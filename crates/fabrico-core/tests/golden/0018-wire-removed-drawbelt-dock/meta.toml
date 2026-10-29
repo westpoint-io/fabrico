@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0018-wire-removed-drawbelt-dock` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0018-wire-removed-drawbelt-dock"
+builder = "GridSession: Place SOURCE + Place SINK + DrawBelt[(1,0),(2,0)] + Dock(Tail->source Out) + Dock(Head->sink In) — the post-Wire default model (belts only from DrawBelt)"
+seed = "0x000000000018db17"
+params = "source@(0,0) --belt(1,0)-(2,0)--> sink@(3,0); NO Wire command; docked topology at rest, round-trips at schema 7 (CLEAN-01/CAT-04)"
+tick_count = 8
+hash_lines = 8
+schema_version = 2
+snapshot_schema_version = 14

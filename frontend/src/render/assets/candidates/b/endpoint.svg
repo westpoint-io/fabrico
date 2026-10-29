@@ -1,0 +1,47 @@
+<!--
+  candidates/b/endpoint.svg - DIRECTION B draft for the ENDPOINT (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION B - "solid chassis plate": a FILLED chassis body (#565f70), a 3-unit dark
+  outline (#2a2f3a), and a 2-unit glyph knocked out in the substrate value (#1b1f27). Port
+  stubs are HELD CONSTANT with Direction A (same geometry, same #565f70, same 2u) so the
+  board compares chassis and glyph treatment rather than port treatment. Glyph geometry is
+  identical to Direction A's: D-02 defines B as a treatment, not a different drawing.
+
+  THIS CANDIDATE PROPOSES A CHASSIS WHERE NONE EXISTS TODAY, and the proposal costs MORE
+  here than in Direction A - which is exactly the kind of thing the board should surface
+  rather than smooth over. The ENDPOINT has no generator at all: render/layers/machines.ts's
+  GEN_KEY_OF has exactly eight entries and ENDPOINT (kind 9) is not one of them. Its ONLY
+  shipped visual is the asymmetric wire-terminal inlet glyph drawn by the WIRES layer at a
+  port (render/layers/inletGlyph.ts, INLET_HALF = 7) - a socket, not a machine box. A
+  filled plate is a much louder claim about "this is a machine" than an open frame is, so
+  if the endpoint should stay a terminal rather than become a machine, this cell is where
+  that shows first. The TODAY column has no endpoint cell to compare it against.
+
+  SEMANTIC VOCABULARY - NO MOTIF TO INHERIT, so the SHIPPED GEOMETRY is carried instead.
+  synth/glyphs.ts has no ENDPOINT entry (it is keyed off machine_kind and ENDPOINT has no
+  generator), so there is no bit matrix to carry or reject. What is carried is
+  inletGlyph.ts's CANONICAL_EAST reading: `socket` is the open-mouth "C" whose aperture
+  faces the cable side (+x, east), and `chevron` is the "<" whose apex points INTO the
+  endpoint (-x, west) - request-in, the D-01 asymmetry that makes a wire terminal readable
+  at rest. Shape, not colour, is the differentiator, which is what keeps it legible in
+  greyscale.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H28 V28 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="socket" d="M22 10 H12 V22 H22" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="chevron" d="M19 12 L15 16 L19 20" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="terminal" d="M28 16 H32" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

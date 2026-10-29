@@ -1,0 +1,46 @@
+<!--
+  candidates/c/sink.svg - DIRECTION C draft for the SINK machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION C - "iconographic badge": the silhouette itself differs per kind. C holds
+  Direction B's paint system exactly (plate #565f70, 3u outline #2a2f3a, 2u knocked-out
+  detail #1b1f27, held-constant port stubs) so that B vs C isolates the SILHOUETTE with the
+  treatment held fixed. See c/source.svg for the full statement of that control.
+
+  SEMANTIC VOCABULARY - CARRIED, AND PROMOTED FROM GLYPH TO SILHOUETTE. synth/glyphs.ts:42
+  says of SINK: "bullseye (launch the rocket / terminal)". The bullseye stays as interior
+  detail; the KIND moves into the outline as an OCTAGON - the universal terminal/stop
+  silhouette. A SOURCE emits and points; a SINK stops and has no direction at all, and a
+  regular octagon is the shape that says "ends here" with no axis. With the interior
+  blanked, SOURCE and SINK are still separable at 1x, which is the property C exists to buy.
+
+  A RECORDED AMBIGUITY, NOT ART-DIRECTED AWAY: this octagon and c/router.svg's hexagon are
+  the two rounded-looking silhouettes in Direction C, and at 1x a 32px octagon and a 64x96
+  hexagon share a family resemblance. They are separated here by footprint and by aspect
+  (1x1 square vs 2x3 tall) rather than by outline alone. Whether that is enough is exactly
+  the judgement the board is being built to ask for, so it is stated rather than fixed.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 96 vertices / 48 points, band `ok`. The octagon outline is the single most
+  expensive part in this file (40 verts) - a stroked closed polygon costs 4 vertices per
+  point plus 8, so every extra silhouette corner in Direction C costs 4 vertices twice
+  over (once for the fill, once for the outline). That is the price of C, and it is printed
+  rather than argued about.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="badge" d="M4 12 L12 4 H20 L28 12 V20 L20 28 H12 L4 20 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 12 L12 4 H20 L28 12 V20 L20 28 H12 L4 20 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="ring" d="M11 11 H21 V21 H11 Z" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="core" d="M14 14 H18 V18 H14 Z" fill="#1b1f27" />
+  <path data-part="port-in" d="M0 16 H4" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

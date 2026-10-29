@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0009-multi-cell-footprint` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0009-multi-cell-footprint"
+builder = "two 2x3 multi-cell exemplars + DrawBelt(1-tile @(2,2)) + Dock Tail->A.Out/Head->B.In (valid facing dock, FOOT-01/FOOT-03)"
+seed = "0x000000000009f007"
+params = "A@(0,0) Out(1,2,E) --belt(2,2)--> B@(3,2) In(3,2,W); 2x3 footprints; DrawBelt+Dock at rest"
+tick_count = 4
+hash_lines = 4
+schema_version = 2
+snapshot_schema_version = 14

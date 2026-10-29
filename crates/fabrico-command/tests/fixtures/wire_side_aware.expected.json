@@ -1,0 +1,21 @@
+[
+  {
+    "name": "N-facing source across columns",
+    "note": "HAND-WRITTEN, plan 75-02 (CABLE-04). No freezer writes or rewrites this file; wire.bin and wire.expected.json are untouched (D-06). The rule the cells were derived by: leave one cell along the source normal, end one cell before the target against its normal, and between those take the shortest, then fewest-bend path, going straight as long as that stays optimal and otherwise turning in the order N, E, S, W. Every body is the dock's own 1x1 cell. Sides are the core bytes N=0, E=1, S=2, W=3, on the y-down axis. Read by crates/fabrico-command/tests/wire_golden.rs and frontend/src/protocol/wireRoute.test.ts.",
+    "from": { "cell": [2, 5], "side": 0, "body": { "min_x": 2, "min_y": 5, "max_x": 2, "max_y": 5 } },
+    "to": { "cell": [6, 9], "side": 3, "body": { "min_x": 6, "min_y": 9, "max_x": 6, "max_y": 9 } },
+    "cells": [[2, 5], [2, 4], [3, 4], [4, 4], [5, 4], [5, 5], [5, 6], [5, 7], [5, 8], [5, 9], [6, 9]]
+  },
+  {
+    "name": "W-facing target across rows",
+    "from": { "cell": [6, 5], "side": 2, "body": { "min_x": 6, "min_y": 5, "max_x": 6, "max_y": 5 } },
+    "to": { "cell": [2, 9], "side": 3, "body": { "min_x": 2, "min_y": 9, "max_x": 2, "max_y": 9 } },
+    "cells": [[6, 5], [6, 6], [6, 7], [6, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [1, 9], [2, 9]]
+  },
+  {
+    "name": "cornered, target side E",
+    "from": { "cell": [2, 5], "side": 2, "body": { "min_x": 2, "min_y": 5, "max_x": 2, "max_y": 5 } },
+    "to": { "cell": [6, 9], "side": 1, "body": { "min_x": 6, "min_y": 9, "max_x": 6, "max_y": 9 } },
+    "cells": [[2, 5], [2, 6], [2, 7], [2, 8], [3, 8], [4, 8], [5, 8], [6, 8], [7, 8], [7, 9], [6, 9]]
+  }
+]

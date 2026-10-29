@@ -1,0 +1,60 @@
+<!--
+  candidates/c/factory.svg - DIRECTION C draft for the FACTORY machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 3x3 -> viewBox 0 0 96 96, the largest in the set and the HERO machine (it is
+  the one that runs user JS). Authored at 96x96 because 96px is what ships.
+
+  DIRECTION C - "iconographic badge": the silhouette itself differs per kind. C holds
+  Direction B's paint system exactly so that B vs C isolates the SILHOUETTE with the
+  treatment held fixed. See c/source.svg for the full statement of that control.
+
+  THE HERO IS NOT BUDGET-CONSTRAINED, and this draft is not simplified as though it were.
+  MEASURED (57-RESEARCH F2.1): identical geometry authored at 0 0 32 32 and at 0 0 96 96
+  tessellates to BYTE-IDENTICAL vertex counts. The 400-vertex ceiling means exactly the same
+  thing on a FACTORY as on a SOURCE.
+
+  SEMANTIC VOCABULARY - CARRIED TWICE OVER, WHICH IS UNIQUE TO THIS CELL AND UNIQUE TO THIS
+  DIRECTION. synth/glyphs.ts:16 says of FACTORY: "code braces { }, the hero machine." The
+  braces are kept as interior detail, because they are the one motif in the set that says
+  WHAT THIS MACHINE IS rather than what it does to flow: a factory runs user JavaScript, and
+  braces are the shortest way to say "your code goes here" to the automation half of the
+  audience. Direction C then ADDS a second reading the other directions cannot carry: a
+  sawtooth-roof factory building with a chimney, the archetypal industrial silhouette, so
+  the shape says "factory" to the Factorio half of the audience before the braces say
+  "code" to the automation half. That double reading - building outside, code inside - is
+  the strongest single argument Direction C has anywhere on the board, and it is stated as
+  an argument the board should let the reviewer test, not as a conclusion.
+
+  THE HONEST COUNTER, recorded so this cell is not just its own advocate: a sawtooth roof is
+  a NINETEENTH-CENTURY factory, and the milestone's stated look is Factorio's. It is also
+  the one silhouette in Direction C that depicts a BUILDING rather than a FLOW, so the hero
+  ends up speaking a different visual grammar from the seven subjects around it. Whether
+  that makes the hero special or makes it an outlier is exactly the sort of thing a
+  side-by-side board is for, and it is left visible rather than tuned away.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 166 vertices / 83 points, band `ok` - the MOST EXPENSIVE CELL IN THE ENTIRE
+  32-CANDIDATE SET, and still only 41% of the 400-vertex ceiling. Thirteen silhouette points
+  cost 26 (fill) + 60 (3u outline) = 86; the two seven-segment braces cost 64 between them.
+  Direction C was measured as it was drawn rather than at the end, precisely because it was
+  the direction expected to meet the cliff. It did not, and that non-event is a recorded
+  finding in its own right: on real art, at these footprints, the vertex budget does not
+  discriminate between any of the four directions.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="badge" d="M4 92 V24 L24 40 V24 L44 40 V24 L64 40 H72 V12 H84 V40 H92 V92 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 92 V24 L24 40 V24 L44 40 V24 L64 40 H72 V12 H84 V40 H92 V92 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="brace-left" d="M46 52 H34 V62 H26 V70 H34 V80 H46" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="brace-right" d="M50 52 H62 V62 H70 V70 H62 V80 H50" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="port-in" d="M0 48 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out" d="M92 48 H96" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

@@ -1,0 +1,23 @@
+<!--
+  odd-coords.svg - the permanent demonstration that the EVEN-COORDINATE rule can fail.
+
+  This fixture is deliberately conforming in every other respect: a legal viewBox, one
+  flat <path>, a unique data-part, an explicit paint, one element per line, integer
+  coordinates throughout, zero curves. The ONLY thing wrong with it is that `29` is odd,
+  so it isolates the rule and nothing else.
+
+  IT IS LINTED CLEAN BY `scripts/lint-svg.ts` ON PURPOSE, and that is the one surprising
+  thing about it. `even-coords` is NOT one of the twelve lint rules: it is enforced at
+  fail severity by `assets/shippedAssets.test.ts`, over the eight shipped machine
+  subjects only, because the lint walker is subject-agnostic by design and two committed
+  bodies of correct SVG - `pilot.svg` and twelve of the thirty-two judged board
+  candidates - carry odd coordinates for reasons that outrank the rule. That spec reads
+  this file and asserts it FAILS.
+
+  It lives here rather than beside that spec because this directory is where the format's
+  failure modes are demonstrated, and a reader looking for "what does a rejected asset
+  look like" should find all of them in one place.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="body" d="M 4 4 H 29 V 28 H 4 Z" fill="#565f70" />
+</svg>

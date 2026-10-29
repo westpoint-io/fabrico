@@ -1,0 +1,184 @@
+// THE canonical demo scene as DATA (EX-01): every node on the shipped default board is a
+// command below, the same commands a user's own gestures produce. Embedded at build via
+// `include_str!`, parsed by `load_scene_from_ron` into the frozen `Vec<GridCommand>`
+// (fabrico-protocol) and booted by `demo_scene::boot_scene`, one command per tick. Its
+// two-applier regenerability is pinned by `GOLDEN_TICK_HASH` (tests/demo_regenerability.rs),
+// its spacing by tests/scene_floors.rs.
+//
+// WHAT IT SHOWS: an order line where every machine does a job a
+// viewer can see. The Factory makes orders (numbered, sized small, medium or large, about one
+// in twenty rejected down its fault belt into the Rejects sink). The Tee copies every order to
+// the Audit sink and sends it on to the Router, which sorts by size: small and medium join in
+// a Merge that feeds the Post sink; large goes into a Balancer's first input, which alternates
+// between two dock sinks. Every sink drains. A separate section answers web requests: a Route
+// and an HTTP Handler. Sand labels name each section in at most three words.
+//
+// Census: 20 Place (11 machines, 7 labels, then the Route and the HTTP Handler) + 12
+// Configure + 1 Rotate + 11 DrawBelt + 22 Dock + 1 DrawWire = 67 commands. The Configures:
+// the SOURCE's injection timer, the seven label texts and sizes, the Factory's order code,
+// the Router's size rules, the HTTP Handler's code and the Route's path.
+//
+// machine_kind u8 legend (source of truth: fabrico-protocol `machine_kind` consts):
+//   SOURCE=0, FACTORY=2, TEE=3, BALANCER=4, ROUTER=5, MERGE=6, SINK=7, ENDPOINT (Route)=9,
+//   HANDLER (HTTP Handler)=10, LABEL=11
+// BeltEnd is a bare unit variant: Tail (admit/entry) or Head (deliver/exit).
+// Dock `port` is the CATALOG port index: SOURCE Out=0; FACTORY In/Out/Fault=0/1/2;
+//   TEE In/Out/Out=0/1/2; SINK In=0; MERGE In/In/Out=0/1/2; BALANCER In/In/Out/Out=0/1/2/3;
+//   ROUTER In=0, Outs 1/2/3 (emit 0/1/2, on its east rows 1, 2 and 0), Fault=4.
+//   DrawWire ports are catalog indexes too (Route In=0, Out=1; HTTP Handler In=0, Out=1).
+//
+// Handle convention: dense u64 handles mint monotonic from 0 in mint order, one per minted
+// node, in command order: machines 0..=10, labels 11..=17, belts 18..=28, the Route 29, the
+// HTTP Handler 30, and the two cables 31 and 32, which ONE DrawWire mints: a cable drawn
+// between a Route and an HTTP Handler always brings its reply leg with it (see
+// fabrico-command `route_handler_pair`), request first, so a second DrawWire for the reply
+// would be refused as an occupied port. Every Dock, Rotate, Configure and DrawWire targets a
+// handle minted by an earlier command.
+[
+    // ── Machines (handles 0..=10, mint order == Place order) ──────────────
+    Place(kind: 0, cell_x: 1, cell_y: 3),    // 0: SOURCE @ (1,3), the order trigger
+
+    // THE ITEM SOURCE'S TIMER, as a REAL logged edit - not host configuration.
+    //
+    // `project_timers` derives the live TimerSet purely from the certified
+    // edit-log, and `SimLoop::tick_body` REPLACES the live set with that
+    // projection on every gesture tick. A timer installed imperatively is invisible
+    // to the projection, so the user's FIRST edit of any kind - Configure, Place,
+    // Undo - would silently and permanently stop the shipped board. This record
+    // is what makes the replace correct: ONE source of truth for the demo's
+    // injection cadence, and it lives where every other authoring decision on
+    // this board lives.
+    //
+    // Position is load-bearing TWICE. It must come AFTER command 0 (handle 0
+    // is minted by that Place, one tick earlier), and it must NOT be last -
+    // a trailing timer record would make a single Ctrl+Z on the freshly-booted
+    // board undo the item source, which is the same dead first-run experience
+    // by another route.
+    //
+    // Interval 8 ticks = about 8 items/s at the 62.5 t/s loop. Pinned in Rust by
+    // `demo_scene.rs`'s `DEMO_INJECT_EVERY` (asserted against this value, not
+    // installed from it).
+    Configure(node: 0, config: Source(trigger: Timer(interval_ticks: 8))),
+
+    Place(kind: 2, cell_x: 4, cell_y: 2),    // 1: FACTORY @ (4,2) 3x3, makes the orders
+    Place(kind: 3, cell_x: 9, cell_y: 3),    // 2: TEE @ (9,3) 2x2, copies every order
+    Place(kind: 7, cell_x: 25, cell_y: 0),   // 3: SINK @ (25,0), Post (small and medium)
+    Place(kind: 7, cell_x: 14, cell_y: 4),   // 4: SINK @ (14,4), Audit copy
+    Place(kind: 7, cell_x: 5, cell_y: 8),    // 5: SINK @ (5,8), Rejects (turned once below)
+    Place(kind: 4, cell_x: 20, cell_y: 3),   // 6: BALANCER @ (20,3) 2x2, the large lane
+    // 7: ROUTER @ (14,0) 2x3. Its catalog In is on the middle row, (14,1) facing W, and
+    // its three Outs face E on rows 1, 2 and 0 for emit 0, 1 and 2.
+    Place(kind: 5, cell_x: 14, cell_y: 0),
+    Place(kind: 6, cell_x: 18, cell_y: 0),   // 8: MERGE @ (18,0) 2x2, small + medium
+    Place(kind: 7, cell_x: 25, cell_y: 3),   // 9: SINK @ (25,3), freight dock A
+    Place(kind: 7, cell_x: 25, cell_y: 6),   // 10: SINK @ (25,6), freight dock B
+
+    // The ONE functionally-necessary Rotate: one clockwise quarter-turn takes the
+    // Rejects sink's In from W to N (REQUIRED before its dock is even legal).
+    Rotate(node: 5, ccw: false),
+
+    // ── Section labels (handles 11..=17), Sand, at most three words ──
+    // Each is resized right after its Place, before any belt is drawn, so its placed
+    // 4x1 box never has to share a cell with a later belt. No label covers a machine,
+    // a belt or a cable (tests/scene_floors.rs).
+    Place(kind: 11, cell_x: 2, cell_y: 0),   // 11
+    Configure(node: 11, config: Label(text: "Make orders", colour: 0, w: 4, h: 1)),
+    Place(kind: 11, cell_x: 9, cell_y: 0),   // 12
+    Configure(node: 12, config: Label(text: "Sort by size", colour: 0, w: 4, h: 1)),
+    Place(kind: 11, cell_x: 1, cell_y: 8),   // 13
+    Configure(node: 13, config: Label(text: "Rejects", colour: 0, w: 3, h: 1)),
+    Place(kind: 11, cell_x: 15, cell_y: 4),  // 14
+    Configure(node: 14, config: Label(text: "Audit copy", colour: 0, w: 3, h: 1)),
+    Place(kind: 11, cell_x: 27, cell_y: 0),  // 15
+    Configure(node: 15, config: Label(text: "Post", colour: 0, w: 2, h: 1)),
+    Place(kind: 11, cell_x: 26, cell_y: 4),  // 16
+    Configure(node: 16, config: Label(text: "Freight docks", colour: 0, w: 4, h: 1)),
+    Place(kind: 11, cell_x: 8, cell_y: 6),   // 17
+    Configure(node: 17, config: Label(text: "Web request", colour: 0, w: 4, h: 1)),
+
+    // ── Drawn belts (handles 18..=28, mint order == DrawBelt order) ─────────
+    DrawBelt(cells: [(2, 3), (3, 3)]),                                 // 18: source -> factory
+    DrawBelt(cells: [(7, 3), (8, 3)]),                                 // 19: factory -> tee
+    DrawBelt(cells: [(11, 3), (12, 3), (12, 2), (12, 1), (13, 1)]),   // 20: tee -> ROUTER In
+    DrawBelt(cells: [(11, 4), (12, 4), (13, 4)]),                      // 21: tee copy -> Audit
+    DrawBelt(cells: [(5, 5), (5, 6), (5, 7)]),                         // 22: factory fault -> Rejects
+    DrawBelt(cells: [(16, 0), (17, 0)]),                               // 23: small lane -> MERGE In 0
+    DrawBelt(cells: [(16, 1), (17, 1)]),                               // 24: medium lane -> MERGE In 1
+    DrawBelt(cells: [(16, 2), (16, 3), (17, 3), (18, 3), (19, 3)]),   // 25: large lane -> BALANCER In 0
+    DrawBelt(cells: [(20, 0), (21, 0), (22, 0), (23, 0), (24, 0)]),   // 26: MERGE Out -> Post
+    DrawBelt(cells: [(22, 3), (23, 3), (24, 3)]),                      // 27: BALANCER Out -> dock A
+    DrawBelt(cells: [(22, 4), (22, 5), (22, 6), (23, 6), (24, 6)]),   // 28: BALANCER Out -> dock B
+
+    // ── Docks (belt, endpoint, node, CATALOG port index) ──────────────────
+    Dock(belt: 18, endpoint: Tail, node: 0, port: 0),   // source Out -> belt 18
+    Dock(belt: 18, endpoint: Head, node: 1, port: 0),   // belt 18 -> factory In
+    Dock(belt: 19, endpoint: Tail, node: 1, port: 1),   // factory Out (catalog 1 -> emit 0) -> belt 19
+    Dock(belt: 19, endpoint: Head, node: 2, port: 0),   // belt 19 -> tee In
+    Dock(belt: 20, endpoint: Tail, node: 2, port: 1),   // tee Out (catalog 1 -> emit 0) -> belt 20
+    Dock(belt: 20, endpoint: Head, node: 7, port: 0),   // belt 20 -> ROUTER In
+    Dock(belt: 21, endpoint: Tail, node: 2, port: 2),   // tee Out (catalog 2 -> emit 1) -> belt 21
+    Dock(belt: 21, endpoint: Head, node: 4, port: 0),   // belt 21 -> Audit sink In
+    Dock(belt: 22, endpoint: Tail, node: 1, port: 2),   // factory Fault (catalog 2 -> FAULT_PORT) -> belt 22
+    Dock(belt: 22, endpoint: Head, node: 5, port: 0),   // belt 22 -> Rejects sink In (turned to N)
+    Dock(belt: 23, endpoint: Tail, node: 7, port: 3),   // ROUTER Out (catalog 3 -> emit 2, row 0) -> small lane
+    Dock(belt: 23, endpoint: Head, node: 8, port: 0),   // small lane -> MERGE In 0
+    Dock(belt: 24, endpoint: Tail, node: 7, port: 1),   // ROUTER Out (catalog 1 -> emit 0, row 1) -> medium lane
+    Dock(belt: 24, endpoint: Head, node: 8, port: 1),   // medium lane -> MERGE In 1
+    Dock(belt: 25, endpoint: Tail, node: 7, port: 2),   // ROUTER Out (catalog 2 -> emit 1, row 2) -> large lane
+    Dock(belt: 25, endpoint: Head, node: 6, port: 0),   // large lane -> BALANCER In 0 (In 1 stays free)
+    Dock(belt: 26, endpoint: Tail, node: 8, port: 2),   // MERGE Out (catalog 2 -> emit 0) -> belt 26
+    Dock(belt: 26, endpoint: Head, node: 3, port: 0),   // belt 26 -> Post sink In
+    Dock(belt: 27, endpoint: Tail, node: 6, port: 2),   // BALANCER Out (catalog 2 -> emit 0) -> belt 27
+    Dock(belt: 27, endpoint: Head, node: 9, port: 0),   // belt 27 -> dock A In
+    Dock(belt: 28, endpoint: Tail, node: 6, port: 3),   // BALANCER Out (catalog 3 -> emit 1) -> belt 28
+    Dock(belt: 28, endpoint: Head, node: 10, port: 0),  // belt 28 -> dock B In
+
+    // THE ORDER CODE. Randomness only through `ctx.randomInt` (seeded, logged, so
+    // every replay draws the same orders); a throw sends the order down the fault belt
+    // into the Rejects sink and rolls `ctx.state` back, so a reject never takes a number.
+    // `size` is emitted FIRST, so every order's JSON starts `{"size":"..."` and the
+    // Router's rules can match a fixed prefix.
+    Configure(node: 1, config: Factory(source: r#"// make an order: number it, size it, and reject about one in twenty
+export default function (input, ctx) {
+  if (ctx.randomInt(0, 20) === 0) {
+    throw new Error("rejected: no delivery address");
+  }
+  var order = (ctx.state.order || 0) + 1;
+  ctx.state.order = order;
+  var qty = ctx.randomInt(1, 10);
+  var size = qty <= 3 ? "small" : qty <= 6 ? "medium" : "large";
+  ctx.emit(0, { size: size, order: order, qty: qty });
+}"#)),
+
+    // THE SIZE RULES. First match wins, in this order; each rule's `expect` is the
+    // exact UTF-8 byte list of its prefix at offset 0 (RON 0.12 has no byte strings).
+    // Medium matches neither and takes the default output, so all three outputs carry.
+    Configure(node: 7, config: Router(routes: [
+        // {"size":"small"  -> emit 2 (top output, row 0) -> the small lane
+        ((offset: 0, expect: [123, 34, 115, 105, 122, 101, 34, 58, 34, 115, 109, 97, 108, 108, 34]), 2),
+        // {"size":"large"  -> emit 1 (bottom output, row 2) -> the large lane
+        ((offset: 0, expect: [123, 34, 115, 105, 122, 101, 34, 58, 34, 108, 97, 114, 103, 101, 34]), 1),
+    ], default: Some(0))),
+
+    // ── The web request: an ordinary Route and HTTP Handler ──
+    // LAST, so every handle above keeps its number. The Handler is the catalog 3x3 with
+    // its own In, Out and Fault, unturned; its Fault nub stays undocked. The two
+    // cables dock separate nubs, and the reply cable loops round the pair exactly as it
+    // does on a pair placed from the palette, because the Route's In and Out share one
+    // cell and face opposite ways. Anchored so the reply loop passes below the pair
+    // on row 8, clear of every machine, belt and label.
+    Place(kind: 9, cell_x: 13, cell_y: 6),     // 29: the caller Route
+    Place(kind: 10, cell_x: 16, cell_y: 5),    // 30: the HTTP Handler, 3x3
+    Configure(node: 30, config: Factory(source: r#"// answer every request with a short reply
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: { "x-fab": "home" },
+    body: "home",
+  }, 0);
+}"#)),
+    Configure(node: 29, config: Endpoint(path: "/hello")),  // answers at /endpoint/hello
+    // ONE command, TWO cables: 31 the request (Route Out 1 -> Handler In 0), then 32 the
+    // reply (Handler Out 1 -> Route In 0), exactly what a user's drag between the pair mints.
+    DrawWire(from_node: 29, from_port: 1, to_node: 30, to_port: 0),
+]

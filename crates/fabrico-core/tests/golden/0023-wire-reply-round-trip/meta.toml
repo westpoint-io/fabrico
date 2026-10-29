@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0023-wire-reply-round-trip` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0023-wire-reply-round-trip"
+builder = "inline caller -> forward_wire -> factory(handler JS) -> return_wire -> caller + logged WireRequest (budget 8) — handler emits Effect::Reply, reverse-transported by correlation through the ONE route_seq queue, inheriting the remaining budget"
+seed = "0x0000000000235117"
+params = "WIRE-01/04 reply round-trip: request @tick0 (return_addr==caller, correlation 0x0023C0DE); factory reply seam maps ctx.command -> Effect::Reply; reply reverse-transports via the return wire (from.node==factory), inheriting the remaining budget (one budget bounds forward+return)"
+tick_count = 12
+hash_lines = 12
+schema_version = 2
+snapshot_schema_version = 14

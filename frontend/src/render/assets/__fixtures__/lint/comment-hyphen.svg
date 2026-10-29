@@ -1,0 +1,17 @@
+<!--
+  comment-hyphen.svg - the fixture for the `comment-hyphen` rule (plan 80-05).
+
+  ILLEGAL ON PURPOSE, AND IN EXACTLY ONE WAY. The line below names a paint token in its
+  full CSS custom-property form, leading dashes included. That doubled hyphen is illegal
+  inside an XML comment by the XML 1.0 specification, so every strict parser refuses this
+  whole document. It is the precise shape four shipped chrome assets carried for a
+  milestone: var(--fab-ink)
+
+  Everything else about this file conforms, which is what makes it a single-rule fixture:
+  a legal viewBox, one flat self-closing path element on its own line, an explicit token
+  paint, a unique data-part, integer coordinates and no curve. Only `comment-hyphen`
+  fires on it.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="body" d="M 4 4 H 28 V 28 H 4 Z" fill="var(--fab-panel-fill)" />
+</svg>

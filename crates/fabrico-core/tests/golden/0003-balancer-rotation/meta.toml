@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0003-balancer-rotation` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0003-balancer-rotation"
+builder = "source_balancer_collectors"
+seed = "0x0000000000b41a0c"
+params = "outputs=3"
+tick_count = 8
+hash_lines = 8
+schema_version = 2
+snapshot_schema_version = 14

@@ -1,0 +1,42 @@
+<!--
+  candidates/a/endpoint.svg - DIRECTION A draft for the ENDPOINT (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32.
+
+  DIRECTION A - "blueprint continuation": open chassis, 3u structural outline, 2u detail,
+  minimal fill, chassis inset 4 units from the cell edge.
+
+  THIS CANDIDATE PROPOSES A CHASSIS WHERE NONE EXISTS TODAY, and that is the decision this
+  header exists to record rather than let a reader infer. The ENDPOINT has no generator at
+  all: render/layers/machines.ts's GEN_KEY_OF has exactly eight entries and ENDPOINT (kind
+  9) is not one of them, so the machines layer skips it. Its ONLY shipped visual is the
+  asymmetric wire-terminal inlet glyph drawn by the WIRES layer at a port
+  (render/layers/inletGlyph.ts, INLET_HALF = 7) - a socket, not a machine box. Drawing a
+  chassis here is therefore a proposal about what an endpoint should be, and the board must
+  judge it as one. The TODAY column has no endpoint cell to compare it against.
+
+  SEMANTIC VOCABULARY - NO MOTIF TO INHERIT, so the SHIPPED GEOMETRY is carried instead.
+  synth/glyphs.ts has no ENDPOINT entry (it is keyed off machine_kind and ENDPOINT has no
+  generator), so there is no bit matrix to carry or reject. What this draft carries is
+  inletGlyph.ts's CANONICAL_EAST reading, deliberately and at its own scale: `socket` is
+  the open-mouth "C" whose aperture faces the cable side (+x, east), and `chevron` is the
+  "<" whose apex points INTO the endpoint (-x, west) - request-in, the D-01 asymmetry that
+  makes a wire terminal readable at rest. Shape, not colour, is the differentiator, which
+  is what keeps it legible in greyscale.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="socket" d="M22 10 H12 V22 H22" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="chevron" d="M19 12 L15 16 L19 20" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="terminal" d="M28 16 H32" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

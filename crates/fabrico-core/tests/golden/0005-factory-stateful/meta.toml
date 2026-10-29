@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0005-factory-stateful` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0005-factory-stateful"
+builder = "source_factory_collector(COUNTER_FACTORY_JS) + FAULT_PORT dead-letter sink"
+seed = "0x000000000f005005"
+params = "gas_budget=DEFAULT; ctx.state counter; "loop" sentinel trips the fuse at tick 3"
+tick_count = 7
+hash_lines = 7
+schema_version = 2
+snapshot_schema_version = 14

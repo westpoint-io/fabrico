@@ -1,0 +1,50 @@
+{
+  "a-port-square-16.svg": {
+    "r1": "PASS 2 shapes",
+    "r2": "PASS 4u",
+    "r3": "n/a",
+    "r4": "PASS 2u"
+  },
+  "a-port-square-full.svg": {
+    "r1": "INFO 6 shapes",
+    "r2": "PASS 4u",
+    "r3": "n/a",
+    "r4": "PASS 2u"
+  },
+  "b-the-turn-16.svg": {
+    "r1": "PASS 2 shapes",
+    "r2": "PASS 8u",
+    "r3": "n/a",
+    "r4": "OVERLAP"
+  },
+  "b-the-turn-full.svg": {
+    "r1": "INFO 6 shapes",
+    "r2": "PASS 2u",
+    "r3": "n/a",
+    "r4": "PASS 2u"
+  },
+  "c-the-board-16.svg": {
+    "r1": "PASS 3 shapes",
+    "r2": "PASS 12u",
+    "r3": "n/a",
+    "r4": "PASS 4u"
+  },
+  "c-the-board-full.svg": {
+    "r1": "INFO 5 shapes",
+    "r2": "PASS 2u",
+    "r3": "n/a",
+    "r4": "PASS 2u"
+  },
+  "d-the-board-pixel.svg": {
+    "r1": "PASS 3 shapes",
+    "r2": "PASS 4u",
+    "r3": "n/a",
+    "r4": "PASS 2u"
+  },
+  "logomark.svg": {
+    "r1": "PASS 3 shapes",
+    "r2": "PASS 2u",
+    "r3": "n/a",
+    "r4": "PASS 2u"
+  }
+}

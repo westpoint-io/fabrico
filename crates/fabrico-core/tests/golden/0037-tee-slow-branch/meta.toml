@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0037-tee-slow-branch` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0037-tee-slow-branch"
+builder = "core seam: Source -> Tee(2); Tee Out 0 -> Debug Sink, Tee Out 1 -> belt(1) whose head docks nowhere; the Source fired one event every 2 ticks while it would accept, for 400 ticks"
+seed = "0x0000000000377ee5"
+params = "JAM-02/WINDOWS 174 (87-RESEARCH P174): one slow Tee branch does not stop the healthy branch; the shed copies are counted on Tee.faults. Certifies the board replays identically; the behaviour is graded by no_permanent_jams.rs#a_slow_tee_branch_does_not_stop_the_others"
+tick_count = 400
+hash_lines = 400
+schema_version = 2
+snapshot_schema_version = 14

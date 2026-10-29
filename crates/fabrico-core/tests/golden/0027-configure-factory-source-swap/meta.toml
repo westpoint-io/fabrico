@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0027-configure-factory-source-swap` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0027-configure-factory-source-swap"
+builder = "inline source -> factory(passthrough) -> collector + edit-log Configure(Factory{doubling}) @tick1; fire 21 @tick0 (pre-swap) and @tick2 (post-swap)"
+seed = "0x000000000027c0f6"
+params = "CFG-02 config determinism: a logged Configure swaps Factory.source (passthrough -> doubling) and evicts the NodeId-keyed runtime cache; the post-swap fire emits the DOUBLED value only because the stale engine was rebuilt (behavioral eviction proof, T-39-STALE-JS); replays byte-identically"
+tick_count = 5
+hash_lines = 5
+schema_version = 2
+snapshot_schema_version = 14

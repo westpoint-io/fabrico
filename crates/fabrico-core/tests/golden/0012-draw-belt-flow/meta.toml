@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0012-draw-belt-flow` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0012-draw-belt-flow"
+builder = "inline s->beltA(2)->beltB(1, DANGLING head = full tail) + tick-0 DrawBelt(3-tile straight) exercising fold_draw_belt"
+seed = "0x000000000012b017"
+params = "length-as-buffer backpressure: beltB head dangles (blocked downstream TAIL, not a stalled machine); 12 items > 9-slot capacity => beltA head bunches + source backlog; + 3-tile drawn belt claims tile cells"
+tick_count = 32
+hash_lines = 32
+schema_version = 2
+snapshot_schema_version = 14

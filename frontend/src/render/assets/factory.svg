@@ -1,0 +1,59 @@
+<!--
+  render/assets/factory.svg - SHIPPED art for the FACTORY machine (ART-01/ART-04, plan 58-02).
+
+  Promoted from `candidates/a/factory.svg`, the Direction A draft judged on the Phase
+  57 art board and locked (`57-ART-LOCK.md`). This file sits FLAT in `render/assets/`, and
+  that placement is a contract rather than a convenience: the discovery walk in
+  `scripts/lint-svg.ts`, `vertexBudget.test.ts` and `geometryDigest.test.ts` is
+  non-recursive, which is exactly what keeps `candidates/` and `__fixtures__/` out of the
+  shipped table. A shipped asset in a subdirectory is an asset no gate measures.
+
+  GLYPH ONLY - NO CHASSIS PATH, NO PORT STUBS (design decision, 2026-08-02). The CHASSIS is
+  drawn in CODE (`render/layers/machineChassis.ts`) at whatever `w x h` the footprint
+  actually is, and the PORT STUBS stay board-drawn from the authoritative `ports[]`.
+
+  FOOTPRINT: FACTORY's base footprint is 3x3, so `viewBox 0 0 96 96` - the largest box in
+  the shipped set, and the only use of that literal.
+
+  SEMANTIC VOCABULARY - CARRIED. `synth/glyphs.ts:16` says of FACTORY: code braces { }, the
+  hero machine. Carried as `brace-left` and `brace-right`. The braces are the one motif in
+  the set that says WHAT THIS MACHINE IS rather than what it does to flow: a factory runs
+  user JavaScript, and braces are the shortest way to say "your code goes here" to the
+  automation half of the audience. Both braces are pure H/V runs with a mid-height nub, so
+  the glyph is exact at every zoom - no diagonal, no curve, nothing to re-tessellate.
+
+  DO NOT ENRICH THIS CELL TO FILL ITS 96u BOX. The candidate header stated the trade in
+  advance - "a chassis carried entirely by its outline has more air in it at 96px than at
+  32px, and whether that air reads as elegant or as unfinished is precisely the judgement
+  being asked for" - and the review judged it and locked Direction A. Adding detail to make
+  the hero feel less empty would be overturning that judgement.
+
+  AND THE BUDGET IS NOT A REASON TO DRAW IT THINNER EITHER. Measured, not assumed
+  (57-RESEARCH F2.1): identical geometry authored at `0 0 32 32` and at `0 0 96 96`
+  tessellates to a BYTE-IDENTICAL vertex count, because tessellation is topological and the
+  400-vertex cliff is scale-free. The 96u box costs nothing.
+
+  Alone in its footprint group, so no binding confusability pair. FILL COUNT 0.
+
+  ART-04 PROVENANCE: authored from scratch for the Phase 57 board. No icon pack was
+  consulted, copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY
+  REFERENCE ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or
+  Remix Icon (non-OSI), which are excluded outright. Promotion carries that provenance
+  forward unchanged.
+
+  COLOUR SOURCE - THE SHIPPED RULE, NOT THE CANDIDATE'S EXEMPTION. Every draft in
+  `candidates/` is exempt from the "no hand-authored hex" rule BECAUSE IT NEVER SHIPS.
+  This file ships, so that basis evaporates and is deliberately not restated. The standing
+  rule stands: the one literal below is `LOCKED_SKIN.palette.ramp[4]` (0xb0bacb, the
+  highlight step), the single ink lock axis 9 permits for every kind's glyph, and it is
+  held to that value by the fail-severity ink allowlist over the SHIPPED assets in
+  `assets/shippedAssets.test.ts` - by a gate, not by this paragraph.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L Z,
+  zero curves, one `<path>` per semantic part carrying its own stable `data-part`, one
+  element per line. The authoring contract is render/assets/README.md.
+-->
+<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="brace-left" d="M 44 26 H 32 V 44 H 24 V 52 H 32 V 70 H 44" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="brace-right" d="M 52 26 H 64 V 44 H 72 V 52 H 64 V 70 H 52" fill="none" stroke="#b0bacb" stroke-width="2" />
+</svg>

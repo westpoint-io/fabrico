@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0015-undo-redo-each-op` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0015-undo-redo-each-op"
+builder = "GridSession: Place(undo/redo) + Rotate(undo/redo) + DrawBelt(undo/redo) + Dock(undo/redo) — undo+redo of every undoable op type (Wire retired 17-02), real inverses + re-mints"
+seed = "0x000000000015de17"
+params = "12-06 undo-vocabulary corpus anchor: each op is applied -> undone (frozen inverse) -> redone (re-minted under a fresh slotmap id, the accepted FLAG); the fixed edit-log replays forward to the same per-tick hash (SC#3) on every OS"
+tick_count = 17
+hash_lines = 17
+schema_version = 2
+snapshot_schema_version = 14

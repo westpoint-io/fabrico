@@ -1,0 +1,54 @@
+<!--
+  candidates/b/source.svg - DIRECTION B draft for the SOURCE machine (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION B - "solid chassis plate" (57-CONTEXT D-02): a FILLED chassis body, a 3-unit
+  dark outline, and a 2-unit glyph knocked out of the fill, so machine kind reads as a
+  chassis-hue family. D-02 records that this is "typically strongest at small size and in
+  greyscale" - the board exists to TEST that rather than assume it, which is why the whole
+  set is drawn to the same standard as Direction A and judged in greyscale beside it.
+
+  KNOCKED OUT, LITERALLY. The glyph is drawn in #1b1f27, the substrate ramp value that is
+  also the board's cell background, so it reads as the plate being punched through rather
+  than as ink laid on top. A true SVG knock-out (even-odd fill on a compound path) is not
+  used: it needs one path to carry two semantic parts, which breaks the one-part-per-path
+  rule the whole format leans on, and it makes the geometry digest depend on fill-rule
+  subtleties for no visual gain at these sizes.
+
+  THE PORT STUBS ARE HELD CONSTANT ACROSS DIRECTIONS - identical geometry, identical
+  #565f70, identical 2u weight in A and in B. Ports are not what separates the two
+  directions, so varying them would confound the comparison the board is built to make.
+  The recorded consequence is real and belongs on the board: in B the stub is the SAME
+  value as the plate, so it reads as the plate's material continuing outward rather than
+  as a distinct nub, while in A the stub sits a full ramp step below the chassis stroke
+  and reads as a separate fitting.
+
+  THE GLYPH GEOMETRY IS BYTE-FOR-BYTE THE SAME AS DIRECTION A's, deliberately. D-02
+  defines B as a chassis-and-fill treatment, not a different drawing, so holding the motif
+  fixed is what makes the cell a test of the TREATMENT. Directions C and D (plan 57-05) are
+  where the silhouette and the construction change.
+
+  SEMANTIC VOCABULARY - CARRIED. synth/glyphs.ts:29 says of SOURCE: "spawn eye with a
+  filled pupil". `eye` is the open lens, `pupil` the filled centre; the lens is a
+  straight-edged diamond rather than a curved almond because this direction is also
+  curve-free (buildAdaptiveBezier tessellates at a hardcoded scale 1, so a curve would
+  serve faceted geometry at the 1.77x and 2x rows the board judges).
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H28 V28 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="eye" d="M10 16 L16 10 L22 16 L16 22 Z" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="pupil" d="M14 14 H18 V18 H14 Z" fill="#1b1f27" />
+  <path data-part="port-out" d="M28 16 H32" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

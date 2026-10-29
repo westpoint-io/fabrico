@@ -1,0 +1,44 @@
+<!--
+  docs/brand/fabrico-icon-master.svg - the LITERAL COLOUR master of the Fabrico mark
+  (MARK-06). The three shapes of the token painted square in
+  frontend/src/chrome/assets/logomark.svg (no longer rendered in the app since
+  2026-10-11), painted in resolved hex instead of CSS custom properties, on a full
+  bleed plate. This is the drawing every installer icon in the phase is cut from.
+
+  NOTHING IN THE APP IMPORTS IT: no component, no Vite input and no bundle reaches
+  docs/, so this drawing is a brand source rather than a shipped asset. It serves the
+  operating system only.
+
+  GENERATED FILE. Written by frontend/scripts/build-icons.ts and regenerated rather than
+  edited: run npm run build:icons. frontend/src/render/assets/iconCuts.test.ts rebuilds
+  it in memory and compares byte for byte, so a hand edit reddens the unit suite.
+
+  WHY IT IS A SEPARATE FILE FROM THE CHROME SQUARE, measured. usvg cannot parse a CSS
+  custom property. It does not fail on one: it warns and falls back, to black for a fill
+  and to NO STROKE for a stroke. So rasterising the token painted square yields two
+  colours, transparent and opaque black, and an ink coverage figure plausible enough to
+  read as a pass. An icon pipeline fed the token painted file writes a black square
+  without failing. This file exists so that cannot happen.
+
+  THE GEOMETRY IS PROVEN EQUAL, NOT ASSERTED. The rail, cell and item d strings here are
+  declared independently in the generator, and compared against the token painted square
+  in frontend/src/chrome/assets/logomark.svg, read from disk, by
+  frontend/src/chrome/iconMasterParity.test.ts. The generator never reads that file, so
+  the comparison is between two declarations rather than one read twice.
+
+  THE PAINT IS DERIVED, NOT TRANSCRIBED. The four values below are read out of
+  skinToCssVars(LOCKED_SKIN) at generation time, by the tokens fab-substrate,
+  fab-panel-fill, fab-ink and fab-accent-item. Two of the four are baked through bakeRamp
+  and are not in the skin file at all.
+
+  ART-04 PROVENANCE: authored from scratch, from the chosen Fabrico mark. No icon pack
+  was consulted, copied, traced or redrawn. Nothing here derives from game-icons.net
+  (CC-BY-3.0, which redrawing does not clear) or from Remix Icon, whose licence forbids
+  logo and trademark use by name.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="plate" d="M 0 0 H 32 V 32 H 0 Z" fill="#1b1f27" />
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="#3b4250" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="#ffb454" />
+</svg>

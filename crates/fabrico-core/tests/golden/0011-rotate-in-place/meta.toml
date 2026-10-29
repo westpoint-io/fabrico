@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0011-rotate-in-place` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0011-rotate-in-place"
+builder = "inline M(2x3) + docked belt (M->belt->sink) + edit-log rotating M four +1 quarter-turns (FOOT-02 rotate90^4==footprint-identity + 17-05 selective de-dock)"
+seed = "0x0000000000112071"
+params = "M 2x3 footprint @(5,5); belt docked to M.port1; edits ticks 0..3 Rotate +1 each (rot 0->1->2->3->0); tick-0 rotate UNLINKS the docked belt (belt survives, last_tick.unlinked records it)"
+tick_count = 5
+hash_lines = 5
+schema_version = 2
+snapshot_schema_version = 14

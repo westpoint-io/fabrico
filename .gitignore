@@ -1,0 +1,31 @@
+/target
+**/*.rs.bk
+
+# Frontend (Phase 07, Vite app — NOT a cargo member)
+frontend/node_modules
+frontend/dist
+
+# ts-rs generated TS bindings (07-01 export target; regenerated on `cargo test`)
+crates/fabrico-protocol/bindings/
+
+# Tauri-build generated ACL/permission schemas (07-08; regenerated on `cargo build`)
+crates/fabrico-app/gen/
+
+# Phase 13 — Playwright e2e run artifacts (TEST-04, 13-04) + insta pending snaps.
+# NB: do NOT ignore crates/fabrico-scenario/fixtures/ or snapshots/ — those are
+# the committed golden corpus; only the *.snap.new pending review files are noise.
+frontend/test-results/
+frontend/playwright-report/
+crates/fabrico-scenario/**/*.snap.new
+
+# Dev-server logs from the hand-started live-e2e path (plan 66-01). The
+# frontend half is already covered by frontend/.gitignore; the dev_render_server is
+# started from the repo root and writes here.
+.srv-*.log
+
+# The maintainer's private planning checkout: a separate repository cloned into this
+# working tree. It is never part of this repository, and
+# scripts/check-no-private-residue.sh allows these three lines here and nowhere else.
+.planning/
+CLAUDE.md
+.claude/

@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0007-edit-add-during-flow` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0007-edit-add-during-flow"
+builder = "inline s->b(3)->c + edit-log grafting s2->belt->c at tick 2 via DrawBelt+Dock (EDITS-FIRST)"
+seed = "0x000000000007ed17"
+params = "belt latency=3; edit@tick2 Place(SOURCE)+DrawBelt(1-tile)+Dock(s2 Tail, c Head); fire s@0, s2@2"
+tick_count = 6
+hash_lines = 6
+schema_version = 2
+snapshot_schema_version = 14

@@ -1,0 +1,67 @@
+# Check out EVERY text file with LF, on every platform.
+#
+# The 2026-10-09 CI run failed its Windows leg on exactly two
+# targets, `add_output_golden` and `belt_join_golden`. Each compares a committed
+# JSON fixture (crates/fabrico-command/tests/fixtures/*.expected.json) byte for
+# byte, and the windows-latest runner checks out with core.autocrlf=true, so both
+# fixtures arrived with CRLF. The repository's rule is identical bytes on every
+# platform, so every text file is pinned to LF at checkout here rather than one
+# extension at a time after each new failure. Files git detects as binary are
+# never converted (`text=auto`), and the explicit `binary` rules below still win.
+# The index already holds LF everywhere (`git ls-files --eol`: zero i/crlf, zero
+# i/mixed), so this needs no renormalisation commit.
+* text=auto eol=lf
+
+# Force shell scripts to LF on EVERY platform's checkout.
+#
+# The determinism gate scripts (scripts/*.sh) are executed verbatim by the CI
+# `determinism` job on the windows-latest runner via Git Bash (defaults.run.shell:
+# bash). A CRLF checkout would inject `\r` into shebangs / `set -euo pipefail` and
+# break the bash gate (RESEARCH Pitfall 3 / A2). Pinning *.sh to LF keeps the same
+# bytes on Linux, macOS, and Windows so the gate runs unmodified everywhere.
+*.sh text eol=lf
+
+# Rust sources are text; let git normalize line endings on commit. (Not
+# load-bearing for the gate, but keeps cross-platform diffs clean.)
+*.rs text
+
+# ── Everything below is LOAD-BEARING FOR DETERMINISM, not tidiness ──────────
+#
+# Any file embedded verbatim by `include_str!` / `include_bytes!` becomes part
+# of a hashed starting state. Git's eol conversion rewrites bytes at CHECKOUT
+# time, per platform, which means an unpinned embedded asset makes the same
+# commit hash differently on different operating systems.
+#
+# This is not hypothetical. The first CI run that ever reached the Windows
+# certification suite failed on it: `order_scene_regenerates_to_an_identical_
+# hash_from_two_appliers` computed acd72356... where the Linux-pinned anchor is
+# 40c167ec.... The windows-latest runner checks out with core.autocrlf=true, so
+# `crates/fabrico-host/src/scenes/order_processing.ron` arrived with CRLF, and
+# its three raw multi-line JS factory bodies (`Configure(node, config:
+# Factory(source: r#"..."#))`, lines 98/104/110) carried the \r into the edit
+# log. Reproduced locally by converting that one file to CRLF, which yields the
+# Windows hash exactly.
+#
+# Note what did NOT fail: both appliers on Windows agreed with each other, and
+# every golden-corpus fixture passed. The core is deterministic across
+# platforms. What diverged was the bytes git handed it.
+
+# Scene definitions are embedded by `include_str!` (demo_scene.rs:113/119/134)
+# and their raw string bodies are hashed byte-verbatim.
+*.ron text eol=lf
+
+# The golden corpus manifests are embedded by `include_str!`
+# (cert_cross_platform.rs). They tolerate CRLF today because the parser trims,
+# but that tolerance is an accident of the parser, not a guarantee.
+crates/fabrico-core/tests/golden/**/hashes.txt text eol=lf
+crates/fabrico-core/tests/golden/README.md text eol=lf
+
+# The frozen corpus payloads are embedded by `include_bytes!` and must reach the
+# decoder as the exact bytes that were blessed. Git currently leaves them alone
+# because its NUL-byte heuristic guesses "binary"; declaring it removes the
+# guess. `binary` is shorthand for `-text -diff`: never convert, never munge.
+*.postcard binary
+*.snapshot binary
+*.bin binary
+*.png binary
+*.ico binary

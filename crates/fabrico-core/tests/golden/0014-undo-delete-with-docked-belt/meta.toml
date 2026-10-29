@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0014-undo-delete-with-docked-belt` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0014-undo-delete-with-docked-belt"
+builder = "GridSession: place ROUTER(2x3) -> DrawBelt[(2,1),(3,1)] -> Dock(Tail->port1) -> Delete(router, REAL capture) -> Undo (restore machine + re-draw/re-dock belt from capture)"
+seed = "0x000000000014de17"
+params = "12-05 delete-undo full-subgraph restore: the Delete record carries the captured footprint+cascade belt; undo re-Places + re-DrawBelts + re-Docks from the capture alone; belt count + tile occupancy return to pre-delete; driven past the undo to settle"
+tick_count = 8
+hash_lines = 8
+schema_version = 2
+snapshot_schema_version = 14

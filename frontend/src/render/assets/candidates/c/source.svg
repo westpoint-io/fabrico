@@ -1,0 +1,49 @@
+<!--
+  candidates/c/source.svg - DIRECTION C draft for the SOURCE machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION C - "iconographic badge" (57-CONTEXT.md D-02): THE SILHOUETTE ITSELF DIFFERS
+  PER KIND rather than only the glyph. Every A and B candidate is a 4-inset RECTANGLE with
+  a different mark inside it; a C candidate is a different SHAPE. That is the whole
+  proposition, and it is why C is the most drawing work in the set.
+
+  C HOLDS B'S PAINT SYSTEM EXACTLY, ON PURPOSE. Same plate fill (#565f70), same 3u dark
+  outline (#2a2f3a), same 2u glyph knocked out in the substrate value (#1b1f27), same
+  held-constant port stubs. This is a control, not a shortcut: A vs B isolates the
+  TREATMENT with the geometry held fixed, and B vs C isolates the SILHOUETTE with the
+  treatment held fixed. Had C also invented a palette, a reader preferring C could not tell
+  whether they were preferring kind-shaped silhouettes or a new colour scheme, and the
+  board would have measured two variables at once. The inherited consequence is inherited
+  too: because the stub is #565f70 and the plate is #565f70, the stub reads as the plate's
+  material continuing outward rather than as a distinct fitting (57-04's recorded finding).
+
+  SEMANTIC VOCABULARY - CARRIED, AND PROMOTED FROM GLYPH TO SILHOUETTE. synth/glyphs.ts:29
+  says of SOURCE: "spawn eye with a filled pupil". The eye is kept as interior detail, but
+  the KIND is now carried by the outline: a right-pointing plate whose apex is the emission
+  vertex, so "this thing emits, rightward" is legible from the shape alone with the interior
+  blanked. That promotion is exactly what Direction C proposes and what A and B cannot do.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED, NOT REASONED: 78 vertices / 39 points against the 400/200 ceiling, band `ok`.
+  Printed by candidateBudget.test.ts on every successful run. C was measured as it was
+  drawn rather than at the end, because C is the direction most exposed to the cliff; had a
+  subject gone over, the standing instruction is to HALT and record it as an N12 finding,
+  never to delete detail until it fits.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="badge" d="M4 4 H20 L28 16 L20 28 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H20 L28 16 L20 28 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="eye" d="M10 16 L15 11 L20 16 L15 21 Z" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="pupil" d="M13 14 H17 V18 H13 Z" fill="#1b1f27" />
+  <path data-part="port-out" d="M28 16 H32" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

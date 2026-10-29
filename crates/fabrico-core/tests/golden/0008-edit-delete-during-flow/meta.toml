@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0008-edit-delete-during-flow` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0008-edit-delete-during-flow"
+builder = "inline s->b(3)->c + edit-log deleting b at tick 1 mid-flow (Q3 drop)"
+seed = "0x000000000008de17"
+params = "belt latency=3; fire s@0; edit@tick1 Delete(b); item drops via missing-link no-op"
+tick_count = 7
+hash_lines = 7
+schema_version = 2
+snapshot_schema_version = 14

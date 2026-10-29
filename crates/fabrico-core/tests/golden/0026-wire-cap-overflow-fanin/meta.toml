@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0026-wire-cap-overflow-fanin` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0026-wire-cap-overflow-fanin"
+builder = "inline caller -> wire -> handler + a fan-IN of WIRE_INFLIGHT_CAP+1 (257) same-tick WireRequests into the ONE entry wire — 256 fill the FIFO, the 257th refuses + faults WireOverflow to the entry node"
+seed = "0x0000000000265117"
+params = "WIRE-03 SPACE bound (integration): 257 same-tick requests fan-in to one entry wire; the FIFO fills to exactly WIRE_INFLIGHT_CAP=256 and the over-cap request faults WireOverflow to the caller; in_flight never exceeds the cap (cannot OOM)"
+tick_count = 5
+hash_lines = 5
+schema_version = 2
+snapshot_schema_version = 14

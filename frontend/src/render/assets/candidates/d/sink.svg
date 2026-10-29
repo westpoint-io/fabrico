@@ -1,0 +1,44 @@
+<!--
+  candidates/d/sink.svg - DIRECTION D draft for the SINK machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION D - "schematic / circuit": line-only, terminal pins at the ports, drawn as the
+  direction it actually is rather than as a hedged version. The full statement of D's
+  line-only rule, its A-ink control and the frame/chassis convergence is at d/source.svg.
+
+  SEMANTIC VOCABULARY - CONSCIOUSLY REJECTED, and replaced in kind. synth/glyphs.ts:42 says of
+  SINK "bullseye (launch the rocket / terminal)". A bullseye is an ICON; Direction D has none.
+  The electronics equivalent is substituted instead: a GROUND SYMBOL - three stacked bars of
+  decreasing width at the end of a trace - which is the single most legible "the signal
+  terminates here" mark in the whole schematic vocabulary, and arguably says it more plainly
+  than a bullseye does. Where D's rejections cost something (see d/source.svg, d/factory.svg)
+  it is recorded; here the substitution is at least as strong as the motif it replaces, and
+  that is recorded too, because a direction that only ever reports its own costs is not being
+  measured honestly either.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 80 vertices / 40 points, band `ok`. Note what that number is made of: SIX
+  two-unit strokes and one three-unit frame, and it still costs 16 MORE than a/sink.svg's 64.
+  Every one of those strokes is an open polyline costing 4 vertices per point, and there is
+  no fill anywhere to average the cost down. This is 57-RESEARCH F2.2 landing on real art.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="frame" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="trace-in" d="M4 16 H16" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="stem" d="M16 16 V19" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="bar-wide" d="M6 19 H26" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="bar-mid" d="M10 22 H22" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="bar-narrow" d="M13 25 H19" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-in" d="M2 13 V19" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="port-in" d="M0 16 H4" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

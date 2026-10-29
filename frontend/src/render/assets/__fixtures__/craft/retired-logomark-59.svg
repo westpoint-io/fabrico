@@ -1,0 +1,44 @@
+<!--
+  retired-logomark-59.svg - THE NEGATIVE SUBJECT, and the only reason four Phase 79 gates
+  can still fail (plan 80-05).
+
+  WHAT THIS IS. The six paths below are the Phase 59 brand mark, verbatim: a beveled
+  machine tile carrying two 45-degree chevrons and an item dot riding the lane. It shipped
+  as `chrome/assets/logomark.svg` until plan 80-05 replaced it with composition A, on the
+  authority of the signed `80-MARK-LOCK-SUPERSESSION.md`. Nothing renders this drawing. It
+  is committed to be MEASURED.
+
+  WHY DELETING IT WOULD HAVE BEEN THE WRONG ANSWER. Four cases in
+  `render/assets/markCraft.test.ts` exist to prove their instruments can fail, and every
+  one of them used the SHIPPED mark as its negative subject: the shipped file was not valid
+  XML and it failed three of the four craft rules. Replacing it with a correct drawing turns
+  all four green BY REMOVING THEIR SUBJECT, which is a vacuous pass wearing the exact
+  costume of a fix. This file is the subject they moved onto, so the instruments still have
+  something real to fail on and the shipped mark becomes the positive subject instead.
+
+  IT MUST KEEP MEASURING WHAT IT MEASURES: FAIL 5 shapes, PASS 26u, FAIL 2u, FAIL 1u, with
+  four touching pairs. Those numbers are asserted, so editing this drawing to "improve" it
+  breaks the gates it exists to feed. If a measurement here moves, the instrument moved, and
+  that is the finding.
+
+  IT IS NOT WALKED BY ANY PRODUCTION WALK. `lintDir` and `discoverChromeAssets` are both
+  non-recursive and filter on `isFile()`, so a `__fixtures__/` subdirectory is invisible to
+  the shipped tables. `measureAll()` walks the Phase 79 candidates directory only and takes
+  no path argument, so this file needs no pinned row in `mark-craft.expected.json` and the
+  key set there stays at eight. It is read by exactly one caller, `measureCut(RETIRED_MARK,
+  16)` in `markCraft.test.ts`.
+
+  THE HEADER IS REWRITTEN, THE GEOMETRY IS NOT. The original header named its paint tokens
+  in the full var form, whose doubled hyphen is illegal inside an XML comment and is now the
+  `comment-hyphen` lint rule. The tokens the six paths use are fab-panel-fill, fab-outline,
+  fab-edge-lit, fab-edge-shadow, fab-ink and fab-btn-primary. Every coordinate below is
+  byte-identical to the retired file.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="tile" d="M 0 0 H 32 V 32 H 0 Z" fill="var(--fab-panel-fill)" />
+  <path data-part="outline" d="M 1 1 H 31 V 31 H 1 Z" fill="none" stroke="var(--fab-outline)" stroke-width="2" />
+  <path data-part="bevel-lit" d="M 3 29 V 3 H 29" fill="none" stroke="var(--fab-edge-lit)" stroke-width="2" />
+  <path data-part="bevel-shadow" d="M 3 29 H 29 V 3" fill="none" stroke="var(--fab-edge-shadow)" stroke-width="2" />
+  <path data-part="chevrons" d="M 6 12 L 10 16 L 6 20 M 14 12 L 18 16 L 14 20" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item-dot" d="M 22 14 H 26 V 18 H 22 Z" fill="var(--fab-btn-primary)" />
+</svg>

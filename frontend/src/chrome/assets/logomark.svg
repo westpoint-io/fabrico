@@ -1,0 +1,92 @@
+<!--
+  chrome/assets/logomark.svg - the Fabrico brand mark, composition A (SHELL-03, MARK-02).
+  A CHROME GLYPH: nothing on the board ever renders it, and it has no canvas subject at
+  all. `render/assets/*.svg` are machine art tessellated by Pixi; this directory is
+  consumed by the DOM only. Authored from scratch in plan 80-05; CONSUMED by
+  `chrome/LogoMark.tsx`. That component was retired on 2026-10-11: since MARK-17 the header
+  draws the lockup, so nothing in the app renders this file any more. It stays as the
+  geometry the installer icons are held to. `chrome/iconMasterParity.test.ts` holds it equal
+  to the icon master shape for shape, matched by layer name, and since 2026-10-11 also holds
+  its one-accent rule (the item, painted fab-accent-item by name); `markSheet.test.ts`
+  compares it byte for byte. The icon raster pins guard the master, not this file. The svg
+  lint holds its zero-hex, viewBox and dialect rules; it has no accent rule.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures.
+
+  WHAT AUTHORISES THIS FILE. This drawing supersedes the earlier six-layer beveled tile
+  (two 45-degree chevrons and an item dot at (24, 16)). A different mark was chosen on
+  rendered comparisons in Phase 79, and composition A became its square cut in Phase 80.
+  The tile is retired, not corrected. Its six paths survive only as a measured negative
+  subject at `render/assets/__fixtures__/craft/retired-logomark-59.svg`, which is what
+  keeps four Phase 79 gates able to fail.
+
+  THE THREE LAYERS, IN DOM ORDER WHICH IS PAINT ORDER (later paints on top). Transcribed
+  from the supersession's section 3 table, which is also where `LogoMark.test.tsx`'s
+  `PINNED_PART_ORDER` was transcribed from (that test was retired with the component on
+  2026-10-11; `chrome/iconMasterParity.test.ts` now pins this order against the icon
+  master).
+
+    1. rail  fill fab-panel-fill, stroke fab-ink 2u   the belt band the square stands on
+    2. cell  fill none,           stroke fab-ink 2u   the framed cell, a real hole
+    3. item  fill fab-accent-item                     the one accent, riding in the cell
+
+  Paint order is deliberately NOT alphabetical. Sorted would be cell, item, rail.
+  `chrome/iconMasterParity.test.ts` asserts a sorted copy differs from the authored order
+  (an assertion the retired `LogoMark.test.tsx` first made), because an order assertion a
+  sorted copy also satisfies cannot distinguish an order from a set.
+
+  EVERY STROKE EDGE SITS ON AN EVEN UNIT, and that is D-04 rather than a coincidence. The
+  rail's outer box is 2..30 by 22..30 and the cell's is 8..24 by 2..18, so at device pixel
+  ratios 1, 1.5 and 2 every 2u stroke is a whole number of device pixels on both axes. The
+  retired mark could not do this: a 2u band flush with the tile edge has its centreline at
+  1u, so three of its six parts carried odd coordinates. This composition has none, which
+  is why the mark now carries `shapeRendering: crispEdges` like every other chrome glyph.
+
+  THE GAPS ARE MEASURED, NOT EYEBALLED. The item clears the cell by 2u on all four sides
+  (item 12..20 by 6..14 inside cell inner 10..22 by 4..16), and the cell's bottom edge at
+  18 clears the rail's top edge at 22 by 4u. `scripts/mark-craft.ts` measures the R4
+  minimum gap at 2u and reports OVERLAP for any pair that touches, so those clearances are
+  the difference between a PASS row and a failing one.
+
+  THE ACCENT RULE, AND THE OPEN QUESTION IT CLOSES. `item` is the ONLY accent; `rail` and
+  `cell` are ramp steps. It is painted fab-accent-item, the token reserved for an item
+  riding a belt, which is what this mark depicts. The retired tile painted its dot
+  fab-btn-primary, the build accent, because `59-UI-SPEC.md:1245-1262` left the question
+  open and its option A default fell through: no lock covered the brand mark and
+  re-tinting was a rebrand decision CHROME-03 did not own. MARK-09 and D-03 close it. No
+  token was added to `LOCKED_SKIN` to do so.
+
+  COLOUR: ZERO HEX. Every fill and stroke is a var reference to a skin token, so the mark
+  re-skins the instant a token moves. This file is the one in the directory that does NOT
+  use currentColor: it is a MULTI-colour composition, and a single inherited ink cannot
+  express an amber item against a grey belt. Held at fail severity by the chrome-scoped
+  ink rule in `scripts/lint-svg.ts`, which admits both forms.
+
+  TOKEN NAMES ARE WRITTEN WITHOUT THEIR LEADING DASHES throughout this header, and from
+  this commit that is a lint rule rather than a convention. A doubled hyphen is illegal
+  inside an XML comment by the XML 1.0 specification, so the var form in a comment makes
+  the whole document unopenable by every strict parser. The file this replaces carried
+  that defect at its line 25 and no gate had ever seen it; `comment-hyphen` in
+  `scripts/lint-svg.ts` sees it now.
+
+  ART-04 PROVENANCE: authored from scratch, from the chosen Fabrico mark.
+  No icon pack was consulted, copied, traced or redrawn - not Material Symbols
+  (permitted as a VOCABULARY REFERENCE ONLY), and not game-icons.net (CC-BY-3.0, which
+  redrawing does not clear) or Remix Icon (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, commands limited to M H V Z, zero curves, one path
+  element per semantic layer carrying its own stable data-part, one element per line, and
+  no attribute outside the five `svgToElements.ts` admits. The words "path element" are
+  spelled out rather than written as markup on purpose: the acceptance gate for this file
+  counts opening path tags in the raw text, and a decoy inside the header would make the
+  count read 4 on a correct three-shape drawing.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg>

@@ -1,0 +1,59 @@
+<!--
+  render/assets/source.svg - SHIPPED art for the SOURCE machine (ART-01/ART-04, plan 58-02).
+
+  Promoted from `candidates/a/source.svg`, the Direction A draft judged on the Phase 57
+  art board and locked (`57-ART-LOCK.md`). This file sits FLAT in `render/assets/`, and
+  that placement is a contract rather than a convenience: the discovery walk in
+  `scripts/lint-svg.ts`, `vertexBudget.test.ts` and `geometryDigest.test.ts` is
+  non-recursive, which is exactly what keeps `candidates/` and `__fixtures__/` out of the
+  shipped table. A shipped asset in a subdirectory is an asset no gate measures.
+
+  GLYPH ONLY - NO CHASSIS PATH, NO PORT STUBS (design decision, 2026-08-02). The CHASSIS is
+  drawn in CODE (`render/layers/machineChassis.ts`) at whatever `w x h` the footprint
+  actually is, because `grow_to_fit` can push a machine past its base footprint and a
+  fixed-`viewBox` asset then has no legal box. The PORT STUBS stay board-drawn from the
+  authoritative `ports[]` via `localNubSpecs` / `drawRoleNub`. The candidate's
+  `port-out` stub is therefore NOT carried forward - authoring it here would double-draw
+  the nub and freeze a port layout into artwork.
+
+  FOOTPRINT: SOURCE's base footprint is 1x1, so `viewBox 0 0 32 32`. One unit is one pixel
+  at CELL 32 / scale 1, so the 2u detail stroke rasterises at 2px here and at 2px on a 3x3
+  FACTORY - which is the whole point of authoring every kind at `32*w` by `32*h` rather
+  than at 32x32 scaled up.
+
+  SEMANTIC VOCABULARY - CARRIED. `synth/glyphs.ts:29` says of SOURCE: "spawn eye with a
+  filled pupil". `eye` is the open lens and `pupil` is the filled centre. The lens is a
+  straight-edged DIAMOND standing in for the curved almond (lock axis 8's named
+  substitution): the reading is preserved, the construction is re-expressed in a language
+  with zero curve commands.
+
+  MUST NOT BE CONFUSABLE WITH SINK, and the discriminator is geometric rather than
+  decorative: the diamond's four edges are ALL DIAGONAL while SINK's ring edges are ALL
+  AXIS-ALIGNED. The two share a footprint and a fill count, so that difference is the only
+  thing separating them in pure greyscale, which is what ART-03's gate measures.
+
+  FILL COUNT 1 (`pupil`). Lock axis 6 states 1 as a MAXIMUM, so this subject sits exactly
+  at the ceiling and cannot gain a second filled path.
+
+  ART-04 PROVENANCE: authored from scratch for the Phase 57 board. No icon pack was
+  consulted, copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY
+  REFERENCE ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or
+  Remix Icon (non-OSI), which are excluded outright. Promotion carries that provenance
+  forward unchanged.
+
+  COLOUR SOURCE - THE SHIPPED RULE, NOT THE CANDIDATE'S EXEMPTION. Every draft in
+  `candidates/` is exempt from the "no hand-authored hex" rule BECAUSE IT NEVER SHIPS.
+  This file ships, so that basis evaporates and is deliberately not restated. The standing
+  rule stands: the one literal below is `LOCKED_SKIN.palette.ramp[4]` (0xb0bacb, the
+  highlight step), the single ink lock axis 9 permits for every kind's glyph, and it is
+  held to that value by the fail-severity ink allowlist over the SHIPPED assets in
+  `assets/shippedAssets.test.ts` - by a gate, not by this paragraph.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L Z,
+  zero curves, one `<path>` per semantic part carrying its own stable `data-part`, one
+  element per line. The authoring contract is render/assets/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="eye" d="M 10 16 L 16 10 L 22 16 L 16 22 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pupil" d="M 14 14 H 18 V 18 H 14 Z" fill="#b0bacb" />
+</svg>

@@ -1,0 +1,39 @@
+<!--
+  chrome/assets/redo.svg - the REDO glyph. A CHROME GLYPH: nothing on the board ever
+  renders it, and it has no canvas subject at all. `render/assets/*.svg` are machine art
+  tessellated by Pixi; this directory is consumed by the DOM only.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures.
+
+  THE MOTIF, AND THE MIRROR CONTRACT. This file is `undo.svg` reflected about x = 16
+  (x' = 32 - x), part for part and coordinate for coordinate: the head points EAST at the
+  top-right and the shaft runs west along the top before turning south. The two glyphs sit
+  side by side in the toolbar, so any drift between them is immediately visible; the
+  relationship is stated in both files rather than left to be noticed. Carried from the
+  8x8 bit matrix this file replaces (`icons.tsx` REDO, deleted in plan 59-02), whose head
+  was two stair bits. Here it is two TRUE 45-degree arms (6u run, 6u rise) - baking a
+  pixel-era staircase into vector art is the thing this milestone exists to stop.
+
+  COLOUR: ZERO HEX. Every fill and stroke is literally `currentColor`, so the glyph takes
+  the colour of the control it sits in - it brightens with `.fab-tool-btn:hover` and
+  desaturates with `:disabled` (Redo is disabled on an empty stack, which is exactly when
+  this matters). A baked value would do neither, silently. Held at `fail` severity by the
+  chrome-scoped ink rule in `scripts/lint-svg.ts`.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 59. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or Remix Icon
+  (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L
+  Z, zero curves, one <path> per semantic part carrying its own stable data-part, one
+  element per line. 3u structural / 2u detail, the locked two-weight system.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="shaft" d="M 22 12 H 10 V 26" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="head" d="M 16 6 L 22 12 L 16 18" fill="none" stroke="currentColor" stroke-width="3" />
+</svg>

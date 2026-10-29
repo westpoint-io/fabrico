@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0016-factory-3x3-fault-dock` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0016-factory-3x3-fault-dock"
+builder = "GridSession: Place FACTORY(3x3) + DrawBelt[(1,3)] + Dock(Tail->fault port 2 -> resolved FAULT_PORT) — the reconciled Role::Fault<->FAULT_PORT dock (CAT-02/DET-05)"
+seed = "0x000000000016fa17"
+params = "3x3 factory @(0,0); fault nub world (1,2) S, facing (1,3); belt tail OFFLOAD-docked by spatial index 2, link key resolved to FAULT_PORT; docked-fault topology at rest, round-trips at schema 7"
+tick_count = 6
+hash_lines = 6
+schema_version = 2
+snapshot_schema_version = 14

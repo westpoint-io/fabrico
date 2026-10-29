@@ -1,0 +1,74 @@
+<!--
+  chrome/assets/wire.svg - a CHROME GLYPH, and NOT the canvas wire art. Read that
+  distinction first, because the two are easy to confuse and they are governed by
+  different documents. This file exists so the Palette's Wire tool has a vector glyph to
+  draw; nothing on the board ever renders it. Canvas wires are drawn by
+  `render/layers/wires.ts` under the Phase 40 wire contract (`40-UI-SPEC.md`), which owns
+  the cable weight, the terminal size and the z-order. Authored for plan 66-01, the Wire
+  tool tracer, and the Palette's Wire row is its only consumer.
+
+  THE MOTIF. A solid square terminal, a thin cable, a solid square terminal - the canvas
+  read of a wire at rest, at icon scale. A wire on the board is exactly that: two end
+  assemblies with a hairline between them. The silhouette is deliberately distinct from
+  `belt.svg` (two 3u structural rails plus two 2u centre dashes, ink across the full
+  32u width top and bottom) at every size, in greyscale, and under every colour-vision
+  channel, because belt-versus-wire is a TOPOLOGICAL distinction here and never a
+  chromatic one: the belt reads as a lane, the wire reads as a link between two points.
+
+  THE CABLE IS AUTHORED AT THE 2u DETAIL WEIGHT, DELIBERATELY. Thinness is the primary
+  belt-versus-wire separation on the canvas, where a wire cable is a hairline against the
+  belt's 20px lane (`render/layers/wires.ts:1-8`), and this glyph QUOTES that reading at
+  icon scale. It quotes it as a proportion and not as a number.
+
+  AND THE PHASE 59 DECOUPLING IS DELIBERATELY KEPT, exactly as `belt.svg` keeps it. This
+  glyph does NOT derive from the canvas geometry: it imports nothing, it reads no
+  constant, and the 2u cable against the 8u terminals is a hand-authored proportion
+  measured against the canvas read, never a computed one. An icon and a tile are
+  different subjects at different sizes: the glyph is authored on a 32-unit box in the
+  chrome's two-weight system, while the canvas cable is world px on a 32px cell under
+  `antialias: false`. Coupling them would make every future canvas-geometry edit a chrome
+  edit, and would make this file's integer-and-even coordinate contract a hostage to a
+  cable width that is free to become fractional. Two declarations, one owner phase, and a
+  reconciliation recorded if they are ever brought into agreement.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures. THIS EDIT ADDS A FILE, so the two asset-count
+  pins move 14 -> 15 by hand in the same commit (`chrome/assets/registry.ts:57-71` states
+  that discipline; `render/assets/lintSvg.test.ts` and `render/assets/vertexBudget.test.ts`
+  hold the pins).
+
+  GLYPH ONLY, AND NO CHASSIS. A wire has no chassis on the board: it is a link, not a
+  machine box. `WireIcon` therefore renders this file alone through `ChromeGlyphIcon`,
+  with no `chassisPathD` sibling. It does NOT go through `MachineGlyphIcon`: `SUBJECT_OF`
+  has no key for kind 8, so `MachineGlyphIcon kind={8}` would draw a bare chassis with no
+  glyph inside it (`chrome/icons.tsx:351,394-396`), which reads as "a machine whose kind
+  this build does not know" - the wrong answer for a link.
+
+  COLOUR: ZERO HEX, and this is where the chrome directory DIVERGES from
+  `render/assets/`. Machine assets carry the one authored literal `#b0bacb`
+  (`LOCKED_SKIN.palette.ramp[4]`) and the DOM icon rewrites it to `currentColor`. A chrome
+  glyph is authored as `currentColor` from the start, because it has no canvas consumer to
+  carry an ink for and because inheriting the control's own colour is what makes it lift
+  on hover and desaturate with a disabled button. Held at `fail` severity by the
+  chrome-scoped ink rule in `scripts/lint-svg.ts`.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 66. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or Remix Icon
+  (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V Z,
+  zero curves, one <path> per semantic part carrying its own stable data-part, one element
+  per line, explicit fill AND stroke on every path. The terminals are 8u wide and 8u tall,
+  filled solid and vertically centred on the 32u box (y 12 to 20); the cable runs between
+  their inner edges at the 2u detail weight. 8u/2u against the 32u box is the terminal-to-
+  cable proportion the canvas shows.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="terminal-west" d="M 0 12 H 8 V 20 H 0 Z" fill="currentColor" stroke="none" />
+  <path data-part="cable" d="M 8 16 H 24" fill="none" stroke="currentColor" stroke-width="2" />
+  <path data-part="terminal-east" d="M 24 12 H 32 V 20 H 24 Z" fill="currentColor" stroke="none" />
+</svg>

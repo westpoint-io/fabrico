@@ -1,0 +1,65 @@
+<!--
+  candidates/c/balancer.svg - DIRECTION C draft for the BALANCER machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION C - "iconographic badge": the silhouette itself differs per kind. C holds
+  Direction B's paint system exactly so that B vs C isolates the SILHOUETTE with the
+  treatment held fixed. See c/source.svg for the full statement of that control.
+
+  SEMANTIC VOCABULARY - CARRIED, AND PROMOTED FROM GLYPH TO SILHOUETTE. synth/glyphs.ts:70-72
+  says of BALANCER: "two full-width horizontal bars joined by a central spine (an 'I') ...
+  the silhouette is unmistakably a pair of rails, never a fork or a diamond." That comment
+  claims a SILHOUETTE property while describing a bit matrix stamped inside a box - in A and
+  B it is three 2u strokes on a rectangular chassis, so the claim is not actually cashed.
+  Direction C is where it is cashed: the twin rails and their web ARE the outline, an
+  H lying on its side, and the rails run edge to edge so the shape is all rail and no box.
+
+  THE MERGE/BALANCER PAIR - THE DECISION THIS PLAN REQUIRES TO BE WRITTEN DOWN RATHER THAN
+  INHERITED. These two are named as the pair most likely to collapse into one another once
+  colour is removed, and in A and B they genuinely can: both are the SAME 4-inset rectangle
+  carrying a few 2u strokes, so at 1x in greyscale a viewer is reading a handful of thin
+  interior lines inside identical boxes. Direction C is the only direction in which the two
+  cannot collapse, because they are no longer the same shape at all:
+
+    BALANCER (here) - an H on its side. Two full-width rails, a narrow web at the middle,
+                      and MASS AT ALL FOUR CORNERS. Bilaterally symmetric on BOTH axes.
+                      Reads: two lanes in, two lanes out, evenly.
+    MERGE (c/merge)  - a funnel. A full-width top mouth tapering to a narrow neck, so mass
+                      is at the TOP and the bottom is a stem. Symmetric on ONE axis only.
+                      Reads: many in, one out.
+
+  The discriminating property is the vertical mass distribution, which survives greyscale,
+  survives 1x, and survives blur - it is not a detail, it is the outline. That IS a real
+  finding in Direction C's favour and it is recorded as a claim about the drawing, NOT as a
+  verdict: whether it holds is the reviewer's judgement at the board, at 1x/1.77x/2x with the three
+  colour-vision simulations alongside. The board ranks nothing and neither does this file.
+
+  THE HONEST COUNTER, recorded because a finding that only lists its own supporting evidence
+  is not a finding: this BALANCER and c/tee.svg are both wide, both symmetric about y=32 and
+  both flat-ended on the right, so the pair C most plausibly confuses is BALANCER/TEE rather
+  than BALANCER/MERGE. They are separated by TEE's arms being diagonal and convergent to two
+  points while these rails are parallel and full-width. That is a weaker separation than the
+  mass-distribution one above, and it is stated rather than smoothed over.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 112 vertices / 56 points, band `ok`. Twelve silhouette points, the most in any
+  2x2 subject in this direction; the four held-constant port stubs are another 32.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="badge" d="M4 14 H60 V26 H38 V38 H60 V50 H4 V38 H26 V26 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 14 H60 V26 H38 V38 H60 V50 H4 V38 H26 V26 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="port-in-a" d="M0 20 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-in-b" d="M0 44 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-a" d="M60 20 H64" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-b" d="M60 44 H64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

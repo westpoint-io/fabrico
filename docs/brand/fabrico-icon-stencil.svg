@@ -1,0 +1,44 @@
+<!--
+  docs/brand/fabrico-icon-stencil.svg - the MONOCHROME STENCIL of the Fabrico mark
+  (MARK-07). One colour, and a silhouette that carries a real hole. This is the cut for a
+  surface that paints the mark itself: a template tray icon, a menu bar glyph, a single
+  colour print.
+
+  IT CARRIES NO PLATE, AND THAT IS ITS ENTIRE POINT (D-08). The master and the 16 unit cut
+  both sit on a full bleed ground so an installer icon does not vanish in a light theme
+  Dock. This one must not: a tray that fills a template glyph would collapse a plated
+  drawing into a solid square, and a solid square is not a mark. The ring between the inner
+  wall of the cell and the amber item is the hole that survives that fill, and
+  frontend/src/render/assets/iconRaster.test.ts measures it against the plated master in the
+  same run rather than against a remembered percentage.
+
+  ONE COLOUR, AND IT IS THE INK OF THE MARK ITSELF RATHER THAN BLACK. Every paint below is
+  the ink value, so this file spends nothing from the brand colour register and adds no row
+  to the table in docs/brand/README.md.
+
+  SAME GEOMETRY AS THE MASTER, on the same 32 unit box: the rail, cell and item d strings
+  are the ones the master declares, minus the plate. The stencil is a repaint of the mark,
+  not a redraw of it.
+
+  NOTHING IN THE APP IMPORTS IT: no component, no Vite input and no bundle reaches docs/, so
+  this drawing is a brand source rather than a shipped asset. It serves the operating system
+  only (D-05).
+
+  GENERATED FILE. Written by frontend/scripts/build-icons.ts and regenerated rather than
+  edited: run npm run build:icons. frontend/src/render/assets/iconCuts.test.ts rebuilds it in
+  memory and compares byte for byte, so a hand edit reddens the unit suite.
+
+  THE PAINT IS DERIVED, NOT TRANSCRIBED. The one value below is read out of
+  skinToCssVars(LOCKED_SKIN) at generation time, by the token fab-ink. No hex literal for it
+  appears in the generator.
+
+  ART-04 PROVENANCE: authored from scratch, from the chosen and approved Fabrico mark. No
+  icon pack was consulted, copied, traced or redrawn. Nothing here derives from
+  game-icons.net (CC-BY-3.0, which redrawing does not clear) or from Remix Icon, whose
+  licence forbids logo and trademark use by name.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="#b0bacb" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="#b0bacb" />
+</svg>

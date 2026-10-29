@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fabrico - Pixel Guard Fixture (dev only)</title>
+    <!--
+      DEV-ONLY pixel-guard fixture (QAGUARD-01, Plan 43-03). Root-level HTML so Vite
+      serves it in dev (`/pixel-guard.html`) yet it is NEVER a build input - only
+      index.html is (vite.config.ts declares no extra rollup inputs), so this fixture
+      stays out of `dist`. It boots the REAL render surfaces over a synthetic scene so
+      the QAGUARD-01 Chromium gate (pixel-guard.spec.ts) can screenshot one surface per
+      render-regression class against committed baselines:
+        - operator footprint (RENDER-01): a router baked at its real per-node w/h,
+        - belt corner apex (RENDER-02): the SHIPPED VECTOR bend at elbowR=16 /
+          laneHalf=10 (the shared/geometry.ts BELT_GEOM record), both chiralities across
+          three march buckets. Plan 61-07 re-pointed this surface off the raster bake and
+          onto the vector corner the belt layer actually draws (61-CONTEXT.md H4), so it
+          gates the shipped path rather than bytes no user can see. The figures this line
+          carried until the phase-61 review - "the full-width ELBOW_R=14 / lane-half=13
+          bend" - never matched the shipped record and are corrected in place here so the
+          correction is legible,
+        - wire reply comet (RENDER-03): the amber comet frozen mid-sweep on a fixed
+          render clock (two draws: latch at T0, then T0+14 gives frac 0.5),
+        - vector pilot (VEC-03, added in Phase 56): render/assets/pilot.svg drawn
+          three times from ONE shared GraphicsContext at scale 1, 2 and 1.77,
+        - belt rail continuity (BELT-05, added in plan 61-09): the REAL belt layer over
+          three synthetic runs (straight, single bend, S-bend), each drawn twice at each
+          of six camera scales - once with the shipped device-quantum rail family and
+          once with a CONTROL family produced by calling the same emitter at quantum 1,
+          all through ONE resized Pixi Application (a browser caps live WebGL contexts).
+          It commits NO baseline image; its gate
+          (e2e/belt-rail-continuity.spec.ts) reads pixels back through Pixi's own
+          extract path and asserts continuity numerically, with the control asserted to
+          FAIL in the same run.
+      Colours are read from LOCKED_SKIN via the real painters. The vector pilot is
+      the ONE documented exemption: an SVG file necessarily carries literal hex, and
+      pilot.svg carries that exemption note plus the named LOCKED_SKIN ramp values it
+      mirrors (see the matching note in src/spike/pixelGuard.tsx, which is the
+      authoritative copy - this comment describes the same five surfaces and must be
+      updated with it). Do NOT import this fixture from App.tsx / main.tsx.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="pixel-guard-root"></div>
+    <script type="module" src="/src/spike/pixelGuard.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+<!--
+  a-port-square-full.svg - Candidate A for Phase 79, "The route is chosen". The full cut,
+  serving 32px and 96px.
+
+  ROUTE. Route 13, "The Port Square", from the logo route research, section 4.14:
+  a machine seen from above with a port cut through the wall on every side, a solid core in
+  the middle, and one item entering the left port half in and half out of the frame. The
+  four-way symmetry is the route's whole pitch and it is a 96px property, which is why the
+  16px cut of this candidate is a separate drawing rather than this one scaled down.
+
+  NOT A SHIPPED ASSET. This file is a throwaway comparison candidate. It exists so four
+  drawings can be looked at side by side at 16px, 32px and 96px and one of them named.
+  Nothing in the application imports it, and nothing renders it outside the Phase 79
+  comparison sheet.
+
+  WHY IT IS NOT IN frontend/src/chrome/assets/ (decision D-09). The discovery walk in
+  scripts/lint-svg.ts and in render/assets/vertexBudget.test.ts is flat and non-recursive, so
+  a file dropped into that directory silently joins the shipped asset set and moves three
+  hand-edited count literals. A file dropped into a subdirectory of it is worse: an asset
+  that looks shipped and that no gate measures at all. Phase 79 leaves that directory
+  byte-identical to where it started.
+
+  THE THREE LAYERS, IN PAINT ORDER (later paints on top):
+
+    1. ring   fill  fab-ink           four corner brackets, one path, four subpaths
+    2. core   fill  fab-ink           a 6u square at the centre, the sink glyph tie
+    3. item   fill  fab-accent-item   a 6u square entering the left port
+
+  Those paint tokens are named without their leading dashes on purpose. Two consecutive
+  hyphens are illegal inside an XML comment, and that single character pair is what makes the
+  shipped chrome/assets/logomark.svg unopenable by every strict parser in this tree.
+  Measured 2026-09-05: Python's XML parser refuses it at line 25 column 34, and ImageMagick
+  returns "unable to read image data". The fill attributes below sit outside the comment and
+  keep their normal var(...) form.
+
+  THE GEOMETRY, AND THE ONE DECISION THIS DRAWING MAKES. The ring runs 2 to 30 with a 6u
+  wall and a 16u inner hole at 8 to 24. A notch is cut clean through the wall at the centre
+  of each edge, spanning 11 to 21 on that edge's axis, which breaks the ring into four corner
+  brackets and is why the ring is one path of four subpaths rather than a wound ring.
+
+  The notch is 10u wide, not the 6u the research sketches. That is the single geometric
+  decision the design contract makes inside Route 13's description, and the arithmetic is the
+  reason: a 6u notch holding a 6u item leaves a 0u gap on both sides and fails the 2u gap
+  rule outright. Widening the notch to 10u buys exactly the 2u the rule asks for.
+
+  THE ITEM TOUCHES THE LEFT EDGE OF THE BOX ON PURPOSE. That is the half in, half out read
+  the route is built on: the item is arriving, not parked. It costs the one pixel of padding
+  convention on one edge and nothing else, and the comparison sheet says so beside the tile
+  rather than leaving a reader to notice it.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 79. No icon pack was consulted, copied,
+  traced or redrawn. Not game-icons.net, whose CC-BY-3.0 licence redrawing does not clear.
+  Not Remix Icon, whose licence forbids logo use by name. No AI-generated image was used at
+  any point.
+
+  Geometry: integer coordinates only, commands limited to M H V L Z, zero curves, one path
+  per semantic layer carrying its own stable data-part, one element per line.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg>

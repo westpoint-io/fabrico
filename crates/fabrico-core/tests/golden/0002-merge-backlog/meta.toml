@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0002-merge-backlog` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0002-merge-backlog"
+builder = "multi_source_merge_collector"
+seed = "0x000000004a1c3e70"
+params = "inputs=3"
+tick_count = 6
+hash_lines = 6
+schema_version = 2
+snapshot_schema_version = 14

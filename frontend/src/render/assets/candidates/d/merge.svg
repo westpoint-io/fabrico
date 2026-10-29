@@ -1,0 +1,57 @@
+<!--
+  candidates/d/merge.svg - DIRECTION D draft for the MERGE machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION D - "schematic / circuit": line-only, terminal pins at the ports. The full
+  statement of D's line-only rule, its A-ink control and the frame/chassis convergence is at
+  d/source.svg.
+
+  SEMANTIC VOCABULARY - CARRIED IN MEANING, DELIBERATELY LOST IN FORM, and this is the
+  clearest case in the direction of what D costs. synth/glyphs.ts:100-102 says of MERGE: "a
+  wide top mouth converges down diagonal walls to a single 1-wide centered neck. The strong
+  top-heavy taper is the inverse of TEE's fork and cannot be confused with the balancer's
+  twin bars." The FUNNEL cannot survive here: a funnel is a tapering solid, and a tapering
+  solid is a shape rather than a circuit. What survives is the topology - two traces in, one
+  trace out, joined at a summing node - routed at right angles like everything else in D.
+
+  THE TOP-HEAVY TAPER IS THE PROPERTY GLYPHS.TS EXPLICITLY CREDITS WITH KEEPING MERGE
+  DISTINCT FROM TEE AND BALANCER, AND DIRECTION D THROWS IT AWAY. That is a real loss and it
+  is recorded rather than compensated for. See d/balancer.svg for the full statement of how
+  the MERGE/BALANCER pair fares in this direction: both are the same 4-inset rectangle with
+  thin traces inside, so D is exposed exactly where A and B are, and its only mitigation is
+  the flow AXIS (merge's ports and pins are vertical, balancer's are horizontal) rather than
+  any difference in shape.
+
+  ROTATED RELATIVE TO ITS SIBLINGS, identically in all four directions. TEE and BALANCER flow
+  left-to-right; MERGE flows top-to-bottom, because a funnel that converges horizontally is a
+  TEE read backwards. Two in on the top edge, one out on the bottom. Whether the shipped
+  machine set tolerates mixed flow axes is a Phase 58 question that 57-04 surfaced and
+  deliberately did not resolve.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 104 vertices / 52 points, band `ok`, against a/merge.svg's 80 and b/merge.svg's
+  88. D is the dearest of the four on this subject despite drawing the FEWEST marks, which is
+  57-RESEARCH F2.2 stated as plainly as real art can state it.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="frame" d="M4 4 H60 V60 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="trace-in-a" d="M18 4 V22 H32" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="trace-in-b" d="M46 4 V22 H32" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="trace-out" d="M32 22 V60" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-in-a" d="M15 2 H21" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-in-b" d="M43 2 H49" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-out" d="M29 62 H35" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="port-in-a" d="M18 0 V4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-in-b" d="M46 0 V4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out" d="M32 60 V64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

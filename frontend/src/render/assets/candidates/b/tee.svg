@@ -1,0 +1,47 @@
+<!--
+  candidates/b/tee.svg - DIRECTION B draft for the TEE machine (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint. AUTHORED AT 64x64, never
+  at 32x32 and scaled: a 3-unit stroke on a scaled 32x32 author box would rasterise at 6px
+  here and 3px on a SOURCE, and the stroke system BOARD-02 is meant to lock would then
+  mean a different thing on every kind.
+
+  DIRECTION B - "solid chassis plate": a FILLED chassis body (#565f70), a 3-unit dark
+  outline (#2a2f3a), and a 2-unit glyph knocked out in the substrate value (#1b1f27). Port
+  stubs are HELD CONSTANT with Direction A (same geometry, same #565f70, same 2u) so the
+  board compares chassis and glyph treatment rather than port treatment. Glyph geometry is
+  identical to Direction A's: D-02 defines B as a treatment, not a different drawing.
+
+  SEMANTIC VOCABULARY - CARRIED. synth/glyphs.ts:55-57 says of TEE: "one-IN / two-OUT fork
+  ... Silhouette reads as an opening '<': clearly not a funnel or a diamond." `spine` is
+  the single input entering from the left; `fork-up` and `fork-down` diverge to the right.
+  The divergence is what separates TEE from MERGE, whose taper runs the other way, and from
+  BALANCER, whose bars are parallel. The port stubs repeat the reading structurally: one
+  in, two out.
+
+  THE PLATE COSTS THIS SUBJECT SOMETHING, and it is worth naming while the board is judged:
+  a filled body gives the fork LESS air to diverge into than Direction A's open frame does,
+  so the three flow kinds (TEE, MERGE, BALANCER) are competing for legibility inside a
+  smaller effective field here. Whether the added chassis-hue mass buys more than it costs
+  is the D-02 claim under test.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H60 V60 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H60 V60 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="spine" d="M14 32 H34" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="fork-up" d="M34 32 L48 18" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="fork-down" d="M34 32 L48 46" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="port-in" d="M0 32 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-up" d="M60 18 H64" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-down" d="M60 46 H64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

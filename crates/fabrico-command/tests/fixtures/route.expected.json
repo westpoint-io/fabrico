@@ -1,0 +1,36 @@
+[
+  {
+    "cell": [
+      0,
+      0
+    ],
+    "kind": {
+      "Straight": {
+        "axis": "X"
+      }
+    }
+  },
+  {
+    "cell": [
+      1,
+      0
+    ],
+    "kind": {
+      "Corner": {
+        "from": "E",
+        "to": "S"
+      }
+    }
+  },
+  {
+    "cell": [
+      1,
+      1
+    ],
+    "kind": {
+      "Straight": {
+        "axis": "Y"
+      }
+    }
+  }
+]

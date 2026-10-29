@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0034-belt-to-belt-junction-replay` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0034-belt-to-belt-junction-replay"
+builder = "GridSession: Place SOURCE@(0,34) + DrawBelt A[(1,34),(2,34),(3,34)] + DrawBelt B[(4,34),(5,34)] + Place SINK@(6,34) + Dock(A.Tail->source Out) + Dock(B.Head->sink In) + Dock(A.Head->B port 0, THE BELT-TO-BELT JOIN) + Configure(Belt{ticks_per_slot: 3x DEFAULT_TICKS_PER_SLOT}) + 30 ManualInject fired one every DEFAULT_TICKS_PER_SLOT ticks (belt A's own free-flow rate, so the bunching is B's pace and not an over-feed) + Unlink(A.Head->B port 0)"
+seed = "0x000000000034c0de"
+params = "LINK-01/LINK-08 belt-to-belt junction determinism: two abutting drawn runs joined by the belt-to-belt Dock this phase shipped, driven until items cross the junction and bunch backwards over it into the slower upstream, then DISCONNECTED in the same log so the downstream drains and the upstream stays packed. Every record is authored by the certified command path; no forged EditOp and no core-seam link"
+tick_count = 213
+hash_lines = 213
+schema_version = 2
+snapshot_schema_version = 14

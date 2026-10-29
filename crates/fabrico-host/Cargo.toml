@@ -1,0 +1,113 @@
+[package]
+name         = "fabrico-host"
+version      = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish      = false
+
+# fabrico-host — the project's first and only home for I/O.
+#
+# It depends on the headless deterministic core but deliberately does NOT carry
+# the determinism clippy gate (`#![deny(clippy::disallowed_types,
+# clippy::disallowed_methods)]` lives only in `fabrico-core/src/lib.rs`). Those
+# lints are at clippy's default `allow` level and only bite the crate that opts
+# in, so the host may use tokio/axum/reqwest/SystemTime/TcpListener freely
+# while `cargo clippy --all-targets -- -D warnings` stays green workspace-wide.
+
+# The offline `.fab` bundle reader (65-10). Declared explicitly for ONE reason:
+# `test = true`. Cargo defaults an example target to `test = false`, so the
+# `#[cfg(test)] mod tests` inside `examples/read_project.rs` would be compiled and
+# then never run - a check structurally unable to see the thing it guards, which is
+# the exact failure shape this project has now hit six times. With this, the reader's
+# own round-trip test runs under a plain `cargo test -p fabrico-host`. Auto-discovery
+# still covers every other example; declaring one does not opt the rest out.
+[[example]]
+name = "read_project"
+path = "examples/read_project.rs"
+test = true
+
+# The dev-only seams (phase 90 review IN-A-04): `SimLoop::with_dev_fault`, the fault switch only
+# `dev_render_server` wires (D-13). ON BY DEFAULT, so `cargo build -p fabrico-host --example
+# dev_render_server` (the live recipe, CI) and this crate's own tests have it with no flag.
+# `fabrico-app` depends on this crate with `default-features = false`, so the shipped Tauri
+# build (`cargo build -p fabrico-app`, the bundler) compiles the library WITHOUT the switch:
+# a call to it from the shell is a compile error there, not only a text-grep miss
+# (`the_shell_never_wires_the_dev_fault_seam`). A workspace-wide build unifies the feature on
+# for every member, which is a development build by definition.
+[features]
+default = ["dev-seams"]
+dev-seams = []
+
+[dependencies]
+fabrico-core = { path = "../fabrico-core" }
+# The headless semantic command layer (CMD-01): the host's live gesture path reuses
+# `validate_normalize` + `GridLookup` + `CommandError` so the UI and the headless
+# harness are PEER PRODUCERS of the one `GridCommand` schema (one validation path,
+# two producers). No dependency cycle — fabrico-command depends only on core+protocol.
+fabrico-command = { path = "../fabrico-command" }
+# The integer-only sim->render wire DTOs (RenderPacket/NodeView/BeltView/ItemView
+# + the machine_kind/state_tag u8 conventions) the render-packet builder produces.
+fabrico-protocol = { path = "../fabrico-protocol" }
+# Generational id handles re-used from the core (`CommandId` carries a `NodeId`).
+# Needed for the `Key` trait so the deterministic idempotency token can read the
+# node's stable FFI value (`id.1.data().as_ffi()`) — never a second minted key.
+slotmap = "1.1"
+# The Factory `code_hash` stamp (CFG-02): blake3 of the EXACT authored JS bytes,
+# computed HOST-SIDE in `apply_gesture` (the core stores 32 opaque bytes it never
+# computes/interprets). blake3 is FENCED to fabrico-host: it stays a DEV-only dep of
+# fabrico-core and MUST NOT enter fabrico-command/fabrico-core runtime. Pinned to 1.8
+# to match the workspace (fabrico-core dev-oracle + fabrico-scenario) — this adds only
+# a dependency EDGE; the package is already resolved in the lockfile at 1.8.5.
+blake3 = "1.8"
+
+# Async runtime for the executor + axum listener (off the sim thread).
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "sync", "net", "time"] }
+# Local HTTP server for the webhook source (127.0.0.1 only this phase). The `ws`
+# feature adds the dev render WebSocket transport (transport_ws.rs, 07-06) that
+# streams the identical render-packet bytes out and accepts gesture frames in.
+axum = { version = "0.8", features = ["ws"] }
+# Outbound HTTP for the HTTP sink — rustls so the bundle stays pure-Rust / clean
+# cross-OS (no system OpenSSL), matching the eventual Tauri installer story.
+# NOTE: reqwest 0.13 renamed the old `rustls-tls` feature to `rustls` (it is now
+# even the default TLS backend); `rustls` pulls aws-lc-rs + rustls-platform-verifier,
+# all pure-Rust with no system OpenSSL link.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# Durable store for the dispatch ledger + the webhook delivery-id seen-set.
+redb = "4.1"
+serde = { version = "1", features = ["derive"] }
+# JSON encode/decode for the Endpoint reply descriptor (ENDP-02): the handler's
+# `{status,headers,body}` is packed as JSON `Item` bytes inside the already-final
+# `Effect::Reply.payload` and decoded reject-only host-side. NOT a new package —
+# serde_json is already a direct dep of the sibling fabrico-command/fabrico-protocol
+# crates and already in the workspace lockfile; this only declares the direct edge.
+serde_json = "1"
+postcard = { version = "1", features = ["use-std"] }
+# axum middleware: bound webhook payload size (mirrors core's MAX_RECORD_BYTES).
+tower-http = { version = "0.7", features = ["limit"] }
+# Human-authorable RON scene format (EX-01): deserializes the build-embedded
+# `Vec<GridCommand>` demo scene asset directly into the frozen protocol enum.
+# Host-side ONLY — never added to fabrico-core/-protocol (core-frozen exit gate).
+ron = "0.12"
+# Owns the FRESH work_dir the Load host-swap hydrates the loaded RedbStore into
+# (the `SimLoop._work_dir` field — it MUST outlive the swapped Host). A normal
+# dependency (not dev-only) because the Load control arm creates a TempDir at
+# runtime, off the test path.
+tempfile = "3"
+
+[dev-dependencies]
+# Dev-only: the ONE sanctioned state-equality digest (`oracle::tick_hash`) for the
+# demo regenerability proof (threat T-13-HASH: never fork the digest path).
+# fabrico-scenario is headless (depends only on command/core/protocol, no host
+# dep), so this in-workspace path dev-dep is acyclic.
+fabrico-scenario = { path = "../fabrico-scenario" }
+# Self-area feature unlock: re-list fabrico-core with `test-support` so the host's
+# tests can forge a decodable-but-invariant-violating `Core` (06-01's MissingInbox
+# helper) to prove load_project rejects a hostile snapshot as a typed error. Not a
+# new package (same path crate), and the feature is off for a normal `cargo build`.
+fabrico-core = { path = "../fabrico-core", features = ["test-support"] }
+# Property testing for the tick-interval timer schedule (same-interval ->
+# same injected ticks; a pure function of the tick).
+proptest = "1"
+# Drive the webhook axum Router in unit tests without binding a socket
+# (`ServiceExt::oneshot`).
+tower = { version = "0.5", features = ["util"] }

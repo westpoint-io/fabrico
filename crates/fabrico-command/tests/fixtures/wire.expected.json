@@ -1,0 +1,48 @@
+{
+  "from_anchor": {
+    "cell_x": 0,
+    "cell_y": 0,
+    "side": 1
+  },
+  "to_anchor": {
+    "cell_x": 1,
+    "cell_y": 1,
+    "side": 0
+  },
+  "tiles": [
+    {
+      "cell": [
+        0,
+        0
+      ],
+      "kind": {
+        "Straight": {
+          "axis": "X"
+        }
+      }
+    },
+    {
+      "cell": [
+        1,
+        0
+      ],
+      "kind": {
+        "Corner": {
+          "from": "E",
+          "to": "S"
+        }
+      }
+    },
+    {
+      "cell": [
+        1,
+        1
+      ],
+      "kind": {
+        "Straight": {
+          "axis": "Y"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0036-balancer-both-inputs` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0036-balancer-both-inputs"
+builder = "core seam: Source A -> belt(1) -> Balancer In 0, Source B -> belt(1) -> Balancer In 1, Balancer Out 0 and Out 1 -> two Debug Sinks; each Source fired one tagged event per tick while it would accept, for 200 ticks, then 100 ticks of drain"
+seed = "0x000000000036ba1a"
+params = "JAM-01/WINDOWS 175 (87-RESEARCH P175 leg B): a Balancer fed on both inputs drains both. Certifies the board replays identically; the behaviour is graded by no_permanent_jams.rs#a_balancer_drains_both_inputs"
+tick_count = 300
+hash_lines = 300
+schema_version = 2
+snapshot_schema_version = 14

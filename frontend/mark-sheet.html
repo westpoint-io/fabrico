@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fabrico - Phase 79, the route is chosen</title>
+    <!--
+      GENERATED FILE. Written by frontend/scripts/build-mark-sheet.ts and regenerated rather
+      than edited: run npm run build:mark-sheet. Every candidate is inlined from its file on
+      disk, every token is baked from LOCKED_SKIN, and every craft verdict comes from a live
+      mark-craft run, so nothing on this page is transcribed and nothing can drift from the
+      files it describes. DELIBERATELY NO NUMBERS IN THIS COMMENT: the generator is the
+      authoritative source for the column set, the sizes and the thresholds, and a comment that
+      restates a constant is a second source of truth that nothing keeps honest.
+
+        - Root level, so Vite serves it in dev at /mark-sheet.html.
+        - NEVER a build input. vite.config.ts declares no extra rollup inputs, so index.html is
+          the only one and this page is STRUCTURALLY absent from dist.
+        - NEVER imported by App.tsx or main.tsx. No query flag, no mount, no global, no
+          keybinding.
+        - A COMPARISON INSTRUMENT. It measures and it describes. It ranks nothing and it
+          records nothing; the only record of a choice is the verdict the reviewer writes.
+    -->
+    <style>
+:root{
+--fab-substrate:#1b1f27;
+--fab-panel-fill:#3b4250;
+--fab-edge-lit:#b0bacb;
+--fab-edge-shadow:#1b1f27;
+--fab-outline:#1b1f27;
+--fab-ink:#b0bacb;
+--fab-btn-neutral:#3b4250;
+--fab-btn-primary:#4fa8ff;
+--fab-focus:#4fa8ff;
+--fab-destructive:#f0506e;
+--fab-accent-working:#34d399;
+--fab-accent-item:#ffb454;
+--fab-label-sand:#e0d388;
+--fab-label-stone:#a19d95;
+--fab-label-moss:#a3c27f;
+--fab-label-lilac:#bea2ea;
+--fab-label-rose:#e39ac0;
+--fab-label-clay:#d68c6c;
+--fab-bezel-ring:6px;
+--fab-bezel-band:1.0000px;
+--fab-bezel-ring-shadow:inset calc(-1 * var(--fab-bezel-band)) calc(-1 * var(--fab-bezel-band)) 0 0 var(--fab-edge-shadow),inset var(--fab-bezel-band) var(--fab-bezel-band) 0 0 var(--fab-edge-lit),inset 0 0 0 calc(2 * var(--fab-bezel-band)) var(--fab-outline);
+--fab-font:"Martian Mono",monospace;
+--fab-font-title:"Sono",monospace;
+--fab-font-size-base:12px;
+--fab-font-size-hero:18px;
+--fab-font-size-hud:12px;
+--fab-space-xs:4px;
+--fab-space-sm:8px;
+--fab-space-md:16px;
+--fab-space-lg:24px;
+--fab-space-xl:32px;
+--fab-space-2xl:48px;
+--fab-space-3xl:64px;
+--fab-min-target:44px;
+}
+
+.mono {
+  --fab-ink: #b0bacb;
+  --fab-edge-lit: #b0bacb;
+  --fab-panel-fill: #b0bacb;
+  --fab-accent-item: #b0bacb;
+  --fab-btn-primary: #b0bacb;
+  --fab-substrate: #1b1f27;
+  --fab-edge-shadow: #1b1f27;
+  --fab-outline: #1b1f27;
+}
+
+.silhouette {
+  --fab-ink: #b0bacb;
+  --fab-edge-lit: #b0bacb;
+  --fab-panel-fill: #b0bacb;
+  --fab-accent-item: #b0bacb;
+  --fab-btn-primary: #b0bacb;
+  --fab-edge-shadow: #b0bacb;
+  --fab-outline: #b0bacb;
+  --fab-substrate: #1b1f27;
+}
+
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('./src/assets/fonts/MartianMono.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Sono';
+  src: url('./src/assets/fonts/Sono.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: block;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #1b1f27;
+  color: #b0bacb;
+}
+
+body {
+  font-family: 'Martian Mono', ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  padding: 64px 24px;
+}
+
+h1, h2, h3 {
+  font-family: 'Sono', ui-monospace, SFMono-Regular, monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin: 0;
+}
+/* EVERY LINE BOX ON THIS PAGE IS A WHOLE NUMBER OF PIXELS, AND THAT IS A CORRECTNESS
+   RULE RATHER THAN A STYLE CHOICE. A ratio line-height of 1.2 gives 21.6px on an 18px
+   heading and 33.6px on a 28px one. Those fractions accumulate down the document, so
+   every section after the first starts at a fractional y and every tile inside it
+   rasterises across a device-pixel boundary. Measured before this rule existed: the
+   96px colour tiles sat at y=3571.15625 and the 16px tiles at y=533.1875, so a tile
+   captioned "16px, 1:1" was smeared over 17 device rows and carried blended ink levels
+   that its own geometry, whose every coordinate is even, cannot produce. A sheet whose
+   16px row is vertically antialiased is showing the reader something other than what it
+   claims, which is the one thing this page exists not to do. Keep these integral. */
+h1 { font-size: 28px; line-height: 34px; }
+h2 { font-size: 18px; line-height: 22px; }
+h3 { font-size: 18px; line-height: 22px; }
+
+p, ul { margin: 0; }
+ul { list-style: none; padding: 0; }
+
+
+#masthead { margin: 0 0 48px 0; }
+#masthead .instruct { margin-top: 16px; }
+#masthead .rules { margin-top: 16px; }
+#masthead .readouts { margin-top: 16px; }
+.readout { font-weight: 700; }
+.readout-ok { color: #b0bacb; }
+.readout-bad { color: #f0506e; }
+
+.section { margin: 0 0 48px 0; }
+.section-note { margin-top: 4px; max-width: 900px; }
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  margin-top: 16px;
+}
+.sep {
+  width: 1px;
+  align-self: stretch;
+  background: #565f70;
+  margin: 0 8px;
+  flex: none;
+}
+
+.col {
+  width: 216px;
+  flex: none;
+}
+.col-head {
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+.col-name { font-weight: 700; }
+
+.chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-self: flex-start;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+.chip-line { display: block; white-space: nowrap; }
+.chip-pass { background: #3b4250; color: #b0bacb; }
+.chip-overlap { background: #565f70; color: #b0bacb; }
+.chip-fail { background: #f0506e; color: #1b1f27; }
+
+.cell {
+  background: #3b4250;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cell[data-failure-rule="1"] {
+  border-left: 4px solid #f0506e;
+  padding-left: 12px;
+}
+
+.tile {
+  position: relative;
+  background: #1b1f27;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  flex: none;
+}
+.tile-16 { width: 16px; height: 16px; }
+.tile-32 { width: 32px; height: 32px; }
+.tile-96 { width: 96px; height: 96px; }
+.tile-mag { width: 64px; height: 64px; }
+
+.tile-svg { display: block; width: 100%; height: 100%; }
+.tile-svg > svg { display: block; width: 100%; height: 100%; }
+.tile-mag > .tile-svg { position: absolute; left: 0; top: 0; visibility: hidden; }
+.tile-mag > canvas.mag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 64px;
+  display: block;
+}
+
+.cap { margin-top: 4px; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.loss { font-weight: 700; }
+.finding { margin-top: 8px; }
+.measured { color: #f0506e; }
+.measured-line { font-weight: 700; }
+.missing {
+  background: #f0506e;
+  color: #1b1f27;
+  font-weight: 700;
+  padding: 8px;
+}
+
+.craft { border-collapse: collapse; margin-top: 16px; font-variant-numeric: tabular-nums; }
+.craft th, .craft td { text-align: left; padding: 4px 16px 4px 0; }
+.craft th { font-weight: 700; }
+.craft tbody tr:nth-child(odd) { background: #3b4250; }
+.craft-file { font-weight: 700; }
+.v-fail, .v-overlap { font-weight: 700; }
+.v-fail { color: #f0506e; }
+.why { margin-top: 16px; }
+.stale-body { color: #f0506e; font-weight: 700; }
+.empty-heading { margin-top: 16px; }
+.empty-body { margin-top: 8px; max-width: 900px; }
+
+    </style>
+  </head>
+  <body>
+
+<header id="masthead"><h1>PHASE 79 - THE ROUTE IS CHOSEN</h1><p class="instruct">Look at the 16px row first. Then look at it in monochrome. Then name one.</p><ul class="rules"><li>R1 shapes: at most 3 distinct shapes inside the live area</li><li>R2 axis: every axis-aligned ink run is at least 2u wide</li><li>R3 diagonal: every diagonal stroke is at least 4u wide</li><li>R4 gap: any two shapes clear each other by at least 2u</li></ul><div class="readouts"><p class="readout" id="dpr-readout" data-dpr>devicePixelRatio has not been read yet</p><p class="readout readout-ok">mark-craft: 8 cuts measured, 0 mismatches against the pin</p><p class="readout">Built from 8 drawings, input digest 4d8308dcb81e</p></div></header>
+<section class="section" data-section="16-colour"><h2>16PX - COLOUR</h2><p class="section-note">The first render on this page. Nothing precedes it but the masthead.</p><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="a-16-colour"><span class="tile-svg" data-candidate="a-port-square-16.svg" data-sha256="22ad8882385d6781a34fb9bb2731dffd07daf84a5f58758df6ed48a187cb35f6"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 30 V 30 H 2 V 21 H 8 V 11 H 2 Z M 8 8 V 24 H 24 V 8 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="a-16-magnified"><span class="tile-svg" data-candidate="a-port-square-16.svg" data-sha256="22ad8882385d6781a34fb9bb2731dffd07daf84a5f58758df6ed48a187cb35f6"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 30 V 30 H 2 V 21 H 8 V 11 H 2 Z M 8 8 V 24 H 24 V 8 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InJpbmciIGQ9Ik0gMiAyIEggMzAgViAzMCBIIDIgViAyMSBIIDggViAxMSBIIDIgWiBNIDggOCBWIDI0IEggMjQgViA4IFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJpdGVtIiBkPSJNIDAgMTMgSCA2IFYgMTkgSCAwIFoiIGZpbGw9IiNmZmI0NTQiIC8+Cjwvc3ZnPg=="></canvas></div><p class="cap" data-magnify-caption="a-16-magnified">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="a-16-control"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="finding">Measured at 16px: the item is a 6u square that hangs 2u off the left edge of the box, which is the half in, half out read this route is built on, and it is why the axis run inside the live area measures 4u rather than 6u. With the accent gone the item and the ring are the same ink separated by one device pixel, the tightest adjacency on this sheet.</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-16" data-tile="b-16-colour"><span class="tile-svg" data-candidate="b-the-turn-16.svg" data-sha256="9961be3b9bcc431d6ed52c0ab1961bfc7f71e2e2c680f1c994199dbd40f39049"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="band" d="M 8 32 V 8 H 32 V 16 H 16 V 32 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="measured"><p class="measured-line">OVERLAP R4 gap - 1 pair(s) touch</p></div><div class="tile tile-mag" data-tile="b-16-magnified"><span class="tile-svg" data-candidate="b-the-turn-16.svg" data-sha256="9961be3b9bcc431d6ed52c0ab1961bfc7f71e2e2c680f1c994199dbd40f39049"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="band" d="M 8 32 V 8 H 32 V 16 H 16 V 32 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9ImJhbmQiIGQ9Ik0gOCAzMiBWIDggSCAzMiBWIDE2IEggMTYgViAzMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgogIDxwYXRoIGRhdGEtcGFydD0iaXRlbSIgZD0iTSAxMCAxMCBIIDE0IFYgMTQgSCAxMCBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="b-16-magnified">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="b-16-control"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="finding">Measured at 16px: the gap rule reports OVERLAP. Once the hollow is gone at this size there is nowhere for the item to sit except on the band, so it rides inside the ink instead of clearing it. In monochrome at 16px this candidate is a bare L with nothing inside it. Both are properties of Route 2 at this size and neither was repaired.</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="c-16-colour"><span class="tile-svg" data-candidate="c-the-board-16.svg" data-sha256="c632f3c89ea7b2b728a519d4de3bb173e85a4fe7904c4106d7a45abf8a4ded44"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="c-16-magnified"><span class="tile-svg" data-candidate="c-the-board-16.svg" data-sha256="c632f3c89ea7b2b728a519d4de3bb173e85a4fe7904c4106d7a45abf8a4ded44"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9ImJlbHQiIGQ9Ik0gMiAyIEggMTQgViAxNCBIIDIgWiBNIDIgMTggSCAxNCBWIDMwIEggMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgogIDxwYXRoIGRhdGEtcGFydD0ic2luayIgZD0iTSAxOCAxOCBIIDMwIFYgMzAgSCAxOCBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="c-16-magnified">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="c-16-control"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="finding">Measured at 16px: dropping the outlined source is what buys three legible shapes, so this cut can no longer say which cell is a machine and which is a belt. At 96px the source is a stroked frame and the belt cells are solid, so the two differ by stroke against fill and never by hue.</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="d-16-colour"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="d-16-magnified"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InNvdXJjZSIgZD0iTSA0IDIgSCA4IFYgNCBIIDEwIFYgOCBIIDggViAxMCBIIDQgViA4IEggMiBWIDQgSCA0IFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJiZWx0IiBkPSJNIDEyIDQgSCAxOCBWIDIyIEggMjAgViAyNiBIIDE0IFYgOCBIIDEyIFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJzaW5rIiBkPSJNIDI0IDIyIEggMjggViAyNCBIIDMwIFYgMjggSCAyOCBWIDMwIEggMjQgViAyOCBIIDIyIFYgMjQgSCAyNCBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="d-16-magnified">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="d-16-control"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">one drawing - this IS the 96px cut</p><p class="finding">Measured at 16px: the belt run reads about as much like the digit 1 as like a belt. The top arm is 6u, the vertical run is 4u, and the bottom foot extends only 2u past the run, which is the shape of a serif. One drawing serves 16px, 32px and 96px here, where A, B and C each need two. That is the shape budget the pixel idiom forces, recorded as a finding rather than redrawn to taste.</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="shipped-16-colour"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="shipped-16-magnified"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InJhaWwiIGQ9Ik0gMyAyMyBIIDI5IFYgMjkgSCAzIFoiIGZpbGw9IiMzYjQyNTAiIHN0cm9rZT0iI2IwYmFjYiIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogIDxwYXRoIGRhdGEtcGFydD0iY2VsbCIgZD0iTSA5IDMgSCAyMyBWIDE3IEggOSBaIiBmaWxsPSJub25lIiBzdHJva2U9IiNiMGJhY2IiIHN0cm9rZS13aWR0aD0iMiIgLz4KICA8cGF0aCBkYXRhLXBhcnQ9Iml0ZW0iIGQ9Ik0gMTIgNiBIIDIwIFYgMTQgSCAxMiBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="shipped-16-magnified">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="shipped-16-control"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">one drawing - this IS the 96px cut</p><p class="finding">On this sheet as a reference and not as a candidate. Measured live at build time: PASS R1 shapes 3, PASS R2 axis 2u, n/a R3 diagonal, PASS R4 gap 2u. This caption read &quot;It measures FAIL on three of the four rules: 5 shapes against a ceiling of 3, a 2u diagonal against a 4u minimum, and a 1u gap against a 2u minimum&quot; until plan 80-05 replaced the drawing. Those numbers belong to the Phase 59 tile, retired by 80-MARK-LOCK-SUPERSESSION.md and kept as a measured fixture at src/render/assets/__fixtures__/craft/retired-logomark-59.svg. It contributes no failing chip to this page. The visibly failing column is B - The Turn, and the generator throws rather than write a sheet on which every column passes, which is what stops a failure treatment that renders nothing from going unnoticed.</p></div></div></div></section>
+<section class="section mono" data-section="16-mono"><h2>16PX - MONOCHROME</h2><p class="section-note">The same drawings with one ink. A mark that needs its accent to be legible has failed.</p><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="a-16-mono"><span class="tile-svg" data-candidate="a-port-square-16.svg" data-sha256="22ad8882385d6781a34fb9bb2731dffd07daf84a5f58758df6ed48a187cb35f6"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 30 V 30 H 2 V 21 H 8 V 11 H 2 Z M 8 8 V 24 H 24 V 8 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="a-16-magnified-mono"><span class="tile-svg" data-candidate="a-port-square-16.svg" data-sha256="22ad8882385d6781a34fb9bb2731dffd07daf84a5f58758df6ed48a187cb35f6"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 30 V 30 H 2 V 21 H 8 V 11 H 2 Z M 8 8 V 24 H 24 V 8 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InJpbmciIGQ9Ik0gMiAyIEggMzAgViAzMCBIIDIgViAyMSBIIDggViAxMSBIIDIgWiBNIDggOCBWIDI0IEggMjQgViA4IFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJpdGVtIiBkPSJNIDAgMTMgSCA2IFYgMTkgSCAwIFoiIGZpbGw9IiNiMGJhY2IiIC8+Cjwvc3ZnPg=="></canvas></div><p class="cap" data-magnify-caption="a-16-magnified-mono">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="a-16-control-mono"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="loss">item survives, 1px from the ring</p><p class="finding">Measured at 16px: the item is a 6u square that hangs 2u off the left edge of the box, which is the half in, half out read this route is built on, and it is why the axis run inside the live area measures 4u rather than 6u. With the accent gone the item and the ring are the same ink separated by one device pixel, the tightest adjacency on this sheet.</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-16" data-tile="b-16-mono"><span class="tile-svg" data-candidate="b-the-turn-16.svg" data-sha256="9961be3b9bcc431d6ed52c0ab1961bfc7f71e2e2c680f1c994199dbd40f39049"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="band" d="M 8 32 V 8 H 32 V 16 H 16 V 32 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="measured"><p class="measured-line">OVERLAP R4 gap - 1 pair(s) touch</p></div><div class="tile tile-mag" data-tile="b-16-magnified-mono"><span class="tile-svg" data-candidate="b-the-turn-16.svg" data-sha256="9961be3b9bcc431d6ed52c0ab1961bfc7f71e2e2c680f1c994199dbd40f39049"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="band" d="M 8 32 V 8 H 32 V 16 H 16 V 32 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9ImJhbmQiIGQ9Ik0gOCAzMiBWIDggSCAzMiBWIDE2IEggMTYgViAzMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgogIDxwYXRoIGRhdGEtcGFydD0iaXRlbSIgZD0iTSAxMCAxMCBIIDE0IFYgMTQgSCAxMCBaIiBmaWxsPSIjYjBiYWNiIiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="b-16-magnified-mono">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="b-16-control-mono"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="loss">item gone - the band is the whole mark</p><p class="finding">Measured at 16px: the gap rule reports OVERLAP. Once the hollow is gone at this size there is nowhere for the item to sit except on the band, so it rides inside the ink instead of clearing it. In monochrome at 16px this candidate is a bare L with nothing inside it. Both are properties of Route 2 at this size and neither was repaired.</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="c-16-mono"><span class="tile-svg" data-candidate="c-the-board-16.svg" data-sha256="c632f3c89ea7b2b728a519d4de3bb173e85a4fe7904c4106d7a45abf8a4ded44"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="c-16-magnified-mono"><span class="tile-svg" data-candidate="c-the-board-16.svg" data-sha256="c632f3c89ea7b2b728a519d4de3bb173e85a4fe7904c4106d7a45abf8a4ded44"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9ImJlbHQiIGQ9Ik0gMiAyIEggMTQgViAxNCBIIDIgWiBNIDIgMTggSCAxNCBWIDMwIEggMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgogIDxwYXRoIGRhdGEtcGFydD0ic2luayIgZD0iTSAxOCAxOCBIIDMwIFYgMzAgSCAxOCBaIiBmaWxsPSIjYjBiYWNiIiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="c-16-magnified-mono">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="c-16-control-mono"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="loss">sink no longer distinguished - three equal blocks</p><p class="finding">Measured at 16px: dropping the outlined source is what buys three legible shapes, so this cut can no longer say which cell is a machine and which is a belt. At 96px the source is a stroked frame and the belt cells are solid, so the two differ by stroke against fill and never by hue.</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="d-16-mono"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="d-16-magnified-mono"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InNvdXJjZSIgZD0iTSA0IDIgSCA4IFYgNCBIIDEwIFYgOCBIIDggViAxMCBIIDQgViA4IEggMiBWIDQgSCA0IFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJiZWx0IiBkPSJNIDEyIDQgSCAxOCBWIDIyIEggMjAgViAyNiBIIDE0IFYgOCBIIDEyIFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJzaW5rIiBkPSJNIDI0IDIyIEggMjggViAyNCBIIDMwIFYgMjggSCAyOCBWIDMwIEggMjQgViAyOCBIIDIyIFYgMjQgSCAyNCBaIiBmaWxsPSIjYjBiYWNiIiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="d-16-magnified-mono">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="d-16-control-mono"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">one drawing - this IS the 96px cut</p><p class="loss">sink no longer distinguished</p><p class="finding">Measured at 16px: the belt run reads about as much like the digit 1 as like a belt. The top arm is 6u, the vertical run is 4u, and the bottom foot extends only 2u past the run, which is the shape of a serif. One drawing serves 16px, 32px and 96px here, where A, B and C each need two. That is the shape budget the pixel idiom forces, recorded as a finding rather than redrawn to taste.</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="shipped-16-mono"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="shipped-16-magnified-mono"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InJhaWwiIGQ9Ik0gMyAyMyBIIDI5IFYgMjkgSCAzIFoiIGZpbGw9IiNiMGJhY2IiIHN0cm9rZT0iI2IwYmFjYiIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogIDxwYXRoIGRhdGEtcGFydD0iY2VsbCIgZD0iTSA5IDMgSCAyMyBWIDE3IEggOSBaIiBmaWxsPSJub25lIiBzdHJva2U9IiNiMGJhY2IiIHN0cm9rZS13aWR0aD0iMiIgLz4KICA8cGF0aCBkYXRhLXBhcnQ9Iml0ZW0iIGQ9Ik0gMTIgNiBIIDIwIFYgMTQgSCAxMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="shipped-16-magnified-mono">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="shipped-16-control-mono"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">one drawing - this IS the 96px cut</p><p class="loss">a light square with dark lines</p><p class="finding">On this sheet as a reference and not as a candidate. Measured live at build time: PASS R1 shapes 3, PASS R2 axis 2u, n/a R3 diagonal, PASS R4 gap 2u. This caption read &quot;It measures FAIL on three of the four rules: 5 shapes against a ceiling of 3, a 2u diagonal against a 4u minimum, and a 1u gap against a 2u minimum&quot; until plan 80-05 replaced the drawing. Those numbers belong to the Phase 59 tile, retired by 80-MARK-LOCK-SUPERSESSION.md and kept as a measured fixture at src/render/assets/__fixtures__/craft/retired-logomark-59.svg. It contributes no failing chip to this page. The visibly failing column is B - The Turn, and the generator throws rather than write a sheet on which every column passes, which is what stops a failure treatment that renders nothing from going unnoticed.</p></div></div></div></section>
+<section class="section" data-section="32-colour"><h2>32PX - COLOUR</h2><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="a-32-colour"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-32" data-tile="b-32-colour"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="c-32-colour"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="d-32-colour"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="shipped-32-colour"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div></div></section>
+<section class="section mono" data-section="32-mono"><h2>32PX - MONOCHROME</h2><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="a-32-mono"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p><p class="loss">item survives, 1px from the ring</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-32" data-tile="b-32-mono"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p><p class="loss">item gone - the band is the whole mark</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="c-32-mono"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p><p class="loss">sink no longer distinguished - three equal blocks</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="d-32-mono"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p><p class="loss">sink no longer distinguished</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="shipped-32-mono"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p><p class="loss">a light square with dark lines</p></div></div></div></section>
+<section class="section silhouette" data-section="32-silhouette"><h2>32PX - SILHOUETTE</h2><p class="section-note">Every paint collapses to one ink, outline and shadow edge included. Two candidates sharing a silhouette here means one of them is redundant.</p><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="a-32-silhouette"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-32" data-tile="b-32-silhouette"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="c-32-silhouette"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="d-32-silhouette"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-32" data-tile="shipped-32-silhouette"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">32px, 1:1</p></div></div></div></section>
+<section class="section" data-section="96-colour"><h2>96PX - COLOUR</h2><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="a-96-colour"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-96" data-tile="b-96-colour"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="c-96-colour"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="d-96-colour"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="shipped-96-colour"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p></div></div></div></section>
+<section class="section mono" data-section="96-mono"><h2>96PX - MONOCHROME</h2><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="a-96-mono"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p><p class="loss">item survives, 1px from the ring</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-96" data-tile="b-96-mono"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p><p class="loss">item gone - the band is the whole mark</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="c-96-mono"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p><p class="loss">sink no longer distinguished - three equal blocks</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="d-96-mono"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p><p class="loss">sink no longer distinguished</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-96" data-tile="shipped-96-mono"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">96px, 1:1</p><p class="loss">a light square with dark lines</p></div></div></div></section>
+<section class="section" data-section="craft"><h2>CRAFT RULES, MEASURED</h2><p class="section-note">Generated by a live mark-craft run at build time. This note read "the shipped row fails three of the four rules, and it stays: it is the evidence this check can fail at all" until plan 80-05 replaced the mark. The shipped row passes all four rules now, and the evidence this check can fail is the retired Phase 59 geometry, measured at FAIL 5 shapes / PASS 26u / FAIL 2u / FAIL 1u by src/render/assets/markCraft.test.ts. It is not pinned here on purpose: a pin is a number an executor can edit, and a measurement is not.</p><table class="craft"><thead><tr><th>input</th><th>R1 shapes</th><th>R2 axis</th><th>R3 diagonal</th><th>R4 gap</th></tr></thead><tbody><tr><td class="craft-file">a-port-square-16.svg</td><td class="v-pass">PASS 2 shapes</td><td class="v-pass">PASS 4u</td><td class="v-na">n/a</td><td class="v-pass">PASS 2u</td></tr><tr><td class="craft-file">a-port-square-full.svg</td><td class="v-info">INFO 6 shapes</td><td class="v-pass">PASS 4u</td><td class="v-na">n/a</td><td class="v-pass">PASS 2u</td></tr><tr><td class="craft-file">b-the-turn-16.svg</td><td class="v-pass">PASS 2 shapes</td><td class="v-pass">PASS 8u</td><td class="v-na">n/a</td><td class="v-overlap">OVERLAP</td></tr><tr><td class="craft-file">b-the-turn-full.svg</td><td class="v-info">INFO 6 shapes</td><td class="v-pass">PASS 2u</td><td class="v-na">n/a</td><td class="v-pass">PASS 2u</td></tr><tr><td class="craft-file">c-the-board-16.svg</td><td class="v-pass">PASS 3 shapes</td><td class="v-pass">PASS 12u</td><td class="v-na">n/a</td><td class="v-pass">PASS 4u</td></tr><tr><td class="craft-file">c-the-board-full.svg</td><td class="v-info">INFO 5 shapes</td><td class="v-pass">PASS 2u</td><td class="v-na">n/a</td><td class="v-pass">PASS 2u</td></tr><tr><td class="craft-file">d-the-board-pixel.svg</td><td class="v-pass">PASS 3 shapes</td><td class="v-pass">PASS 4u</td><td class="v-na">n/a</td><td class="v-pass">PASS 2u</td></tr><tr><td class="craft-file">logomark.svg</td><td class="v-pass">PASS 3 shapes</td><td class="v-pass">PASS 2u</td><td class="v-na">n/a</td><td class="v-pass">PASS 2u</td></tr></tbody></table><ul class="why"><li>a-port-square-16.svg  R3 diagonal: no diagonal segment in this cut</li><li>a-port-square-full.svg  R1 shapes: full cut, the shape ceiling is a 16px rule</li><li>a-port-square-full.svg  R3 diagonal: no diagonal segment in this cut</li><li>b-the-turn-16.svg  R3 diagonal: no diagonal segment in this cut</li><li>b-the-turn-16.svg  R4 gap: 1 pair(s) touch</li><li>b-the-turn-full.svg  R1 shapes: full cut, the shape ceiling is a 16px rule</li><li>b-the-turn-full.svg  R3 diagonal: no diagonal segment in this cut</li><li>c-the-board-16.svg  R3 diagonal: no diagonal segment in this cut</li><li>c-the-board-full.svg  R1 shapes: full cut, the shape ceiling is a 16px rule</li><li>c-the-board-full.svg  R3 diagonal: no diagonal segment in this cut</li><li>d-the-board-pixel.svg  R3 diagonal: no diagonal segment in this cut</li><li>logomark.svg  R3 diagonal: no diagonal segment in this cut</li></ul></section>
+<section class="section" data-section="verdict"><h2>THE VERDICT</h2><h3 class="empty-heading">Verdict: not yet recorded</h3><p class="empty-body">The reviewer names one route. Their reason, and the reason each of the other three lost, are written to 79-VERDICT.md. Nothing downstream reads this sheet; Phase 80 reads the verdict.</p></section>
+<section class="section" data-section="16-colour-repeat"><h2>16PX - COLOUR, AGAIN</h2><p class="section-note">The last thing on this page is the first thing that mattered.</p><div class="row"><div class="col" data-column="a"><div class="col-head"><p class="col-name">A - The Port Square</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="a-16-repeat"><span class="tile-svg" data-candidate="a-port-square-16.svg" data-sha256="22ad8882385d6781a34fb9bb2731dffd07daf84a5f58758df6ed48a187cb35f6"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 30 V 30 H 2 V 21 H 8 V 11 H 2 Z M 8 8 V 24 H 24 V 8 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="a-16-magnified-repeat"><span class="tile-svg" data-candidate="a-port-square-16.svg" data-sha256="22ad8882385d6781a34fb9bb2731dffd07daf84a5f58758df6ed48a187cb35f6"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 30 V 30 H 2 V 21 H 8 V 11 H 2 Z M 8 8 V 24 H 24 V 8 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InJpbmciIGQ9Ik0gMiAyIEggMzAgViAzMCBIIDIgViAyMSBIIDggViAxMSBIIDIgWiBNIDggOCBWIDI0IEggMjQgViA4IFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJpdGVtIiBkPSJNIDAgMTMgSCA2IFYgMTkgSCAwIFoiIGZpbGw9IiNmZmI0NTQiIC8+Cjwvc3ZnPg=="></canvas></div><p class="cap" data-magnify-caption="a-16-magnified-repeat">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="a-16-control-repeat"><span class="tile-svg" data-candidate="a-port-square-full.svg" data-sha256="9c6ce3c73fa1813b8839c89c04e80a6d476f119c602e9201cec3b854f5817576"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="ring" d="M 2 2 H 11 V 8 H 8 V 11 H 2 Z M 30 2 H 21 V 8 H 24 V 11 H 30 Z M 30 30 H 21 V 24 H 24 V 21 H 30 Z M 2 30 H 11 V 24 H 8 V 21 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="core" d="M 13 13 H 19 V 19 H 13 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 0 13 H 6 V 19 H 0 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="finding">Measured at 16px: the item is a 6u square that hangs 2u off the left edge of the box, which is the half in, half out read this route is built on, and it is why the axis run inside the live area measures 4u rather than 6u. With the accent gone the item and the ring are the same ink separated by one device pixel, the tightest adjacency on this sheet.</p></div></div><div class="col" data-column="b"><div class="col-head"><p class="col-name">B - The Turn</p><div class="chip chip-overlap" data-verdict="overlap"><span class="chip-line">OVERLAP R4 gap</span></div></div><div class="cell" data-failure-rule="1"><div class="tile tile-16" data-tile="b-16-repeat"><span class="tile-svg" data-candidate="b-the-turn-16.svg" data-sha256="9961be3b9bcc431d6ed52c0ab1961bfc7f71e2e2c680f1c994199dbd40f39049"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="band" d="M 8 32 V 8 H 32 V 16 H 16 V 32 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="measured"><p class="measured-line">OVERLAP R4 gap - 1 pair(s) touch</p></div><div class="tile tile-mag" data-tile="b-16-magnified-repeat"><span class="tile-svg" data-candidate="b-the-turn-16.svg" data-sha256="9961be3b9bcc431d6ed52c0ab1961bfc7f71e2e2c680f1c994199dbd40f39049"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="band" d="M 8 32 V 8 H 32 V 16 H 16 V 32 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9ImJhbmQiIGQ9Ik0gOCAzMiBWIDggSCAzMiBWIDE2IEggMTYgViAzMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgogIDxwYXRoIGRhdGEtcGFydD0iaXRlbSIgZD0iTSAxMCAxMCBIIDE0IFYgMTQgSCAxMCBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="b-16-magnified-repeat">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="b-16-control-repeat"><span class="tile-svg" data-candidate="b-the-turn-full.svg" data-sha256="549e3860d38870995ae0b462d9426bc39839467caf53e6e47a39fd09179933df"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="finding">Measured at 16px: the gap rule reports OVERLAP. Once the hollow is gone at this size there is nowhere for the item to sit except on the band, so it rides inside the ink instead of clearing it. In monochrome at 16px this candidate is a bare L with nothing inside it. Both are properties of Route 2 at this size and neither was repaired.</p></div></div><div class="col" data-column="c"><div class="col-head"><p class="col-name">C - The Board (clean vector)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="c-16-repeat"><span class="tile-svg" data-candidate="c-the-board-16.svg" data-sha256="c632f3c89ea7b2b728a519d4de3bb173e85a4fe7904c4106d7a45abf8a4ded44"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="c-16-magnified-repeat"><span class="tile-svg" data-candidate="c-the-board-16.svg" data-sha256="c632f3c89ea7b2b728a519d4de3bb173e85a4fe7904c4106d7a45abf8a4ded44"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9ImJlbHQiIGQ9Ik0gMiAyIEggMTQgViAxNCBIIDIgWiBNIDIgMTggSCAxNCBWIDMwIEggMiBaIiBmaWxsPSIjYjBiYWNiIiAvPgogIDxwYXRoIGRhdGEtcGFydD0ic2luayIgZD0iTSAxOCAxOCBIIDMwIFYgMzAgSCAxOCBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="c-16-magnified-repeat">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="c-16-control-repeat"><span class="tile-svg" data-candidate="c-the-board-full.svg" data-sha256="86a1d1a28b1f43d89d7658fc7417cadfa4ed5a248aa78580ad117242f5f4b220"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">scaled from 96px - control, not a candidate</p><p class="finding">Measured at 16px: dropping the outlined source is what buys three legible shapes, so this cut can no longer say which cell is a machine and which is a belt. At 96px the source is a stroked frame and the belt cells are solid, so the two differ by stroke against fill and never by hue.</p></div></div><div class="col" data-column="d"><div class="col-head"><p class="col-name">D - The Board (pixel-grid look)</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="d-16-repeat"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="d-16-magnified-repeat"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InNvdXJjZSIgZD0iTSA0IDIgSCA4IFYgNCBIIDEwIFYgOCBIIDggViAxMCBIIDQgViA4IEggMiBWIDQgSCA0IFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJiZWx0IiBkPSJNIDEyIDQgSCAxOCBWIDIyIEggMjAgViAyNiBIIDE0IFYgOCBIIDEyIFoiIGZpbGw9IiNiMGJhY2IiIC8+CiAgPHBhdGggZGF0YS1wYXJ0PSJzaW5rIiBkPSJNIDI0IDIyIEggMjggViAyNCBIIDMwIFYgMjggSCAyOCBWIDMwIEggMjQgViAyOCBIIDIyIFYgMjQgSCAyNCBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="d-16-magnified-repeat">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="d-16-control-repeat"><span class="tile-svg" data-candidate="d-the-board-pixel.svg" data-sha256="53fb6f3bc9bfd6bee9610b6197448eb5126306f3773b20222446a037ecd2d694"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">one drawing - this IS the 96px cut</p><p class="finding">Measured at 16px: the belt run reads about as much like the digit 1 as like a belt. The top arm is 6u, the vertical run is 4u, and the bottom foot extends only 2u past the run, which is the shape of a serif. One drawing serves 16px, 32px and 96px here, where A, B and C each need two. That is the shape budget the pixel idiom forces, recorded as a finding rather than redrawn to taste.</p></div></div><div class="sep"></div><div class="col" data-column="shipped"><div class="col-head"><p class="col-name">SHIPPED (today) - not a candidate</p><div class="chip chip-pass" data-verdict="pass"><span class="chip-line">PASS 4/4</span></div></div><div class="cell"><div class="tile tile-16" data-tile="shipped-16-repeat"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">16px, 1:1 - this is what you get</p><div class="tile tile-mag" data-tile="shipped-16-magnified-repeat"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span><canvas class="mag" width="64" height="64" data-magnify="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkYXRhLXBhcnQ9InJhaWwiIGQ9Ik0gMyAyMyBIIDI5IFYgMjkgSCAzIFoiIGZpbGw9IiMzYjQyNTAiIHN0cm9rZT0iI2IwYmFjYiIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogIDxwYXRoIGRhdGEtcGFydD0iY2VsbCIgZD0iTSA5IDMgSCAyMyBWIDE3IEggOSBaIiBmaWxsPSJub25lIiBzdHJva2U9IiNiMGJhY2IiIHN0cm9rZS13aWR0aD0iMiIgLz4KICA8cGF0aCBkYXRhLXBhcnQ9Iml0ZW0iIGQ9Ik0gMTIgNiBIIDIwIFYgMTQgSCAxMiBaIiBmaWxsPSIjZmZiNDU0IiAvPgo8L3N2Zz4="></canvas></div><p class="cap" data-magnify-caption="shipped-16-magnified-repeat">the 16px render, 4x nearest-neighbour</p><div class="tile tile-16" data-tile="shipped-16-control-repeat"><span class="tile-svg" data-candidate="logomark.svg" data-sha256="f27db177195e326bc410175c88b654ffeae0015538bc23eb15bc0fcb4bf06563"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rail" d="M 3 23 H 29 V 29 H 3 Z" fill="var(--fab-panel-fill)" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="cell" d="M 9 3 H 23 V 17 H 9 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="item" d="M 12 6 H 20 V 14 H 12 Z" fill="var(--fab-accent-item)" />
+</svg></span></div><p class="cap">one drawing - this IS the 96px cut</p><p class="finding">On this sheet as a reference and not as a candidate. Measured live at build time: PASS R1 shapes 3, PASS R2 axis 2u, n/a R3 diagonal, PASS R4 gap 2u. This caption read &quot;It measures FAIL on three of the four rules: 5 shapes against a ceiling of 3, a 2u diagonal against a 4u minimum, and a 1u gap against a 2u minimum&quot; until plan 80-05 replaced the drawing. Those numbers belong to the Phase 59 tile, retired by 80-MARK-LOCK-SUPERSESSION.md and kept as a measured fixture at src/render/assets/__fixtures__/craft/retired-logomark-59.svg. It contributes no failing chip to this page. The visibly failing column is B - The Turn, and the generator throws rather than write a sheet on which every column passes, which is what stops a failure treatment that renders nothing from going unnoticed.</p></div></div></div></section>
+    <script>
+(function () {
+  var readout = document.getElementById('dpr-readout');
+  var dpr = window.devicePixelRatio;
+  document.documentElement.setAttribute('data-dpr', String(dpr));
+  if (readout !== null) {
+    readout.setAttribute('data-dpr', String(dpr));
+    if (dpr === 1) {
+      readout.textContent = 'devicePixelRatio is 1 - every 16px tile is 16 device pixels';
+      readout.className = 'readout readout-ok';
+    } else {
+      readout.textContent =
+        'devicePixelRatio is ' + dpr +
+        ', not 1 - the 16px row is being scaled and is not what you get';
+      readout.className = 'readout readout-bad';
+    }
+  }
+
+  function fallback(canvas) {
+    canvas.setAttribute('data-magnified', 'vector');
+    canvas.style.display = 'none';
+    var tile = canvas.parentNode;
+    var vector = tile.querySelector('.tile-svg');
+    if (vector !== null) vector.style.visibility = 'visible';
+    var id = tile.getAttribute('data-tile');
+    var caption = document.querySelector('[data-magnify-caption="' + id + '"]');
+    if (caption !== null) caption.textContent = 'geometry at 4x - NOT what 16px looks like';
+  }
+
+  function magnify(canvas) {
+    var small = document.createElement('canvas');
+    small.width = 16;
+    small.height = 16;
+    var source = small.getContext('2d');
+    var target = canvas.getContext('2d');
+    if (source === null || target === null) {
+      fallback(canvas);
+      return;
+    }
+    var image = new Image();
+    image.onload = function () {
+      try {
+        source.clearRect(0, 0, 16, 16);
+        source.drawImage(image, 0, 0, 16, 16);
+        target.imageSmoothingEnabled = false;
+        target.clearRect(0, 0, 64, 64);
+        target.drawImage(small, 0, 0, 16, 16, 0, 0, 64, 64);
+        canvas.setAttribute('data-magnified', 'raster');
+      } catch (err) {
+        fallback(canvas);
+      }
+    };
+    image.onerror = function () {
+      fallback(canvas);
+    };
+    image.src = canvas.getAttribute('data-magnify');
+  }
+
+  var canvases = document.querySelectorAll('canvas[data-magnify]');
+  for (var i = 0; i < canvases.length; i++) magnify(canvases[i]);
+})();
+</script>
+  </body>
+</html>

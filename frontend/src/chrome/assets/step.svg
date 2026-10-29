@@ -1,0 +1,36 @@
+<!--
+  chrome/assets/step.svg - the transport STEP-ONE-TICK glyph. A CHROME GLYPH: nothing on
+  the board ever renders it, and it has no canvas subject at all. `render/assets/*.svg`
+  are machine art tessellated by Pixi; this directory is consumed by the DOM only.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures.
+
+  THE MOTIF. A right-pointing solid triangle running INTO a solid bar - "advance, then
+  stop", the single-tick sibling of `play.svg`. Carried from the 8x8 bit matrix this file
+  replaces (`icons.tsx` STEP, deleted in plan 59-02), whose triangle was a stepped column
+  run against a 2-bit right rail. The triangle is the same form `play.svg` draws, narrowed
+  to 12u so the bar fits without either element losing its reading; the bar matches
+  `pause.svg`'s 6u so the three transport glyphs share one vocabulary of parts.
+
+  COLOUR: ZERO HEX. Every fill and stroke is literally `currentColor`, so the glyph takes
+  the colour of the control it sits in - it brightens with `.fab-tool-btn:hover` and
+  desaturates with `:disabled`. A baked value would do neither, silently. Held at `fail`
+  severity by the chrome-scoped ink rule in `scripts/lint-svg.ts`.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 59. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or Remix Icon
+  (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L
+  Z, zero curves, one <path> per semantic part carrying its own stable data-part, one
+  element per line. 3u structural / 2u detail, the locked two-weight system.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="triangle" d="M 6 6 L 18 16 L 6 26 Z" fill="currentColor" />
+  <path data-part="bar" d="M 20 6 H 26 V 26 H 20 Z" fill="currentColor" />
+</svg>

@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0030-inbox-saturation-replay` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0030-inbox-saturation-replay"
+builder = "inline source -> belt(1 tile) -> collector, over-fed one ManualInject per tick through tick 99, then 20 logged Timeouts aimed at the collector's UNLINKED FAULT_PORT"
+seed = "0x000000000030c0de"
+params = "PILE-01/02/03/04/09 overload determinism: the chain jams backwards from the far end and every bound this phase introduced is holding at the frozen final tick - the collector's port-0 inbox at MECHANICAL_INBOX_CAP, the belt's head RETAINED in slot 0 (the refusal), the belt's own staging inbox at MECHANICAL_INBOX_CAP, the source's pending deque at SOURCE_PENDING_CAP, and the collector's FAULT_PORT bucket at FAULT_QUEUE_CAP with the surplus timeouts dropped. Every bound is imported from fabrico_core::admit, never transcribed"
+tick_count = 120
+hash_lines = 120
+schema_version = 2
+snapshot_schema_version = 14

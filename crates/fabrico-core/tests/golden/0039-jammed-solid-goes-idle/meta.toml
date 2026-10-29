@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0039-jammed-solid-goes-idle` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0039-jammed-solid-goes-idle"
+builder = "core seam: Source -> belt(1) -> Tee(2); Tee Out 0 -> belt(1) and Tee Out 1 -> belt(1), both heads docked nowhere; a Debug Sink unlinked; 60 events at ticks 0 to 59; once the board has stepped nothing for 200 ticks, one Dock(right branch Head -> Sink In) edit; 300 ticks after it"
+seed = "0x0000000000391d1e"
+params = "JAM-04/WINDOWS 177 (87-RESEARCH P177B): a board jammed solid goes idle (every machine and settled belt asleep, no node stepped), and an edit wakes it and drains it. Certifies the board replays identically; the behaviour is graded by no_permanent_jams.rs#a_board_jammed_solid_goes_idle and #an_edit_wakes_a_blocked_machine"
+tick_count = 581
+hash_lines = 581
+schema_version = 2
+snapshot_schema_version = 14

@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0001-source-belt-collector` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0001-source-belt-collector"
+builder = "source_belt_collector"
+seed = "0x000000000000b117"
+params = "latency=3"
+tick_count = 10
+hash_lines = 10
+schema_version = 2
+snapshot_schema_version = 14

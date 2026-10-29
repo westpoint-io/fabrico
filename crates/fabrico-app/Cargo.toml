@@ -1,0 +1,72 @@
+[package]
+name         = "fabrico-app"
+version      = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish      = false
+
+# fabrico-app — the Tauri 2 production shell.
+#
+# It wraps a `fabrico_host::Host` behind exactly TWO capability-scoped IPC
+# commands — `subscribe_render` (Channel of postcard render-packet bytes OUT) and
+# `submit_input` (decode-behind-Result GridCommand IN). The bytes are BYTE-IDENTICAL
+# to the dev WebSocket transport (07-06): both subscribe to the single
+# `RenderProducer` (the locked "one renderer, two transports"). NO shell/fs/dialog
+# commands are exposed this phase (threat T-07-CMD-EXPOSE).
+#
+# Desktop-window run/packaging/signing/auto-update is DEFERRED to the developer
+# (CONTEXT); the Wave-5 gate is only that this crate `cargo check`s.
+
+[lib]
+name = "fabrico_app_lib"
+
+[build-dependencies]
+# Generates the Tauri context (icons/config) from tauri.conf.json at build time.
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+# The sanctioned I/O home this shell wraps: Host, the render producer, the
+# authoritative gesture applier, and the executor dispatch contract.
+fabrico-host = { path = "../fabrico-host", default-features = false }
+# The integer-only sim->render / render->sim wire DTOs (GridCommand, RenderPacket).
+fabrico-protocol = { path = "../fabrico-protocol" }
+# Core construction (genesis) + the redb store for the headless sim the shell owns.
+fabrico-core = { path = "../fabrico-core" }
+# The desktop shell. Default features pull the webview (wry/webkit2gtk on Linux).
+tauri = { version = "2.11", features = [] }
+# Native save/open file dialogs for the Save/Load project commands. The plugin
+# yields ONLY a `PathBuf` — the hardened Rust save_project/load_project own the
+# bytes; the capability grants dialog:allow-save/allow-open ONLY, never fs:*
+# (Package Legitimacy Audit: official tauri-apps/plugins-workspace, 18-RESEARCH).
+tauri-plugin-dialog = "2.7.1"
+# QA-01: OS-native clipboard writes from the Rust side. The WebKitGTK
+# custom-protocol webview is NOT a secure context, so `navigator.clipboard` is
+# absent there and the webview API silently no-ops; this plugin writes through
+# the host's own clipboard instead. The capability grants
+# clipboard-manager:allow-write-text ONLY, never allow-read-text or
+# allow-clear, because the app only ever PUTS a URL on the clipboard
+# (least privilege, the same trust boundary discipline as the dialog plugin).
+# Package Legitimacy Audit: official tauri-apps/plugins-workspace (52-01-PLAN
+# threat model), version-matched to the npm half at 2.3.2.
+tauri-plugin-clipboard-manager = "2.3.2"
+# One serialization stack: decode inbound GridCommand, the producer encodes outbound.
+postcard = { version = "1", features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+# The off-sim-thread executor runtime + the watch/broadcast subscription handles
+# the render command clones per webview connection.
+tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time"] }
+# Self-contained redb files for the headless demo sim (desktop run deferred).
+tempfile = "3"
+
+[dev-dependencies]
+# `#[tokio::test]` for the async command-wiring unit tests (macros + a runtime).
+# `test-util` is what makes GESTURE_VERDICT_BOUND assertable: `start_paused = true`
+# auto-advances the clock to the next timer, so the 30-second leak bound is proved in
+# microseconds. Without it the bound could only be "tested" by not testing it.
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync", "test-util", "time"] }
+# QA-01 least-privilege lock: the capability files are parsed as JSON, not by
+# hand. A hand parser cannot see a scoped OBJECT permission entry
+# ({"identifier": "..."}) and so certified a widened clipboard grant green.
+# Already a direct dep of fabrico-command/protocol/host and in the lockfile via
+# tauri, so this is a line, not a new stack. Test-only: not in the shipped binary.
+serde_json = "1"

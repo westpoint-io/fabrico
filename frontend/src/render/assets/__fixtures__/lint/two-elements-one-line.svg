@@ -1,0 +1,3 @@
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="left" d="M4 4 H12 V12 H4 Z" fill="#565f70" /><path data-part="right" d="M20 20 H28 V28 H20 Z" fill="#b0bacb" />
+</svg>

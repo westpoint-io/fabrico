@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0017-rotate-re-route-dedock` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0017-rotate-re-route-dedock"
+builder = "inline BALANCER(2x2)@(5,5) + a belt docked BOTH ends (Tail->Out0, Head->In0) + edit-log Rotate +1 (CAT-06 selective de-dock, both-ends landmine)"
+seed = "0x000000000017ded0"
+params = "rot 0->1 spins Out0 to face the belt Tail (KEPT) but In0 away from the belt Head (UNLINKED); belt SURVIVES; last_tick.unlinked records exactly the Head dock"
+tick_count = 3
+hash_lines = 3
+schema_version = 2
+snapshot_schema_version = 14

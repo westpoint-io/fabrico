@@ -1,0 +1,42 @@
+<!--
+  candidates/b/sink.svg - DIRECTION B draft for the SINK machine (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION B - "solid chassis plate": a FILLED chassis body (#565f70), a 3-unit dark
+  outline (#2a2f3a), and a 2-unit glyph knocked out in the substrate value (#1b1f27), so
+  machine kind reads as a chassis-hue family. Port stubs are HELD CONSTANT with Direction A
+  (same geometry, same #565f70, same 2u) so the board compares chassis and glyph treatment
+  rather than port treatment. Glyph geometry is identical to Direction A's for the same
+  reason: D-02 defines B as a treatment, not a different drawing.
+
+  SEMANTIC VOCABULARY - CARRIED. synth/glyphs.ts:42 says of SINK: "bullseye (launch the
+  rocket / terminal)". `ring` is the outer band and `core` the filled centre, concentric as
+  the motif requires. The rings are square rather than circular because this direction is
+  curve-free, and square is also what keeps SINK apart from the diamond-lensed SOURCE at
+  1x. The second cue is the port: SINK terminates, so it carries an inbound stub on the
+  LEFT and no outflow.
+
+  THE KNOCK-OUT IS WHERE B EARNS ITS D-02 CLAIM OR DOES NOT, and this is the cell to look
+  at first: a bullseye is nested bands, and nested bands are exactly what a low-contrast
+  treatment loses first at small size. In greyscale on the 1x row, either the three
+  concentric values separate or they merge into a grey square. That is the judgement, and
+  it is not pre-answered here.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H28 V28 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="ring" d="M10 10 H22 V22 H10 Z" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="core" d="M14 14 H18 V18 H14 Z" fill="#1b1f27" />
+  <path data-part="port-in" d="M0 16 H4" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

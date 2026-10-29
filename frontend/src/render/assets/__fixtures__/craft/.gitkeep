@@ -1,0 +1,9 @@
+# Fixture drawings for the mark-craft instrument (plan 80-03).
+#
+# This directory exists so a craft fixture never has to be dropped into a walked
+# directory to be measured. `lintDir` and `discoverChromeAssets` are both flat and
+# non-recursive, and `markCraft.test.ts` demands a pinned row for every file it
+# discovers under the Phase 79 candidates directory, so a fixture placed there would
+# gain a pinned row and change the discovered input set.
+#
+# Plan 80-05 populates it with the retired geometry it needs as an anti-vacuity floor.

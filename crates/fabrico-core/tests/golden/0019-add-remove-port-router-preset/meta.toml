@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0019-add-remove-port-router-preset` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0019-add-remove-port-router-preset"
+builder = "GridSession: place_router_preset(Mechanical) [1-in/3-out + Mechanical Fault, 2x3] + AddPort Out x2 (grows to 1-in/5-out, 2x5) + RemovePort x2 (back to 1-in/3-out, box stays 2x5 since 74.1-16)"
+seed = "0x000000000019b017"
+params = "PORT-07 add/remove-port footprint-resize: two Out ports added (2x3 -> 2x5 at 5 outputs, grow_to_fit min-rect) then removed back (since 74.1-16 a removal never shrinks the machine, so the box stays 2x5); replays byte-identical from genesis on every OS"
+tick_count = 19
+hash_lines = 19
+schema_version = 2
+snapshot_schema_version = 14

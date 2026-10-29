@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0029-belt-pace-replay` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0029-belt-pace-replay"
+builder = "source_belt_collector(1 tile) at DEFAULT_TICKS_PER_SLOT + edit-log Configure(Belt{ticks_per_slot:5}) @tick12; fire the SAME item 'pace' @tick0 (pre-Configure, default pace) and @tick15 (post-Configure, slowed pace)"
+seed = "0x000000000029be17"
+params = "BELT-02 / THAW-05 belt-pace determinism: a logged Configure sets the belt's own advance interval to a NonZeroU32 differing from DEFAULT_TICKS_PER_SLOT, and the SAME item takes a DIFFERENT number of ticks to traverse the belt afterwards; the frozen per-tick hashes bake both traversals in. The measured widening is checked against the (SLOTS_PER_TILE * tiles - 1) * ticks_per_slot traverse-time contract plus its bounded admission-alignment offset, not against a typed constant; code_hash is the [0u8;32] N/A value"
+tick_count = 44
+hash_lines = 44
+schema_version = 2
+snapshot_schema_version = 14

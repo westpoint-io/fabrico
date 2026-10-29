@@ -1,0 +1,79 @@
+<!--
+  overbudget.svg - a MEASURED band fixture for the vertex budget gate (VEC-04, Plan 56-05).
+
+  56 filled 1u squares on the integer grid. Filled 1u squares tessellate at exactly
+  8n vertices - MEASURED through GraphicsContextSystem.updateGpuContext, never estimated -
+  so this file measures 8 * 56 = 448 vertices (224 points).
+  assets/vertexBudget.test.ts asserts that exact number. The 8n formula assertion is what
+  stops this fixture silently drifting into a different band under an edit; the UI-SPEC
+  suggestion it replaces (a 60-segment stroked zigzag) measures 244, roughly 40% short.
+
+  THIS FILE LIVES OUTSIDE THE PRODUCTION WALK ON PURPOSE. render/assets/__fixtures__/ is
+  one directory below render/assets/, and the .svg discovery every gate shares is
+  NON-RECURSIVE - a contract plan 56-04 owns and asserts itself (lintSvg.test.ts, "walks
+  render/assets/ NON-RECURSIVELY, so the deliberately non-conforming fixtures are
+  invisible to it"). That is what keeps the geometry digest table key set equal to the
+  shipped asset set rather than polluted by a deliberately over-budget file.
+
+  It is otherwise fully format-conforming: viewBox 0 0 32 32, integer coordinates only,
+  one element per line, a stable part attribute on every path, an explicit fill. The ONLY
+  thing wrong with this file is its size, which is the single property under test.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="sq-0" d="M0 0 H1 V1 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-1" d="M4 0 H5 V1 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-2" d="M8 0 H9 V1 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-3" d="M12 0 H13 V1 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-4" d="M16 0 H17 V1 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-5" d="M20 0 H21 V1 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-6" d="M24 0 H25 V1 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-7" d="M28 0 H29 V1 H28 Z" fill="#b0bacb" />
+  <path data-part="sq-8" d="M0 4 H1 V5 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-9" d="M4 4 H5 V5 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-10" d="M8 4 H9 V5 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-11" d="M12 4 H13 V5 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-12" d="M16 4 H17 V5 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-13" d="M20 4 H21 V5 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-14" d="M24 4 H25 V5 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-15" d="M28 4 H29 V5 H28 Z" fill="#b0bacb" />
+  <path data-part="sq-16" d="M0 8 H1 V9 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-17" d="M4 8 H5 V9 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-18" d="M8 8 H9 V9 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-19" d="M12 8 H13 V9 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-20" d="M16 8 H17 V9 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-21" d="M20 8 H21 V9 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-22" d="M24 8 H25 V9 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-23" d="M28 8 H29 V9 H28 Z" fill="#b0bacb" />
+  <path data-part="sq-24" d="M0 12 H1 V13 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-25" d="M4 12 H5 V13 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-26" d="M8 12 H9 V13 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-27" d="M12 12 H13 V13 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-28" d="M16 12 H17 V13 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-29" d="M20 12 H21 V13 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-30" d="M24 12 H25 V13 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-31" d="M28 12 H29 V13 H28 Z" fill="#b0bacb" />
+  <path data-part="sq-32" d="M0 16 H1 V17 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-33" d="M4 16 H5 V17 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-34" d="M8 16 H9 V17 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-35" d="M12 16 H13 V17 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-36" d="M16 16 H17 V17 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-37" d="M20 16 H21 V17 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-38" d="M24 16 H25 V17 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-39" d="M28 16 H29 V17 H28 Z" fill="#b0bacb" />
+  <path data-part="sq-40" d="M0 20 H1 V21 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-41" d="M4 20 H5 V21 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-42" d="M8 20 H9 V21 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-43" d="M12 20 H13 V21 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-44" d="M16 20 H17 V21 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-45" d="M20 20 H21 V21 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-46" d="M24 20 H25 V21 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-47" d="M28 20 H29 V21 H28 Z" fill="#b0bacb" />
+  <path data-part="sq-48" d="M0 24 H1 V25 H0 Z" fill="#b0bacb" />
+  <path data-part="sq-49" d="M4 24 H5 V25 H4 Z" fill="#b0bacb" />
+  <path data-part="sq-50" d="M8 24 H9 V25 H8 Z" fill="#b0bacb" />
+  <path data-part="sq-51" d="M12 24 H13 V25 H12 Z" fill="#b0bacb" />
+  <path data-part="sq-52" d="M16 24 H17 V25 H16 Z" fill="#b0bacb" />
+  <path data-part="sq-53" d="M20 24 H21 V25 H20 Z" fill="#b0bacb" />
+  <path data-part="sq-54" d="M24 24 H25 V25 H24 Z" fill="#b0bacb" />
+  <path data-part="sq-55" d="M28 24 H29 V25 H28 Z" fill="#b0bacb" />
+</svg>

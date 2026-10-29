@@ -1,0 +1,65 @@
+<!--
+  d-the-board-pixel.svg - Candidate D for Phase 79, "The route is chosen".
+
+  ROUTE. Route 1, "The Board", from the logo route research, section 4.2: a legal
+  Fabrico factory seen from above, with a source block, a belt run that turns twice, and a
+  sink block where the item arrives. Drawn in the pixel-grid look rather than the clean
+  vector look, which is the drawing style Candidate C uses for the same route. If this
+  candidate wins, that one answer settles both the route and the drawing style.
+
+  NOT A SHIPPED ASSET. This file is a throwaway comparison candidate. It exists so four
+  drawings can be looked at side by side at 16px, 32px and 96px and one of them named.
+  Nothing in the application imports it, and nothing renders it outside the Phase 79
+  comparison sheet.
+
+  WHY IT IS NOT IN frontend/src/chrome/assets/ (decision D-09). The discovery walk in
+  scripts/lint-svg.ts and in render/assets/vertexBudget.test.ts is flat and non-recursive, so
+  a file dropped into that directory silently joins the shipped asset set and moves three
+  hand-edited count literals. A file dropped into a subdirectory of it is worse: an asset
+  that looks shipped and that no gate measures at all. Phase 79 leaves that directory
+  byte-identical to where it started.
+
+  THE THREE LAYERS, IN PAINT ORDER (later paints on top):
+
+    1. source   fill   fab-ink           4 by 4 pixel block at units 2 to 10, corners bitten
+    2. belt     fill   fab-ink           a 4u wide run: right, then down, then right
+    3. sink     fill   fab-accent-item   4 by 4 pixel block at units 22 to 30, corners bitten
+
+  Those paint tokens are named without their leading dashes on purpose. Two consecutive
+  hyphens are illegal inside an XML comment, and that single character pair is what makes the
+  shipped chrome/assets/logomark.svg unopenable by every strict parser in this tree.
+  Measured 2026-09-05: Python's XML parser refuses it at line 25 column 34, resvg reports a
+  comment containing a doubled hyphen, and ImageMagick returns "unable to read image data".
+  The fill attributes below sit outside the comment and keep their normal var(...) form.
+
+  PIXEL LOOK AS VECTOR (decision D-03). The pixel grid is 16 by 16 and one pixel is two
+  units, so every coordinate here is an even integer, every edge lies on the two-unit module,
+  and there are zero diagonals. There is no matrix literal and no embedded bitmap anywhere in
+  the file. The geometry stores merged outlines rather than one rectangle per pixel, and that
+  is the decision expressed in the only form this dialect allows: the chrome-asset lint takes
+  one path per semantic layer, so three layers cannot be forty elements. The mark reads as
+  drawn on a 16 by 16 grid because its edges are on that grid.
+
+  ONE DRAWING, THREE SIZES. Candidate D serves 16px, 32px and 96px from this single file,
+  where Candidates A, B and C each need a second, hand-authored 16px cut. That is a finding
+  rather than a favour: it falls out of the shape budget the pixel idiom forces, which is
+  three shapes, a 4u minimum wall and a 2u minimum gap.
+
+  DELIBERATELY NOT DRAWN: the graph-paper dots the research offers for Route 1 at 32px and
+  above. They would be a fourth paint value that the monochrome token remap turns bright,
+  which would make the monochrome cut lie. No bevel, no highlight band and no shadow band
+  either: a light source below 48px is forbidden, and this file has to serve 16px.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 79. No icon pack was consulted, copied,
+  traced or redrawn. Not game-icons.net, whose CC-BY-3.0 licence redrawing does not clear.
+  Not Remix Icon, whose licence forbids logo use by name. No AI-generated image was used at
+  any point.
+
+  Geometry: integer coordinates only, commands limited to M H V L Z, zero curves, one path
+  per semantic layer carrying its own stable data-part, one element per line.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 4 2 H 8 V 4 H 10 V 8 H 8 V 10 H 4 V 8 H 2 V 4 H 4 Z" fill="var(--fab-ink)" />
+  <path data-part="belt" d="M 12 4 H 18 V 22 H 20 V 26 H 14 V 8 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 24 22 H 28 V 24 H 30 V 28 H 28 V 30 H 24 V 28 H 22 V 24 H 24 Z" fill="var(--fab-accent-item)" />
+</svg>

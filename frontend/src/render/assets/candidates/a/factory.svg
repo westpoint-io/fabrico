@@ -1,0 +1,44 @@
+<!--
+  candidates/a/factory.svg - DIRECTION A draft for the FACTORY machine (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 3x3 -> viewBox 0 0 96 96, the largest in the set and the HERO machine (it is
+  the one that runs user JS). Authored at 96x96 because 96px is what ships.
+
+  THE HERO IS NOT BUDGET-CONSTRAINED, and this draft is not simplified as though it were.
+  MEASURED (57-RESEARCH F2.1): identical geometry authored at 0 0 32 32 and at 0 0 96 96
+  tessellates to BYTE-IDENTICAL vertex counts - 32 verts at all four legal viewBoxes. The
+  400-vertex ceiling means exactly the same thing on a FACTORY as on a SOURCE, and the same
+  geometry buys the same count. Anyone reading "the hero is the tightest cell on the board"
+  as a reason to draw the FACTORY thinner is reading a measured non-fact.
+
+  DIRECTION A - "blueprint continuation": open chassis, 3u structural outline, 2u detail,
+  minimal fill, chassis inset 4 units from the cell edge on every subject. MINIMAL FILL IS
+  THE DIRECTION, NOT A SHORTAGE OF EFFORT. If this cell reads as emptier than the same
+  subject in Direction B, that IS the finding the board exists to surface - a chassis
+  carried entirely by its outline has more air in it at 96px than at 32px, and whether that
+  air reads as elegant or as unfinished is precisely the judgement being asked for.
+
+  SEMANTIC VOCABULARY - CARRIED. synth/glyphs.ts:16 says of FACTORY: "code braces { }, the
+  hero machine." Carried as `brace-left` and `brace-right`. The braces are the one motif in
+  the set that says WHAT THIS MACHINE IS rather than what it does to flow: a factory runs
+  user JavaScript, and braces are the shortest way to say "your code goes here" to the
+  automation half of the audience. Both braces are drawn as pure H/V runs with a mid-height
+  nub, so the glyph is exact at every zoom the board shows.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H92 V92 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="brace-left" d="M44 26 H32 V44 H24 V52 H32 V70 H44" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="brace-right" d="M52 26 H64 V44 H72 V52 H64 V70 H52" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="port-in" d="M0 48 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out" d="M92 48 H96" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

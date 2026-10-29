@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0021-undo-port-edit-survives-save-load` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0021-undo-port-edit-survives-save-load"
+builder = "GridSession: place_router_preset(Mechanical) [1-in/3-out + Mechanical Fault] + AddPort Out + Undo + RemovePort + Undo - a port edit and its inverse each undone, back to the preset"
+seed = "0x000000000021b017"
+params = "PORT-07/UNDO-03 durability: the genesis snapshot is the save/load boundary; re-folding the whole edit-log FORWARD (AddPort+Undo, RemovePort+Undo) reproduces a byte-equal core hash AND projection at every tick on every OS (undo survives save/load)"
+tick_count = 19
+hash_lines = 19
+schema_version = 2
+snapshot_schema_version = 14

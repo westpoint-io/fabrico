@@ -1,0 +1,52 @@
+[package]
+name = "fabrico-core"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+fixed        = { version = "1.31", features = ["serde"] }
+rand_chacha  = { version = "0.9",  features = ["serde"] }   # see RESEARCH Assumptions A1 (pin 0.9)
+rand_core    = { version = "0.9" }
+serde        = { version = "1.0",  features = ["derive"] }
+postcard     = { version = "1.1",  features = ["use-std"] }
+redb         = { version = "4.1" }
+slotmap      = { version = "1.0",  features = ["serde"] }    # resolves to 1.1.1
+rustc-hash   = "2"                                            # point-lookups only
+# rquickjs: the QuickJS-NG factory engine (Phase 04). FIRST C-toolchain runtime dep —
+# rquickjs-sys vendors quickjs-ng and compiles it with `cc` (gcc/clang/MSVC). Default
+# features + `loader` (declare/evaluate user code as a module); NO `bindgen` (uses the
+# shipped pre-generated bindings → no libclang, the documented Windows-MSVC failure path,
+# issue #76); NO `full-async`/`futures`/`parallel` (suspend/resume is FACT-05/v2 — v1 is
+# synchronous). Minimal feature set for Windows-MSVC build health (RESEARCH Pitfall 6).
+rquickjs     = { version = "0.12", features = ["loader"] }
+
+[features]
+# Test-only scaffolding (e.g. `GridState::test_remove_inbox`) used to forge the
+# invalid Cores the snapshot trust gate must reject. Empty in normal builds; the
+# self dev-dependency below enables it for this crate's integration tests only.
+test-support = []
+
+[dev-dependencies]
+proptest     = "1"
+tempfile     = "3"                                            # RedbStore on-disk test (plan 03)
+blake3       = "1.8"                                          # dev-only state-hash oracle (cert suite); NEVER a runtime dep
+# Self dev-dependency so integration tests (tests/*.rs) link fabrico-core with the
+# `test-support` feature enabled, exposing the forge-invalid-state helpers that are
+# `#[cfg(test)]`-only for unit tests. Standard Cargo pattern; not a runtime dep.
+fabrico-core = { path = ".", features = ["test-support"] }
+# dev-only: the 0014 corpus GENERATOR (gen_0014) drives the REAL command surface so the
+# delete-undo fixture carries a real captured subgraph + the real frozen undo group. This
+# is a DEV-dependency cycle (fabrico-core[dev] -> fabrico-command -> fabrico-core), which
+# Cargo permits because it never enters the normal build graph (the headless `deps_are_
+# headless` fence still proves the LIBRARY links no UI/command crate). Only the #[ignore]d
+# regen target links these; the cert RUNNER uses include_bytes! and needs neither.
+fabrico-command = { path = "../fabrico-command" }
+fabrico-protocol = { path = "../fabrico-protocol" }
+# dev-only: the headless scenario harness owns THE single `tick_hash` oracle. The
+# core's test common module re-exports it (below), so the project has exactly one
+# semantic digest path (T-13-HASH). This is a DEV-dependency cycle (fabrico-core[dev]
+# -> fabrico-scenario -> fabrico-core), which Cargo permits because fabrico-scenario
+# only NORMAL-depends on fabrico-core (A1) and the cycle never enters the normal
+# build graph (the `deps_are_headless` fences both crates).
+fabrico-scenario = { path = "../fabrico-scenario" }

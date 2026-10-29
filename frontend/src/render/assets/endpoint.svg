@@ -1,0 +1,68 @@
+<!--
+  render/assets/endpoint.svg - SHIPPED art for the HTTP ENDPOINT (ART-01/ART-04, plan 58-02).
+
+  Promoted from `candidates/a/endpoint.svg`, the Direction A draft judged on the Phase
+  57 art board and locked (`57-ART-LOCK.md`). This file sits FLAT in `render/assets/`, and
+  that placement is a contract rather than a convenience: the discovery walk in
+  `scripts/lint-svg.ts`, `vertexBudget.test.ts` and `geometryDigest.test.ts` is
+  non-recursive, which is exactly what keeps `candidates/` and `__fixtures__/` out of the
+  shipped table. A shipped asset in a subdirectory is an asset no gate measures.
+
+  GLYPH ONLY - NO CHASSIS PATH, NO PORT STUBS (design decision, 2026-08-02). The CHASSIS is
+  drawn in CODE (`render/layers/machineChassis.ts`) at whatever `w x h` the footprint
+  actually is, because `grow_to_fit` can push a machine past its base footprint and a
+  fixed-`viewBox` asset then has no legal box.
+
+  NO PRIOR ART, AND THAT IS A STATED FACT RATHER THAN AN OVERSIGHT. `synth/glyphs.ts` is
+  keyed off `machine_kind` and has exactly eight entries; ENDPOINT has no generator and no
+  bit matrix, so there is no motif to carry or reject. Its only current visual is the
+  wire-terminal inlet glyph the wires layer draws at a port. Phase 58 is where a chassis
+  first exists for it: no baseline to preserve, and nothing to match.
+
+  FOOTPRINT: the endpoint's base footprint is 1x1, so `viewBox 0 0 32 32`.
+
+  WHAT IS CARRIED INSTEAD: `inletGlyph.ts`'s CANONICAL_EAST reading (lock section 2.10).
+  `socket` is the open mouth whose aperture faces the cable side (east, +x) and `chevron`
+  is the arrow whose apex points INTO the endpoint (west, -x) - request-in, the D-01
+  asymmetry that makes a terminal readable at rest.
+
+  THE ONE RULE THIS SUBJECT CAN BREAK QUIETLY: this glyph must NOT be geometrically derived
+  from `layers/inletGlyph.ts`. That module is the single geometry source for the wire
+  terminal - nub-local integer rects, mirrored into the Legend so the two cannot drift -
+  and it stays exactly as it is, at the port, in `electric`. This is a separate drawing, in
+  viewBox space, in `ramp[4]`, at chassis scale. The two deliberately ECHO (a socket at the
+  port and a socket on the box is coherence, and it is what keeps the endpoint legible in
+  Phase 59's palette icon where no wire exists), but sharing geometry between a nub-local
+  rect list and a viewBox path would couple two things that scale differently.
+
+  THE CHEVRON IS CORRECTED FROM THE CANDIDATE. The draft placed it at the odd step
+  (19 / 15 / 19); it is authored here at the even step (20 / 16 / 20). Clearance, computed
+  rather than eyeballed: the socket back wall at x = 12 with a 2u stroke spans 11-13, and
+  the chevron apex at x = 16 spans 15-17. 2u clear.
+
+  MUST NOT BE CONFUSABLE WITH SINK (this socket is OPEN on one side; the sink ring is
+  CLOSED on all four) or with SOURCE (this glyph is asymmetric about the vertical; the
+  source lens is symmetric about both axes). FILL COUNT 0.
+
+  ART-04 PROVENANCE: authored from scratch for the Phase 57 board. No icon pack was
+  consulted, copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY
+  REFERENCE ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or
+  Remix Icon (non-OSI), which are excluded outright. Promotion carries that provenance
+  forward unchanged.
+
+  COLOUR SOURCE - THE SHIPPED RULE, NOT THE CANDIDATE'S EXEMPTION. Every draft in
+  `candidates/` is exempt from the "no hand-authored hex" rule BECAUSE IT NEVER SHIPS.
+  This file ships, so that basis evaporates and is deliberately not restated. The standing
+  rule stands: the one literal below is `LOCKED_SKIN.palette.ramp[4]` (0xb0bacb, the
+  highlight step), the single ink lock axis 9 permits for every kind's glyph, and it is
+  held to that value by the fail-severity ink allowlist over the SHIPPED assets in
+  `assets/shippedAssets.test.ts` - by a gate, not by this paragraph.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L Z,
+  zero curves, one `<path>` per semantic part carrying its own stable `data-part`, one
+  element per line. The authoring contract is render/assets/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="socket" d="M 22 10 H 12 V 22 H 22" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="chevron" d="M 20 12 L 16 16 L 20 20" fill="none" stroke="#b0bacb" stroke-width="2" />
+</svg>

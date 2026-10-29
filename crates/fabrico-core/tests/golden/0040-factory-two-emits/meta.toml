@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0040-factory-two-emits` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0040-factory-two-emits"
+builder = "core seam: Source -> Factory(JS: ctx.emit(0, input) twice) -> belt(1) -> Debug Sink; the Source fired one event per tick while it would accept, for 120 ticks, then the board drains to 400 ticks"
+seed = "0x0000000000402e17"
+params = "JAM-05/WINDOWS 165 (87-RESEARCH P165): a Factory that emits twice on one port delivers both, the extra emit waiting in Factory.pending_emits. Certifies the board replays identically; the behaviour is graded by no_permanent_jams.rs#a_factory_that_emits_twice_delivers_both"
+tick_count = 400
+hash_lines = 400
+schema_version = 2
+snapshot_schema_version = 14

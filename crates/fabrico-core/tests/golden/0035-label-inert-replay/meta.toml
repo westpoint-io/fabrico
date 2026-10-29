@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0035-label-inert-replay` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0035-label-inert-replay"
+builder = "GridSession: Place SOURCE@(0,35) + DrawBelt[(1,35),(2,35),(3,35)] + Place SINK@(4,35) + Dock(belt.Tail->source Out) + Dock(belt.Head->sink In) + Place LABEL@(1,36) + Configure(Label{Order intake, Lilac, 6x2}) + 12 ManualInject one every DEFAULT_TICKS_PER_SLOT ticks + drain + Delete(label) + Undo + 12 more injects + drain"
+seed = "0x0000000000351abe"
+params = "SHAPE-11/D-08 label determinism: a configured 6 by 2 Lilac label beside a flowing belt, deleted and undone (the undo re-Places the box and re-Configures the words and colour), replayed from genesis. Certifies the label's frozen records replay identically; it cannot see a compute_inverse regression (fabrico-command tests/label.rs is that guard)"
+tick_count = 153
+hash_lines = 153
+schema_version = 2
+snapshot_schema_version = 14

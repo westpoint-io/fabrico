@@ -1,0 +1,6 @@
+---
+source: crates/fabrico-scenario/tests/golden_hashes.rs
+expression: "format!(\"{hash}\\n{summary}\")"
+---
+fcbdcacc3e25e4ecced0fdb79108cadd3c6038188c82b2b0c79b7f639b3f86d6
+nodes=6 belts=1 items=0 faulted=[]

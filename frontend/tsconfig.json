@@ -1,0 +1,59 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting / strictness */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  // WHAT IS TYPECHECKED, and the gap this list closed on 2026-08-31.
+  //
+  // `e2e` and `e2e-live` were absent, so `npx tsc --noEmit` covered ZERO Playwright
+  // specs - 60 files across the two suites (58 specs plus their support modules,
+  // 25,389 lines, counted 2026-08-31), including all 1,714 lines phase 69
+  // produced. The gap was recorded at milestone v6.2 (tsc covered 0 of 43 e2e specs)
+  // and had been open since. Playwright strips types with babel at run time and never
+  // typechecks, so nothing in the tree checked those files at all: adding both
+  // directories surfaced 37 real errors in 7 specs, one of which
+  // (`belt-rail-continuity.spec.ts`'s `RailReport`) had silently drifted from the
+  // fixture that produces its payload.
+  //
+  // Both suites are in, deliberately, and NOT narrowed to the specs that happened to
+  // be clean. A gate that excludes what it cannot typecheck is the defect class phase
+  // 69 exists to close.
+  //
+  // The four Playwright configs are in for the same reason and were already clean; they
+  // were the third item the CI comment named as uncovered.
+  //
+  // `typings` holds ambient declarations the specs need and the packages do not ship.
+  "include": [
+    "scripts",
+    "src",
+    "shared",
+    "typings",
+    "e2e",
+    "e2e-live",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "playwright.live.config.ts",
+    "playwright.live.reuse.config.ts",
+    "playwright.mock.reuse.config.ts"
+  ]
+}

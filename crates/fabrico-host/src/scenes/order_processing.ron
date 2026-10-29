@@ -1,0 +1,122 @@
+// THE order-processing teaching scene as DATA (EX-02) — the thing the v6.2
+// done-test rebuilds by hand from an empty board. A real webhook order flows:
+//
+//   SOURCE(1,6) -b6-> FACTORY validate/split(5,5 3x3) --emit 0 (invoice)---b7--> FACTORY invoice(13,2 3x3) -b9--> SINK Debug(21,3)
+//                                                     \-emit 1 (fulfill)--b8--> FACTORY fulfill(13,9 3x3) -b10-> SINK Http(21,10)
+//
+// The front door is a webhook SOURCE (kind 0), NOT a Node::Endpoint (kind 9), by
+// design. An Endpoint is placeable from the palette today (it is the palette's
+// Route), but this scene teaches the simpler door: every
+// Node::Source auto-projects a `POST /hook/src-<id>` route carrying the body
+// VERBATIM onto its Out belt, which IS "the webhook feeds the belt system
+// directly". Do not "fix" this into an Endpoint.
+//
+// Census: 6 Place + 1 AddPort + 5 DrawBelt + 10 Dock + 6 Configure = 28 commands.
+// EVERY command is UI-producible (palette place, Ports "+ output", belt drag with
+// nub docks, config panel bodies) — enforced by the Rust census test
+// `order_scene_vocabulary_is_ui_producible` (tests/order_flow.rs).
+//
+// machine_kind u8 legend (source of truth: fabrico-protocol `machine_kind` consts):
+//   SOURCE=0, FACTORY=2, SINK=7
+// BeltEnd is a bare unit variant: Tail (admit/entry) or Head (deliver/exit).
+// Dock `port` is the CATALOG port index; JS emits on the EMIT index. The splitter's
+// AddPort-grown second Out is catalog 3 -> emit 1 (In ports come first in every
+// catalog, so the routing key is the port's 0-based position among Role::Out ports).
+//
+// Port seating NOTE (load-bearing for the belt end cells below): the AddPort fold
+// re-seats the splitter's WHOLE port list via `reseat_ports`, centre-out from the
+// 3x3 catalog box (design rule: "Edits keep middle layout"), so the
+// add moves no existing port and the new Out takes the slot below
+// the first: In_0 -> local (0,1) W = world (5,6); Out_0 (catalog 1) -> (2,1) E =
+// world (7,6); Fault (catalog 2) -> (1,2) S = world (6,7), undocked; Out_1
+// (catalog 3) -> (2,2) E = world (7,7). The re-seat was once by index, and
+// these belts then ended one row higher. The branch factories keep their catalog seats
+// too: In (0,1) W, Out (2,1) E, Fault (1,2) S.
+//
+// Handle convention: dense u64 handles mint monotonic from 0 in mint order
+// (machines first in Place order -> handles 0..=5; then belts in DrawBelt order ->
+// handles 6..=10). Every AddPort/Dock/Configure targets a handle minted by an
+// earlier command (one-command-per-tick seeding makes resolution structural).
+//
+// Sink targets: the HTTP sink defaults to a user-editable loopback URL
+// (port 8799, path /fulfillment) — NEVER a third-party endpoint.
+// This default is NOT "harmless" in the unqualified sense an earlier revision of
+// this comment claimed. Fabrico does not reserve 8799 and cannot know what owns
+// it, so loading this example and firing one order makes the app POST the
+// caller-supplied order JSON at whatever local service is listening there. That
+// is an ACCEPTED risk: the request never leaves
+// loopback, the URL is editable in the sink panel before any traffic flows, and
+// nothing fires on its own (this scene installs no timers, so it takes a
+// deliberate load plus a deliberate POST). Do not re-point this at a port a
+// common local tool binds, and never at a non-loopback host. The
+// invoice sink (node 4) is a Debug sink: it makes no outbound call at all, so the
+// invoice branch drains on any machine, offline included, and the user watches
+// each invoice arrive there. Its Configure is authored explicitly (a fresh Sink
+// is already Debug), for the same teaching reason as the Source's Webhook trigger.
+// `method: Post` matches the executor's behavior (it always POSTs;
+// the field is inert host-side, authored Post so data == behavior).
+[
+    // ── Machines (handles 0..=5, mint order == Place order) ──────────────
+    Place(kind: 0, cell_x: 1,  cell_y: 6),   // 0: SOURCE, the webhook front door, 1x1
+    Place(kind: 2, cell_x: 5,  cell_y: 5),   // 1: FACTORY validate/split, 3x3
+    Place(kind: 2, cell_x: 13, cell_y: 2),   // 2: FACTORY invoice branch (upper corridor)
+    Place(kind: 2, cell_x: 13, cell_y: 9),   // 3: FACTORY fulfillment branch (lower corridor)
+    Place(kind: 7, cell_x: 21, cell_y: 3),   // 4: SINK Debug (shows each invoice arriving)
+    Place(kind: 7, cell_x: 21, cell_y: 10),  // 5: SINK HTTP (fulfillment API call)
+
+    // ── Grow the splitter's second Out (UI: Ports section "+ output") ─────
+    // role 1 = Out, side 1 = E, medium 0 = Mechanical. Appends catalog 3 -> emit 1;
+    // the re-seat keeps every existing splitter port (see the seating NOTE above).
+    AddPort(node: 1, role: 1, side: 1, medium: 0),
+
+    // ── Drawn belts (handles 6..=10, mint order == DrawBelt order) ────────
+    // Every run >= 2 cells; both branch corridors leave the splitter mouth heading
+    // E (the dock facing-opposite rule), then jog apart at x=9 to their corridors
+    // (invoice row 3, fulfillment row 10 — >= 3 rows apart away from the mouth).
+    DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),                                           // 6: source -> splitter In (straight on row 6)
+    DrawBelt(cells: [(8, 6), (9, 6), (9, 5), (9, 4), (9, 3), (10, 3), (11, 3), (12, 3)]), // 7: splitter Out1 -> invoice In (jogs up at x9)
+    DrawBelt(cells: [(8, 7), (9, 7), (9, 8), (9, 9), (9, 10), (10, 10), (11, 10), (12, 10)]), // 8: splitter Out2 -> fulfillment In (jogs down at x9)
+    DrawBelt(cells: [(16, 3), (17, 3), (18, 3), (19, 3), (20, 3)]),                      // 9: invoice -> Debug sink
+    DrawBelt(cells: [(16, 10), (17, 10), (18, 10), (19, 10), (20, 10)]),                 // 10: fulfillment -> HTTP sink
+
+    // ── Docks (belt, endpoint, node, CATALOG port index) ──────────────────
+    Dock(belt: 6,  endpoint: Tail, node: 0, port: 0),  // source Out -> belt 6
+    Dock(belt: 6,  endpoint: Head, node: 1, port: 0),  // belt 6 -> splitter In @ (5,6)
+    Dock(belt: 7,  endpoint: Tail, node: 1, port: 1),  // splitter Out 1 (catalog 1 -> emit 0) @ (7,6)
+    Dock(belt: 7,  endpoint: Head, node: 2, port: 0),  // belt 7 -> invoice In @ (13,3)
+    Dock(belt: 8,  endpoint: Tail, node: 1, port: 3),  // splitter Out 2 (catalog 3 -> emit 1) @ (7,7)
+    Dock(belt: 8,  endpoint: Head, node: 3, port: 0),  // belt 8 -> fulfillment In @ (13,10)
+    Dock(belt: 9,  endpoint: Tail, node: 2, port: 1),  // invoice Out (catalog 1 -> emit 0) @ (15,3)
+    Dock(belt: 9,  endpoint: Head, node: 4, port: 0),  // belt 9 -> Debug sink In @ (21,3)
+    Dock(belt: 10, endpoint: Tail, node: 3, port: 1),  // fulfillment Out (catalog 1 -> emit 0) @ (15,10)
+    Dock(belt: 10, endpoint: Head, node: 5, port: 0),  // belt 10 -> HTTP sink In @ (21,10)
+
+    // ── Configures (all panel-producible) ─────────────────────────────────
+    // Explicit webhook trigger (a fresh Source is webhook-ready with no Configure;
+    // authored anyway for teaching explicitness — the panel's segmented control).
+    Configure(node: 0, config: Source(trigger: Webhook)),
+    // The validate/split Factory: a structurally-non-order JSON body (missing `id`
+    // or an `items` array) THROWS — the honest red-state teaching moment, leaving
+    // the machine FAULTED for that item with zero emissions. A genuinely malformed
+    // (non-JSON) body already faults at the sandbox's canonical-JSON boundary
+    // before this JS runs. A passing order emits exactly one invoice job on emit 0
+    // and one fulfillment job on emit 1.
+    Configure(node: 1, config: Factory(source: r#"// validate and split the order
+export default function (input, ctx) {
+  if (!input || !input.id || !Array.isArray(input.items)) { throw new Error("not an order"); }
+  ctx.emit(0, { kind: "invoice", order: input.id, items: input.items });
+  ctx.emit(1, { kind: "fulfillment", order: input.id, items: input.items });
+}"#)),
+    Configure(node: 2, config: Factory(source: r#"// build the invoice
+export default function (input, ctx) {
+  var total = 0;
+  for (var i = 0; i < input.items.length; i++) { total += input.items[i].qty * input.items[i].price; }
+  ctx.emit(0, { order: input.order, total: total });
+}"#)),
+    Configure(node: 3, config: Factory(source: r#"// prepare fulfillment
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, ship: input.items });
+}"#)),
+    Configure(node: 4, config: Sink(target: Debug)),
+    Configure(node: 5, config: Sink(target: Http(url: "http://localhost:8799/fulfillment", method: Post))),
+]

@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0013-delete-belt-with-items` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0013-delete-belt-with-items"
+builder = "inline s->beltA(2, DRAWN geometry+claimed cells)->c + edit-log deleting beltA at tick 2 with an in-flight slot item (BELT-08 deterministic discard)"
+seed = "0x000000000013de17"
+params = "drawn belt carries an in-flight slot item; Delete@tick2 drops items + frees claimed tile cells (no resurrection / no occupancy ghost); driven past the delete"
+tick_count = 8
+hash_lines = 8
+schema_version = 2
+snapshot_schema_version = 14

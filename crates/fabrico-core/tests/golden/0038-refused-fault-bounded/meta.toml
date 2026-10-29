@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0038-refused-fault-bounded` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0038-refused-fault-bounded"
+builder = "core seam: Source -> Router(no routes, no default); Router FAULT_PORT -> belt(1) -> Debug Sink; the Source fired one event per tick while it would accept, and a logged command Timeout on the Router every 5 ticks before tick 400, for 1000 ticks"
+seed = "0x000000000038fa17"
+params = "JAM-03/WINDOWS 176 (87-RESEARCH P176b): the fault drain counts in the output gate and a refused fault is never wrapped again, so the board stays bounded. Certifies the board replays identically; the behaviour is graded by no_permanent_jams.rs#the_fault_drain_counts_in_the_gate"
+tick_count = 1000
+hash_lines = 1000
+schema_version = 2
+snapshot_schema_version = 14

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fabrico - Chrome DPR Spike (dev only)</title>
+    <!--
+      DEV-ONLY DPR spike fixture (CHROME-04, Plan 27-02; text stripped Plan
+      47-03; migrated off the raster bezel Plan 59-03). Root-level HTML so Vite
+      serves it in dev (`/chrome-dpr-spike.html`) yet it is NEVER a build input -
+      only index.html is, so this fixture stays out of `dist`. It renders the
+      SHIPPED chrome bezel - a pure-CSS composed inset ring, not the retired
+      "hollow bezel panel via the exact Plan 01 recipe" - at the device DPR, by
+      applying the real CHROME_CSS and the real skinToCssVars token block, so the
+      crispness contract can be judged live and pixel-gated by
+      dpr-crispness.spec.ts. Plan 59-06 extended it past the bezel: it now also
+      hosts the 29-cell pinned icon strip, a DISABLED chunky button, the
+      four-variant guard-dialog button row, a content-driven .fab-panel for the
+      DPR-stable rect proof and a SCROLLED config panel - the four surfaces the
+      seven new baselines need. ELEVEN IS NOW SEVEN (2026-10-11): 59-06 also hosted
+      the shipped LogoMark here as a fifth surface with four baselines of its own;
+      those retired with LogoMark.tsx, because the app no longer renders the
+      square. Still TEXT-FREE (no text nodes): since Phase 47
+      the chrome renders vector text, so there is no font ladder to judge here, and
+      none of the new subjects carries a label. Do NOT import this from App.tsx /
+      main.tsx.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        /* The locked substrate (ramp[0]) so the panel edge sits on the real world. */
+        background: #1b1f27;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="spike-root"></div>
+    <script type="module" src="/src/spike/chromeDpr.tsx"></script>
+  </body>
+</html>

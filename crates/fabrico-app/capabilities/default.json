@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main-window capability: Tauri core defaults + the native file dialog (save/open) ONLY. The app commands (subscribe_render + submit_input + the six control commands) are app-defined and invokable directly. The dialog plugin yields ONLY a PathBuf; the hardened Rust save_project/load_project own all byte I/O — NO filesystem-scope permission is granted (trust boundary T-18-DIALOG). The clipboard plugin is granted write-text ONLY: the app only ever PUTS the endpoint URL on the clipboard, so reading and clearing the user's clipboard are withheld (least privilege, trust boundary T-52-CLIP).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "core:window:allow-destroy",
+    "clipboard-manager:allow-write-text"
+  ]
+}

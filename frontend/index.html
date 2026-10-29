@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fabrico</title>
+    <style>
+      /* The Pixi canvas fills the viewport; chrome floats over it (07-09).
+
+         THE BACKGROUND BELOW IS SUBSTITUTED AT BUILD, not hand-authored (SKIN-03,
+         plan 58-05). The `fab-page-background` plugin in `vite.config.ts` replaces
+         the build token with `colorToCss(LOCKED_SKIN.palette.ramp[0])` in BOTH
+         `vite` and `vite build`, so this markup carries no second declaration of the
+         app's darkest step. It used to hardcode a near-black that was NOT `ramp[0]`,
+         so closing the leak was a real (if small) colour change and not a
+         de-duplication of an equal value.
+
+         A TOKEN RATHER THAN A REPLACEABLE LITERAL, deliberately: if the transform
+         ever fails to run the declaration is invalid CSS and the page paints
+         unstyled, LOUDLY. A literal would have degraded silently to a stale colour,
+         which is the failure this leak already was.
+
+         The token is spelled EXACTLY ONCE in this file, in the declaration itself.
+         Naming it again in this comment would substitute here too and turn the
+         explanation into the thing it explains. */
+      html,
+      body,
+      #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: %FAB_PAGE_BG%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

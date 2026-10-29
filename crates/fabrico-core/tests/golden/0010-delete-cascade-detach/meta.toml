@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0010-delete-cascade-detach` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0010-delete-cascade-detach"
+builder = "inline s->beltA(3)->M(2x3)->beltC(3)->c + edit-log deleting M at tick 1 mid-flow (FOOT-04 cascade + Q3 drop)"
+seed = "0x000000000010cade"
+params = "belt latency=3; M 2x3 footprint @(5,5); fire s@0; edit@tick1 Delete(M) cascade-detaches beltA(in-flight)+beltC; item drops via missing-link no-op"
+tick_count = 7
+hash_lines = 7
+schema_version = 2
+snapshot_schema_version = 14

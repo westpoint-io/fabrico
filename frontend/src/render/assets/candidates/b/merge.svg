@@ -1,0 +1,46 @@
+<!--
+  candidates/b/merge.svg - DIRECTION B draft for the MERGE machine (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION B - "solid chassis plate": a FILLED chassis body (#565f70), a 3-unit dark
+  outline (#2a2f3a), and a 2-unit glyph knocked out in the substrate value (#1b1f27). Port
+  stubs are HELD CONSTANT with Direction A (same geometry, same #565f70, same 2u) so the
+  board compares chassis and glyph treatment rather than port treatment. Glyph geometry is
+  identical to Direction A's: D-02 defines B as a treatment, not a different drawing.
+
+  SEMANTIC VOCABULARY - CARRIED. synth/glyphs.ts:100-102 says of MERGE: "many-to-one
+  funnel: a wide top mouth converges down diagonal walls to a single 1-wide centered neck.
+  The strong top-heavy taper is the inverse of TEE's fork and cannot be confused with the
+  balancer's twin bars." `mouth` is the wide top, `wall-left` and `wall-right` the
+  converging diagonals, `neck` the single outflow. The TOP-HEAVY TAPER is the property
+  doing the discriminating between MERGE, TEE and BALANCER at 1x, so it is drawn strongly
+  rather than politely.
+
+  ROTATED RELATIVE TO ITS SIBLINGS, and that is deliberate and identical in both
+  directions. TEE and BALANCER flow left-to-right; MERGE flows top-to-bottom, because a
+  funnel that converges horizontally is a TEE read backwards. The ports follow the flow:
+  two in on the top edge, one out on the bottom. Whether the shipped machine set tolerates
+  mixed flow axes is a Phase 58 question, and stating it here is the point of the board.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H60 V60 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H60 V60 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="mouth" d="M12 16 H52" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="wall-left" d="M12 16 L32 38" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="wall-right" d="M52 16 L32 38" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="neck" d="M32 38 V50" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="port-in-a" d="M18 0 V4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-in-b" d="M46 0 V4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out" d="M32 60 V64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

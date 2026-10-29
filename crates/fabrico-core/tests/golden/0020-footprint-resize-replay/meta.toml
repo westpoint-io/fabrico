@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0020-footprint-resize-replay` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0020-footprint-resize-replay"
+builder = "GridSession: place_router_preset(Electrical) [1-in/3-out + Mechanical Fault, 2x3] + AddPort Out x4 (grows to 1-in/7-out, 2x7) + RemovePort x4 (back to 1-in/3-out, box stays 2x7 since 74.1-16)"
+seed = "0x000000000020b017"
+params = "PORT-07 footprint-resize replay: the resize is a pure fn of the edit records; the genesis snapshot + re-folded edit-log reproduce every intermediate footprint (2x3 -> 2x7, kept at 2x7 by the removals since 74.1-16) byte-identically on every OS (snapshot/restore round-trips the resized machine)"
+tick_count = 23
+hash_lines = 23
+schema_version = 2
+snapshot_schema_version = 14

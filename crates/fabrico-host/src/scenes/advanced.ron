@@ -1,0 +1,215 @@
+// THE "advanced" example scene as DATA (quick 260916-adv): a larger, more sophisticated
+// order-fulfilment board than `demo_scene.ron` / `order_processing.ron`, shipped
+// as the third loadable Examples entry (SceneId::Advanced) and booted by the dev
+// render server for demos. Embedded via `include_str!` and parsed by
+// `load_scene_from_ron` into the frozen `Vec<GridCommand>` (fabrico-protocol);
+// same substrate and conventions as the other two scenes.
+//
+// What it shows off (all wired, belt-side):
+//   - TWO ingress Sources (a Timer for auto-flow on stage + a Webhook for a live
+//     POST) funnelled together through a front MERGE.
+//   - A validate FACTORY (AddPort'd to two Outs) that VALIDATES each order and
+//     fans it out by concern (a fulfilment job on emit 0, an invoice job on emit
+//     1, every valid order gets both; there is no content routing), and faults a
+//     bad order out its Fault port.
+//   - A wired DEAD-LETTER Sink on that Fault port (resilience has a location).
+//   - Parallel scale-out: the fulfilment stream fans through a BALANCER to TWO
+//     worker FACTORIES, then re-converges through a back MERGE to an HTTP Sink.
+//   - A billing branch: the invoice stream runs to an invoice FACTORY -> Debug Sink.
+//
+//        SOURCE(Timer)  \                          emit0 fulfilment job  /-> FACTORY workerA -\
+//                        MERGE -> FACTORY validate -------------------- BALANCER               MERGE -> SINK(HTTP)
+//        SOURCE(Webhook)/           |  \ emit1 invoice job (same order)  \-> FACTORY workerB -/
+//                                   |   \-> FACTORY invoice -> SINK(Debug)
+//                                   \-Fault-> SINK(dead-letter)
+//
+// machine_kind u8 legend (source of truth: fabrico-protocol `machine_kind`):
+//   SOURCE=0, FACTORY=2, BALANCER=4, MERGE=6, SINK=7
+// BeltEnd is a bare unit variant: Tail (admit/entry) or Head (deliver/exit).
+// Dock `port` is the CATALOG (spatial) port index. Base catalogs used here:
+//   SOURCE   Out=0
+//   FACTORY  In=0, Out=1, Fault=2   (default 3x3: In (0,1)W, Out (2,1)E, Fault (1,2)S)
+//   FACTORY(+1 AddPort Out) keeps its catalog seats and takes the new Out on the
+//     slot below the first (the 74.1-14 centre-out re-seat): In (0,1)W, Out0 (2,1)E,
+//     Out1 (2,2)E, Fault (1,2)S -> CATALOG In=0, Out0=1, Fault=2, Out1=3 (the
+//     order-scene note).
+//   BALANCER In0=0, In1=1, Out0=2, Out1=3 (2x2: In (0,0)/(0,1)W, Out (1,0)/(1,1)E)
+//   MERGE    In0=0, In1=1, Out=2      (2x2: In (0,0)/(0,1)W, Out (1,0)E)
+//   SINK     In=0                     (1x1, In W by default; the dead-letter Sink
+//     is turned CW twice so its In faces E and takes the fault belt dropping down
+//     its east side; see the Rotate note below).
+//
+// Handle convention: dense u64 handles mint monotonic from 0 in mint order
+// (machines first in Place order -> handles 0..=11; then belts in DrawBelt order
+// -> handles 12..=23). Every AddPort/Rotate/Dock/Configure targets a handle
+// minted by an earlier command (one-command-per-tick seeding).
+//
+// All three Sinks (fulfilment, invoice, dead-letter) are left UNCONFIGURED, so
+// they are Debug sinks that swallow every item. The Timer source drives the board
+// continuously, so a configured HTTP terminal would fire a side-effect on every
+// arrival and (offline) draw a persistent fault ring; Debug terminals keep the
+// auto-running showcase clean and fully offline-safe. Retarget the fulfilment
+// terminal to Http(url: ...) in the panel for the real call (the
+// order_processing example ships that shape).
+[
+    // ── Machines (handles 0..=11, mint order == Place order) ─────────────────
+    // The two Sources sit in column 0 on rows 6 and 8, one empty row apart (EX-03
+    // floor 2: stacked flush they read as one 1x2 block at fit zoom). Source 0
+    // feeds ingress-Merge In0 with a straight belt on row 6; Source 1 leaves east
+    // on row 8 and jogs up one row to arrive east into In1 on row 7. The spine runs
+    // left-to-right on row 6 and dips to row 7 through the validate Factory, whose In
+    // and first Out sit on its middle row (plan 74.1-14). The Balancer and everything
+    // after it on the fulfilment side sit two columns east of where 260916-adv put them
+    // (plan 85-10; see the belt notes below). The invoice branch (10, 11) keeps its place.
+    Place(kind: 0, cell_x: 0,  cell_y: 6),   // 0: SOURCE Timer (auto-flow; also live-POST addressable)
+    Place(kind: 0, cell_x: 0,  cell_y: 8),   // 1: SOURCE Webhook (live orders)
+    Place(kind: 6, cell_x: 4,  cell_y: 6),   // 2: MERGE ingress (2x2): In0 (4,6), In1 (4,7), Out (5,6)
+    Place(kind: 2, cell_x: 8,  cell_y: 6),   // 3: FACTORY validate/split (3x3, +AddPort): In (8,7), Fault (9,8)
+    Place(kind: 7, cell_x: 8,  cell_y: 11),  // 4: SINK dead-letter (turned twice; In faces E at (8,11))
+    Place(kind: 4, cell_x: 15, cell_y: 6),   // 5: BALANCER fan-out (2x2): In0 (15,6), In1 (15,7) unused, Out0 (16,6), Out1 (16,7)
+    Place(kind: 2, cell_x: 19, cell_y: 5),   // 6: FACTORY worker A (3x3): In (19,6), Out (21,6)
+    Place(kind: 2, cell_x: 20, cell_y: 9),   // 7: FACTORY worker B (3x3): In (20,10), Out (22,10)
+    Place(kind: 6, cell_x: 25, cell_y: 6),   // 8: MERGE fan-in (2x2): In0 (25,6), In1 (25,7), Out (26,6)
+    Place(kind: 7, cell_x: 29, cell_y: 6),   // 9: SINK HTTP (fulfilment API call): In (29,6)
+    Place(kind: 2, cell_x: 13, cell_y: 12),  // 10: FACTORY invoice (3x3): In (13,13), Out (15,13)
+    Place(kind: 7, cell_x: 18, cell_y: 13),  // 11: SINK Debug (invoice): In (18,13)
+
+    // Grow the validate Factory's second Out (UI: Ports "+ output"). role 1 = Out,
+    // side 1 = E, medium 0 = Mechanical. Appends catalog 3 -> emit 1; the re-seat
+    // keeps every existing port (In (0,1)W, Out0 (2,1)E, Out1 (2,2)E, Fault (1,2)S)
+    // -> world In (8,7), Out0 (10,7), Out1 (10,8), Fault (9,8)S. Until 74.1-14 the
+    // re-seat was by index and the belts below ended one row higher.
+    AddPort(node: 3, role: 1, side: 1, medium: 0),
+
+    // Two clockwise quarter-turns take the dead-letter sink's In from W to E. Until plan
+    // 74.1-14 ONE turn (W to N) sufficed: the validate Factory's Fault sat at (8,8),
+    // straight above the sink, and its belt dropped (8,9) -> (8,10) into the N-facing In.
+    // Since the 74.1-14 re-seat keeps the Factory's catalog Fault at (1,2), world (9,8),
+    // one column east of the sink, a belt into an N-facing In would have to step WEST to
+    // (8,10), which floor 4 (no net-backwards run) forbids. Every machine keeps its place;
+    // the sink turns once more, its In faces E with its doorstep at (9,11), and the fault
+    // belt drops straight down (9,9) -> (9,11) and turns into it.
+    Rotate(node: 4, ccw: false),
+    Rotate(node: 4, ccw: false),
+
+    // ── Drawn belts (handles 12..=23, mint order == DrawBelt order) ──────────
+    // Every belt LEAVES its Out along the port facing (E), and no belt doubles back
+    // (scene_floors.rs floor 6): once a belt has stepped one way along an axis it never
+    // steps the other way. A belt whose In sits on another row either jogs in its middle
+    // and arrives along the port facing, or runs straight to the In's doorstep and turns
+    // into the port there (accepted since 74.1, D-02).
+    //
+    // Plan 85-10 (the PR #2 review's WR-05 and IN-04) re-laid the fulfilment side. The
+    // Balancer and everything after it (the two workers, the fan-in Merge, the HTTP Sink)
+    // sit two columns further east, so the invoice belt (17) turns south at (12,8) with a
+    // clear column (13) and the Balancer's unused In1 mouth (14,7) beyond it: at fit zoom
+    // the billing branch no longer reads as feeding the Balancer. Belt 17 runs straight
+    // down column 12 into the invoice Factory's doorstep (12,13) instead of jogging west
+    // at (12,12); belt 21 climbs column 24 into the fan-in Merge's In1 doorstep (24,7)
+    // instead of jogging west at (22,8) and running one row under belt 20 for two
+    // columns. The box is x 0..29, exactly floor 5's 30-cell cap. Every Dock port and
+    // every Configure is unchanged.
+    DrawBelt(cells: [(1, 6), (2, 6), (3, 6)]),                                           // 12: SourceTimer Out -> ingress Merge In0
+    DrawBelt(cells: [(1, 8), (2, 8), (2, 7), (3, 7)]),                                   // 13: SourceWebhook Out -> ingress Merge In1
+    DrawBelt(cells: [(6, 6), (6, 7), (7, 7)]),                                           // 14: ingress Merge Out -> validate In (drops to row 7)
+    DrawBelt(cells: [(9, 9), (9, 10), (9, 11)]),                                         // 15: validate Fault -> dead-letter Sink In (E, drops down its east side)
+    DrawBelt(cells: [(11, 7), (11, 6), (12, 6), (13, 6), (14, 6)]),                      // 16: validate Out0 (fulfilment) -> Balancer In0 (back up to row 6)
+    DrawBelt(cells: [(11, 8), (12, 8), (12, 9), (12, 10), (12, 11), (12, 12), (12, 13)]),  // 17: validate Out1 (invoice) -> invoice In (turns into it at its doorstep)
+    DrawBelt(cells: [(17, 6), (18, 6)]),                                                 // 18: Balancer Out0 -> worker A In
+    DrawBelt(cells: [(17, 7), (18, 7), (18, 8), (18, 9), (18, 10), (19, 10)]),           // 19: Balancer Out1 -> worker B In
+    DrawBelt(cells: [(22, 6), (23, 6), (24, 6)]),                                        // 20: worker A Out -> fulfilment Merge In0
+    DrawBelt(cells: [(23, 10), (24, 10), (24, 9), (24, 8), (24, 7)]),                    // 21: worker B Out -> fulfilment Merge In1 (turns into it at its doorstep)
+    DrawBelt(cells: [(27, 6), (28, 6)]),                                                 // 22: fulfilment Merge Out -> HTTP Sink In
+    DrawBelt(cells: [(16, 13), (17, 13)]),                                               // 23: invoice Factory Out -> invoice Sink In
+
+    // ── Docks (belt, endpoint, node, CATALOG port index) ─────────────────────
+    Dock(belt: 12, endpoint: Tail, node: 0,  port: 0),  // SourceTimer Out -> belt 12
+    Dock(belt: 12, endpoint: Head, node: 2,  port: 0),  // belt 12 -> ingress Merge In0
+    Dock(belt: 13, endpoint: Tail, node: 1,  port: 0),  // SourceWebhook Out -> belt 13
+    Dock(belt: 13, endpoint: Head, node: 2,  port: 1),  // belt 13 -> ingress Merge In1
+    Dock(belt: 14, endpoint: Tail, node: 2,  port: 2),  // ingress Merge Out -> belt 14
+    Dock(belt: 14, endpoint: Head, node: 3,  port: 0),  // belt 14 -> validate In
+    Dock(belt: 15, endpoint: Tail, node: 3,  port: 2),  // validate Fault (catalog 2) -> belt 15
+    Dock(belt: 15, endpoint: Head, node: 4,  port: 0),  // belt 15 -> dead-letter Sink In (turned to face E)
+    Dock(belt: 16, endpoint: Tail, node: 3,  port: 1),  // validate Out0 (catalog 1 -> emit 0) -> belt 16
+    Dock(belt: 16, endpoint: Head, node: 5,  port: 0),  // belt 16 -> Balancer In0
+    Dock(belt: 17, endpoint: Tail, node: 3,  port: 3),  // validate Out1 (catalog 3 -> emit 1) -> belt 17
+    Dock(belt: 17, endpoint: Head, node: 10, port: 0),  // belt 17 -> invoice Factory In
+    Dock(belt: 18, endpoint: Tail, node: 5,  port: 2),  // Balancer Out0 (catalog 2 -> emit 0) -> belt 18
+    Dock(belt: 18, endpoint: Head, node: 6,  port: 0),  // belt 18 -> worker A In
+    Dock(belt: 19, endpoint: Tail, node: 5,  port: 3),  // Balancer Out1 (catalog 3 -> emit 1) -> belt 19
+    Dock(belt: 19, endpoint: Head, node: 7,  port: 0),  // belt 19 -> worker B In
+    Dock(belt: 20, endpoint: Tail, node: 6,  port: 1),  // worker A Out (catalog 1 -> emit 0) -> belt 20
+    Dock(belt: 20, endpoint: Head, node: 8,  port: 0),  // belt 20 -> fulfilment Merge In0
+    Dock(belt: 21, endpoint: Tail, node: 7,  port: 1),  // worker B Out (catalog 1 -> emit 0) -> belt 21
+    Dock(belt: 21, endpoint: Head, node: 8,  port: 1),  // belt 21 -> fulfilment Merge In1
+    Dock(belt: 22, endpoint: Tail, node: 8,  port: 2),  // fulfilment Merge Out (catalog 2) -> belt 22
+    Dock(belt: 22, endpoint: Head, node: 9,  port: 0),  // belt 22 -> HTTP Sink In
+    Dock(belt: 23, endpoint: Tail, node: 10, port: 1),  // invoice Factory Out (catalog 1 -> emit 0) -> belt 23
+    Dock(belt: 23, endpoint: Head, node: 11, port: 0),  // belt 23 -> invoice Sink In
+
+    // ── Configures (all panel-producible) ────────────────────────────────────
+    // Timer source drives auto-flow on stage (~4 items/s at 62.5 t/s). The
+    // projected timer payload is the canonical `{}` (the empty object).
+    Configure(node: 0, config: Source(trigger: Timer(interval_ticks: 16))),
+    // The live front door: a fresh Source is webhook-ready; authored explicitly.
+    Configure(node: 1, config: Source(trigger: Webhook)),
+    // Validate, then fan out by concern. ONLY the Timer heartbeat shape, a
+    // non-null, non-array object with zero own keys, is swapped for a synthetic
+    // demo order so the board flows unattended. EVERY other body is taken as the
+    // order itself and THROWS "not a valid order" unless it has a truthy `id` AND
+    // a non-empty `items` array: the machine faults for that item and the fault
+    // record leaves the south Fault port for the dead-letter Sink. So a live POST
+    // with no id (a typo'd `order_id`, an array, a bare string) is dead-lettered,
+    // never laundered into a fabricated order.
+    //
+    // Assumption (quick 260929-p7p): a live POST whose body is exactly `{}` is
+    // byte-identical to the Timer heartbeat. A Factory receives only the payload
+    // bytes (the ctx built by `__fab_make_ctx` in fabrico-core `factory.rs`, and
+    // the webhook's `ManualInject` in fabrico-host `sim_loop.rs`); no origin
+    // travels with the item. That one shape is therefore still synthesised.
+    // Moving the synthesis into its own Factory on the Timer lane would close even
+    // that case, but it pushes the board past floor 5's 30-cell width, so it is
+    // recorded as a follow-up todo instead.
+    //
+    // A valid order emits a fulfilment job on emit 0 AND an invoice job on emit 1.
+    Configure(node: 3, config: Factory(source: r#"// validate the order, then fan it out by concern
+export default function (input, ctx) {
+  var heartbeat = input !== null && typeof input === "object" && !Array.isArray(input)
+    && Object.keys(input).length === 0;
+  var order = heartbeat ? { id: "auto", items: [{ sku: "widget", qty: 2, price: 5 }] } : input;
+  if (!order || typeof order !== "object" || Array.isArray(order) || !order.id
+      || !Array.isArray(order.items) || order.items.length === 0) {
+    throw new Error("not a valid order");
+  }
+  var units = 0;
+  for (var i = 0; i < order.items.length; i++) { units += (order.items[i].qty || 0); }
+  ctx.emit(0, { kind: "fulfillment", order: order.id, units: units });
+  ctx.emit(1, { kind: "invoice", order: order.id, items: order.items });
+}"#)),
+    // Parallel worker A: pick/pack the fulfilment job.
+    Configure(node: 6, config: Factory(source: r#"// worker A: pick & pack
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, packed: input.units, station: "A" });
+}"#)),
+    // Parallel worker B: identical work, a second lane behind the Balancer.
+    Configure(node: 7, config: Factory(source: r#"// worker B: pick & pack
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, packed: input.units, station: "B" });
+}"#)),
+    // Invoice: total the line items.
+    Configure(node: 10, config: Factory(source: r#"// build the invoice total
+export default function (input, ctx) {
+  var total = 0;
+  for (var i = 0; i < input.items.length; i++) { total += (input.items[i].qty || 0) * (input.items[i].price || 0); }
+  ctx.emit(0, { order: input.order, total: total });
+}"#)),
+    // Terminal sinks (HTTP fulfilment, the invoice sink) and the dead-letter sink
+    // are all left UNCONFIGURED, i.e. Debug sinks that simply swallow every item
+    // they receive. This is deliberate: the Timer source drives the board
+    // continuously, so a real HTTP sink would attempt (and, offline, fail) a
+    // side-effect on every arrival and draw a persistent fault ring. A Debug
+    // terminal keeps the auto-running showcase clean and fully offline-safe; a
+    // user retargets the fulfilment sink to Http(url: ...) in the panel (as the
+    // order_processing example ships it) when they want the real call.
+]

@@ -1,0 +1,56 @@
+<!--
+  candidates/c/merge.svg - DIRECTION C draft for the MERGE machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION C - "iconographic badge": the silhouette itself differs per kind. C holds
+  Direction B's paint system exactly so that B vs C isolates the SILHOUETTE with the
+  treatment held fixed. See c/source.svg for the full statement of that control.
+
+  SEMANTIC VOCABULARY - CARRIED, AND PROMOTED FROM GLYPH TO SILHOUETTE. synth/glyphs.ts:100-102
+  says of MERGE: "a wide top mouth converges down diagonal walls to a single 1-wide centered
+  neck. The strong top-heavy taper is the inverse of TEE's fork and cannot be confused with
+  the balancer's twin bars." In A and B that funnel is four 2u strokes inside a rectangle;
+  here the funnel IS the outline, so the top-heavy taper is the thing being seen rather than
+  a detail drawn on something else. The taper is drawn STRONGLY (a 56-wide mouth collapsing
+  to a 16-wide neck) rather than politely, because the taper is the whole discriminator.
+
+  THE MERGE/BALANCER DECISION is stated in full at c/balancer.svg and is not repeated here.
+  The short form: in Direction C the two cannot collapse, because MERGE carries its mass at
+  the TOP and is symmetric on one axis only, while BALANCER carries mass at all four corners
+  and is symmetric on both. That is a property of the outline, so it survives greyscale, 1x
+  and blur. It is recorded as a claim about the drawing, not as a verdict - the board ranks
+  nothing, and whether the separation actually holds is the reviewer's call at the board.
+
+  ROTATED RELATIVE TO ITS SIBLINGS, and identically in all four directions. TEE and BALANCER
+  flow left-to-right; MERGE flows top-to-bottom, because a funnel that converges horizontally
+  is a TEE read backwards. The ports follow the flow: two in on the top edge, one out on the
+  bottom. Whether the shipped machine set tolerates mixed flow axes is a Phase 58 question
+  (57-04 surfaced it and deliberately did not resolve it), and it is repeated here because
+  Direction C makes the mixed axis MORE visible, not less: when the outline itself is the
+  funnel, a viewer scanning a row of C cells sees one shape pointing down among shapes
+  pointing right. That is a cost of C specifically and belongs on the board.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 80 vertices / 40 points, band `ok`. Identical to a/merge.svg's 80 and 8 under
+  b/merge.svg's 88, which is worth noting out loud: a kind-shaped SILHOUETTE is not
+  automatically dearer than a rectangle plus a glyph, because the glyph strokes it replaces
+  were themselves costing 4 vertices per point. Direction C's cost is concentrated in its
+  MANY-CORNERED subjects (tee, balancer, factory), not spread evenly across the direction.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="badge" d="M4 4 H60 V16 L40 36 V60 H24 V36 L4 16 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H60 V16 L40 36 V60 H24 V36 L4 16 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="port-in-a" d="M18 0 V4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-in-b" d="M46 0 V4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out" d="M32 60 V64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

@@ -1,0 +1,57 @@
+# clippy.toml  (workspace root) — the determinism-killers, hard-denied.
+#
+# Activated at deny level by the crate-root attributes in
+# crates/fabrico-core/src/lib.rs:
+#   #![deny(clippy::disallowed_types, clippy::disallowed_methods)]
+# and enforced in CI via `cargo clippy --all-targets --all-features -- -D warnings`.
+# A tripped lint fails the build (SC#5). Each entry keeps its determinism rationale.
+#
+# IMPORTANT: this gate is CLIPPY-load-bearing, NOT compiler-enforced. A plain
+# `cargo build` / `cargo test` (without clippy) does NOT catch any of these — only
+# `#![forbid(unsafe_code)]` is enforced by the compiler. CI MUST run the clippy
+# command above (and scripts/determinism-gate-negative-test.sh proves it bites).
+#
+# `allow-invalid = true` on the `rand::*` entries: `rand` is not a direct
+# dependency (only `rand_core` / `rand_chacha` are), so those paths do not resolve
+# in this graph. We keep them as a forward guard (in case `rand` is ever pulled in)
+# and silence the "does not refer to a reachable path" config notice that would
+# otherwise be emitted under `-D warnings`.
+
+disallowed-types = [
+    # CORE-04 — no floats in the sim
+    { path = "f32", reason = "floats are non-deterministic across CPU/OS/compiler; use fixed::I32F32 (Fx)" },
+    { path = "f64", reason = "floats are non-deterministic; use fixed::I32F32 (Fx)" },
+    # CORE-06 — no order-observed unordered collections
+    { path = "std::collections::HashMap", reason = "randomized iteration order breaks replay; use BTreeMap (or FxHashMap for point-lookups only, never iterated)" },
+    { path = "std::collections::HashSet", reason = "randomized iteration order breaks replay; use BTreeSet" },
+    # CORE-03/05 — no ambient clock / ambient RNG
+    { path = "std::time::Instant",   reason = "wall clock is non-deterministic; time is current_tick" },
+    { path = "std::time::SystemTime", reason = "wall clock is non-deterministic; time is current_tick" },
+    { path = "rand::rngs::ThreadRng", reason = "unseeded ambient RNG; use the seeded Ctx::rng()", allow-invalid = true },
+    # No IO / no ambient authority — type-level entries (catch construction + signatures)
+    { path = "std::fs::OpenOptions", reason = "no IO in the sim core (closes the OpenOptions::open bypass of fs::File::open)" },
+    { path = "std::net::TcpStream",  reason = "no network IO in the sim core" },
+    { path = "std::net::TcpListener", reason = "no network IO in the sim core" },
+    { path = "std::net::UdpSocket",  reason = "no network IO in the sim core" },
+    { path = "std::process::Command", reason = "no subprocess / ambient process IO in the sim core" },
+]
+
+disallowed-methods = [
+    { path = "std::time::Instant::now",    reason = "no wall clock in the sim" },
+    { path = "std::time::Instant::elapsed", reason = "wall clock is non-deterministic; time is current_tick" },
+    { path = "std::time::SystemTime::now", reason = "no wall clock in the sim" },
+    { path = "std::time::SystemTime::elapsed", reason = "wall clock is non-deterministic; time is current_tick" },
+    { path = "rand::thread_rng",           reason = "unseeded ambient RNG; use Ctx::rng()", allow-invalid = true },
+    { path = "rand::random",               reason = "unseeded ambient RNG; use Ctx::rng()", allow-invalid = true },
+    { path = "std::fs::read",          reason = "no IO in the sim core" },
+    { path = "std::fs::write",         reason = "no IO in the sim core" },
+    { path = "std::fs::read_to_string", reason = "no IO in the sim core" },
+    { path = "std::fs::File::open",    reason = "no IO in the sim core" },
+    { path = "std::fs::OpenOptions::new", reason = "no IO in the sim core (OpenOptions bypass of File::open)" },
+    { path = "std::fs::create_dir",     reason = "no IO in the sim core" },
+    { path = "std::fs::create_dir_all", reason = "no IO in the sim core" },
+    # No ambient environment / process
+    { path = "std::env::var",  reason = "no ambient environment in the sim core; inputs enter only as logged events" },
+    { path = "std::env::vars", reason = "no ambient environment in the sim core; inputs enter only as logged events" },
+    { path = "std::process::Command::new", reason = "no subprocess in the sim core" },
+]

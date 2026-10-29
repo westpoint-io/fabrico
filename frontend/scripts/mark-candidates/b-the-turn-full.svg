@@ -1,0 +1,65 @@
+<!--
+  b-the-turn-full.svg - Candidate B for Phase 79, "The route is chosen". The full cut,
+  serving 32px and 96px.
+
+  ROUTE. Route 2, "The Turn", from the logo route research, section 4.3: a belt
+  corner. A band of constant width turns 90 degrees with square corners inside and out,
+  entering the bottom edge, turning right at the top, and exiting the right edge. It carries
+  three tread slats and one item riding the corner.
+
+  TRANSLATED FROM THE SHIPPED RENDERER, NOT INVENTED. src/render/synth/beltGeometry.ts
+  already draws this shape: a full-detail belt tile is two rail rectangles plus the marching
+  tread dashes, and it says in its own comment that there is NO interior rectangle, because
+  the belt interior is hollow ramp[0] and the board underneath is the same ramp[0], so an
+  interior fill would be an invisible rectangle spending vertices to draw nothing. This
+  drawing copies that construction exactly, which is part of why the research rates this
+  route's animation as free.
+
+  THE HOLLOW IS UNPAINTED AND THAT IS THE POINT. The interior of the turn is the page ground
+  showing through, not ink. It is produced by winding the inner contour opposite to the outer
+  so the default nonzero rule cuts it, because the chrome-asset dialect refuses fill-rule.
+  This satisfies the contrast rule without a stroked frame, and it is verified by rendering
+  the file and looking at the result, never by reading the path data: path data that looks
+  wound and is not renders as a solid slab, and a solid slab would read as a passing
+  candidate.
+
+  NOT A SHIPPED ASSET. This file is a throwaway comparison candidate. Nothing in the
+  application imports it, and nothing renders it outside the Phase 79 comparison sheet.
+
+  WHY IT IS NOT IN frontend/src/chrome/assets/ (decision D-09). The discovery walk in
+  scripts/lint-svg.ts and in render/assets/vertexBudget.test.ts is flat and non-recursive, so
+  a file dropped into that directory silently joins the shipped asset set and moves three
+  hand-edited count literals. A file dropped into a subdirectory of it is worse: an asset
+  that looks shipped and that no gate measures at all. Phase 79 leaves that directory
+  byte-identical to where it started.
+
+  THE THREE LAYERS, IN PAINT ORDER (later paints on top):
+
+    1. rails  fill  fab-ink           hollow L band, 12u overall, 2u rails, 8u hollow
+    2. slats  fill  fab-ink           three 2u tread bars floating in the hollow
+    3. item   fill  fab-accent-item   a 4u square riding the corner of the hollow
+
+  Those paint tokens are named without their leading dashes on purpose. Two consecutive
+  hyphens are illegal inside an XML comment, and that single character pair is what makes the
+  shipped chrome/assets/logomark.svg unopenable by every strict parser in this tree. The fill
+  attributes below sit outside the comment and keep their normal var(...) form.
+
+  THE RAILS ARE TWO SHAPES, NOT ONE, AND THAT IS THE TRUE READING. The hollow reaches both
+  the bottom edge and the right edge, so it cuts the band into an outer rail and an inner
+  rail with no ink joining them anywhere inside the box. The shipped renderer draws the same
+  two rails for the same reason. A reader counting layers gets one; the craft rule counts
+  connected shapes and gets two.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 79. No icon pack was consulted, copied,
+  traced or redrawn. Not game-icons.net, whose CC-BY-3.0 licence redrawing does not clear.
+  Not Remix Icon, whose licence forbids logo use by name. No AI-generated image was used at
+  any point.
+
+  Geometry: integer coordinates only, commands limited to M H V L Z, zero curves, one path
+  per semantic layer carrying its own stable data-part, one element per line.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="rails" d="M 6 32 V 6 H 32 V 18 H 18 V 32 Z M 8 32 H 16 V 16 H 32 V 8 H 8 Z" fill="var(--fab-ink)" />
+  <path data-part="slats" d="M 10 26 H 14 V 28 H 10 Z M 10 20 H 14 V 22 H 10 Z M 24 10 H 26 V 14 H 24 Z" fill="var(--fab-ink)" />
+  <path data-part="item" d="M 10 10 H 14 V 14 H 10 Z" fill="var(--fab-accent-item)" />
+</svg>

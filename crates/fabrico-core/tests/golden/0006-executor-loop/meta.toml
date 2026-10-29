@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0006-executor-loop` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0006-executor-loop"
+builder = "source_sink_deadletter(Http) + logged CommandResult/Timeout outcomes"
+seed = "0x0000000000065006"
+params = "Success audit-only; Failure+Timeout route CommandFailure/CommandTimeout faults to the emitting sink's FAULT_PORT inbox (dead-letter)"
+tick_count = 6
+hash_lines = 6
+schema_version = 2
+snapshot_schema_version = 14

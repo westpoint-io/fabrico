@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fabrico - Art Board (dev only)</title>
+    <!--
+      DEV-ONLY art board (BOARD-01, plan 57-01). Four claims, and DELIBERATELY NO
+      NUMBERS: /src/spike/artBoard.ts is the authoritative source for every constant
+      this board uses - the column order, the subjects and their footprints, the zoom
+      levels, the grid module, the cell box, the substrate. None of them is duplicated
+      here. This comment exists because pixel-guard.html's own header copied numbers
+      into prose and has since drifted from the module it describes; a comment that
+      restates a constant is a second source of truth that nothing keeps honest.
+
+        - Root-level, so Vite serves it in dev at /art-board.html.
+        - NEVER a build input. vite.config.ts declares no extra rollup inputs, so
+          index.html is the only one, and this page is therefore STRUCTURALLY absent
+          from dist rather than absent by convention. A gate asserts it after a build.
+        - NEVER imported by App.tsx or main.tsx. The board is not a live-canvas mode:
+          no query flag, no mount, no global, no keybinding.
+        - A COMPARISON INSTRUMENT, not a variant system (D-05, 57-UI-SPEC Part G). It
+          ranks nothing and records nothing. The direction list is a board-local const
+          that is never exported out of src/spike/; a direction registry under
+          src/render/ is the half-built skin picker SKIN-02 deleted one phase ago. The
+          only record of a choice is the art-direction lock, written by the maintainer.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="art-board-root"></div>
+    <script type="module" src="/src/spike/artBoard.ts"></script>
+  </body>
+</html>

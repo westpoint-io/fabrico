@@ -1,0 +1,198 @@
+{
+  "tick": 8,
+  "full": true,
+  "placed": [
+    {
+      "id": 100,
+      "kind": 5,
+      "cell_x": 0,
+      "cell_y": 0,
+      "state": 1,
+      "w": 2,
+      "h": 3,
+      "rot": 1,
+      "ports": [
+        {
+          "index": 0,
+          "cell_x": 0,
+          "cell_y": 0,
+          "side": 3,
+          "role": 0,
+          "medium": 0
+        },
+        {
+          "index": 1,
+          "cell_x": 1,
+          "cell_y": 2,
+          "side": 1,
+          "role": 1,
+          "medium": 0
+        },
+        {
+          "index": 2,
+          "cell_x": 0,
+          "cell_y": 2,
+          "side": 2,
+          "role": 2,
+          "medium": 0
+        }
+      ],
+      "load": 2,
+      "label": null
+    },
+    {
+      "id": 101,
+      "kind": 7,
+      "cell_x": 5,
+      "cell_y": 2,
+      "state": 0,
+      "w": 1,
+      "h": 1,
+      "rot": 0,
+      "ports": [],
+      "load": 0,
+      "label": null
+    },
+    {
+      "id": 103,
+      "kind": 11,
+      "cell_x": 2,
+      "cell_y": 6,
+      "state": 0,
+      "w": 4,
+      "h": 1,
+      "rot": 0,
+      "ports": [],
+      "load": 0,
+      "label": {
+        "text": "Café 注文",
+        "colour": 3
+      }
+    },
+    {
+      "id": 102,
+      "kind": 7,
+      "cell_x": 9,
+      "cell_y": 7,
+      "state": 3,
+      "w": 1,
+      "h": 1,
+      "rot": 0,
+      "ports": [
+        {
+          "index": 0,
+          "cell_x": 9,
+          "cell_y": 7,
+          "side": 3,
+          "role": 0,
+          "medium": 0
+        }
+      ],
+      "load": 4,
+      "label": null
+    }
+  ],
+  "removed": [],
+  "belts": [
+    {
+      "id": 200,
+      "latency": 8,
+      "fill": 1024,
+      "items": [
+        {
+          "arrival_tick": 15,
+          "tag": 1
+        },
+        {
+          "arrival_tick": 18,
+          "tag": 3
+        }
+      ],
+      "tiles": [
+        {
+          "cell_x": 0,
+          "cell_y": 0,
+          "kind": {
+            "Straight": {
+              "axis": 0
+            }
+          }
+        },
+        {
+          "cell_x": 1,
+          "cell_y": 0,
+          "kind": {
+            "Corner": {
+              "from": 1,
+              "to": 2
+            }
+          }
+        }
+      ],
+      "docks": [
+        {
+          "end": "Head",
+          "node": 101,
+          "port": 0
+        },
+        {
+          "end": "Tail",
+          "node": 100,
+          "port": 1
+        },
+        {
+          "end": "Tail",
+          "node": 100,
+          "port": 2
+        }
+      ],
+      "ticks_per_slot": 7
+    }
+  ],
+  "can_undo": true,
+  "can_redo": false,
+  "wires": [
+    {
+      "id": 300,
+      "from": {
+        "node": 100,
+        "port": 1
+      },
+      "to": {
+        "node": 101,
+        "port": 0
+      },
+      "path": [
+        {
+          "cell_x": 0,
+          "cell_y": 0,
+          "kind": {
+            "Straight": {
+              "axis": 0
+            }
+          }
+        },
+        {
+          "cell_x": 1,
+          "cell_y": 0,
+          "kind": {
+            "Corner": {
+              "from": 1,
+              "to": 2
+            }
+          }
+        }
+      ],
+      "pulses": [
+        {
+          "entry_tick": 6,
+          "hop_ticks": 1,
+          "direction": 1
+        }
+      ]
+    }
+  ],
+  "resync": false,
+  "generation": 7,
+  "swap_floor": 5
+}

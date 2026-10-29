@@ -1,0 +1,40 @@
+[package]
+name = "fabrico-scenario"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# THE headless Rust scenario-test harness (CONTEXT Area 1). It builds, drives, and
+# digests deterministic `Core` scenarios entirely from Rust — no renderer, no host,
+# no async runtime, no desktop shell. It depends ONLY on the headless `fabrico-core`,
+# the headless command layer `fabrico-command`, and the wire-contract
+# `fabrico-protocol` (+ blake3/postcard/serde). NO tokio/axum/reqwest/lettre/tauri/
+# pixi/wgpu — the `deps_are_headless` dependency-fence test (tests/deps_headless.rs)
+# fails the build if any renderer/IO/host dependency leaks into the normal tree.
+#
+# Single-digest-path rule (threat T-13-HASH): `oracle::tick_hash` is the ONE public
+# state-equality digest = blake3(snapshot(core)). Never fork it or add a second
+# field-walking digest path.
+
+[dependencies]
+fabrico-command  = { path = "../fabrico-command" }
+fabrico-core     = { path = "../fabrico-core" }
+fabrico-protocol = { path = "../fabrico-protocol" }
+# THE state-equality digest (blake3 of the snapshot bytes) — pinned to match
+# fabrico-core's dev-only blake3 oracle pin (1.8) so the single digest path is
+# byte-identical across the workspace.
+blake3           = "1.8"
+postcard         = { version = "1", features = ["use-std"] }
+serde            = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# The data-driven golden + determinism test layer over the committed fixture corpus
+# (Plan 07). `rstest` `#[files("fixtures/*.postcard")]` generates ONE test case per
+# fixture; `insta` freezes each fixture's blake3 `tick_hash` (PRIMARY) + id-free
+# StateSummary (secondary) as a committed FILE snapshot under `snapshots/`, 1:1 with
+# fixtures. CI runs `INSTA_UPDATE=no` so an unblessed snapshot change fails the build.
+# crates.io-approved, no checkpoint required (insta since 2019 ~1.5M/wk; rstest since
+# 2018 ~1.9M/wk) — threat T-13-SC accept.
+insta  = "1.48"
+rstest = "0.26"

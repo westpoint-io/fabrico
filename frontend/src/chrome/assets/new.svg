@@ -1,0 +1,37 @@
+<!--
+  chrome/assets/new.svg - the NEW BOARD glyph (SAVE-04). A CHROME GLYPH: nothing on the
+  board ever renders it, and it has no canvas subject at all. `render/assets/*.svg` are
+  machine art tessellated by Pixi; this directory is consumed by the DOM only.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures.
+
+  THE MOTIF. A BLANK sheet with a folded top-right corner - the file-lifecycle "start
+  over" affordance. Carried from the 8x8 bit matrix this file replaces (`icons.tsx` NEW,
+  deleted in plan 59-02), whose fold was a two-bit stair. The emptiness is load-bearing:
+  the sheet's interior carries no ink at all, which is what says "new" rather than "a
+  file". The fold is drawn as a 6u true diagonal on the sheet outline plus a 2u corner
+  crease, so the corner reads as TURNED rather than cut - `save.svg`'s notch is the cut,
+  and the two glyphs sit two buttons apart.
+
+  COLOUR: ZERO HEX. Every fill and stroke is literally `currentColor`, so the glyph takes
+  the colour of the control it sits in - it brightens with `.fab-tool-btn:hover` and
+  desaturates with `:disabled`. A baked value would do neither, silently. Held at `fail`
+  severity by the chrome-scoped ink rule in `scripts/lint-svg.ts`.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 59. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or Remix Icon
+  (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L
+  Z, zero curves, one <path> per semantic part carrying its own stable data-part, one
+  element per line. 3u structural / 2u detail, the locked two-weight system.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="sheet" d="M 6 6 H 20 L 26 12 V 26 H 6 Z" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="fold" d="M 20 6 V 12 H 26" fill="none" stroke="currentColor" stroke-width="2" />
+</svg>

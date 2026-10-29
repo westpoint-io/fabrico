@@ -1,0 +1,61 @@
+<!--
+  candidates/a/source.svg - DIRECTION A draft for the SOURCE machine (BOARD-01, plan 57-01).
+
+  A DRAFT, NOT SHIPPED ART. This file exists only to be compared on the art board
+  (/art-board.html) and is deliberately outside the shipped registry: it is NOT in
+  svgAssets.ts's ASSET_SOURCES and its name is NOT in the AssetName type. It lives in
+  a SUBDIRECTORY so Phase 56's non-recursive production walk (scripts/lint-svg.ts
+  lintDir over render/assets/*.svg) never sees it - the same __fixtures__ mechanism,
+  reused rather than reinvented. Phase 57 locks a DIRECTION; Phase 58 authors the art.
+
+  DIRECTION A - "blueprint continuation" (57-CONTEXT.md D-02). It extends the ALREADY
+  LOCKED belt language to a machine: an open chassis whose structure is carried by the
+  3-unit outline stroke, with minimal fill. The belt half of this language is not a
+  candidate and is not up for discussion - 53-BELT-LOCK.md, Direction B "Blueprint /
+  clean line", the maintainers' lock, 2026-07-26. A machine drawn in this direction is
+  therefore drawn AGAINST a settled belt language, which is the whole reason A exists
+  as the coherence baseline.
+
+  SEMANTIC VOCABULARY - CARRIED, not discarded. synth/glyphs.ts:29 says of SOURCE:
+  "spawn eye with a filled pupil". That vocabulary is prior art and this draft carries
+  it: `eye` is the open lens, `pupil` is the filled centre. The lens is drawn as a
+  straight-edged diamond rather than a curved almond because this direction has zero
+  curves (see below); the READING (an eye that spawns) is preserved, the CONSTRUCTION
+  is re-expressed in the direction's own language. Whether Phase 58's shipped SOURCE
+  keeps the eye is a Phase 58 decision, not one this draft makes.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (which ART-04 permits as a VOCABULARY
+  REFERENCE ONLY), and certainly not game-icons.net (CC-BY-3.0, which redrawing does not
+  clear) or Remix Icon (non-OSI, bans icon-pack redistribution), both of which ART-04
+  excludes outright. A locked direction must never be one that cannot ship.
+
+  COLOUR-SOURCE EXEMPTION - the pilot.svg note, extended to the candidate directories.
+  The standing rule (pixelGuard.tsx) is "all colours come from LOCKED_SKIN via the real
+  painters, no hand-authored hex". An SVG file necessarily carries literal hex, so this
+  file is exempt BECAUSE IT NEVER SHIPS - it is a draft on a dev-only comparison page.
+  Its literals are exactly the named LOCKED_SKIN ramp values:
+    #b0bacb = LOCKED_SKIN.palette.ramp[4] (highlight) - chassis + eye stroke, pupil fill
+    #565f70 = LOCKED_SKIN.palette.ramp[3]             - the outflow port stub
+    #1b1f27 = LOCKED_SKIN.palette.ramp[0] (substrate) - the board's cell background,
+                                                        not authored here
+  Whether SHIPPED artwork carries literal hex or a per-part tint resolved from
+  LOCKED_SKIN at render time is a Phase 58 decision (ART-02). Do not read this exemption
+  as that decision having been made.
+
+  AUTHORING CONTRACT: render/assets/README.md, in full. viewBox exactly 0 0 32 32 (SOURCE
+  is 1x1 - crates/fabrico-core/src/state.rs base_footprint, frozen); integer coordinates
+  only; <path> elements only, one per line; a unique data-part per path; an explicit fill
+  and/or stroke on every path; no transform, no inline style, no banned element. Commands
+  are limited to M H V L Z - ZERO curves. The `curve` lint rule is warn severity, so this
+  is a choice, not compliance: buildAdaptiveBezier tessellates at a hardcoded scale 1 and
+  the result is cached on the shared context, so a curve authored here serves stale,
+  faceted geometry at the 1.77x and 2x rows the board exists to judge. Straight edges are
+  exact at every scale (VEC-03).
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="eye" d="M10 16 L16 10 L22 16 L16 22 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pupil" d="M14 14 H18 V18 H14 Z" fill="#b0bacb" />
+  <path data-part="port-out" d="M28 16 H32" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

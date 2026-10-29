@@ -1,0 +1,61 @@
+<!--
+  docs/brand/fabrico-icon-16.svg - the 16 UNIT OPTICAL CUT of the Fabrico mark (MARK-05).
+  The drawing a SIZE AWARE consumer paints below 24 pixels: a compositor window icon, a
+  proper freedesktop icon theme lookup, and the Windows and macOS containers. One author
+  unit is one device pixel at 16px, so every edge lands whole and nothing is blended.
+
+  WHAT DOES NOT PAINT IT, measured 2026-09-09. This file used to say the drawing was for
+  "taskbar, tray, window decoration and Dock", and two measurements contradict it. A
+  desktop shell's bar can render the active window as text only, with no taskbar or dock
+  widget that paints a window icon at all. And some Linux launchers index icons by bare
+  basename with the size directory discarded and no size ordering, so they paint
+  whichever layer the filesystem returned first: a RESAMPLED larger layer rather than
+  this cut, measured at 50 distinct colours in a 24 pixel box against the hand-cut
+  layer 8.
+
+  INSTALLING THIS CUT DOES NOT MEAN A GIVEN PANEL SHOWS IT. Measure the surface, do not
+  infer it from the file having been installed. Any later work has to read this before it
+  claims anything about the favicon and the web surfaces.
+
+  AUTHORED ON THIS GRID. NEVER RESAMPLED FROM THE MASTER (D-04). MARK-05 exists precisely
+  because a downscale cannot produce this drawing, which is also why tauri icon cannot do
+  this job: a shape correct at 48 pixels is wrong at 16, and what is wrong here is PAINT
+  rather than geometry.
+
+  THE ONE PLACE IT DEPARTS FROM HALF SCALE, stated so the next reader does not "fix" it
+  back. The cell and the item are exact half scale of the master. THE BELT IS NOT: it is a
+  SOLID INK BAR, three units tall and unstroked, where half of the painted belt box on the
+  master would be four units tall and would be a panel filled band inside an ink stroke. At
+  16px that band renders as a 1px hollow outline with a dark interior and reads as a second
+  outlined rectangle competing with the cell frame. Filling it with ink is the optical fix
+  and it is the whole reason this file exists. frontend/src/render/assets/icon16Cut.test.ts
+  asserts the departure, so restoring half scale reddens the unit suite.
+
+  THE CELL IS A FILLED RING, not a stroked rectangle: an outer contour and an inner contour
+  wound in reverse, so the hole falls out of the default nonzero rule. There is no fill rule
+  attribute in this file. frontend/src/chrome/svgToElements.ts throws on that attribute by
+  name, and the reversed winding renders byte identically without it.
+
+  NOTHING IN THE APP IMPORTS IT: no component, no Vite input and no bundle reaches docs/, so
+  this drawing is a brand source rather than a shipped asset. It serves the operating system
+  only (D-05).
+
+  GENERATED FILE. Written by frontend/scripts/build-icons.ts and regenerated rather than
+  edited: run npm run build:icons. frontend/src/render/assets/iconCuts.test.ts rebuilds it in
+  memory and compares byte for byte, so a hand edit reddens the unit suite.
+
+  THE PAINT IS DERIVED, NOT TRANSCRIBED. The three values below are read out of
+  skinToCssVars(LOCKED_SKIN) at generation time, by the tokens fab-substrate, fab-ink and
+  fab-accent-item. No hex literal for any of them appears in the generator.
+
+  ART-04 PROVENANCE: authored from scratch, from the chosen and approved Fabrico mark. No
+  icon pack was consulted, copied, traced or redrawn. Nothing here derives from
+  game-icons.net (CC-BY-3.0, which redrawing does not clear) or from Remix Icon, whose
+  licence forbids logo and trademark use by name.
+-->
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="plate" d="M 0 0 H 16 V 16 H 0 Z" fill="#1b1f27" />
+  <path data-part="rail" d="M 1 11 H 15 V 14 H 1 Z" fill="#b0bacb" />
+  <path data-part="cell" d="M 4 1 H 12 V 9 H 4 Z M 5 2 V 8 H 11 V 2 Z" fill="#b0bacb" />
+  <path data-part="item" d="M 6 3 H 10 V 7 H 6 Z" fill="#ffb454" />
+</svg>

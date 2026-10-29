@@ -1,0 +1,48 @@
+<!--
+  candidates/c/tee.svg - DIRECTION C draft for the TEE machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION C - "iconographic badge": the silhouette itself differs per kind. C holds
+  Direction B's paint system exactly so that B vs C isolates the SILHOUETTE with the
+  treatment held fixed. See c/source.svg for the full statement of that control.
+
+  SEMANTIC VOCABULARY - CARRIED, AND THIS IS THE SUBJECT WHERE C'S PROPOSITION IS AT ITS
+  PUREST. synth/glyphs.ts:55-57 says of TEE: "one-IN / two-OUT fork ... silhouette reads as
+  an opening '<': clearly not a funnel or a diamond." In A and B that fork is three 2u
+  strokes stamped inside a rectangle. Here it IS the outline: a solid Y whose trunk enters
+  left and whose two arms exit upper-right and lower-right, with the crotch notched at
+  (46,32) so the split is legible at the silhouette level.
+
+  NO INTERIOR DETAIL, AND THAT IS THE DIRECTION RATHER THAN A SHORTAGE OF EFFORT. Adding a
+  glyph inside a shape that already says "fork" would be Direction B's construction wearing
+  C's outline, and it would make this cell answer a question the board is not asking. If a
+  bare Y reads as under-drawn next to b/tee.svg's plate-plus-glyph, that IS the finding.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 98 vertices / 49 points, band `ok`. Eleven silhouette points cost 22 (fill) +
+  52 (3u outline) = 74 vertices, i.e. three quarters of this cell - which is the honest
+  shape of Direction C's cost: it is spent on the outline, not on detail.
+
+  THE PORT STUBS ARE HELD CONSTANT with A and B (identical geometry, identical #565f70,
+  identical 2u), so the silhouette had to be drawn to MEET them: the left edge spans
+  y=26..38 to receive the inlet at y=32, and the two right edges span y=12..24 and y=40..52
+  to receive the outlets at y=18 and y=46. Making the shape fit the control rather than
+  moving the control is what keeps this cell comparable to its A and B siblings.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="badge" d="M4 26 H34 L52 12 H60 V24 L46 32 L60 40 V52 H52 L34 38 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 26 H34 L52 12 H60 V24 L46 32 L60 40 V52 H52 L34 38 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="port-in" d="M0 32 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-up" d="M60 18 H64" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-down" d="M60 46 H64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

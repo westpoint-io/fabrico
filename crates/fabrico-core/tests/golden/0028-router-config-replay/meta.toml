@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0028-router-config-replay` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0028-router-config-replay"
+builder = "inline source -> router(3 Out ports) -> one collector per port + edit-log Configure(Router{routes:[(offset 0 'A')->port 0, (offset 0 'B')->port 1], default:Some(port 2)}) @tick1; fire the SAME item 'A1' @tick0 (pre-Configure, routed to port 2) and @tick2 (post-Configure, routed to port 0)"
+seed = "0x000000000028c0de"
+params = "ROUTE-03 / THAW-04 routing-table determinism: a logged Configure replaces the router's ordered route table and its default Out port; the SAME item bytes leave a DIFFERENT Out port after the edit than before it, and the frozen per-tick hashes bake that difference in. Routes are pairwise distinct RouteKeys on pairwise distinct Out ports plus a Some(default) naming a port no route names; code_hash is the [0u8;32] N/A value the shipped command path emits for a non-Factory config"
+tick_count = 8
+hash_lines = 8
+schema_version = 2
+snapshot_schema_version = 14

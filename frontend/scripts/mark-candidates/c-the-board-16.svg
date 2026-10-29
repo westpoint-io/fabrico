@@ -1,0 +1,52 @@
+<!--
+  c-the-board-16.svg - Candidate C for Phase 79, "The route is chosen". The 16px cut.
+
+  ROUTE. Route 1, "The Board", from the logo route research, section 4.2. Same
+  subject as c-the-board-full.svg: a factory board of discrete cells with an item arriving at
+  a sink. This is a DIFFERENT DRAWING of that subject, not a smaller one.
+
+  HAND-AUTHORED, NEVER SCALED (decision D-08). The full cut carries five cells on a 2u
+  gutter. At 16px one device pixel is two units, so that gutter would be a single device
+  pixel and the five cells would read as one grey block. This cut therefore drops the
+  outlined source and two of the five cells, thickens the cells from 8u to 12u, and widens
+  the gutter from 2u to 4u. That is three shapes exactly at the ceiling of three, and it
+  trades the source-versus-belt semantic for legibility, which is what a 16px cut is for:
+  remove elements, thicken what remains.
+
+  WHAT IS LOST, SAID PLAINLY. With the outlined source gone, this cut can no longer say which
+  cell is a machine and which is a belt. It says only "a board with cells and an item". That
+  is a real cost of the route at this size and the comparison sheet states it rather than
+  leaving a reader to infer it.
+
+  NOT A SHIPPED ASSET. This file is a throwaway comparison candidate. Nothing in the
+  application imports it, and nothing renders it outside the Phase 79 comparison sheet.
+
+  WHY IT IS NOT IN frontend/src/chrome/assets/ (decision D-09). The discovery walk in
+  scripts/lint-svg.ts and in render/assets/vertexBudget.test.ts is flat and non-recursive, so
+  a file dropped into that directory silently joins the shipped asset set and moves three
+  hand-edited count literals. A file dropped into a subdirectory of it is worse: an asset
+  that looks shipped and that no gate measures at all. Phase 79 leaves that directory
+  byte-identical to where it started.
+
+  THE TWO LAYERS, IN PAINT ORDER (later paints on top):
+
+    1. belt  fill  fab-ink           two 12u cells, one path, two subpaths
+    2. sink  fill  fab-accent-item   the amber 12u cell, bottom right
+
+  Those paint tokens are named without their leading dashes on purpose. Two consecutive
+  hyphens are illegal inside an XML comment, and that single character pair is what makes the
+  shipped chrome/assets/logomark.svg unopenable by every strict parser in this tree. The fill
+  attributes below sit outside the comment and keep their normal var(...) form.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 79. No icon pack was consulted, copied,
+  traced or redrawn. Not game-icons.net, whose CC-BY-3.0 licence redrawing does not clear.
+  Not Remix Icon, whose licence forbids logo use by name. No AI-generated image was used at
+  any point.
+
+  Geometry: integer coordinates only, commands limited to M H V L Z, zero curves, one path
+  per semantic layer carrying its own stable data-part, one element per line.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="belt" d="M 2 2 H 14 V 14 H 2 Z M 2 18 H 14 V 30 H 2 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 18 18 H 30 V 30 H 18 Z" fill="var(--fab-accent-item)" />
+</svg>

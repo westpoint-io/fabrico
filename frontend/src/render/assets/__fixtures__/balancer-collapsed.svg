@@ -1,0 +1,47 @@
+<!--
+  __fixtures__/balancer-collapsed.svg - A PERMANENT FAILING FIXTURE. NOT SHIPPED ART.
+
+  WHAT THIS IS. A BALANCER whose glyph is MERGE's funnel, copied verbatim from
+  `render/assets/merge.svg`. It is the mutation that `assets/shapeDistinctness.test.ts`
+  is asserted to FAIL on, and it exists so the shape gate has been SHOWN to fail rather
+  than merely asserted to work.
+
+  WHY IT EXISTS. Phase 57 mutation 57-05 M4 is on record and survived that phase:
+  copying one candidate over another REDDENED NOTHING, because every gate in the tree
+  checked conformance (does it lint, does it fit the vertex budget, does it use the
+  right ink) and cost, and no gate checked DISTINCTNESS. `57-ART-LOCK.md` section 5
+  ceiling 4 then handed Phase 58 the MERGE / BALANCER pair as an OPEN EXPOSURE: under
+  Direction A the two are the same 4u-inset rectangle and only the 2u glyph separates
+  them. The design decision on 2026-08-01 was to separate them by glyph MASS DISTRIBUTION and
+  to GATE it, with no exemption and no allowlist entry. This file is the proof that the
+  gate can fire.
+
+  THE THREE INDEPENDENT WAYS IT FAILS, all asserted:
+
+    1. SYMMETRY CLASS. MERGE's funnel is (symV YES, symH NO). The real BALANCER is
+       (YES, YES). So a collapsed balancer takes MERGE's class and the 2x2 group's
+       pairwise class-distinctness rule breaks.
+    2. PERIPHERAL MASS. A balancer must put >= 0.70 of its glyph ink outside the
+       central 50% box of its own bounding box - that is what "mass at the four
+       corners" means as a number. A funnel does not.
+    3. OCCUPANCY BACKSTOP. It carries MERGE's paths verbatim, so its normalised
+       Hamming distance from MERGE is EXACTLY 0.0 - the symmetric difference of the
+       two ink sets is empty. It therefore sits below any positive floor, which is the
+       cross-check on the floor's derivation: if a chosen floor ever failed to catch
+       this, the floor would be the thing that is wrong.
+
+  WHERE IT LIVES, AND WHY THAT IS A CONTRACT. `__fixtures__/` is excluded from the
+  NON-RECURSIVE production walk that `scripts/lint-svg.ts`, `assets/vertexBudget.test.ts`,
+  `assets/geometryDigest.test.ts` and `assets/shippedAssets.test.ts` all share. This file
+  is therefore invisible to every shipped-asset gate and cannot be promoted by accident -
+  the same placement contract `__fixtures__/lint/odd-coords.svg` (plan 58-02) and the
+  `geometry.digest.json` mutation demonstration (plan 56-05) already rely on.
+
+  DO NOT "FIX" THIS FILE. A green run here means the gate stopped working.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="mouth" d="M 12 16 H 52" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="wall-left" d="M 12 16 L 32 38" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="wall-right" d="M 52 16 L 32 38" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="neck" d="M 32 38 V 50" fill="none" stroke="#b0bacb" stroke-width="2" />
+</svg>

@@ -1,0 +1,64 @@
+<!--
+  candidates/d/factory.svg - DIRECTION D draft for the FACTORY machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 3x3 -> viewBox 0 0 96 96, the largest in the set and the HERO machine (it is
+  the one that runs user JS). Authored at 96x96 because 96px is what ships.
+
+  DIRECTION D - "schematic / circuit": line-only, terminal pins at the ports. The full
+  statement of D's line-only rule, its A-ink control and the frame/chassis convergence is at
+  d/source.svg.
+
+  THE HERO IS NOT BUDGET-CONSTRAINED, and this draft is not simplified as though it were.
+  MEASURED (57-RESEARCH F2.1): identical geometry authored at 0 0 32 32 and at 0 0 96 96
+  tessellates to BYTE-IDENTICAL vertex counts. The 400-vertex ceiling means exactly the same
+  thing on a FACTORY as on a SOURCE.
+
+  SEMANTIC VOCABULARY - CARRIED, AFTER THE REJECTION WAS CONSIDERED AND TURNED DOWN.
+  synth/glyphs.ts:16 says of FACTORY: "code braces { }, the hero machine." The obvious D move
+  was to reject the braces and substitute an IC symbol - a die with numbered pins, the
+  schematic word for "a part that computes". It was turned down for a fairness reason rather
+  than an aesthetic one: the braces are the only motif in the whole vocabulary that says WHAT
+  A MACHINE IS rather than what it does to flow, and A, B and C all carry them. Dropping them
+  in D alone would have meant the board's fourth column answered a different question about
+  the hero than the other three, and a reader comparing the four factories would have been
+  comparing motifs instead of directions. So the braces are carried, drawn identically to
+  a/factory.svg's - which costs D nothing in language, because A's braces are ALREADY pure
+  H/V runs, i.e. already right-angle traces.
+
+  WHAT D ADDS INSTEAD IS THE FRAMING: an inner `die` boundary inside the outer `frame`, with
+  the input and output traces entering and leaving it. The component-inside-a-component
+  reading is the schematic way of saying "this box contains logic", and it is the part of
+  this cell that is genuinely Direction D rather than Direction A.
+
+  THE COST OF THAT DECISION IS STATED: two nested rectangles on a 96x96 cell is a lot of
+  frame for one glyph, and the hero is where D's D-02 risk - reading as a diagram rather than
+  as a factory - is most exposed, because a diagram of a factory is exactly what this is. Set
+  it beside c/factory.svg, which proposes a literal factory BUILDING, and the two hero cells
+  are the sharpest either/or on the board.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 160 vertices / 80 points, band `ok`. The second dearest cell in the 32-candidate
+  set, behind c/factory.svg's 166 and ahead of b/factory.svg's 112 - and the whole of that
+  gap is two nested outlines and two pins, on a drawing with no fills in it at all.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="frame" d="M4 4 H92 V92 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="die" d="M24 24 H72 V72 H24 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="trace-in" d="M4 48 H24" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="trace-out" d="M72 48 H92" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="brace-left" d="M44 34 H34 V46 H28 V50 H34 V62 H44" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="brace-right" d="M52 34 H62 V46 H68 V50 H62 V62 H52" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-in" d="M2 45 V51" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-out" d="M94 45 V51" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="port-in" d="M0 48 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out" d="M92 48 H96" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

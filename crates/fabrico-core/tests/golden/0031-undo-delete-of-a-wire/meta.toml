@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0031-undo-delete-of-a-wire` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0031-undo-delete-of-a-wire"
+builder = "GridSession: place_router_preset(Electrical) x2 + DrawWire(Out->In) + Delete(the minted wire) + Undo - the Undo now succeeds and the wire comes back"
+seed = "0x000000000031d00d"
+params = "UNDO-01/UNDO-08: blessed PRE-FIX in plan 73-02 with the Undo refused, TIGHTENED in plan 73-05. The Undo is now expected to succeed and the generator asserts the restored wire runs between the identical endpoints with its forward link back. The hashes.txt moved when 73-03 landed the DrawWire restore leg, which is what a fixture blessed after a fix can never show"
+tick_count = 30
+hash_lines = 30
+schema_version = 2
+snapshot_schema_version = 14

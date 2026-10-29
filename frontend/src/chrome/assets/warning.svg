@@ -1,0 +1,47 @@
+<!--
+  chrome/assets/warning.svg - the WARNING glyph. A CHROME GLYPH: nothing on the board ever
+  renders it, and it has no canvas subject at all. `render/assets/*.svg` are machine art
+  tessellated by Pixi; this directory is consumed by the DOM only.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures.
+
+  THE MOTIF. A triangle carrying an exclamation bar and dot. It is drawn as an OUTLINED
+  triangle with INKED interior marks, and that is a deliberate departure from the 8x8 bit
+  matrix this file replaces (`icons.tsx` WARNING, deleted in plan 59-02), which was a
+  SOLID triangle with the exclamation punched out as NEGATIVE SPACE.
+
+  WHY THE NEGATIVE-SPACE TECHNIQUE DID NOT SURVIVE, recorded so a reader finds a decision
+  rather than a discrepancy. Punching a hole through a filled path needs either a second
+  paint (there is only one ink here - the glyph is entirely `currentColor`, over an unknown
+  button body) or `fill-rule="evenodd"` on a two-subpath path. `fill-rule` is NOT a member
+  of the closed five-attribute allowlist in `chrome/svgToElements.ts`, and that allowlist
+  is a whitelist rather than a sanitiser: a sixth attribute is a NAMED THROW, never a
+  silent pass-through. Widening a security allowlist to buy a fill technique is the wrong
+  trade, so the outlined form is used instead. It carries the same reading - triangle,
+  bar, dot - at the same mass, and it matches the two-weight stroke system every other
+  glyph in this directory obeys.
+
+  COLOUR: ZERO HEX, as everywhere here. This glyph is the one whose DEFAULT wrapper tint is
+  `fab-destructive` rather than `fab-ink` - but that default lives on the
+  `WarningIcon` component, not in this file, because the same artwork is also drawn in an
+  inherited ink inside the guard dialogs. Held at `fail` severity by the chrome-scoped ink
+  rule in `scripts/lint-svg.ts`.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 59. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or Remix Icon
+  (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L
+  Z, zero curves, one <path> per semantic part carrying its own stable data-part, one
+  element per line. 3u structural / 2u detail, the locked two-weight system.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="triangle" d="M 16 6 L 28 26 H 4 Z" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="bar" d="M 16 12 V 18" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="dot" d="M 14 20 H 18 V 24 H 14 Z" fill="currentColor" />
+</svg>

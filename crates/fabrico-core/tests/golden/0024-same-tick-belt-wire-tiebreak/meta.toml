@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0024-same-tick-belt-wire-tiebreak` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0024-same-tick-belt-wire-tiebreak"
+builder = "inline reply lane (caller->forward_wire->factory->return_wire->caller) + belt lane (belt_source->belt(1)->caller); a discovered-tick belt fire lands its item on the caller the SAME tick the wire reply does"
+seed = "0x0000000000245117"
+params = "WIRE-02 tie-break: a wire reply and a belt item converge on the caller's port 0 the SAME tick; both ride the SAME route_seq drain (belt/wire delivery indistinguishable to the ONE comparator), ordered canonically"
+tick_count = 10
+hash_lines = 10
+schema_version = 2
+snapshot_schema_version = 14

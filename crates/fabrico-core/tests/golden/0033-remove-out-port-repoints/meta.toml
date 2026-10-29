@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0033-remove-out-port-repoints` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0033-remove-out-port-repoints"
+builder = "GridSession: Place ROUTER(2x3) + Configure(3-rule table, default key 0) + DrawBelt[(2,0),(3,0)] + Dock(Tail->catalog index 3 = routing key 2) + DrawBelt[(2,1),(3,1)] + Dock(Tail->catalog index 1 = routing key 0) + RemovePort(catalog index 1 = routing key 0) + Undo - TIGHTENED at plan 73-06, re-authored at 74.1-14 and 74.1-16"
+seed = "0x000000000033c0de"
+params = "UNDO-04/UNDO-05/UNDO-08: an EARLIER Out is removed on a Router carrying a non-empty routing table, a default naming the removed key, and a belt docked to a HIGHER Out. The removal drops the rule and clears the default that named the removed key and decrements the higher rules; since 74.1-16 (no port edit moves an existing port) the belt on the higher Out is KEPT and re-keyed 2 -> 1, touching its unmoved port, and only the belt on the removed Out is released, under its pre-edit key 0. ONE Undo puts the Out back at its ORIGINAL index on its own row, re-points the table and the default, puts the kept belt back on key 2 and re-docks the released belt touching its port. Every assertion is on a resolved value, never on a Port struct"
+tick_count = 11
+hash_lines = 11
+schema_version = 2
+snapshot_schema_version = 14

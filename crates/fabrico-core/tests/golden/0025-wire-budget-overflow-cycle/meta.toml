@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0025-wire-budget-overflow-cycle` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0025-wire-budget-overflow-cycle"
+builder = "inline caller -> wire_a <-> wire_b routing cycle (both FAULT_PORTs dead-lettered) + logged WireRequest (budget 3) — a request bounces a<->b, budget-1 per delivered wire, faulting WireOverflow when the budget hits 0"
+seed = "0x0000000000255117"
+params = "WIRE-03 DEPTH bound (integration): a routing cycle spends one budget unit per delivered wire; budget 3 exhausts at a DETERMINISTIC tick -> WireOverflow (dead-lettered); the cycle TERMINATES in bounded ticks (both wires drain — never hangs/OOMs)"
+tick_count = 7
+hash_lines = 7
+schema_version = 2
+snapshot_schema_version = 14

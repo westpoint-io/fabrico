@@ -1,0 +1,41 @@
+<!--
+  candidates/b/balancer.svg - DIRECTION B draft for the BALANCER (BOARD-01, plan 57-04).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION B - "solid chassis plate": a FILLED chassis body (#565f70), a 3-unit dark
+  outline (#2a2f3a), and a 2-unit glyph knocked out in the substrate value (#1b1f27). Port
+  stubs are HELD CONSTANT with Direction A (same geometry, same #565f70, same 2u) so the
+  board compares chassis and glyph treatment rather than port treatment. Glyph geometry is
+  identical to Direction A's: D-02 defines B as a treatment, not a different drawing.
+
+  SEMANTIC VOCABULARY - CARRIED. synth/glyphs.ts:70-72 says of BALANCER: "parallel even
+  split: two full-width horizontal bars joined by a central spine (an 'I'). The two opposed
+  bars are the even-split motif; the silhouette is unmistakably a pair of rails, never a
+  fork or a diamond." `bar-top` and `bar-bottom` are the rails, `spine` the joining stem.
+  PARALLEL is the load-bearing property - the instant the bars converge or diverge the
+  machine reads as a MERGE or a TEE. The four port stubs carry the same claim structurally:
+  two in on the left and two out on the right, aligned to the rails, because an even split
+  with a single inbound stub would draw a claim the glyph does not make.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="chassis" d="M4 4 H60 V60 H4 Z" fill="#565f70" />
+  <path data-part="outline" d="M4 4 H60 V60 H4 Z" fill="none" stroke="#2a2f3a" stroke-width="3" />
+  <path data-part="bar-top" d="M14 20 H50" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="bar-bottom" d="M14 44 H50" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="spine" d="M32 20 V44" fill="none" stroke="#1b1f27" stroke-width="2" />
+  <path data-part="port-in-a" d="M0 20 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-in-b" d="M0 44 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-a" d="M60 20 H64" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-b" d="M60 44 H64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

@@ -1,0 +1,52 @@
+<!--
+  candidates/d/tee.svg - DIRECTION D draft for the TEE machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 2x2 -> viewBox 0 0 64 64, the true base footprint, authored at its real size.
+
+  DIRECTION D - "schematic / circuit": line-only, terminal pins at the ports. The full
+  statement of D's line-only rule, its A-ink control and the frame/chassis convergence is at
+  d/source.svg.
+
+  SEMANTIC VOCABULARY - CARRIED, and this is the subject where D's language and the existing
+  vocabulary agree without either giving anything up. synth/glyphs.ts:55-57 says of TEE:
+  "one-IN / two-OUT fork ... silhouette reads as an opening '<'". A fork IS a schematic trace
+  split, so it survives the translation unchanged in meaning - the only change is that the
+  branches are ROUTED (a right-angle run to the split, then two right-angle runs out) rather
+  than drawn as free diagonals. Right angles are the circuit-board idiom, and they are also
+  exact at every zoom (VEC-03), so this is one of the few places where the direction's
+  aesthetic and the milestone's technical constraint want the same line.
+
+  THE JUNCTION IS A CORNER, NOT A DOT. Direction D contains no filled paths at all (see
+  d/source.svg for why that rule is literal), so the three-way split at (30,32) is drawn as a
+  T where three traces meet. In a real schematic that T would carry a solder dot; here the
+  construction is unambiguous instead, because no two traces in the direction ever cross
+  without meeting.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 104 vertices / 52 points, band `ok` - against a/tee.svg's 72 and b/tee.svg's 80.
+  The decomposition is worth stating because it is the whole D cost story in one cell: the
+  three held-constant port stubs are 24, the THREE TERMINAL PINS are another 24, and the pins
+  are the direction's declared feature rather than incidental decoration. D is dearer than A
+  even with the pins subtracted (80 vs 72), because everything it draws is a stroke.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="frame" d="M4 4 H60 V60 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="trace-in" d="M4 32 H30" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="trace-up" d="M30 32 V18 H60" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="trace-down" d="M30 32 V46 H60" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-in" d="M2 29 V35" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-out-up" d="M62 15 V21" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-out-down" d="M62 43 V49" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="port-in" d="M0 32 H4" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-up" d="M60 18 H64" fill="none" stroke="#565f70" stroke-width="2" />
+  <path data-part="port-out-down" d="M60 46 H64" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

@@ -1,0 +1,44 @@
+<!--
+  candidates/d/endpoint.svg - DIRECTION D draft for the ENDPOINT machine (BOARD-01, plan 57-05).
+
+  A DRAFT, NOT SHIPPED ART. Phase 57 locks a DIRECTION; Phase 58 authors the art. The
+  never-ships boundary, the colour-source exemption and the ART-04 policy are stated once
+  in candidates/README.md and are not repeated here.
+
+  FOOTPRINT: 1x1 -> viewBox 0 0 32 32, the true base footprint, authored at its real size.
+
+  DIRECTION D - "schematic / circuit": line-only, terminal pins at the ports. The full
+  statement of D's line-only rule, its A-ink control and the frame/chassis convergence is at
+  d/source.svg.
+
+  THIS CANDIDATE PROPOSES A CHASSIS THAT DOES NOT EXIST TODAY, exactly as the a/, b/ and c/
+  endpoint candidates do. The shipped ENDPOINT has NO generator at all (`GEN_KEY_OF` has
+  exactly eight entries; kind 9 is absent) and its only visual is the asymmetric wire-terminal
+  inlet glyph drawn by the wires layer at a port (layers/inletGlyph.ts, INLET_HALF = 7). The
+  board's `TODAY` column has no endpoint cell to compare any of the four against.
+
+  SEMANTIC VOCABULARY - NO MOTIF TO INHERIT (glyphs.ts has no ENDPOINT entry), so one is
+  PROPOSED from the shipped inlet glyph. This is the ONE SUBJECT WHERE DIRECTION D IS AT AN
+  ADVANTAGE RATHER THAN A DISADVANTAGE, and it is worth naming: the endpoint is genuinely a
+  wire terminal, so the schematic language is not a translation here, it is the native one. A
+  terminal block - a vertical bar with two short leads entering it and one trace leaving
+  through the pin - is what this machine literally is. Where D's rejections cost something on
+  the icon-shaped subjects (d/source.svg, d/factory.svg), this cell is the counterweight.
+
+  ART-04 PROVENANCE: authored from scratch for this board. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net or Remix Icon, which are excluded outright.
+
+  MEASURED: 72 vertices / 36 points, band `ok`.
+
+  Colour literals are the named LOCKED_SKIN ramp values; see candidates/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="frame" d="M4 4 H28 V28 H4 Z" fill="none" stroke="#b0bacb" stroke-width="3" />
+  <path data-part="trace" d="M28 16 H16" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="block" d="M16 9 V23" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="lead-upper" d="M10 12 H16" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="lead-lower" d="M10 20 H16" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="pin-term" d="M30 13 V19" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="terminal" d="M28 16 H32" fill="none" stroke="#565f70" stroke-width="2" />
+</svg>

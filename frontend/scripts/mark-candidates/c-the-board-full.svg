@@ -1,0 +1,63 @@
+<!--
+  c-the-board-full.svg - Candidate C for Phase 79, "The route is chosen". The full cut,
+  serving 32px and 96px.
+
+  ROUTE. Route 1, "The Board", from the logo route research, section 4.2: a legal
+  Fabrico factory seen from above. A source, three belt cells, and a sink where the item
+  arrives. Discrete cells, drawn as cells. This is the clean-vector drawing of that subject;
+  d-the-board-pixel.svg is the same subject drawn a second time in the pixel-grid look, and
+  the two are peer candidates rather than a drawing and its variant.
+
+  THE FIELD. A 3 by 3 grid of 8u cells on a 2u gutter with 2u padding, so cell origins sit
+  at 2, 12 and 22 on both axes. The route is source, right, down, down, right, sink. That is
+  TWO turns rather than one, which is the research's own mitigation for the drawing reading
+  as a falling-block puzzle rather than a factory.
+
+  NOT A SHIPPED ASSET. This file is a throwaway comparison candidate. Nothing in the
+  application imports it, and nothing renders it outside the Phase 79 comparison sheet.
+
+  WHY IT IS NOT IN frontend/src/chrome/assets/ (decision D-09). The discovery walk in
+  scripts/lint-svg.ts and in render/assets/vertexBudget.test.ts is flat and non-recursive, so
+  a file dropped into that directory silently joins the shipped asset set and moves three
+  hand-edited count literals. A file dropped into a subdirectory of it is worse: an asset
+  that looks shipped and that no gate measures at all. Phase 79 leaves that directory
+  byte-identical to where it started.
+
+  THE THREE LAYERS, IN PAINT ORDER (later paints on top):
+
+    1. source  stroke  fab-ink           an OUTLINED cell, top left, stroke-width 2
+    2. belt    fill    fab-ink           three solid cells, one path, three subpaths
+    3. sink    fill    fab-accent-item   the amber cell, bottom right
+
+  Those paint tokens are named without their leading dashes on purpose. Two consecutive
+  hyphens are illegal inside an XML comment, and that single character pair is what makes the
+  shipped chrome/assets/logomark.svg unopenable by every strict parser in this tree. The
+  stroke and fill attributes below sit outside the comment and keep their normal var(...)
+  form.
+
+  SOURCE AND BELT DIFFER BY STROKE VERSUS FILL, NEVER BY HUE. That is the whole reason the
+  source is outlined rather than painted a second colour: a hue difference would vanish the
+  moment the comparison sheet's monochrome column remapped both to one ink, and the
+  monochrome cut would then be telling a lie about how well this candidate holds up without
+  its accent. Outline against solid survives greyscale intact.
+
+  ODD COORDINATES ON source, AND WHY THEY ARE CORRECT. The stroke is 2u wide and centred on
+  its own path data, so a centreline at 3 lays ink across units 2 to 4. The centreline is
+  therefore inset one unit from the cell so the painted band spans units 2 to 10, which is
+  the same 8u cell every other layer uses. The shipped logomark.svg does exactly this on
+  three of its six parts and documents the same reason. Every other coordinate in this file
+  is even.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 79. No icon pack was consulted, copied,
+  traced or redrawn. Not game-icons.net, whose CC-BY-3.0 licence redrawing does not clear.
+  Not Remix Icon, whose licence forbids logo use by name. No AI-generated image was used at
+  any point.
+
+  Geometry: integer coordinates only, commands limited to M H V L Z, zero curves, one path
+  per semantic layer carrying its own stable data-part, one element per line.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="source" d="M 3 3 H 9 V 9 H 3 Z" fill="none" stroke="var(--fab-ink)" stroke-width="2" />
+  <path data-part="belt" d="M 12 2 H 20 V 10 H 12 Z M 12 12 H 20 V 20 H 12 Z M 12 22 H 20 V 30 H 12 Z" fill="var(--fab-ink)" />
+  <path data-part="sink" d="M 22 22 H 30 V 30 H 22 Z" fill="var(--fab-accent-item)" />
+</svg>

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"           # edition-2024 default resolver
+members  = ["crates/fabrico-core", "crates/fabrico-host", "crates/fabrico-protocol", "crates/fabrico-command", "crates/fabrico-app", "crates/fabrico-scenario"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+# Debug info for dev builds (GATE-02, phase 84 plan 84-03). Cargo's default is full DWARF
+# (`debug = 2`) for every crate, which made one clean CI-equivalent build about 13 GB: the
+# 2026-10-09 CI run's ubuntu leg died with `collect2: fatal error: ld terminated with signal 7
+# [Bus error]` on a 14 GB runner disk, and every local generation in target/ was that size.
+# These two lines are the Cargo book's own recommendation ("Reduce debug information",
+# https://doc.rust-lang.org/cargo/guide/build-performance.html): workspace crates keep line
+# tables, so panics and backtraces still name file and line; dependencies carry none. Debug
+# info does not change generated code, so determinism is untouched (checked by
+# cert_cross_platform and measure-golden-corpus.sh after the change).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

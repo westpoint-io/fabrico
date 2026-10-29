@@ -1,0 +1,150 @@
+# =====================================================================================
+# DECLARED MOVES
+#
+# Read by scripts/check-core-declared.sh at this exact path. The path is fixed and not
+# configurable: a gate that could be pointed at a different declaration could be pointed
+# at an empty one. It lives outside the three covered crate roots on purpose, so editing
+# it is not itself an undeclared change to a covered source file.
+#
+# WHAT THIS FILE IS. The golden corpus, the scenario corpus, the protocol fixtures and the
+# source of fabrico-core, fabrico-protocol and fabrico-scenario are COVERED paths. A
+# covered byte may move, and it must be DECLARED here first, with the digest it is
+# expected to carry afterwards. An undeclared move exits 1 by name. A declared move that
+# did not happen exits 1 by name too, so a stale entry cannot become a blanket permission.
+#
+# ANCHOR. Every comparison is against the annotated tag `public-base`, cut at the first
+# commit of this repository. Not against HEAD, not against the previous commit.
+#
+# CUMULATIVE. Entries accumulate for as long as the base stays where it is. An entry
+# written for one change is still read, and still asserted, by every later run. DO NOT
+# tidy old entries away: a fixture that moved last month still differs from the base
+# today, so deleting its line turns a declared move back into an undeclared one and
+# reddens the gate for a reason nobody chose. Append; never prune.
+#
+# When the maintainers move the base tag forward (a reviewed change of its own, described
+# under BASE MOVES in scripts/check-core-declared.sh), both sections are reset to NONE in
+# the same commit, because every move declared against the old base is part of the new
+# one.
+#
+# =====================================================================================
+# GRAMMAR
+# =====================================================================================
+#
+# Two sections, in this order: [fixtures] then [source]. Both must be present.
+#
+#   [fixtures]   one line per covered path:   <path> <sha256>
+#   [source]     one line per covered path:   <path>
+#
+# A DELETED covered path is declared too, because A DELETION IS A MOVE. Both covered sets
+# are the UNION of the working tree and `public-base`, so a path that existed at the tag
+# and is gone today is still walked and still reddens by name. In [fixtures] a deletion
+# carries the literal digest field `DELETED` rather than a hex string, since an absent path
+# has no bytes to digest; the gate refuses that line while the path is still on disk. In
+# [source] a deletion is declared exactly the way an edit is, as a bare path.
+#
+#   [fixtures]   a deleted covered path:      <path> DELETED
+#
+# A line that is blank, or whose first non-blank character is `#`, is ignored anywhere.
+# A REASON for an entry goes on a `#` comment line immediately above it. It does not go
+# on the entry line: the parser takes exactly the field count above and REFUSES anything
+# else with exit 2 rather than skipping it, because a line silently skipped is the
+# vacuous green this whole gate exists to refuse.
+#
+# The literal line `NONE` is the ONLY way to declare that a section has zero entries.
+# An EMPTY FILE IS NOT ZERO ENTRIES: an empty file is indistinguishable from a file
+# somebody forgot to write, and both exit 2. `NONE` is a statement; absence is not.
+#
+# WHEN YOU WRITE A SECTION'S FIRST ENTRY, DELETE THAT SECTION'S `NONE` LINE. `NONE` and an
+# entry in the same section is a contradiction: one of the two is stale and the gate must
+# not guess which, so it exits 2 rather than picking one.
+#
+# Example, for a change that re-blesses one golden fixture and edits one core file:
+#
+#   [fixtures]
+#   # SNAPSHOT_SCHEMA_VERSION bump re-tags the genesis snapshot; re-blessed with
+#   # scripts/regen-golden.sh bless.
+#   crates/fabrico-core/tests/golden/0001-source-belt-collector <post-move sha256>
+#
+#   [source]
+#   # the schema bump itself
+#   crates/fabrico-core/src/snapshot.rs
+#
+# =====================================================================================
+# THE DIGEST RECIPE (reproduce it by hand; the gate uses exactly this)
+# =====================================================================================
+#
+# A GOLDEN FIXTURE DIRECTORY IS ONE COVERED PATH, not five. Its digest is the sha256 of
+# the `sha256sum` output lines over EVERY FILE it holds at ANY depth, dot-files included,
+# sorted BYTE-WISE by the `./`-prefixed path `find` emits:
+#
+#     (cd <dir> && LC_ALL=C find . -type f -print0 | LC_ALL=C sort -z \
+#        | xargs -0 sha256sum | sha256sum)
+#
+# `LC_ALL=C` is MANDATORY and is the answer to the cross-platform question: locale
+# collation orders the names differently on a different runner and would produce a
+# different digest for byte-identical content.
+#
+# `find`, NOT `ls`. `ls` omits dot-files and does not recurse, so a tracked `.smuggled`
+# file or a nested subdirectory planted inside an already-declared fixture directory would
+# leave that directory's digest exactly where it was and the gate would stay green.
+# `find . -type f` sees both. The `./` prefix is part of the digested text.
+#
+# EVERY OTHER COVERED PATH IS A SINGLE FILE and its digest is a plain `sha256sum` of its
+# raw bytes:
+#
+#     sha256sum <path>
+#
+# A DELETED COVERED PATH HAS NO DIGEST. Its [fixtures] line is `<path> DELETED`. The gate
+# refuses that line while the path is still on disk, so a deletion cannot be declared in
+# advance and cannot outlive itself.
+#
+# EQUALITY IS OVER RAW BYTES. No text mode, no line-ending translation, no Unicode
+# normalization, no trailing-whitespace tolerance. A CRLF that a text-mode comparison
+# would forgive changes the recorded bytes, and the recorded bytes are the thing the
+# corpus asserts.
+#
+# On a mismatch the gate PRINTS the recomputed digest beside the declared one, so
+# correcting an entry is copy-paste rather than re-derivation.
+#
+# macOS note: `sha256sum` is GNU coreutils. On a machine that ships only `shasum -a 256`
+# the recipe is the same pipeline with that command substituted; the digest is identical
+# because both emit `<hex>  <name>` in the same format. The gate SELECTS between the two
+# once at the top and exits 2 if neither is on PATH.
+#
+# =====================================================================================
+# WHAT THE [source] SECTION CATCHES, AND WHAT IT DOES NOT
+# =====================================================================================
+#
+# [source] is a PATH LIST WITH NO DIGESTS. It catches an edit to a core, protocol or
+# scenario source file that was not declared. It is checked in BOTH directions, exactly
+# as [fixtures] is: a changed source file that is not listed exits 1, and a listed source
+# file that did not change also exits 1.
+#
+# IT DOES NOT CATCH a wrong edit to a file that WAS declared, when that edit moves no
+# fixture. The named backstop for that is the corpus itself plus
+# `crates/fabrico-core/tests/cert_cross_platform.rs`: a fold change that alters behaviour
+# on any of the golden boards or any of the scenario scenes MOVES a fixture, and an
+# undeclared fixture move exits 1. A FOLD CHANGE THAT NO BOARD IN EITHER CORPUS
+# EXERCISES IS OUT OF THIS GATE'S REACH. That is a stated limit, not an oversight.
+#
+# AN OVER-BROAD [source] LIST IS THE NARROWING MOVE IN PERMISSIVE CLOTHING. An entry
+# naming a file you did not actually change is a red, not a convenience, and because this
+# file is cumulative an entry that outlives its change silently un-guards that file for
+# every change after it. List what you touched; nothing more.
+#
+# =====================================================================================
+# HOW TO ANSWER A RED
+# =====================================================================================
+#
+# The gate names the offending path. Either DECLARE the move here, with its post-move
+# digest and a one-line reason above it, or revert the edit. Do NOT narrow the covered
+# path set in scripts/check-core-declared.sh, and do NOT move `public-base` forward, to
+# make a red pass: both delete the measurement instead of answering it.
+#
+# =====================================================================================
+
+[fixtures]
+NONE
+
+[source]
+NONE

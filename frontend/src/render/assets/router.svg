@@ -1,0 +1,53 @@
+<!--
+  render/assets/router.svg - SHIPPED art for the ROUTER machine (ART-01/ART-04, plan 58-02).
+
+  Promoted from `candidates/a/router.svg`, the Direction A draft judged on the Phase 57
+  art board and locked (`57-ART-LOCK.md`). This file sits FLAT in `render/assets/`, and
+  that placement is a contract rather than a convenience: the discovery walk in
+  `scripts/lint-svg.ts`, `vertexBudget.test.ts` and `geometryDigest.test.ts` is
+  non-recursive, which is exactly what keeps `candidates/` and `__fixtures__/` out of the
+  shipped table. A shipped asset in a subdirectory is an asset no gate measures.
+
+  GLYPH ONLY - NO CHASSIS PATH, NO PORT STUBS (design decision, 2026-08-02). THE ROUTER IS THE
+  SUBJECT THAT FORCED THAT CALL. Research found that a user can grow a machine through the
+  shipped `+ Add output` gesture and `grow_to_fit` clamps only at `MAX_FOOTPRINT_DIM = 64`,
+  so a ROUTER at base 2x3 becomes 2x6 and beyond - and the legal `viewBox` whitelist has
+  exactly four entries. A grown ROUTER has no legal asset. The chassis is therefore drawn
+  parametrically at whatever `w x h` the footprint actually is, and this file carries the
+  glyph, centred, alone.
+
+  FOOTPRINT: ROUTER's base footprint is 2x3, so `viewBox 0 0 64 96`. This is the ONLY use
+  of that literal in the shipped set; the transposed `0 0 96 64` is a footprint no machine
+  has, and the lint's four-literal whitelist plus the subject-keyed table in
+  `assets/shippedAssets.test.ts` exist between them to reject it.
+
+  SEMANTIC VOCABULARY - CARRIED. `synth/glyphs.ts:85-87` reads the ROUTER as a decision
+  diamond with a central switch cell. `diamond` is the decision and `switch` is the filled
+  cell inside it. Alone in its footprint group, so it has no binding confusability pair -
+  which is why the vocabulary is carried straight rather than sharpened against a sibling.
+
+  FILL COUNT 1 (`switch`). Lock axis 6 states 1 as a MAXIMUM, so this subject sits exactly
+  at the ceiling and cannot gain a second filled path.
+
+  ART-04 PROVENANCE: authored from scratch for the Phase 57 board. No icon pack was
+  consulted, copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY
+  REFERENCE ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or
+  Remix Icon (non-OSI), which are excluded outright. Promotion carries that provenance
+  forward unchanged.
+
+  COLOUR SOURCE - THE SHIPPED RULE, NOT THE CANDIDATE'S EXEMPTION. Every draft in
+  `candidates/` is exempt from the "no hand-authored hex" rule BECAUSE IT NEVER SHIPS.
+  This file ships, so that basis evaporates and is deliberately not restated. The standing
+  rule stands: the one literal below is `LOCKED_SKIN.palette.ramp[4]` (0xb0bacb, the
+  highlight step), the single ink lock axis 9 permits for every kind's glyph, and it is
+  held to that value by the fail-severity ink allowlist over the SHIPPED assets in
+  `assets/shippedAssets.test.ts` - by a gate, not by this paragraph.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L Z,
+  zero curves, one `<path>` per semantic part carrying its own stable `data-part`, one
+  element per line. The authoring contract is render/assets/README.md.
+-->
+<svg viewBox="0 0 64 96" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="diamond" d="M 32 24 L 54 48 L 32 72 L 10 48 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="switch" d="M 28 44 H 36 V 52 H 28 Z" fill="#b0bacb" />
+</svg>

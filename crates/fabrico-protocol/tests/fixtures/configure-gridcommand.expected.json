@@ -1,0 +1,104 @@
+[
+  {
+    "Configure": {
+      "node": 42,
+      "config": {
+        "Factory": {
+          "source": "export default (x) => x + 1"
+        }
+      }
+    }
+  },
+  {
+    "Configure": {
+      "node": 7,
+      "config": {
+        "Source": {
+          "trigger": {
+            "Timer": {
+              "interval_ticks": 60
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "Configure": {
+      "node": 9,
+      "config": {
+        "Source": {
+          "trigger": "Webhook"
+        }
+      }
+    }
+  },
+  {
+    "Configure": {
+      "node": 3,
+      "config": {
+        "Sink": {
+          "target": {
+            "Http": {
+              "url": "http://127.0.0.1/hook",
+              "method": "Patch"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "Configure": {
+      "node": 6,
+      "config": {
+        "Sink": {
+          "target": "Debug"
+        }
+      }
+    }
+  },
+  {
+    "Configure": {
+      "node": 11,
+      "config": {
+        "Belt": {
+          "ticks_per_slot": 12
+        }
+      }
+    }
+  },
+  {
+    "Configure": {
+      "node": 13,
+      "config": {
+        "Router": {
+          "routes": [
+            [
+              {
+                "offset": 0,
+                "expect": [
+                  123
+                ]
+              },
+              1
+            ],
+            [
+              {
+                "offset": 4,
+                "expect": [
+                  222,
+                  173,
+                  190,
+                  239
+                ]
+              },
+              2
+            ]
+          ],
+          "default": 0
+        }
+      }
+    }
+  }
+]

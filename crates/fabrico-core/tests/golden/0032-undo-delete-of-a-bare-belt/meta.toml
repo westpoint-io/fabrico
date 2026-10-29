@@ -1,0 +1,11 @@
+# Golden fixture provenance — human/script readable, NOT read by the runner.
+# Re-freeze ONLY via `scripts/regen-golden.sh bless 0032-undo-delete-of-a-bare-belt` after a reviewed,
+# deliberate behavior change (the corpus is asserted forever).
+scenario_id = "0032-undo-delete-of-a-bare-belt"
+builder = "GridSession: DrawBelt[(4,7),(5,7),(6,7)] + Delete(the belt) + Undo - the Undo now succeeds and the belt comes back on the same three cells"
+seed = "0x000000000032be17"
+params = "UNDO-02/UNDO-08: blessed PRE-FIX in plan 73-02 with the Undo refused, TIGHTENED and RE-BLESSED in plan 73-05. The Undo is now expected to succeed and the generator asserts the restored belt has the identical drawn geometry with all three tile cells re-claimed by that one node. The hashes.txt MOVED in the same commit, which is what a fixture blessed after a fix can never show"
+tick_count = 6
+hash_lines = 6
+schema_version = 2
+snapshot_schema_version = 14

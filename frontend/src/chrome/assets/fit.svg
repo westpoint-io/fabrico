@@ -1,0 +1,43 @@
+<!--
+  chrome/assets/fit.svg - the FIT-FACTORY-TO-VIEW glyph (NAV-01). A CHROME GLYPH: nothing
+  on the board ever renders it, and it has no canvas subject at all. `render/assets/*.svg`
+  are machine art tessellated by Pixi; this directory is consumed by the DOM only.
+
+  This file sits FLAT in `chrome/assets/`, and that placement is a contract rather than a
+  convenience: the discovery walk in `scripts/lint-svg.ts` and
+  `render/assets/vertexBudget.test.ts` is non-recursive, which is exactly what keeps
+  candidate and fixture directories out of the shipped table. A shipped asset in a
+  subdirectory is an asset no gate measures.
+
+  THE MOTIF. Four corner brackets framing a centred dot - "enclose everything". Carried
+  from the 8x8 bit matrix this file replaces (`icons.tsx` FIT, deleted in plan 59-02).
+  The four brackets are ONE part each rather than one four-subpath part, because the
+  data-part handle is what a later phase tints and diffs against and "the north-west
+  bracket" is a thing a reader can point at.
+
+  THE GAP IS THE GLYPH. Each bracket is an 8u L reaching only a quarter of the way along
+  its edges, so the four leave a wide gap on every side; closing them into a rectangle
+  would read as a frame or a selection marquee rather than as "fit". The dot at the centre
+  is the subject being framed.
+
+  COLOUR: ZERO HEX. Every fill and stroke is literally `currentColor`, so the glyph takes
+  the colour of the control it sits in. A baked value would not follow its control's
+  state, silently. Held at `fail` severity by the chrome-scoped ink rule in
+  `scripts/lint-svg.ts`.
+
+  ART-04 PROVENANCE: authored from scratch for Phase 59. No icon pack was consulted,
+  copied, traced or redrawn - not Material Symbols (permitted as a VOCABULARY REFERENCE
+  ONLY), and not game-icons.net (CC-BY-3.0, which redrawing does not clear) or Remix Icon
+  (non-OSI), which are excluded outright.
+
+  Geometry: integer coordinates only, every coordinate EVEN, commands limited to M H V L
+  Z, zero curves, one <path> per semantic part carrying its own stable data-part, one
+  element per line. 3u structural / 2u detail, the locked two-weight system.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="corner-nw" d="M 4 12 V 4 H 12" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="corner-ne" d="M 20 4 H 28 V 12" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="corner-se" d="M 28 20 V 28 H 20" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="corner-sw" d="M 12 28 H 4 V 20" fill="none" stroke="currentColor" stroke-width="3" />
+  <path data-part="dot" d="M 14 14 H 18 V 18 H 14 Z" fill="currentColor" />
+</svg>

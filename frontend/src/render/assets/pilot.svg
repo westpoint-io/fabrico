@@ -1,0 +1,35 @@
+<!--
+  pilot.svg - the PERMANENT vector calibration fixture (VEC-02/03, Plan 56-01).
+
+  This is deliberately NOT a machine and must never be "improved" toward one.
+  Machines are rectangular chassis with ports and a glyph; this is a registration
+  target: an open frame, one filled triangle, one filled pip, totally asymmetric
+  so a flip/transpose regression is visible to the eye AND reddens the gate. It
+  is the stable subject the geometry-digest and vertex-budget gates keep forever,
+  and the known-good reference every later phase compares a misbehaving asset
+  against. It renders ONLY on the dev-only pixel-guard.html fixture page and
+  NEVER on the shipped canvas.
+
+  COLOUR-SOURCE EXEMPTION - read before copying this pattern. The standing rule
+  (pixelGuard.tsx) is "all colours come from LOCKED_SKIN via the real painters,
+  no hand-authored hex". An SVG file necessarily carries literal hex, so this
+  file is exempt BECAUSE IT NEVER SHIPS. Its literals are exactly the named
+  LOCKED_SKIN ramp values:
+    #b0bacb = LOCKED_SKIN.palette.ramp[4] (highlight) - frame stroke, pip fill
+    #565f70 = LOCKED_SKIN.palette.ramp[3]             - notch fill
+    #1b1f27 = LOCKED_SKIN.palette.ramp[0] (substrate) - the canvas background,
+                                                        not authored here
+  Whether SHIPPED artwork carries literal hex or a per-part tint resolved from
+  LOCKED_SKIN at render time is a Phase 58 decision (ART-02). Do not read this
+  exemption as that decision having been made.
+
+  Geometry is locked by 56-UI-SPEC Part D.2: viewBox 0 0 32 32, integer
+  coordinates only, commands limited to M/H/V/Z, zero curves, one <path> per
+  semantic part carrying its own stable part attribute, one element per line.
+  The authoring contract is render/assets/README.md.
+-->
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <path data-part="frame" d="M3 3 H29 V29 H3 Z" fill="none" stroke="#b0bacb" stroke-width="2" />
+  <path data-part="notch" d="M18 8 H26 V16 Z" fill="#565f70" />
+  <path data-part="pip" d="M8 20 H12 V24 H8 Z" fill="#b0bacb" />
+</svg>
