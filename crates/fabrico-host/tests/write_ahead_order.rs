@@ -15,8 +15,16 @@
 //! covers the files in [`FILES_NAMING_A_COMMAND_SENDER`]: `driver.rs`, `sim_loop.rs`,
 //! `demo_scene.rs`, `input_apply.rs`, `project.rs`, `examples/read_project.rs` and
 //! `examples/vertical_slice.rs`. The only sends it allows are the one in `tick_once` and the
-//! `#[cfg(test)]` `test_send_command` in `sim_loop.rs`. It reads text, so a type alias for the
-//! sender would get past it.
+//! `#[cfg(test)]` `test_send_command` in `sim_loop.rs`.
+//!
+//! That scan reads text and can't work out a channel's type, so two forms get past it: a type alias
+//! for the sender, and a channel whose type the compiler infers, such as
+//! `let (tx, rx) = unbounded_channel();`, which this crate already writes for other channels. The
+//! fourth test covers those from the other end. It pins the lines in `sim_loop.rs` that read `cmd_rx`
+//! and call the executor's `dispatch`, refuses any mention of `recover` in that file, and pins each
+//! use of the `executor` module in `src/` and `examples/`. Two forms get past all four tests: a
+//! renamed import of the module in another file (`use crate::executor as ex;`), and code that runs
+//! an effect without `executor::dispatch`, for example by calling a function under `sinks/` directly.
 
 // The workspace-root `clippy.toml` disallows `std::fs::read_to_string` to keep the sim core free of
 // ambient IO. The scan has to read the source files, so that lint is allowed in this one file.
@@ -40,8 +48,10 @@ const TICKS: u8 = 10;
 /// A floor on the dispatches seen, so the test can't pass on a run that dispatched nothing.
 const MIN_DISPATCHES: usize = 3;
 
-/// The files under `src/` and `examples/` that name a command sender. A new file on this list is a
-/// new way to reach the executor, so the scan fails until someone has read it and added it here.
+/// The files under `src/` and `examples/` that write a command sender's type. A new file writing it
+/// is a new way to reach the executor, so the scan fails until someone has read it and added it here.
+/// A file that lets the compiler infer the type isn't found by this list, which is why the fourth
+/// test pins the executor's end of the channel.
 const FILES_NAMING_A_COMMAND_SENDER: &[&str] = &[
     "examples/read_project.rs",
     "examples/vertical_slice.rs",
@@ -56,6 +66,11 @@ const FILES_NAMING_A_COMMAND_SENDER: &[&str] = &[
 /// `sim_loop.rs` has the `#[cfg(test)]` `test_send_command`.
 const ALLOWED_SENDS: &[(&str, usize)] = &[("src/driver.rs", 1), ("src/sim_loop.rs", 1)];
 
+/// How many lines hold the sender's type alone, as one member of a multi-line tuple, in each file.
+/// Such a line has no name on it for the name check to read. Both of these are in a `channels()`
+/// test helper that drops the receiver, so a send on what they return reaches no executor.
+const BARE_SENDER_TYPES: &[(&str, usize)] = &[("examples/read_project.rs", 1), ("src/input_apply.rs", 1)];
+
 /// Every line in `sim_loop.rs` that mentions the production sender. Listing them whole catches an
 /// alias or a clone taken from the field, and a renamed field, which the send count can't see.
 const SIM_LOOP_CMD_TX_LINES: &[&str] = &[
@@ -64,6 +79,28 @@ const SIM_LOOP_CMD_TX_LINES: &[&str] = &[
     "cmd_tx,",
     "let _ = self.cmd_tx.send(cmd);",
     "self.host.tick_once(&mut self.ingress_rx, &mut self.results_rx, &self.cmd_tx)?;",
+];
+
+/// Every line in `sim_loop.rs` that mentions the executor's end of the channel. A second input to
+/// the executor loop has to change the `while let` line, for example to a `tokio::select!`.
+const SIM_LOOP_CMD_RX_LINES: &[&str] = &[
+    "let (cmd_tx, mut cmd_rx) = unbounded_channel::<Command>();",
+    "while let Some(cmd) = cmd_rx.recv().await {",
+];
+
+/// Every call to the executor's `dispatch` in `sim_loop.rs`. A second consumer loop leaves the
+/// `while let` line alone, but it has to call `dispatch` to run an effect.
+const SIM_LOOP_DISPATCH_CALLS: &[&str] = &["let outcome = dispatch(&cfg, &cmd).await;"];
+
+/// The lines in `sim_loop.rs` that mention `recover`. `Host::recover` hands back replayed commands,
+/// and nothing in this file needs them.
+const SIM_LOOP_RECOVER_LINES: &[&str] = &[];
+
+/// Every line under `src/` and `examples/` that goes through the `executor` module. This keeps a
+/// second `dispatch` from being written in another file.
+const EXECUTOR_MODULE_USES: &[(&str, &str)] = &[
+    ("src/sim_loop.rs", "use crate::executor::dispatch;"),
+    ("src/sinks/http.rs", "use crate::executor::command_id_string;"),
 ];
 
 #[test]
@@ -172,6 +209,28 @@ fn rust_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Every `.rs` file under this crate's `src/` and `examples/`, by path from the crate root, with its
+/// comment lines removed.
+fn host_source_files() -> BTreeMap<String, String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = Vec::new();
+    rust_files_under(&root.join("src"), &mut paths);
+    rust_files_under(&root.join("examples"), &mut paths);
+    paths
+        .iter()
+        .map(|path| {
+            let relative = path.strip_prefix(&root).expect("the walk stays under the crate root");
+            let src = std::fs::read_to_string(path).expect("read a source file");
+            (relative.to_string_lossy().replace('\\', "/"), code_of(&src))
+        })
+        .collect()
+}
+
+/// The lines of `code` that contain `needle`, trimmed.
+fn lines_mentioning<'a>(code: &'a str, needle: &str) -> Vec<&'a str> {
+    code.lines().filter(|l| l.contains(needle)).map(str::trim).collect()
+}
+
 /// True if the line writes `Sender<Command>` or `channel::<Command>`, with or without a module path.
 fn names_a_command_sender(line: &str) -> bool {
     ["Sender<", "channel::<"].iter().any(|open| {
@@ -188,18 +247,7 @@ fn names_a_command_sender(line: &str) -> bool {
 /// forbids.
 #[test]
 fn only_tick_once_sends_on_a_command_sender_in_src_and_examples() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut paths = Vec::new();
-    rust_files_under(&root.join("src"), &mut paths);
-    rust_files_under(&root.join("examples"), &mut paths);
-    let files: BTreeMap<String, String> = paths
-        .iter()
-        .map(|path| {
-            let relative = path.strip_prefix(&root).expect("the walk stays under the crate root");
-            let src = std::fs::read_to_string(path).expect("read a source file");
-            (relative.to_string_lossy().replace('\\', "/"), code_of(&src))
-        })
-        .collect();
+    let files = host_source_files();
 
     let naming: Vec<&str> = files
         .iter()
@@ -212,16 +260,27 @@ fn only_tick_once_sends_on_a_command_sender_in_src_and_examples() {
          tick_once, then update FILES_NAMING_A_COMMAND_SENDER"
     );
 
+    let mut bare_types: BTreeMap<&str, usize> = BTreeMap::new();
     for (name, code) in &files {
         for line in code.lines().filter(|l| names_a_command_sender(l)) {
-            let bare_type = line.trim() == "UnboundedSender<Command>,";
+            if line.trim() == "UnboundedSender<Command>," {
+                *bare_types.entry(name).or_default() += 1;
+                continue;
+            }
             assert!(
-                bare_type || line.contains("cmd_tx"),
+                line.contains("cmd_tx"),
                 "{name} gives a command sender a name other than cmd_tx, so the send count below \
                  can't see it: {line}"
             );
         }
     }
+    assert_eq!(
+        bare_types,
+        BARE_SENDER_TYPES.iter().copied().collect::<BTreeMap<_, _>>(),
+        "a line holding only the sender's type changed. It has no name on it, so whatever receives \
+         that sender can use any name and the send count below can't see it. Read the new one for \
+         a send that skips tick_once, then update BARE_SENDER_TYPES"
+    );
 
     let mut sends: BTreeMap<&str, usize> = BTreeMap::new();
     for (name, code) in &files {
@@ -245,10 +304,9 @@ fn only_tick_once_sends_on_a_command_sender_in_src_and_examples() {
     );
 
     let sim_loop = &files["src/sim_loop.rs"];
-    let mentions: Vec<&str> =
-        sim_loop.lines().filter(|l| l.contains("cmd_tx")).map(str::trim).collect();
     assert_eq!(
-        mentions, SIM_LOOP_CMD_TX_LINES,
+        lines_mentioning(sim_loop, "cmd_tx"),
+        SIM_LOOP_CMD_TX_LINES,
         "sim_loop.rs uses the production sender in a new way. Its only production use is passing \
          it to tick_once, and a copy of it can send outside tick_once"
     );
@@ -259,5 +317,45 @@ fn only_tick_once_sends_on_a_command_sender_in_src_and_examples() {
         ),
         "test_send_command in sim_loop.rs has to stay #[cfg(test)], because without that it is a \
          production send that skips the ledger row"
+    );
+}
+
+/// The third test watches senders by their text, so `let (resend_tx, mut resend_rx) =
+/// unbounded_channel();` passes it, and a `tokio::select!` over that receiver and `cmd_rx` gets
+/// replayed commands to `dispatch` with no ledger row. This test holds the executor to the one
+/// channel and the one `dispatch` call, wherever the second sender came from.
+#[test]
+fn the_executor_reads_one_channel_and_dispatches_in_one_place() {
+    let files = host_source_files();
+    let sim_loop = &files["src/sim_loop.rs"];
+    assert_eq!(
+        lines_mentioning(sim_loop, "cmd_rx"),
+        SIM_LOOP_CMD_RX_LINES,
+        "sim_loop.rs changed how the executor reads its commands. A second input to that loop gets \
+         commands to dispatch with no ledger row, so a crash could fire one twice"
+    );
+    assert_eq!(
+        lines_mentioning(sim_loop, "dispatch("),
+        SIM_LOOP_DISPATCH_CALLS,
+        "sim_loop.rs changed its calls to the executor's dispatch. A second call runs effects for \
+         commands that may not have come through tick_once, so they may have no ledger row"
+    );
+    assert_eq!(
+        lines_mentioning(sim_loop, "recover"),
+        SIM_LOOP_RECOVER_LINES,
+        "sim_loop.rs now mentions recover. Host::recover hands back replayed commands, and sending \
+         those to the executor is what the crash-recovery rule forbids. If this line doesn't do \
+         that, add it to SIM_LOOP_RECOVER_LINES"
+    );
+    let uses: Vec<(&str, &str)> = files
+        .iter()
+        .flat_map(|(name, code)| {
+            lines_mentioning(code, "executor::").into_iter().map(move |line| (name.as_str(), line))
+        })
+        .collect();
+    assert_eq!(
+        uses, EXECUTOR_MODULE_USES,
+        "the uses of the executor module changed. Read any new one for a dispatch that skips \
+         tick_once, then update EXECUTOR_MODULE_USES"
     );
 }
