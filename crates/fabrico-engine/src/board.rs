@@ -64,6 +64,7 @@ pub struct ScriptEntry {
 
 /// What a script can feed a running board.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum ScriptInput {
     /// A webhook body delivered to a Source, addressed by its dense handle.
     Webhook {
@@ -110,6 +111,7 @@ pub struct OutcomeRule {
 /// How one outbound call ends. A command emitted on tick T has already folded, so the earliest
 /// answer arrives on T+1, and `after_ticks` is at least 1.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum OutboundOutcome {
     /// A successful reply after this many ticks.
     Reply {
@@ -399,6 +401,33 @@ mod tests {
     fn a_stray_field_in_the_current_format_is_a_parse_error() {
         let src = board_text(1, ONE_PLACE, "", PLAIN_EXECUTOR, 900).replace("seed: 7,", "seed: 7, sneed: 8,");
         assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{src}");
+    }
+
+    /// The same holds inside each variant of a script input and an outcome. Each text differs from
+    /// a valid one by the stray field only, so the error can only be about that field.
+    #[test]
+    fn a_stray_field_inside_an_input_or_an_outcome_is_a_parse_error() {
+        for (valid, stray) in [
+            (r#"Webhook(source: 0, body: "{}")"#, r#"Webhook(source: 0, body: "{}", query: "a=1")"#),
+            (
+                r#"Request(route: 0, method: "POST", path: "/x", body: "{}")"#,
+                r#"Request(route: 0, method: "POST", path: "/x", body: "{}", query: "a=1")"#,
+            ),
+        ] {
+            let entry = |input: &str| format!("At(tick: 50, input: {input})");
+            assert!(parse_board(&board_text(1, ONE_PLACE, &entry(valid), PLAIN_EXECUTOR, 900)).is_ok(), "{valid}");
+            let src = board_text(1, ONE_PLACE, &entry(stray), PLAIN_EXECUTOR, 900);
+            assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{stray}");
+        }
+        for (valid, stray) in [
+            ("Reply(after_ticks: 1)", "Reply(after_ticks: 1, status: 200)"),
+            ("Error(after_ticks: 1)", "Error(after_ticks: 1, status: 500)"),
+        ] {
+            let executor = |outcome: &str| format!("Executor(default: {outcome}, rules: [])");
+            assert!(parse_board(&board_text(1, ONE_PLACE, "", &executor(valid), 900)).is_ok(), "{valid}");
+            let src = board_text(1, ONE_PLACE, "", &executor(stray), 900);
+            assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{stray}");
+        }
     }
 
     #[test]

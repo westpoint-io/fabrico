@@ -197,3 +197,5 @@ crates/fabrico-engine/tests/board_manifest.rs
 # Review 93 WR-01, in files listed above (board.rs, scripted.rs, tests/board_outcomes.rs): the parser
 # refuses an after_ticks larger than end_tick, and the scripted executor uses a checked add. No board
 # in the repo has such a delay, so no hash moves.
+# Review 93 WR-07, in board.rs listed above: ScriptInput and OutboundOutcome refuse an unknown field.
+# Only text is affected, and no board file holds one, so no hash moves.
