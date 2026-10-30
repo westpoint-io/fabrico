@@ -1,0 +1,8 @@
+# Final state hashes for the board files in this folder.
+#
+# Format: one line per board, with three fields separated by a single space:
+#
+#   <board path> <end tick> <hash>
+#
+# Lines are sorted byte-wise by board path. A generator writes this file, so don't edit it by
+# hand. Lines that start with # are comments.

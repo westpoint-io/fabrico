@@ -1026,6 +1026,7 @@ dependencies = [
  "fabrico-command",
  "fabrico-core",
  "fabrico-protocol",
+ "fabrico-qjs-alloc",
  "fabrico-scenario",
  "fixed",
  "postcard",
@@ -1065,6 +1066,7 @@ dependencies = [
  "blake3",
  "fabrico-command",
  "fabrico-core",
+ "fabrico-engine",
  "fabrico-protocol",
  "fabrico-scenario",
  "postcard",
@@ -1089,6 +1091,13 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+]
+
+[[package]]
+name = "fabrico-qjs-alloc"
+version = "0.1.0"
+dependencies = [
+ "rquickjs",
 ]
 
 [[package]]

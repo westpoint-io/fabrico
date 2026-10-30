@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"           # edition-2024 default resolver
-members  = ["crates/fabrico-core", "crates/fabrico-host", "crates/fabrico-protocol", "crates/fabrico-command", "crates/fabrico-app", "crates/fabrico-scenario", "crates/fabrico-engine"]
+members  = ["crates/fabrico-core", "crates/fabrico-host", "crates/fabrico-protocol", "crates/fabrico-command", "crates/fabrico-app", "crates/fabrico-scenario", "crates/fabrico-engine", "crates/fabrico-qjs-alloc"]
 
 [workspace.package]
 edition = "2024"

@@ -48,6 +48,8 @@ fabrico-command = { path = "../fabrico-command" }
 # The integer-only sim->render wire DTOs (RenderPacket/NodeView/BeltView/ItemView
 # + the machine_kind/state_tag u8 conventions) the render-packet builder produces.
 fabrico-protocol = { path = "../fabrico-protocol" }
+# The headless engine: board loading, the tick driver and the render-packet builder.
+fabrico-engine = { path = "../fabrico-engine" }
 # Generational id handles re-used from the core (`CommandId` carries a `NodeId`).
 # Needed for the `Key` trait so the deterministic idempotency token can read the
 # node's stable FFI value (`id.1.data().as_ffi()`) — never a second minted key.
