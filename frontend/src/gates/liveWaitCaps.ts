@@ -174,6 +174,7 @@ export const HOOKS: Readonly<Record<string, { cls: HookClass; why: string }>> = 
   simulateStreamDrop: { cls: 'control', why: 'flips the dev stream-drop simulator' },
   controlsSent: { cls: 'model', why: 'sendCountsRef.controls: the controls the page handed to the transport' },
   inputsSent: { cls: 'model', why: 'sendCountsRef.inputs: the gestures the page handed to the transport' },
+  tutorial: { cls: 'drawn', why: 'the lesson layer writes this probe from its animation-frame loop, so its step index and hint rects only advance on a drawn frame' },
 };
 
 const REGION_ORDER: readonly Region[] = ['CAPTURE', 'SAMPLER', 'INPUT', 'DRAWN', 'MODEL', 'DOM', 'IO', 'NONE'];

@@ -1,6 +1,6 @@
 // The GL-backend pin's config-shape gate (VEC-05, Plan 56-01).
 //
-// WHAT THIS GATE COVERS: that all four Playwright configs name the SAME GL
+// WHAT THIS GATE COVERS: that all five Playwright configs name the SAME GL
 // backend, in their ONLY `launchOptions.args` declaration. The "only" is
 // load-bearing and was added by the phase 56 review (WR-04): Playwright replaces
 // `launchOptions` wholesale when a project-level `use` declares it, so a gate
@@ -49,6 +49,7 @@ const CONFIG_FILES = [
   'playwright.mock.reuse.config.ts',
   'playwright.live.config.ts',
   'playwright.live.reuse.config.ts',
+  'playwright.walk.config.ts',
 ] as const;
 
 /** cwd-independent resolution (the `src/protocol/route.test.ts` idiom). */
@@ -82,8 +83,8 @@ function extractAllLaunchArgs(source: string): Array<readonly string[]> {
 }
 
 describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () => {
-  it('checks exactly 4 configs (a shrinking list cannot pass vacuously)', () => {
-    expect(CONFIG_FILES).toHaveLength(4);
+  it('checks exactly 5 configs (a shrinking list cannot pass vacuously)', () => {
+    expect(CONFIG_FILES).toHaveLength(5);
   });
 
   for (const name of CONFIG_FILES) {
@@ -104,7 +105,7 @@ describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () =>
     });
   }
 
-  it('all 4 configs carry a byte-identical arg array', () => {
+  it('all 5 configs carry a byte-identical arg array', () => {
     const extracted = CONFIG_FILES.map((name) => ({
       name,
       all: extractAllLaunchArgs(readFileSync(configPath(name), 'utf8')),

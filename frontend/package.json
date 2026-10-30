@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "e2e:live": "rm -f test-results/live-report.json && cargo build -p fabrico-host --example dev_render_server && playwright test --config=playwright.live.config.ts",
+    "e2e:walk": "rm -f test-results/walk-report.json && cargo build -p fabrico-host --example dev_render_server --example replay_hash && playwright test --config=playwright.walk.config.ts",
     "perf:capture": "cargo build -p fabrico-host --example dev_render_server && node scripts/perf-capture.ts",
     "lint:svg": "node scripts/lint-svg.ts",
     "build:mark-sheet": "node scripts/build-mark-sheet.ts",
