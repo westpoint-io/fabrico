@@ -175,3 +175,7 @@ crates/fabrico-engine/tests/headless_slice.rs
 # packets. The builder now reads a RenderSource, which the engine and the host both implement. Its
 # output is unchanged, and the host keeps the producer, the relay and their channels.
 crates/fabrico-engine/src/render_packet.rs
+# The request envelope and the default reply deadline move out of the desktop host, so a scripted
+# request and a real one go through one serializer. The field order and the bytes are unchanged,
+# and a test pins them to a literal.
+crates/fabrico-engine/src/envelope.rs

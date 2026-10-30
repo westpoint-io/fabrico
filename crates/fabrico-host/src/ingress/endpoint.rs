@@ -30,6 +30,7 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use fabrico_core::ids::{Item, NodeId};
+use fabrico_engine::envelope::{RequestEnvelope, encode_request_envelope};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
@@ -238,30 +239,10 @@ pub const ENDPOINT_INGRESS_CAPACITY: usize = 256;
 /// doors now refuse rather than accumulate while the sim is Draining/Frozen.)
 pub type EndpointTx = Sender<EndpointIngress>;
 
-/// The JSON request envelope the endpoint handler builds and forwards as opaque
-/// `Item` bytes. `BTreeMap` headers (NEVER `HashMap`) so the serialized envelope is
-/// deterministic / order-stable. POST-only for v1, but the `method` field keeps the
-/// shape branch-future-proof (GET/any-method passthrough is deferred).
-#[derive(Debug, Serialize)]
-struct RequestEnvelope {
-    /// The HTTP method string (always `POST` for v1).
-    method: String,
-    /// The request path (e.g. `/endpoint/route-1`).
-    path: String,
-    /// The raw query string (empty when absent).
-    query: String,
-    /// Request headers, lexical (deterministic) order. Duplicate names collapse to
-    /// the last value in iteration order — acceptable for v1.
-    headers: BTreeMap<String, String>,
-    /// The body as UTF-8 (lossy). Binary-via-base64 is DEFERRED (decision D5).
-    body: String,
-}
-
 /// Build the opaque JSON request envelope from the untrusted request parts. The
 /// bytes are NEVER decoded or trusted as structure downstream — they cross into
-/// the sim as opaque `Item` bytes. `serde_json::to_vec` of this plain data cannot
-/// realistically fail; an impossible failure folds to empty bytes (the sim's
-/// reject-only decode handles it), never a panic.
+/// the sim as opaque `Item` bytes. The bytes come from
+/// [`encode_request_envelope`], so a scripted request produces the same ones.
 fn build_request_envelope(method: &Method, uri: &Uri, headers: &HeaderMap, body: &[u8]) -> Vec<u8> {
     let mut header_map: BTreeMap<String, String> = BTreeMap::new();
     for (name, value) in headers {
@@ -277,7 +258,7 @@ fn build_request_envelope(method: &Method, uri: &Uri, headers: &HeaderMap, body:
         headers: header_map,
         body: String::from_utf8_lossy(body).into_owned(),
     };
-    serde_json::to_vec(&envelope).unwrap_or_default()
+    encode_request_envelope(&envelope)
 }
 
 /// `POST /endpoint/{target}`: resolve the target label, build the request envelope,

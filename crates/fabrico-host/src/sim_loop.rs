@@ -232,13 +232,7 @@ pub const LOAD_WORK_DIR_REFUSAL: &str =
 pub const LOAD_TIMERS_REFUSAL: &str =
     "project file not opened: the timers in its edit log could not be read.";
 
-/// The default reply deadline for an endpoint request, in logical ticks
-/// (ENDP-03, plan decision D4 — TUNABLE): `deadline_tick = tick_at_ingress +
-/// DEFAULT_ENDPOINT_DEADLINE_TICKS`. ~5s at the ~62.5 t/s live cadence. This is
-/// LOGGED data (a deterministic logical deadline the per-tick sweep decides
-/// against `core.tick`), NEVER a wall-clock duration — the whole determinism
-/// boundary of the phase rests on the deadline being a tick count, not a `Duration`.
-pub const DEFAULT_ENDPOINT_DEADLINE_TICKS: u64 = 300;
+pub use fabrico_engine::envelope::DEFAULT_ENDPOINT_DEADLINE_TICKS;
 
 /// One gesture crossing the render->sim boundary, plus the OPTIONAL verdict sink the
 /// drain answers it through.

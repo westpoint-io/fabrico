@@ -10,6 +10,7 @@
 #![warn(clippy::all)]
 
 pub mod engine;
+pub mod envelope;
 pub mod gesture;
 pub mod render_packet;
 pub mod timer;
