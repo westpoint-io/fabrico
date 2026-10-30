@@ -170,6 +170,14 @@ pub enum BoardError {
         /// The tick the boot ends on.
         boot_end: u64,
     },
+    /// A script entry falls on or after `end_tick`, so a run would stop before applying it. A run
+    /// ends once the core reaches `end_tick`, so the last tick that folds is the one before it.
+    ScriptTickAfterEnd {
+        /// The entry's tick.
+        tick: u64,
+        /// The board's end tick.
+        end_tick: u64,
+    },
     /// A command in the board was refused while it was being applied.
     Command(CommandError),
     /// A script entry names a handle that no command has minted by its tick.
@@ -205,6 +213,9 @@ impl std::fmt::Display for BoardError {
             }
             Self::EndTickBeforeBoot { end_tick, boot_end } => {
                 write!(f, "end_tick {end_tick} is before the boot end, tick {boot_end}")
+            }
+            Self::ScriptTickAfterEnd { tick, end_tick } => {
+                write!(f, "a script entry at tick {tick} would never apply, because the run ends at tick {end_tick}")
             }
             Self::Command(e) => write!(f, "a board command was refused: {e}"),
             Self::UnknownHandle { tick, handle } => {
@@ -444,6 +455,17 @@ mod tests {
             Err(BoardError::EndTickBeforeBoot { end_tick: ONE_PLACE_BOOT_END - 1, boot_end: ONE_PLACE_BOOT_END })
         );
         assert!(parse_board(&board_text(1, ONE_PLACE, "", PLAIN_EXECUTOR, ONE_PLACE_BOOT_END)).is_ok());
+    }
+
+    /// A run stops when the core reaches `end_tick`, so an entry on that tick would never apply.
+    #[test]
+    fn a_script_entry_on_the_end_tick_is_refused_and_one_tick_earlier_is_accepted() {
+        let on_end = board_text(1, ONE_PLACE, &webhook_at(50, "a"), PLAIN_EXECUTOR, 50);
+        assert_eq!(parse_board(&on_end), Err(BoardError::ScriptTickAfterEnd { tick: 50, end_tick: 50 }));
+        let past_end = board_text(1, ONE_PLACE, &webhook_at(60, "a"), PLAIN_EXECUTOR, 50);
+        assert_eq!(parse_board(&past_end), Err(BoardError::ScriptTickAfterEnd { tick: 60, end_tick: 50 }));
+        let before_end = board_text(1, ONE_PLACE, &webhook_at(49, "a"), PLAIN_EXECUTOR, 50);
+        assert!(parse_board(&before_end).is_ok());
     }
 
     /// Every input and outcome in the format reads back as the value the file spells.
