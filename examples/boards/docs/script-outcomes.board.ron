@@ -1,9 +1,15 @@
-// A test board for scripted runs: a webhook goes through a Factory to an HTTP Sink, and the
-// executor below answers that call on the tick this file says. It never reaches a network.
+// A test board for scripted runs. It scripts each kind of input and each answer an outbound call
+// can get, and the executor below answers on the ticks this file says. It never reaches a network.
 //
-//   SOURCE(1,2) -b3-> FACTORY(5,1 3x3) -b4-> SINK Http(11,2)
+//   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2, HTTP to /slow, answered after 40 ticks
+//   row 6:   SOURCE 5 -b7-> SINK 6, HTTP to /bad, fails after 3 ticks
+//   row 9:   SOURCE 8 -b10-> SINK 9, HTTP to /lost, never answered, so it times out
+//   row 12:  SOURCE 11 -b13-> SINK 12, Debug, and a scripted edit puts this Source on a Timer
+//   right:   ROUTE 14 and HTTP HANDLER 15, joined by cables 16 (request) and 17 (reply)
 //
-// Handles mint in command order: machines 0 to 2, then belts 3 and 4. The boot ends on tick 11.
+// Handles mint in command order, and DrawWire mints both cables. The 32 commands and the history
+// seal end the boot on tick 33. The script starts the /slow call first and that call finishes
+// before tick 150, so a reader sees one call at a time at the start of the run.
 Board(
     format: 1,
     seed: 93,
@@ -18,12 +24,56 @@ Board(
         Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
         Dock(belt: 4, endpoint: Head, node: 2, port: 0),
         Configure(node: 2, config: Sink(target: Http(url: "https://example.com/slow", method: Post))),
+
+        Place(kind: 0, cell_x: 1, cell_y: 6),        // 5: SOURCE
+        Place(kind: 7, cell_x: 5, cell_y: 6),        // 6: SINK
+        DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),   // 7
+        Dock(belt: 7, endpoint: Tail, node: 5, port: 0),
+        Dock(belt: 7, endpoint: Head, node: 6, port: 0),
+        Configure(node: 6, config: Sink(target: Http(url: "https://example.com/bad", method: Post))),
+
+        Place(kind: 0, cell_x: 1, cell_y: 9),        // 8: SOURCE
+        Place(kind: 7, cell_x: 5, cell_y: 9),        // 9: SINK
+        DrawBelt(cells: [(2, 9), (3, 9), (4, 9)]),   // 10
+        Dock(belt: 10, endpoint: Tail, node: 8, port: 0),
+        Dock(belt: 10, endpoint: Head, node: 9, port: 0),
+        Configure(node: 9, config: Sink(target: Http(url: "https://example.com/lost", method: Post))),
+
+        Place(kind: 0, cell_x: 1, cell_y: 12),       // 11: SOURCE
+        Place(kind: 7, cell_x: 5, cell_y: 12),       // 12: SINK, Debug by default
+        DrawBelt(cells: [(2, 12), (3, 12), (4, 12)]), // 13
+        Dock(belt: 13, endpoint: Tail, node: 11, port: 0),
+        Dock(belt: 13, endpoint: Head, node: 12, port: 0),
+
+        Place(kind: 9, cell_x: 13, cell_y: 6),       // 14: ROUTE
+        Place(kind: 10, cell_x: 16, cell_y: 5),      // 15: HTTP HANDLER, 3x3
+        Configure(node: 15, config: Factory(source: r#"// answer every request with a short reply
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: {},
+    body: "hello",
+  }, 0);
+}"#)),
+        Configure(node: 14, config: Endpoint(path: "/hello")),
+        // One command mints both cables: 16 the request, then 17 the reply.
+        DrawWire(from_node: 14, from_port: 1, to_node: 15, to_port: 0),
     ],
     script: [
         At(tick: 60, input: Webhook(source: 0, body: "{}")),
+        At(tick: 150, input: Webhook(source: 5, body: "{}")),
+        At(tick: 200, input: Webhook(source: 8, body: "{}")),
+        At(tick: 250, input: Request(route: 14, method: "POST", path: "/endpoint/hello", body: r#"{"name":"docs"}"#)),
+        // Two entries on one tick apply in file order.
+        At(tick: 300, input: Webhook(source: 11, body: r#"{"order":"first"}"#)),
+        At(tick: 300, input: Webhook(source: 11, body: r#"{"order":"second"}"#)),
+        // From here this Source fires on each multiple of 50, starting on tick 350.
+        At(tick: 349, input: Edit(Configure(node: 11, config: Source(trigger: Timer(interval_ticks: 50))))),
     ],
     executor: Executor(default: Reply(after_ticks: 1), rules: [
         Rule(url_prefix: "https://example.com/slow", outcome: Reply(after_ticks: 40)),
+        Rule(url_prefix: "https://example.com/bad", outcome: Error(after_ticks: 3)),
+        Rule(url_prefix: "https://example.com/lost", outcome: Timeout),
     ]),
     view: View(fit: Board),
     end_tick: 1000,

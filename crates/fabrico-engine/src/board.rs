@@ -285,6 +285,9 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
     if board.end_tick < boot_end {
         return Err(BoardError::EndTickBeforeBoot { end_tick: board.end_tick, boot_end });
     }
+    if let Some(entry) = board.script.iter().find(|entry| entry.tick >= board.end_tick) {
+        return Err(BoardError::ScriptTickAfterEnd { tick: entry.tick, end_tick: board.end_tick });
+    }
     Ok(())
 }
 
