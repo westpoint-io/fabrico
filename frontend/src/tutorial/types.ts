@@ -4,6 +4,8 @@
 // shapes, so it can run in a node test and in the walk test, and it holds nothing that could send
 // a command.
 
+import type { ShortcutId } from '../input/shortcuts';
+
 export type LessonId = 'your-first-line';
 export type BindingName = 'source' | 'sink' | 'belt';
 
@@ -51,14 +53,18 @@ export type Check = { is: 'nodeAppeared'; kind: number; bind: BindingName };
 
 export type StageWhen =
   | { is: 'always' }
+  | { is: 'paused' }
   | { is: 'toolArmed'; machineKind: number }
   | { is: 'toolNotArmed'; machineKind: number };
 
 export type HintAnchor =
-  | { on: 'panel'; target: { kind: 'placeMachine'; machineKind: number } }
+  | { on: 'panel'; target: { kind: 'placeMachine'; machineKind: number } | { kind: 'playButton' } }
   | { on: 'floor'; spot: 'source' | 'sink' };
 
 export type Gesture = { do: 'pressHint' } | { do: 'none' };
+
+/** Lesson words: plain text, a key named through `SHORTCUTS`, or a machine named through `KIND_NAMES`. */
+export type PhraseToken = string | { key: ShortcutId } | { kind: number };
 
 /** One thing a step asks for. A step's stages are read top to bottom, and the first that holds is shown. */
 export interface Stage {
@@ -66,6 +72,7 @@ export interface Stage {
   when: StageWhen;
   hint: HintAnchor | null;
   gesture: Gesture;
+  text: readonly PhraseToken[];
 }
 
 export interface Step {
@@ -78,4 +85,6 @@ export interface Lesson {
   id: LessonId;
   title: string;
   steps: readonly Step[];
+  /** What the card says once the last step is done. */
+  closing: readonly PhraseToken[];
 }
