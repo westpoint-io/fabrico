@@ -166,3 +166,8 @@ crates/fabrico-engine/src/timer.rs
 # The per-tick loop body moves out of the desktop host. Its order among stamps and fold is
 # unchanged, and no golden fixture moves.
 crates/fabrico-engine/src/engine.rs
+# Gesture application moves out of the desktop host, so a board can take scripted edits with no
+# host. The code is unchanged apart from taking the engine, and the host keeps a wrapper with the
+# old signature. The headless test proves the path from gesture to command. No golden fixture moves.
+crates/fabrico-engine/src/gesture.rs
+crates/fabrico-engine/tests/headless_slice.rs

@@ -54,12 +54,10 @@ fabrico-engine = { path = "../fabrico-engine" }
 # Needed for the `Key` trait so the deterministic idempotency token can read the
 # node's stable FFI value (`id.1.data().as_ffi()`) — never a second minted key.
 slotmap = "1.1"
-# The Factory `code_hash` stamp (CFG-02): blake3 of the EXACT authored JS bytes,
-# computed HOST-SIDE in `apply_gesture` (the core stores 32 opaque bytes it never
-# computes/interprets). blake3 is FENCED to fabrico-host: it stays a DEV-only dep of
-# fabrico-core and MUST NOT enter fabrico-command/fabrico-core runtime. Pinned to 1.8
-# to match the workspace (fabrico-core dev-oracle + fabrico-scenario) — this adds only
-# a dependency EDGE; the package is already resolved in the lockfile at 1.8.5.
+# The Factory `code_hash` stamp (CFG-02) now runs in `fabrico-engine`, which carries its own
+# edge to blake3. This entry stays so the lockfile doesn't move: removing it would change this
+# package's recorded dependency list. The core stores 32 opaque bytes it never computes, so
+# blake3 stays a dev-only dependency of fabrico-core and out of fabrico-command.
 blake3 = "1.8"
 
 # Async runtime for the executor + axum listener (off the sim thread).

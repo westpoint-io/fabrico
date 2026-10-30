@@ -10,4 +10,5 @@
 #![warn(clippy::all)]
 
 pub mod engine;
+pub mod gesture;
 pub mod timer;
