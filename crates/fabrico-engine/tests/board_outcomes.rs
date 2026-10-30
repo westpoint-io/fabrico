@@ -454,3 +454,21 @@ fn the_first_matching_rule_wins_and_the_default_covers_the_rest() {
     assert_eq!(executor.effects().len(), 5);
     assert_eq!(executor.effects()[2].outcome, OutboundOutcome::Timeout);
 }
+
+/// A spec built in code can skip the parser's bound, so the executor can't trust it. A sum past
+/// `u64::MAX` names no tick: the call gets no answer, in a debug build and a release one, and the
+/// record says so. An unchecked sum panics in debug and wraps to a past tick in release.
+#[test]
+fn an_answer_too_late_to_name_a_tick_is_no_answer_and_the_record_says_so() {
+    for outcome in [OutboundOutcome::Reply { after_ticks: u64::MAX }, OutboundOutcome::Error { after_ticks: u64::MAX }] {
+        let mut executor = ScriptedExecutor::new(ExecutorSpec { default: outcome, rules: Vec::new() });
+        let mut nodes: SlotMap<NodeId, ()> = SlotMap::with_key();
+        let node = nodes.insert(());
+        let effect = Effect::Http { url: SLOW_URL.to_owned(), body: Vec::new(), method: HttpMethod::Post };
+        executor.on_command(5, &Command { event_version: EVENT_VERSION, id: (5, node, 0), partition: 0, effect, deadline: 100 });
+        for tick in 0..10 {
+            assert_eq!(executor.due(tick), vec![], "tick {tick}");
+        }
+        assert_eq!(executor.effects()[0].outcome, OutboundOutcome::Timeout);
+    }
+}

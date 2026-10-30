@@ -151,6 +151,14 @@ pub enum BoardError {
     EmptyBoard,
     /// An outcome says `after_ticks: 0`.
     ZeroAfterTicks,
+    /// An outcome's `after_ticks` is larger than the board's `end_tick`, so its answer could only
+    /// land after the run has stopped.
+    AfterTicksPastEnd {
+        /// The outcome's delay.
+        after_ticks: u64,
+        /// The board's end tick.
+        end_tick: u64,
+    },
     /// A script entry falls at or before the boot end.
     ScriptTickBeforeBoot {
         /// The entry's tick.
@@ -205,6 +213,9 @@ impl std::fmt::Display for BoardError {
             }
             Self::EmptyBoard => write!(f, "the board has no commands that mint a node"),
             Self::ZeroAfterTicks => write!(f, "an outcome has after_ticks: 0, and the earliest answer is 1 tick later"),
+            Self::AfterTicksPastEnd { after_ticks, end_tick } => {
+                write!(f, "an outcome has after_ticks: {after_ticks}, and the run ends at tick {end_tick}")
+            }
             Self::ScriptTickBeforeBoot { tick, boot_end } => {
                 write!(f, "a script entry at tick {tick} is at or before the boot end, tick {boot_end}")
             }
@@ -265,8 +276,8 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
     if board.commands.is_empty() {
         return Err(BoardError::EmptyBoard);
     }
-    let outcomes = std::iter::once(&board.executor.default).chain(board.executor.rules.iter().map(|rule| &rule.outcome));
-    for outcome in outcomes {
+    let outcomes = || std::iter::once(&board.executor.default).chain(board.executor.rules.iter().map(|rule| &rule.outcome));
+    for outcome in outcomes() {
         if matches!(outcome, OutboundOutcome::Reply { after_ticks: 0 } | OutboundOutcome::Error { after_ticks: 0 }) {
             return Err(BoardError::ZeroAfterTicks);
         }
@@ -287,6 +298,13 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
     }
     if let Some(entry) = board.script.iter().find(|entry| entry.tick >= board.end_tick) {
         return Err(BoardError::ScriptTickAfterEnd { tick: entry.tick, end_tick: board.end_tick });
+    }
+    for outcome in outcomes() {
+        if let OutboundOutcome::Reply { after_ticks } | OutboundOutcome::Error { after_ticks } = outcome
+            && *after_ticks > board.end_tick
+        {
+            return Err(BoardError::AfterTicksPastEnd { after_ticks: *after_ticks, end_tick: board.end_tick });
+        }
     }
     Ok(())
 }
@@ -413,6 +431,29 @@ mod tests {
                 "{executor}"
             );
         }
+    }
+
+    /// A delay past the end tick is refused wherever an answer can come from, with `u64::MAX` as
+    /// the case that used to panic in a debug build and act as no answer in a release one. A delay
+    /// equal to the end tick is the largest one accepted.
+    #[test]
+    fn after_ticks_past_the_end_tick_is_refused_wherever_it_appears() {
+        for after_ticks in [901, u64::MAX] {
+            for executor in [
+                format!("Executor(default: Reply(after_ticks: {after_ticks}), rules: [])"),
+                format!("Executor(default: Error(after_ticks: {after_ticks}), rules: [])"),
+                format!(r#"Executor(default: Timeout, rules: [Rule(url_prefix: "https://a", outcome: Reply(after_ticks: {after_ticks}))])"#),
+                format!(r#"Executor(default: Timeout, rules: [Rule(url_prefix: "https://a", outcome: Error(after_ticks: {after_ticks}))])"#),
+            ] {
+                assert_eq!(
+                    parse_board(&board_text(1, ONE_PLACE, "", &executor, 900)),
+                    Err(BoardError::AfterTicksPastEnd { after_ticks, end_tick: 900 }),
+                    "{executor}"
+                );
+            }
+        }
+        let at_end = "Executor(default: Reply(after_ticks: 900), rules: [])";
+        assert!(parse_board(&board_text(1, ONE_PLACE, "", at_end, 900)).is_ok());
     }
 
     #[test]

@@ -194,3 +194,6 @@ crates/fabrico-engine/tests/board_outcomes.rs
 # The check that runs each board file to its end tick and compares the end tick and final hash
 # with the board hash manifest. It adds no behaviour to the engine, and no golden fixture moves.
 crates/fabrico-engine/tests/board_manifest.rs
+# Review 93 WR-01, in files listed above (board.rs, scripted.rs, tests/board_outcomes.rs): the parser
+# refuses an after_ticks larger than end_tick, and the scripted executor uses a checked add. No board
+# in the repo has such a delay, so no hash moves.

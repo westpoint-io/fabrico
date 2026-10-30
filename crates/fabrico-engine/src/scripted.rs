@@ -123,8 +123,13 @@ impl ScriptedExecutor {
             OutboundOutcome::Error { after_ticks } => Some((after_ticks, Outcome::Failure)),
             OutboundOutcome::Timeout => None,
         };
-        if let Some((after_ticks, result)) = answer {
-            self.queue.entry(tick + after_ticks).or_default().push(ResultEvent {
+        // The parser refuses an `after_ticks` past the end tick, but a spec built in code skips
+        // it. A sum past `u64::MAX` names no tick, so that call gets no answer in any build
+        // profile and its record reads as what happened to it: a timeout.
+        let due = answer.and_then(|(after_ticks, result)| Some((tick.checked_add(after_ticks)?, result)));
+        let outcome = if due.is_some() { outcome } else { OutboundOutcome::Timeout };
+        if let Some((due_tick, result)) = due {
+            self.queue.entry(due_tick).or_default().push(ResultEvent {
                 command_id: cmd.id,
                 tick: 0,
                 outcome: result,
