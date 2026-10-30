@@ -5,12 +5,14 @@
 //! the ledger and the executor are both outside the fold, so `host_parity.rs` stays green if
 //! the two calls swap. These tests are the check for it.
 //!
-//! The first test looks at the ledger from inside the dispatch closure, so it reads what recovery
-//! would read if the host died at that exact moment. The second keeps the host to one channel
-//! send, so nothing can reach the executor without going through that closure.
+//! The first test drives [`Host::tick_with_dispatch`], the function `tick_once` runs, and looks at
+//! the ledger from inside the dispatch closure, so it reads what recovery would read if the host
+//! died at that exact moment. The second holds `tick_once` to that one call and the one send, so
+//! nothing can reach the executor without going through the function the first test drives.
 
 use std::collections::BTreeSet;
 
+use fabrico_core::command::ResultEvent;
 use fabrico_core::core::Core;
 use fabrico_core::event::{EventPayload, LogHeader, SCHEMA_VERSION};
 use fabrico_core::ids::{CommandId, Item};
@@ -18,6 +20,7 @@ use fabrico_core::persist::RedbStore;
 use fabrico_core::state::SinkTemplate;
 use fabrico_host::driver::Host;
 use fabrico_host::ledger::DispatchLedger;
+use tokio::sync::mpsc::unbounded_channel;
 
 /// Enough ticks for the source to push several items into the sink.
 const TICKS: u8 = 10;
@@ -40,15 +43,18 @@ fn a_commands_ledger_row_is_durable_when_its_dispatch_runs() {
     let ledger = DispatchLedger::open(dir.path().join("ledger.redb")).expect("open ledger");
     let mut host = Host::new(core, store, ledger, None).expect("open host");
 
+    let (ingress_tx, mut ingress_rx) = unbounded_channel::<EventPayload>();
+    let (_results_tx, mut results_rx) = unbounded_channel::<ResultEvent>();
     let mut dispatched: Vec<CommandId> = Vec::new();
     for byte in 0..TICKS {
-        let ingress = vec![EventPayload::ManualInject {
-            target: source,
-            port: 0,
-            item: Item(vec![byte]),
-        }];
-        let out = host.step_engine(ingress, Vec::new());
-        host.finish_tick(out, |cmd, ledger| {
+        ingress_tx
+            .send(EventPayload::ManualInject {
+                target: source,
+                port: 0,
+                item: Item(vec![byte]),
+            })
+            .expect("the ingress channel is open");
+        host.tick_with_dispatch(&mut ingress_rx, &mut results_rx, |cmd, ledger| {
             let recovery = ledger.recover(&BTreeSet::new()).expect("read the ledger");
             assert!(
                 recovery.do_not_resend.iter().any(|(id, _)| *id == cmd.id),
@@ -68,6 +74,19 @@ fn a_commands_ledger_row_is_durable_when_its_dispatch_runs() {
     );
 }
 
+/// The text of `tick_once`'s body with comments and all whitespace removed.
+fn tick_once_body(code: &str) -> String {
+    let head = code.find("pub fn tick_once(").expect("driver.rs has tick_once");
+    let open = head + code[head..].find(") -> Result<(), StoreError> {").expect("tick_once returns a Result");
+    let body = open + code[open..].find('{').expect("tick_once has a body") + 1;
+    let close = body + code[body..].find("\n    }\n").expect("tick_once's body closes at four spaces");
+    code[body..close].chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// `tick_once` holds one statement, so the first test's function is the path production runs. A
+/// send moved ahead of the ledger row has to be written in `tick_once`, which fails this exact
+/// comparison, or in `tick_with_dispatch`, where the first test sees it. A count of the text
+/// `cmd_tx.send(` passed the first of those and lost to a renamed variable.
 #[test]
 fn the_host_sends_to_the_executor_in_one_place() {
     let src = include_str!("../src/driver.rs");
@@ -77,10 +96,18 @@ fn the_host_sends_to_the_executor_in_one_place() {
         .collect::<Vec<_>>()
         .join("\n");
     // Assembled from pieces, so this file's own text can't be what gets counted.
-    let send: String = ["cmd_tx", ".send("].concat();
+    let send: String = [".", "send("].concat();
     assert_eq!(
         code.matches(&send).count(),
         1,
-        "the only send is the one inside finish_tick's dispatch closure, in tick_once"
+        "driver.rs holds exactly one channel send, the one in tick_once's dispatch closure"
+    );
+    let want: String = ["self.tick_with_dispatch(ingress_rx,results_rx,|cmd,_ledger|{", "let_=cmd_tx", ".send(cmd.clone());})"].concat();
+    assert_eq!(
+        tick_once_body(&code),
+        want,
+        "tick_once must be one call to tick_with_dispatch with the send as its closure, because \
+         a_commands_ledger_row_is_durable_when_its_dispatch_runs drives tick_with_dispatch and \
+         sees nothing written around it"
     );
 }

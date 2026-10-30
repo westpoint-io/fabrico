@@ -24,7 +24,7 @@
 //!
 //! # The fixed per-tick order ([`Host::tick_once`])
 //! `tick_once` drains both channels with `try_recv` and calls [`Engine::step`], which does no
-//! I/O. It then hands the [`StepOutput`] to [`Host::finish_tick`], which performs the durable
+//! I/O. It then hands the [`StepOutput`] to `Host::finish_tick`, which performs the durable
 //! writes and the sends.
 //!
 //! In the engine:
@@ -418,6 +418,23 @@ impl Host {
         results_rx: &mut UnboundedReceiver<ResultEvent>,
         cmd_tx: &UnboundedSender<Command>,
     ) -> Result<(), StoreError> {
+        self.tick_with_dispatch(ingress_rx, results_rx, |cmd, _ledger| {
+            // Unbounded send is sync-callable from the sim thread (no await).
+            let _ = cmd_tx.send(cmd.clone());
+        })
+    }
+
+    /// The body of [`Host::tick_once`], with the send handed in as `dispatch`. `tick_once` adds
+    /// nothing to it but that send, and `tests/write_ahead_order.rs` holds it to that, so a test
+    /// driving this function runs the path production runs and can look at the ledger from inside
+    /// the dispatch closure.
+    #[doc(hidden)]
+    pub fn tick_with_dispatch(
+        &mut self,
+        ingress_rx: &mut UnboundedReceiver<EventPayload>,
+        results_rx: &mut UnboundedReceiver<ResultEvent>,
+        dispatch: impl FnMut(&Command, &DispatchLedger),
+    ) -> Result<(), StoreError> {
         let mut ingress: Vec<EventPayload> = Vec::new();
         while let Ok(payload) = ingress_rx.try_recv() {
             ingress.push(payload);
@@ -427,29 +444,14 @@ impl Host {
             results.push(re);
         }
         let out = self.engine.step(ingress, results);
-        self.finish_tick(out, |cmd, _ledger| {
-            // Unbounded send is sync-callable from the sim thread (no await).
-            let _ = cmd_tx.send(cmd.clone());
-        })
-    }
-
-    /// One [`Engine::step`] with no channels, for a test that calls [`Host::finish_tick`]
-    /// itself so it can look at the ledger from inside the dispatch closure.
-    #[doc(hidden)]
-    pub fn step_engine(
-        &mut self,
-        ingress: Vec<EventPayload>,
-        results: Vec<ResultEvent>,
-    ) -> StepOutput {
-        self.engine.step(ingress, results)
+        self.finish_tick(out, dispatch)
     }
 
     /// Perform what one [`Engine::step`] returned, in the durable order: mark resolved
     /// commands done, append the events, append the edits, write each command ahead and
     /// dispatch it, then snapshot if due. `dispatch` runs once per command, after that
     /// command's `InFlight` row is durable, and gets the ledger so a test can check that.
-    #[doc(hidden)]
-    pub fn finish_tick(
+    fn finish_tick(
         &mut self,
         out: StepOutput,
         mut dispatch: impl FnMut(&Command, &DispatchLedger),
