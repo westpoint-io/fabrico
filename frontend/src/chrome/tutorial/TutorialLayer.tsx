@@ -4,12 +4,15 @@
 // of changing anything is the `doNewThen` prop: the tutorial asks the host for a new board and
 // never holds the transport, so it can't place a machine or finish a step for the user.
 
-import { useCallback, useLayoutEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react';
 import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
+import { devWsInvoke } from '../../transport/devWsInvoke';
+import { transportKind } from '../../transport/transport';
 import { LESSONS } from '../../tutorial/lessons';
-import { IDLE, currentStage, reduce, stageKey, type Card, type TutorialState } from '../../tutorial/machine';
-import type { BoardFacts, ChromeFacts, LessonId, Stage } from '../../tutorial/types';
+import { IDLE, currentStage, noteTokens, reduce, stageKey, viewKey, type Card, type TutorialState } from '../../tutorial/machine';
+import type { BindingName, BoardFacts, ChromeFacts, LessonId, Stage } from '../../tutorial/types';
+import { loadConfig, tauriInvoke } from '../ConfigPanel';
 import type { ArmedTool } from '../Palette';
 import { readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
@@ -48,11 +51,20 @@ interface FrameFacts {
  * frame after the state, and until then its rect belongs to the old stage, so a rect in a probe read
  * always belongs to the stage named in that same read.
  */
-function ringRectFor(key: string): HintRect | null {
+function ringRectFor(key: string, shape: HintRect['shape']): HintRect | null {
   const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
   if (ring === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
   const r = ring.getBoundingClientRect();
-  return { x: r.x, y: r.y, width: r.width, height: r.height, shape: 'square' };
+  return { x: r.x, y: r.y, width: r.width, height: r.height, shape };
+}
+
+/** The drag's far ring, under the same comparison: the ring records the stage both were written for. */
+function ringToRectFor(key: string): HintRect | null {
+  const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
+  const to = document.querySelector<HTMLElement>('[data-fab-hint-to]');
+  if (ring === null || to === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
+  const r = to.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height, shape: 'circle' };
 }
 
 function probeOf(s: TutorialState, facts: FrameFacts | null): TutorialProbe {
@@ -69,8 +81,8 @@ function probeOf(s: TutorialState, facts: FrameFacts | null): TutorialProbe {
     stepCount: lesson?.steps.length ?? 0,
     stepId: lesson?.steps[s.stepIndex]?.id ?? null,
     stageId: stage?.id ?? null,
-    hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id)),
-    hintTo: null,
+    hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id), stage.hint?.on === 'port' ? 'circle' : 'square'),
+    hintTo: stage?.hint?.on === 'port' && stage.hint.to !== undefined ? ringToRectFor(stageKey(s.stepIndex, stage.id)) : null,
     bound,
   };
 }
@@ -100,9 +112,28 @@ function readFreeArea(): ChromeFacts['view']['freeArea'] {
 /** What the card shows, or null when it has nothing to show. */
 function cardViewOf(s: TutorialState, stage: Stage | null): StepCardView | null {
   if (s.card === 'starting') return { state: 'starting' };
+  const lesson = LESSONS.find((l) => l.id === s.lessonId);
+  if (s.card === 'finished' && lesson !== undefined) return { state: 'finished', text: lesson.closing };
   if (s.card !== 'running' || stage === null) return null;
-  const stepCount = LESSONS.find((l) => l.id === s.lessonId)?.steps.length ?? 0;
-  return { state: 'running', stepNumber: s.stepIndex + 1, stepCount, note: null, text: stage.text };
+  const note = s.note === null ? null : noteTokens(s.note);
+  return { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, note, text: stage.text };
+}
+
+/** How often the layer asks the host for the bound Source's trigger: slower than a person presses Apply. */
+export const TRIGGER_POLL_MS = 400;
+
+/** The step that waits on an applied trigger, and the binding it names. Null when the lesson has none. */
+function triggerWatch(s: TutorialState): { from: number; of: BindingName } | null {
+  const steps = LESSONS.find((l) => l.id === s.lessonId)?.steps ?? [];
+  const from = steps.findIndex((step) => step.done.is === 'triggerApplied');
+  const done = steps[from]?.done;
+  return done?.is === 'triggerApplied' ? { from, of: done.of } : null;
+}
+
+/** The pressed segment of the inspector's Trigger group: the unapplied buffer, read from the DOM. */
+function readTriggerPressed(): ChromeFacts['triggerPressed'] {
+  const text = document.querySelector('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]')?.textContent?.trim();
+  return text === 'Webhook' || text === 'Timer' ? text : null;
 }
 
 export interface TutorialLayerProps {
@@ -140,9 +171,41 @@ export function TutorialLayer({
   const factsRef = useRef<FrameFacts | null>(null);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
+  // The host's last answer about the bound Source's trigger. The frame loop reads only this.
+  const appliedRef = useRef<ChromeFacts['appliedTrigger']>(null);
   // The frame loop below outlives any one render, so it reads the chrome's props through this.
   const chromeRef = useRef({ armed, selectedNode, playing });
   chromeRef.current = { armed, selectedNode, playing };
+
+  // THE TRIGGER READ, only while the lesson sits at or past the Timer step. The model has no Source
+  // trigger: `machine_config` is the one read, the same query the inspector makes. It's async, so it
+  // runs on a timer and the frame loop reads the ref, because a query per frame is what the Route sweep
+  // in App.tsx warns against. It reads and enqueues nothing, so the simulation can't tell it ran.
+  const watch = triggerWatch(state);
+  const watchedNode =
+    watch !== null && state.card === 'running' && state.stepIndex >= watch.from ? (state.bindings[watch.of]?.id ?? null) : null;
+  useEffect(() => {
+    if (watchedNode === null) return undefined;
+    const invoke = transportKind() === 'dev' ? devWsInvoke : tauriInvoke;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const read = async (): Promise<void> => {
+      try {
+        const config = await loadConfig(watchedNode, invoke);
+        if (!disposed) {
+          appliedRef.current = config?.kind === 'Source' ? { node: watchedNode, kind: config.trigger.kind } : null;
+        }
+      } catch {
+        // A query that fails says nothing about the trigger, so the last answer stands.
+      }
+      if (!disposed) timer = setTimeout(() => void read(), TRIGGER_POLL_MS);
+    };
+    void read();
+    return () => {
+      disposed = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [watchedNode]);
 
   useLayoutEffect(() => {
     probeRef.current = () => probeOf(stateRef.current, factsRef.current);
@@ -171,22 +234,24 @@ export function TutorialLayer({
         const board = sceneSnapshot(handle.sceneState);
         const chrome: ChromeFacts = {
           ...chromeRef.current,
-          triggerPressed: null,
-          appliedTrigger: null,
+          triggerPressed: readTriggerPressed(),
+          appliedTrigger: appliedRef.current,
           view: { camera, freeArea: readFreeArea() },
         };
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);
         factsRef.current = { board, chrome };
         if (next !== stateRef.current) {
+          // The watch step's slot read changes the state on most frames and shows nothing.
+          const seen = viewKey(next) !== viewKey(stateRef.current);
           stateRef.current = next;
-          setState(next);
+          if (seen) setState(next);
         }
         const shown = currentStage(next, board, chrome, LESSONS);
         setStage(shown);
         targetRef.current =
           shown === null
             ? null
-            : { stageKey: stageKey(next.stepIndex, shown.id), hint: shown.hint, cell: next.spot?.cell ?? null };
+            : { stageKey: stageKey(next.stepIndex, shown.id), hint: shown.hint, cell: next.spot?.cell ?? null, bindings: next.bindings };
       }
       raf = requestAnimationFrame(frame);
     };
@@ -204,6 +269,7 @@ export function TutorialLayer({
         stateRef.current = next;
         setState(next);
         targetRef.current = null;
+        appliedRef.current = null;
         onLessonsOpenChange(false);
       });
     },
@@ -219,13 +285,18 @@ export function TutorialLayer({
     setStage(null);
   }, []);
 
+  const backToLessons = useCallback((): void => {
+    leave();
+    onLessonsOpenChange(true);
+  }, [leave, onLessonsOpenChange]);
+
   const view = cardViewOf(state, stage);
 
   return (
     <>
       {lessonsOpen && <LessonPanel lessons={LESSONS} onStart={start} onClose={() => onLessonsOpenChange(false)} />}
-      {active && <HintPointer targetRef={targetRef} paintRef={paintRingRef} />}
-      {view !== null && <StepCard view={view} onLeave={leave} />}
+      {active && <HintPointer handleRef={handleRef} targetRef={targetRef} paintRef={paintRingRef} />}
+      {view !== null && <StepCard view={view} onLeave={leave} onBackToLessons={backToLessons} onKeepBuilding={leave} />}
     </>
   );
 }

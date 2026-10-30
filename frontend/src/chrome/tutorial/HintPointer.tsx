@@ -8,12 +8,18 @@
 // paints the ring first and works out the lesson second, so a stage change reaches the ring a frame
 // after the lesson state has moved. Until then its rect belongs to the old stage. The attribute is
 // what lets a reader tell the two apart, and only this file writes it.
+//
+// A DRAG HAS TWO RINGS, and one paint call writes both with that attribute. If either target resolves
+// to nothing, both hide and the attribute goes, so a drag stage never shows half its rings.
 
 import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObject } from 'react';
-import { CELL } from '../../../shared/geometry';
+import { CELL, nubAnchor } from '../../../shared/geometry';
 import { KIND_NAMES } from '../../../shared/kindNames';
+import { effectiveBox } from '../../protocol/footprint';
 import { machine_kind } from '../../protocol/kinds';
-import type { HintAnchor, PanelTarget } from '../../tutorial/types';
+import type { SceneHandle } from '../../render/pixiApp';
+import type { BoundNode, TutorialState } from '../../tutorial/machine';
+import type { BindingName, HintAnchor, PanelTarget, PortRoleName } from '../../tutorial/types';
 import { readCamera } from './cameraRead';
 
 /** What the layer asks the ring to mark. `stageKey` is `stageKey(stepIndex, stage.id)` from the lesson machine. */
@@ -21,6 +27,7 @@ export interface HintTarget {
   stageKey: string;
   hint: HintAnchor | null;
   cell: readonly [number, number] | null;
+  bindings: TutorialState['bindings'];
 }
 
 /** Space between the target and the ring, on each side. */
@@ -29,6 +36,10 @@ const OUTSET_PX = 4;
 const PANEL_TARGET_Z = '4';
 /** With the name chips: a ring on the board is cut off by a panel it pans under. */
 const BOARD_TARGET_Z = '1';
+/** A port ring's diameter, fixed on screen: `--fab-space-xl`. A later plan sizes it to the exact hit area. */
+const PORT_RING_PX = 32;
+/** The wire's port roles (`NodeView.ports[].role`): In=0, Out=1, Fault=2. A Sink's fault dot is never a target. */
+const PORT_ROLE: Readonly<Record<PortRoleName, number>> = { in: 0, out: 1 };
 
 interface RingBox {
   x: number;
@@ -62,8 +73,43 @@ function panelControl(target: PanelTarget): HTMLElement | null {
   }
 }
 
+type SceneNodes = NonNullable<SceneHandle['sceneState']>['nodes'];
+
+/**
+ * The bound machine as it stands now, or null. A keyframe can hand a handle to another kind or to
+ * nothing and the binding follows a frame later, so the node has to still read the kind in its key.
+ */
+function boundNode(nodes: SceneNodes | undefined, bound: BoundNode | undefined) {
+  if (nodes === undefined || bound === undefined) return null;
+  const node = nodes.get(bound.id);
+  if (node === undefined || String(node.kind) !== bound.nodeKey.split('@')[0]) return null;
+  return node;
+}
+
+/** A 32 px circle centred on a bound machine's port dot, through the camera. */
+function portBox(
+  nodes: SceneNodes | undefined,
+  bindings: TutorialState['bindings'],
+  of: BindingName,
+  role: PortRoleName,
+): RingBox | null {
+  const node = boundNode(nodes, bindings[of]);
+  const cam = readCamera();
+  if (node === null || cam === null) return null;
+  const port = node.ports.find((p) => p.role === PORT_ROLE[role]);
+  if (port === undefined) return null;
+  const anchor = nubAnchor(port.cell_x, port.cell_y, port.side);
+  return {
+    x: anchor.x * cam.scale + cam.x - PORT_RING_PX / 2,
+    y: anchor.y * cam.scale + cam.y - PORT_RING_PX / 2,
+    width: PORT_RING_PX,
+    height: PORT_RING_PX,
+    zIndex: BOARD_TARGET_Z,
+  };
+}
+
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
-function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean): RingBox | null {
+function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean, nodes: SceneNodes | undefined): RingBox | null {
   const hint = target.hint;
   if (hint === null) return null;
   if (hint.on === 'panel') {
@@ -83,9 +129,23 @@ function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean): R
       zIndex: PANEL_TARGET_Z,
     };
   }
+  if (hint.on === 'port') return portBox(nodes, target.bindings, hint.of, hint.role);
   const cam = readCamera();
-  if (cam === null || target.cell === null) return null;
+  if (cam === null) return null;
   const size = CELL * cam.scale;
+  if (hint.on === 'machine') {
+    const node = boundNode(nodes, target.bindings[hint.of]);
+    if (node === null) return null;
+    const { ew, eh } = effectiveBox(node.w, node.h, node.rot);
+    return {
+      x: node.cell_x * size + cam.x - OUTSET_PX,
+      y: node.cell_y * size + cam.y - OUTSET_PX,
+      width: ew * size + 2 * OUTSET_PX,
+      height: eh * size + 2 * OUTSET_PX,
+      zIndex: BOARD_TARGET_Z,
+    };
+  }
+  if (target.cell === null) return null;
   return {
     x: target.cell[0] * size + cam.x - OUTSET_PX,
     y: target.cell[1] * size + cam.y - OUTSET_PX,
@@ -96,44 +156,60 @@ function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean): R
 }
 
 export interface HintPointerProps {
+  handleRef: RefObject<SceneHandle | null>;
   /** Written by the layer's frame loop; null when there is no stage. */
   targetRef: RefObject<HintTarget | null>;
   /** Where the ring leaves its paint function, for the layer's frame loop to call. */
   paintRef: MutableRefObject<(() => void) | null>;
 }
 
-export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Element {
+function writeRing(ring: HTMLElement, box: RingBox): void {
+  ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
+  ring.style.width = `${box.width}px`;
+  ring.style.height = `${box.height}px`;
+  ring.style.visibility = 'visible';
+}
+
+export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps): JSX.Element {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
+  const ringToRef = useRef<HTMLDivElement | null>(null);
+  const paintElRef = useRef<HTMLDivElement | null>(null);
   const lastStageRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     const project = (): void => {
       const layer = layerRef.current;
       const ring = ringRef.current;
-      if (layer === null || ring === null) return;
+      const ringTo = ringToRef.current;
+      if (layer === null || ring === null || ringTo === null) return;
       const target = targetRef.current;
       const stageBegan = target !== null && target.stageKey !== lastStageRef.current;
       lastStageRef.current = target?.stageKey ?? null;
-      const box = target === null ? null : ringBox(target, layer, stageBegan);
-      if (target === null || box === null) {
+      const nodes = handleRef.current?.sceneState.nodes;
+      const box = target === null ? null : ringBox(target, layer, stageBegan, nodes);
+      const hint = target?.hint;
+      const to = hint?.on === 'port' ? hint.to : undefined;
+      const toBox = target !== null && to !== undefined ? portBox(nodes, target.bindings, to.of, to.role) : null;
+      if (target === null || box === null || (to !== undefined && toBox === null)) {
         ring.style.visibility = 'hidden';
+        ringTo.style.visibility = 'hidden';
         ring.removeAttribute('data-fab-hint-stage');
-      } else {
-        layer.style.zIndex = box.zIndex;
-        ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
-        ring.style.width = `${box.width}px`;
-        ring.style.height = `${box.height}px`;
-        ring.setAttribute('data-fab-hint-stage', target.stageKey);
-        ring.style.visibility = 'visible';
+        return;
       }
+      layer.style.zIndex = box.zIndex;
+      writeRing(ring, box);
+      if (toBox === null) ringTo.style.visibility = 'hidden';
+      else writeRing(ringTo, toBox);
+      if (paintElRef.current !== null) paintElRef.current.className = hint?.on === 'port' ? 'fab-hint fab-hint--port' : 'fab-hint';
+      ring.setAttribute('data-fab-hint-stage', target.stageKey);
     };
     project();
     paintRef.current = project;
     return () => {
       paintRef.current = null;
     };
-  }, [targetRef, paintRef]);
+  }, [handleRef, targetRef, paintRef]);
 
   return (
     <div
@@ -149,7 +225,15 @@ export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Elem
         style={{ position: 'absolute', top: 0, left: 0, willChange: 'transform', visibility: 'hidden' }}
       >
         {/* The paint, apart from the moving element, so a later pulse never touches the transform. */}
-        <div className="fab-hint" />
+        <div ref={paintElRef} className="fab-hint" />
+      </div>
+      {/* Where a drag ends. Only a port is ever a drag's far end, so its paint is always the circle. */}
+      <div
+        ref={ringToRef}
+        data-fab-hint-to=""
+        style={{ position: 'absolute', top: 0, left: 0, willChange: 'transform', visibility: 'hidden' }}
+      >
+        <div className="fab-hint fab-hint--port" />
       </div>
     </div>
   );

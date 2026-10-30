@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { noteTokens } from '../../tutorial/machine.ts';
+import { MAX_NOTE_CHARS } from '../../tutorial/phrase.ts';
 import { StepCard, type StepCardView } from './StepCard.tsx';
 
 // The vitest env is `node`, with no DOM, so the component is called directly and its element tree is
@@ -41,9 +43,13 @@ const RUNNING: StepCardView = {
   text: ['A ', { kind: 0 }, ' makes items.'],
 };
 
+const NOOPS = { onLeave: () => {}, onBackToLessons: () => {}, onKeepBuilding: () => {} };
+
 function render(view: StepCardView): El[] {
-  return elements(StepCard({ view, onLeave: () => {} }));
+  return elements(StepCard({ view, ...NOOPS }));
 }
+
+const FINISHED: StepCardView = { state: 'finished', text: ['A ', { kind: 0 }, ' makes items.'] };
 
 const styleOf = (el: El): Record<string, unknown> => (el.props.style ?? {}) as Record<string, unknown>;
 
@@ -90,7 +96,7 @@ describe('StepCard', () => {
   });
 
   it('reads the step counter and the instruction while running, with Leave', () => {
-    const text = textOf(StepCard({ view: RUNNING, onLeave: () => {} }));
+    const text = textOf(StepCard({ view: RUNNING, ...NOOPS }));
     expect(text).toContain('Step 1 of 6');
     expect(text).toContain('A Source makes items.');
     expect(text).toContain('Leave');
@@ -102,13 +108,13 @@ describe('StepCard', () => {
   });
 
   it('shows a note above the step counter when there is one', () => {
-    const text = textOf(StepCard({ view: { ...RUNNING, note: ['Step 1 was already done.'] }, onLeave: () => {} }));
+    const text = textOf(StepCard({ view: { ...RUNNING, note: ['Step 1 was already done.'] }, ...NOOPS }));
     expect(text.indexOf('Step 1 was already done.')).toBeGreaterThanOrEqual(0);
     expect(text.indexOf('Step 1 was already done.')).toBeLessThan(text.indexOf('Step 1 of 6'));
   });
 
   it('reads Clearing the board with no step counter while a new board is on its way', () => {
-    const text = textOf(StepCard({ view: { state: 'starting' }, onLeave: () => {} }));
+    const text = textOf(StepCard({ view: { state: 'starting' }, ...NOOPS }));
     expect(text).toContain('Clearing the board.');
     expect(text).not.toMatch(/Step \d/);
     expect(text).toContain('Leave');
@@ -116,8 +122,70 @@ describe('StepCard', () => {
 
   it('calls onLeave when Leave is pressed', () => {
     let left = 0;
-    const tree = elements(StepCard({ view: { state: 'starting' }, onLeave: () => (left += 1) }));
+    const tree = elements(StepCard({ view: { state: 'starting' }, ...NOOPS, onLeave: () => (left += 1) }));
     (tree.find((el) => el.type === 'button')!.props.onClick as () => void)();
     expect(left).toBe(1);
+  });
+
+  it('reads a note that uses the whole of its budget', () => {
+    const note = 'x'.repeat(MAX_NOTE_CHARS);
+    const text = textOf(StepCard({ view: { ...RUNNING, note: [note] }, ...NOOPS }));
+    expect(text).toContain(note);
+  });
+
+  it('reads the real note above the step counter', () => {
+    const note = noteTokens({ kind: 'alreadyRunning', a: 5, b: 5 });
+    const text = textOf(StepCard({ view: { ...RUNNING, note }, ...NOOPS }));
+    expect(text).toContain('The board was already running, so step 5 is done. Space pauses it.');
+    expect(text.indexOf('already running')).toBeLessThan(text.indexOf('Step 1 of 6'));
+  });
+
+  describe('when the lesson is finished', () => {
+    it('reads Lesson done as a heading, with the closing sentence and no step counter', () => {
+      const [heading] = render(FINISHED).filter((el) => el.type === 'h2');
+      expect(heading?.props.className).toBe('fab-title');
+      expect(textOf(heading)).toBe('Lesson done');
+      const text = textOf(StepCard({ view: FINISHED, ...NOOPS }));
+      expect(text).toContain('A Source makes items.');
+      expect(text).not.toMatch(/Step \d/);
+    });
+
+    it('offers Back to lessons, neutral, and Keep building with the accent, and no Leave', () => {
+      const buttons = render(FINISHED).filter((el) => el.type === 'button');
+      expect(buttons.map((b) => textOf(b))).toEqual(['Back to lessons', 'Keep building']);
+      expect(buttons[0]?.props.className).toBe('fab-tool-btn fab-tool-btn--labeled');
+      expect(buttons[1]?.props.className).toBe('fab-cta');
+    });
+
+    it('calls the prop each button names', () => {
+      const calls: string[] = [];
+      const buttons = elements(
+        StepCard({
+          view: FINISHED,
+          onLeave: () => calls.push('leave'),
+          onBackToLessons: () => calls.push('back'),
+          onKeepBuilding: () => calls.push('keep'),
+        }),
+      ).filter((el) => el.type === 'button');
+      (buttons[0]!.props.onClick as () => void)();
+      (buttons[1]!.props.onClick as () => void)();
+      expect(calls).toEqual(['back', 'keep']);
+    });
+
+    it('still takes the pointer only on the button box, and keeps focus off a pressed button', () => {
+      const tree = render(FINISHED);
+      const auto = tree.filter((el) => styleOf(el).pointerEvents === 'auto');
+      expect(auto, 'one element takes the pointer').toHaveLength(1);
+      expect(elements(auto[0]!.props.children).map((el) => el.type)).toEqual(['button', 'button']);
+      for (const button of tree.filter((el) => el.type === 'button')) {
+        let prevented = 0;
+        (button.props.onMouseDown as (ev: { preventDefault(): void }) => void)({
+          preventDefault: () => {
+            prevented += 1;
+          },
+        });
+        expect(prevented).toBe(1);
+      }
+    });
   });
 });

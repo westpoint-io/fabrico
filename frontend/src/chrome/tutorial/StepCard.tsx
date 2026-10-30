@@ -13,11 +13,14 @@ import type { PhraseToken } from '../../tutorial/types';
 
 export type StepCardView =
   | { state: 'starting' }
-  | { state: 'running'; stepNumber: number; stepCount: number; note: readonly PhraseToken[] | null; text: readonly PhraseToken[] };
+  | { state: 'running'; stepNumber: number; stepCount: number; note: readonly PhraseToken[] | null; text: readonly PhraseToken[] }
+  | { state: 'finished'; text: readonly PhraseToken[] };
 
 export interface StepCardProps {
   view: StepCardView;
   onLeave: () => void;
+  onBackToLessons: () => void;
+  onKeepBuilding: () => void;
 }
 
 const textStyle: CSSProperties = {
@@ -45,7 +48,35 @@ function Words({ tokens }: { tokens: readonly PhraseToken[] }): JSX.Element {
   );
 }
 
-export function StepCard({ view, onLeave }: StepCardProps): JSX.Element {
+/** A press on a card button must not leave focus on it, or Space would stop reaching the board. */
+const keepFocusOff = (ev: { preventDefault(): void }): void => ev.preventDefault();
+
+function Buttons({ view, onLeave, onBackToLessons, onKeepBuilding }: StepCardProps): JSX.Element {
+  if (view.state === 'finished') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--fab-space-sm)', pointerEvents: 'auto' }}>
+        <button type="button" className="fab-tool-btn fab-tool-btn--labeled" onMouseDown={keepFocusOff} onClick={onBackToLessons}>
+          Back to lessons
+        </button>
+        <button type="button" className="fab-cta" onMouseDown={keepFocusOff} onClick={onKeepBuilding}>
+          Keep building
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ alignSelf: 'end', pointerEvents: 'auto' }}>
+      <button type="button" className="fab-tool-btn fab-tool-btn--labeled" onMouseDown={keepFocusOff} onClick={onLeave}>
+        Leave
+      </button>
+    </div>
+  );
+}
+
+export function StepCard(props: StepCardProps): JSX.Element {
+  const { view } = props;
+  // Two buttons don't fit beside the closing sentence, so a finished card sets them under it.
+  const stacked = view.state === 'finished';
   return (
     <aside
       data-fab-step-card=""
@@ -61,8 +92,9 @@ export function StepCard({ view, onLeave }: StepCardProps): JSX.Element {
         width: 480,
         padding: 'calc(var(--fab-space-md) + var(--fab-bezel-ring))',
         display: 'grid',
-        gridTemplateColumns: '1fr auto',
+        gridTemplateColumns: stacked ? '1fr' : '1fr auto',
         columnGap: 'var(--fab-space-md)',
+        rowGap: 'var(--fab-space-md)',
         pointerEvents: 'none',
       }}
     >
@@ -72,26 +104,24 @@ export function StepCard({ view, onLeave }: StepCardProps): JSX.Element {
         aria-atomic="true"
         style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--fab-space-sm)' }}
       >
-        {view.state === 'starting' ? (
-          <p style={textStyle}>Clearing the board.</p>
-        ) : (
+        {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
+        {view.state === 'running' && (
           <>
             {view.note !== null && <Words tokens={view.note} />}
             <p style={{ ...textStyle, fontWeight: 700 }}>{`Step ${view.stepNumber} of ${view.stepCount}`}</p>
             <Words tokens={view.text} />
           </>
         )}
+        {view.state === 'finished' && (
+          <>
+            <h2 className="fab-title" style={{ margin: 0 }}>
+              Lesson done
+            </h2>
+            <Words tokens={view.text} />
+          </>
+        )}
       </div>
-      <div style={{ alignSelf: 'end', pointerEvents: 'auto' }}>
-        <button
-          type="button"
-          className="fab-tool-btn fab-tool-btn--labeled"
-          onMouseDown={(ev) => ev.preventDefault()}
-          onClick={onLeave}
-        >
-          Leave
-        </button>
-      </div>
+      <Buttons {...props} />
     </aside>
   );
 }
