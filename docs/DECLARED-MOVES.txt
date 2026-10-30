@@ -159,3 +159,7 @@ crates/fabrico-core/tests/factory_memory_pin.rs
 crates/fabrico-core/src/factory.rs
 # Comment lines only: the header names the pinned rquickjs version and the memory limit's new home.
 crates/fabrico-core/tests/rquickjs_spike.rs
+# The timers move out of the desktop host so the tick loop can run without tokio, axum or redb.
+# The code is unchanged, and the host re-exports it from the old paths.
+crates/fabrico-engine/src/lib.rs
+crates/fabrico-engine/src/timer.rs

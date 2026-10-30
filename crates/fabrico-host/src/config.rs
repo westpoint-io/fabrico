@@ -23,7 +23,7 @@
 
 use std::net::SocketAddr;
 
-use fabrico_core::ids::NodeId;
+pub use fabrico_engine::timer::TimerConfig;
 
 /// All host-side configuration. Built at startup; never serialized into the
 /// event log (see the module docs).
@@ -32,20 +32,4 @@ pub struct HostConfig {
     /// The address the webhook source binds. Loopback-only this phase
     /// (`127.0.0.1:PORT`); a public tunnel is deferred to Phase 6.
     pub webhook_addr: SocketAddr,
-}
-
-/// A tick-interval timer source: every `interval` ticks, inject one event into
-/// `target`.
-#[derive(Clone, Debug)]
-pub struct TimerConfig {
-    /// The source node the timer injects into.
-    pub target: NodeId,
-    /// The tick period between injections.
-    pub interval: u64,
-    /// The item payload every injection from this timer carries: plain data,
-    /// constant per timer, byte-stable across runs and replays — the same
-    /// determinism contract the old fixed marker byte had, now caller-chosen so
-    /// a JSON-parsing factory receives valid input (e.g. canonical `b"{}"`)
-    /// instead of faulting on every fire (Finding 2 / LIVE-05).
-    pub item: Vec<u8>,
 }

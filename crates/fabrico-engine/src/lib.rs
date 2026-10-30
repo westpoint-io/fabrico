@@ -8,3 +8,5 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_types, clippy::disallowed_methods)]
 #![warn(clippy::all)]
+
+pub mod timer;
