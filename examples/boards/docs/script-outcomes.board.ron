@@ -1,0 +1,30 @@
+// A test board for scripted runs: a webhook goes through a Factory to an HTTP Sink, and the
+// executor below answers that call on the tick this file says. It never reaches a network.
+//
+//   SOURCE(1,2) -b3-> FACTORY(5,1 3x3) -b4-> SINK Http(11,2)
+//
+// Handles mint in command order: machines 0 to 2, then belts 3 and 4. The boot ends on tick 11.
+Board(
+    format: 1,
+    seed: 93,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY, the default pass-through
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),   // 3: source -> factory
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),  // 4: factory -> sink
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 2, config: Sink(target: Http(url: "https://example.com/slow", method: Post))),
+    ],
+    script: [
+        At(tick: 60, input: Webhook(source: 0, body: "{}")),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/slow", outcome: Reply(after_ticks: 40)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 1000,
+)

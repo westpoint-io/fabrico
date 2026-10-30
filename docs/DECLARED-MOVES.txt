@@ -185,3 +185,7 @@ crates/fabrico-engine/src/envelope.rs
 crates/fabrico-engine/src/board.rs
 # A comment line only: the demo's list moved out of the host into a board file.
 crates/fabrico-core/src/tick.rs
+# The scripted run: a board's own inputs and outside answers reach the fold through Engine::step,
+# with no host and no network. Nothing in the fold changes, and no golden fixture moves.
+crates/fabrico-engine/src/scripted.rs
+crates/fabrico-engine/tests/board_outcomes.rs
