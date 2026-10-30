@@ -45,12 +45,15 @@ function panelSelector(target: Extract<HintAnchor, { on: 'panel' }>['target']): 
 }
 
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
-function ringBox(target: HintTarget, layer: HTMLElement): RingBox | null {
+function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean): RingBox | null {
   const hint = target.hint;
   if (hint === null) return null;
   if (hint.on === 'panel') {
     const control = document.querySelector<HTMLElement>(panelSelector(hint.target));
     if (control === null) return null;
+    // Once, when the stage begins: a palette row can sit below the fold of its scrolling column.
+    // This moves chrome only, so the camera and the board stay as they were.
+    if (stageBegan) control.scrollIntoView({ block: 'nearest' });
     const r = control.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return null;
     const origin = layer.getBoundingClientRect();
@@ -84,6 +87,7 @@ export interface HintPointerProps {
 export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Element {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
+  const lastStageRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     const project = (): void => {
@@ -91,7 +95,9 @@ export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Elem
       const ring = ringRef.current;
       if (layer === null || ring === null) return;
       const target = targetRef.current;
-      const box = target === null ? null : ringBox(target, layer);
+      const stageBegan = target !== null && target.stageKey !== lastStageRef.current;
+      lastStageRef.current = target?.stageKey ?? null;
+      const box = target === null ? null : ringBox(target, layer, stageBegan);
       if (target === null || box === null) {
         ring.style.visibility = 'hidden';
         ring.removeAttribute('data-fab-hint-stage');
@@ -124,16 +130,8 @@ export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Elem
         data-fab-hint=""
         style={{ position: 'absolute', top: 0, left: 0, willChange: 'transform', visibility: 'hidden' }}
       >
-        <div
-          style={{
-            boxSizing: 'border-box',
-            width: '100%',
-            height: '100%',
-            border: '2px solid var(--fab-focus)',
-            // Dark lines either side keep the blue readable on the floor, a panel or a blue button.
-            boxShadow: '0 0 0 2px var(--fab-substrate), inset 0 0 0 2px var(--fab-substrate)',
-          }}
-        />
+        {/* The paint, apart from the moving element, so a later pulse never touches the transform. */}
+        <div className="fab-hint" />
       </div>
     </div>
   );

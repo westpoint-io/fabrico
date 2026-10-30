@@ -50,6 +50,7 @@ export const IDLE: TutorialState = {
 
 export type TutorialEvent =
   | { type: 'newSent'; lessonId: LessonId; floorAtSend: number }
+  | { type: 'left' }
   | { type: 'frame'; board: BoardFacts; chrome: ChromeFacts };
 
 /** The value the ring records as `data-fab-hint-stage`. The step index is in it because a stage id can recur across steps. */
@@ -150,6 +151,10 @@ function advance(s: TutorialState, board: BoardFacts, lessons: readonly Lesson[]
 export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Lesson[]): TutorialState {
   if (e.type === 'newSent') {
     return { ...IDLE, card: 'starting', lessonId: e.lessonId, floor: e.floorAtSend };
+  }
+  if (e.type === 'left') {
+    // The board stays, and so do the step index, bindings and baseline, so the lesson can resume.
+    return { ...s, card: 'none' };
   }
   if (s.card === 'starting') {
     // The swap floor, not the generation: Undo raises the generation too, and only a real swap

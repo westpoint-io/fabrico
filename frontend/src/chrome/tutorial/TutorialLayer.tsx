@@ -9,11 +9,12 @@ import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, reduce, stageKey, type Card, type TutorialState } from '../../tutorial/machine';
-import type { BoardFacts, ChromeFacts, LessonId } from '../../tutorial/types';
+import type { BoardFacts, ChromeFacts, LessonId, Stage } from '../../tutorial/types';
 import type { ArmedTool } from '../Palette';
 import { readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
 import { LessonPanel } from './LessonPanel';
+import { StepCard, type StepCardView } from './StepCard';
 
 export interface HintRect {
   x: number;
@@ -84,15 +85,24 @@ const FREE_AREA_TOP_PX = 116;
 /** The window's right edge less `--fab-space-lg`. */
 const FREE_AREA_RIGHT_INSET_PX = 24;
 
-/** The part of the window no panel covers: right of the palette, under the toolbar. */
+/** The part of the window no panel covers: right of the palette, under the toolbar, above the card. */
 function readFreeArea(): ChromeFacts['view']['freeArea'] {
   const dock = document.querySelector<HTMLElement>('[data-fab-left-dock]');
+  const card = document.querySelector<HTMLElement>('[data-fab-step-card]');
   return {
     left: dock === null ? 0 : dock.getBoundingClientRect().right,
     right: window.innerWidth - FREE_AREA_RIGHT_INSET_PX,
     top: FREE_AREA_TOP_PX,
-    bottom: window.innerHeight,
+    bottom: card === null ? window.innerHeight : card.getBoundingClientRect().top,
   };
+}
+
+/** What the card shows, or null when it has nothing to show. */
+function cardViewOf(s: TutorialState, stage: Stage | null): StepCardView | null {
+  if (s.card === 'starting') return { state: 'starting' };
+  if (s.card !== 'running' || stage === null) return null;
+  const stepCount = LESSONS.find((l) => l.id === s.lessonId)?.steps.length ?? 0;
+  return { state: 'running', stepNumber: s.stepIndex + 1, stepCount, note: null, text: stage.text };
 }
 
 export interface TutorialLayerProps {
@@ -124,6 +134,9 @@ export function TutorialLayer({
   // React state follows only so the panel and the ring can mount and unmount.
   const stateRef = useRef<TutorialState>(IDLE);
   const [state, setState] = useState<TutorialState>(IDLE);
+  // The stage can change with the chrome while the lesson state stands still, for example when a tool
+  // arms. The stages are constants, so setting the same one each frame costs no render.
+  const [stage, setStage] = useState<Stage | null>(null);
   const factsRef = useRef<FrameFacts | null>(null);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
@@ -163,11 +176,12 @@ export function TutorialLayer({
           stateRef.current = next;
           setState(next);
         }
-        const stage = currentStage(next, board, chrome, LESSONS);
+        const shown = currentStage(next, board, chrome, LESSONS);
+        setStage(shown);
         targetRef.current =
-          stage === null
+          shown === null
             ? null
-            : { stageKey: stageKey(next.stepIndex, stage.id), hint: stage.hint, cell: next.spot?.cell ?? null };
+            : { stageKey: stageKey(next.stepIndex, shown.id), hint: shown.hint, cell: next.spot?.cell ?? null };
       }
       raf = requestAnimationFrame(frame);
     };
@@ -184,16 +198,29 @@ export function TutorialLayer({
         const next = reduce(stateRef.current, { type: 'newSent', lessonId, floorAtSend }, LESSONS);
         stateRef.current = next;
         setState(next);
+        targetRef.current = null;
         onLessonsOpenChange(false);
       });
     },
     [doNewThen, handleRef, onLessonsOpenChange],
   );
 
+  const leave = useCallback((): void => {
+    const next = reduce(stateRef.current, { type: 'left' }, LESSONS);
+    stateRef.current = next;
+    setState(next);
+    // So a later Start can't paint this lesson's last target before its first frame.
+    targetRef.current = null;
+    setStage(null);
+  }, []);
+
+  const view = cardViewOf(state, stage);
+
   return (
     <>
       {lessonsOpen && <LessonPanel lessons={LESSONS} onStart={start} onClose={() => onLessonsOpenChange(false)} />}
       {active && <HintPointer targetRef={targetRef} paintRef={paintRingRef} />}
+      {view !== null && <StepCard view={view} onLeave={leave} />}
     </>
   );
 }

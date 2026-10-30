@@ -176,6 +176,18 @@ ${BEZEL_CLASSES.join(',\n')} {
   background-color: var(--fab-panel-fill);
 }
 
+/* The lesson ring's paint, on the element inside the one the frame loop moves. The dark
+   keylines either side keep the blue readable on the floor, a panel, a machine outline or a
+   blue button. It carries no bezel, so it stays out of BEZEL_CLASSES. */
+.fab-hint {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 2px solid var(--fab-focus);
+  box-shadow: 0 0 0 2px var(--fab-substrate), inset 0 0 0 2px var(--fab-substrate);
+}
+.fab-hint--port { border-radius: 50%; }
+
 .fab-palette-item {
   display: flex;
   align-items: center;

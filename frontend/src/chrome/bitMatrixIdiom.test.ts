@@ -261,8 +261,10 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  *
  * 51 -> 55 with the tutorial's chrome folder (LessonPanel.tsx, TutorialLayer.tsx, HintPointer.tsx,
  * cameraRead.ts): four plain additions, each scanned like the rest.
+ *
+ * 55 -> 56 with StepCard.tsx, the lesson's step card: one more plain addition.
  */
-const EXPECTED_CHROME_SOURCE_FILES = 55;
+const EXPECTED_CHROME_SOURCE_FILES = 56;
 
 describe('the bit-matrix icon idiom is GONE from frontend/src/chrome, not dormant', () => {
   const files = chromeSourceFiles();
