@@ -1,8 +1,8 @@
 //! Wave-0 build-gate spike for the Phase-04 factory sandbox (plan 04-01).
 //!
-//! This is a STANDALONE integration test that exercises the `rquickjs` 0.12 crate
+//! This is a STANDALONE integration test that exercises the `rquickjs` 0.14 crate
 //! directly — it is deliberately NOT wired into any `src` module. Its job is to
-//! de-risk the first vendored-C runtime dependency and to PIN the exact 0.12 API
+//! de-risk the first vendored-C runtime dependency and to PIN the exact 0.14 API
 //! spellings, trait bounds, and the f64-free patterns that plan 04-02 will build
 //! the real `FactoryRuntime` against (so 04-02 codes against confirmed APIs, not
 //! the RESEARCH pseudocode / Open Questions A1-A5).
@@ -12,7 +12,7 @@
 //! bans `f64`/`HashMap`/`Instant`/IO) UNCHANGED with the new engine present.
 //!
 //! ─────────────────────────────────────────────────────────────────────────────
-//! PINNED rquickjs 0.12.0 API (consumed by plan 04-02) — verified against the
+//! PINNED rquickjs 0.14.0 API (consumed by plan 04-02) — verified against the
 //! crate source in ~/.cargo and proven by the tests below:
 //!
 //! Imports / public paths:
@@ -23,6 +23,9 @@
 //! Runtime + fences (all on the SYNC `Runtime`):
 //!   let rt = Runtime::new()?;                       // -> Runtime  (Clone, Send; NOT Sync)
 //!   rt.set_memory_limit(bytes: usize);             // -> ()
+//!     // Production code no longer calls this. `FactoryRuntime::build` gives the runtime a
+//!     // `FenceAllocator`, which enforces the limit, and this spike still exercises the
+//!     // upstream call.
 //!   rt.set_max_stack_size(bytes: usize);           // -> ()
 //!   rt.set_interrupt_handler(Some(Box::new(move || -> bool { .. })));
 //!     // InterruptHandler = Box<dyn FnMut() -> bool + 'static>   (NON-Send: no `parallel` feature)

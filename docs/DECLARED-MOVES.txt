@@ -157,3 +157,5 @@ NONE
 crates/fabrico-qjs-alloc/src/lib.rs
 crates/fabrico-core/tests/factory_memory_pin.rs
 crates/fabrico-core/src/factory.rs
+# Comment lines only: the header names the pinned rquickjs version and the memory limit's new home.
+crates/fabrico-core/tests/rquickjs_spike.rs
