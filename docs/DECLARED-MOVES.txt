@@ -189,3 +189,6 @@ crates/fabrico-core/src/tick.rs
 # with no host and no network. Nothing in the fold changes, and no golden fixture moves.
 crates/fabrico-engine/src/scripted.rs
 crates/fabrico-engine/tests/board_outcomes.rs
+# The check that runs each board file to its end tick and compares the end tick and final hash
+# with the board hash manifest. It adds no behaviour to the engine, and no golden fixture moves.
+crates/fabrico-engine/tests/board_manifest.rs
