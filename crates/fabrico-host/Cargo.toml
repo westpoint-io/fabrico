@@ -26,6 +26,14 @@ name = "read_project"
 path = "examples/read_project.rs"
 test = true
 
+# The headless tick and hash reader a save-and-compare test runs. `test = true` is what
+# makes its tests run: Cargo defaults an example to `test = false`, which compiles
+# the `#[cfg(test)]` module and never runs it.
+[[example]]
+name = "replay_hash"
+path = "examples/replay_hash.rs"
+test = true
+
 # The dev-only seams (phase 90 review IN-A-04): `SimLoop::with_dev_fault`, the fault switch only
 # `dev_render_server` wires (D-13). ON BY DEFAULT, so `cargo build -p fabrico-host --example
 # dev_render_server` (the live recipe, CI) and this crate's own tests have it with no flag.
