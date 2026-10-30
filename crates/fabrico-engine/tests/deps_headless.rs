@@ -2,9 +2,10 @@
 //!
 //! `fabrico-engine` has to run outside the desktop host, so an async runtime, an HTTP stack, a
 //! file database, a mailer, a renderer or the desktop shell must never enter its normal
-//! dependency tree. This test asks `cargo tree` for the tree on every target, so a dependency
-//! that exists on only one platform shows up too, and it compares exact package names, so a
-//! longer name that happens to contain a forbidden word doesn't trip it.
+//! dependency tree. This test asks `cargo tree` for the tree on every target and with every engine
+//! feature on, so a dependency that exists on only one platform or behind one feature shows up too,
+//! and it compares exact package names, so a longer name that happens to contain a forbidden word
+//! doesn't trip it.
 //!
 //! The tree is compared with a committed list, so any new package is a red test that someone has
 //! to review, whatever it is called. The forbidden names are a second check: adding one of them to
@@ -120,6 +121,7 @@ fn deps_are_headless() {
             "tree",
             "-p",
             "fabrico-engine",
+            "--all-features",
             "-e",
             "normal",
             "--target",
@@ -172,11 +174,12 @@ fn deps_are_headless() {
     assert!(
         new.is_empty(),
         "{new:?} entered fabrico-engine's normal dependency tree and is not on the allowed list.\n\
-         Run `cargo tree -p fabrico-engine -e normal --target all -i <package>` to see what pulled \
-         it in, and review what it does: the engine must stay free of an async runtime, an HTTP \
-         stack, a file database, a mailer, a renderer and the desktop shell. If it does none of \
-         those, add its name to ALLOWED in crates/fabrico-engine/tests/deps_headless.rs. Adding \
-         it changes Cargo.lock, which also takes a reviewed move of the public-base tag.\n\
+         Run `cargo tree -p fabrico-engine --all-features -e normal --target all -i <package>` to \
+         see what pulled it in, and review what it does: the engine must stay free of an async \
+         runtime, an HTTP stack, a file database, a mailer, a renderer and the desktop shell. If \
+         it does none of those, add its name to ALLOWED in \
+         crates/fabrico-engine/tests/deps_headless.rs. Adding it changes Cargo.lock, which also \
+         takes a reviewed move of the public-base tag.\n\
          --- cargo tree ---\n{tree}"
     );
 

@@ -207,4 +207,6 @@ crates/fabrico-engine/tests/board_manifest.rs
 # Only text is affected, and no board file holds one, so no hash moves.
 # Review 93 WR-04: the headless dependency check compares the tree with a committed list of packages.
 # It is a test file only, and no hash moves.
+# Review 93 WR-10, in the same test file: cargo tree now runs with --all-features, so a package behind
+# an optional engine feature reaches the list too. It is a test file only, and no hash moves.
 crates/fabrico-engine/tests/deps_headless.rs
