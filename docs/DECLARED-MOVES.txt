@@ -151,6 +151,8 @@ NONE
 [source]
 # The Factory memory limit moves into an allocator, so it stops depending on QuickJS's
 # platform constant MALLOC_OVERHEAD. First-faulting counts change from 481 arrays, 7534 strings
-# and 60693 small objects to 477, 7416 and 59434. No golden fixture moves.
+# and 60693 small objects to 477, 7416 and 59434, and cyclic garbage from 110247 to 98873. No
+# golden fixture moves.
 crates/fabrico-qjs-alloc/src/lib.rs
 crates/fabrico-core/tests/factory_memory_pin.rs
+crates/fabrico-core/src/factory.rs

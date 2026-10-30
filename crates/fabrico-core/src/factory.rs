@@ -35,8 +35,9 @@
 //!    across ticks — the door the fresh context closes structurally. The fresh
 //!    context ALSO resets the module-record table each tick, so per-tick
 //!    `Module::declare` cannot accumulate engine-internal records and push a
-//!    long-lived core toward `set_memory_limit` at a tick a cold-restored core
-//!    would not — closing the long-horizon snapshot/restore divergence too.)
+//!    long-lived core toward the memory limit `FenceAllocator` enforces at a tick a
+//!    cold-restored core would not — closing the long-horizon snapshot/restore
+//!    divergence too.)
 //! 2. **No untrusted code ever runs UNMETERED.** The module's top-level statements
 //!    execute during that per-tick eval, which happens *under the armed gas fuse*
 //!    (the fuse is held UNMETERED only while the TRUSTED environment is installed,
@@ -94,6 +95,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use fabrico_qjs_alloc::FenceAllocator;
 use rquickjs::context::intrinsic;
 use rquickjs::prelude::Func;
 use rquickjs::{CatchResultExt, Context, Ctx, Function, Module, Object, Runtime, Value};
@@ -162,8 +164,10 @@ impl EmitLog {
 /// pure function of the bytecode path at any fixed budget).
 pub const DEFAULT_GAS_BUDGET: u64 = 256;
 
-/// Default memory fence (bytes). Caps memory-bomb allocations; an over-limit
-/// allocation surfaces as a catchable engine error → `FactoryError` fault.
+/// Default memory fence (bytes). Caps memory-bomb allocations. `FenceAllocator` enforces
+/// it in the bytes it hands out, so the limit doesn't depend on QuickJS's platform
+/// constant; an over-limit allocation returns null, and the engine raises that as a
+/// catchable error → `FactoryError` fault.
 ///
 /// Fixed-width `u32` (not `usize`): these fences are configuration values, not
 /// serialized state, but keeping every numeric knob fixed-width keeps the
@@ -483,10 +487,10 @@ impl FactoryRuntime {
         mem_limit: u32,
         stack_limit: u32,
     ) -> Result<Self, FactoryBuildError> {
-        let rt = Runtime::new().map_err(FactoryBuildError::engine)?;
         // The fences are fixed-width `u32` (config, not serialized state); cast to
-        // the rquickjs `usize` API only here, at the single fence call site.
-        rt.set_memory_limit(mem_limit as usize);
+        // the `usize` these APIs take only here, at the single fence call site.
+        let rt = Runtime::new_with_alloc(FenceAllocator::new(mem_limit as usize))
+            .map_err(FactoryBuildError::engine)?;
         rt.set_max_stack_size(stack_limit as usize);
 
         // The fuse: a shared budget counted down in the interrupt handler. Held
