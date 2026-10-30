@@ -236,6 +236,7 @@ test.describe('the step card and the hint ring', () => {
           const ring = document.querySelector('[data-fab-hint]');
           return {
             inLayer: el?.closest('[data-fab-hint-layer]') != null,
+            inCard: el?.closest('[data-fab-step-card]') != null,
             onRow: el?.closest('button[aria-label="Place Source"]') != null,
             onCanvas: el?.tagName === 'CANVAS',
             ringEvents: ring === null ? null : getComputedStyle(ring).pointerEvents,
@@ -263,6 +264,20 @@ test.describe('the step card and the hint ring', () => {
     await page.mouse.click(floorCentre.x, floorCentre.y);
     await expect.poll(() => h.sent.length, { message: 'the press under the ring sent a command' }).toBeGreaterThan(sentBefore);
     expect(h.sent[sentBefore]?.[0], 'the command is a Place').toBe(CMD.Place);
+
+    // The card's body lets a press through too. The tool stays armed after a place, so a press
+    // there that reaches the board sends another Place.
+    const text = await boxOf(page.locator(`${CARD} [aria-live]`), "the card's text");
+    const textCentre = { x: text.x + text.width / 2, y: text.y + text.height / 2 };
+    const onCard = await hitAt(textCentre.x, textCentre.y);
+    expect(onCard.inCard, "at the centre of the card's text, the card takes no press").toBe(false);
+    expect(onCard.onCanvas, "at the centre of the card's text, the press reaches the board").toBe(true);
+    const sentBeforeCard = h.sent.length;
+    await page.mouse.click(textCentre.x, textCentre.y);
+    await expect
+      .poll(() => h.sent.length, { message: "the press on the card's text sent a command" })
+      .toBeGreaterThan(sentBeforeCard);
+    expect(h.sent[sentBeforeCard]?.[0], 'the command is a Place').toBe(CMD.Place);
   });
 
   test('the card sits above the open Legend', async ({ page }) => {
