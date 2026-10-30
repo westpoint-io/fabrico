@@ -1,9 +1,8 @@
-// THE canonical demo scene as DATA (EX-01): every node on the shipped default board is a
-// command below, the same commands a user's own gestures produce. Embedded at build via
-// `include_str!`, parsed by `load_scene_from_ron` into the frozen `Vec<GridCommand>`
-// (fabrico-protocol) and booted by `demo_scene::boot_scene`, one command per tick. Its
-// two-applier regenerability is pinned by `GOLDEN_TICK_HASH` (tests/demo_regenerability.rs),
-// its spacing by tests/scene_floors.rs.
+// The demo as data: every node on the shipped default board is a command below, the same
+// commands a user's own gestures produce. The app embeds this file at build time, parses it with
+// `parse_board` and boots it one command per tick. `GOLDEN_TICK_HASH` in
+// tests/demo_regenerability.rs pins what it builds,
+// and tests/scene_floors.rs pins its spacing.
 //
 // WHAT IT SHOWS: an order line where every machine does a job a
 // viewer can see. The Factory makes orders (numbered, sized small, medium or large, about one
@@ -34,7 +33,10 @@
 // fabrico-command `route_handler_pair`), request first, so a second DrawWire for the reply
 // would be refused as an occupied port. Every Dock, Rotate, Configure and DrawWire targets a
 // handle minted by an earlier command.
-[
+Board(
+    format: 1,
+    seed: 7,
+    commands: [
     // ── Machines (handles 0..=10, mint order == Place order) ──────────────
     Place(kind: 0, cell_x: 1, cell_y: 3),    // 0: SOURCE @ (1,3), the order trigger
 
@@ -181,4 +183,9 @@ export default function (input, ctx) {
     // ONE command, TWO cables: 31 the request (Route Out 1 -> Handler In 0), then 32 the
     // reply (Handler Out 1 -> Route In 0), exactly what a user's drag between the pair mints.
     DrawWire(from_node: 29, from_port: 1, to_node: 30, to_port: 0),
-]
+    ],
+    script: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 1200,
+)

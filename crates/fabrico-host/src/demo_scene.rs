@@ -1,8 +1,8 @@
 //! The shipped scenes as DATA, and THE one function that boots any of them.
 //!
 //! Every shipped board (the demo, the order-processing example and the advanced example) is
-//! a build-embedded RON list of [`GridCommand`]s (`scenes/*.ron`), the same commands a user's
-//! own gestures produce. [`boot_scene`] applies a scene to a fresh-genesis [`Host`] through
+//! a build-embedded board file (`examples/boards/*.board.ron`) holding a list of
+//! [`GridCommand`]s, the same commands a user's own gestures produce. [`boot_scene`] applies a scene to a fresh-genesis [`Host`] through
 //! the certified gesture path (`apply_gesture` -> `enqueue_edit` -> `tick_once`, one command
 //! per tick, never the `core_mut` backdoor), seals the history so the scene's own commands
 //! are not undo steps (plan 85-06, D-10), and projects the board's timers out of the edit log
@@ -14,7 +14,7 @@
 //! is a pure function of the log, a reopened board needs no side marker, and the catalog
 //! guard can rebuild each node from its logged kind (plan 85-08, D-02, D-03). The demo's
 //! request/response pair is an ordinary Route and HTTP Handler, placed, configured and wired
-//! by commands at the END of `demo_scene.ron`, so every earlier handle keeps its number. One
+//! by commands at the END of `demo_scene.board.ron`, so every earlier handle keeps its number. One
 //! `DrawWire` between them mints both cables, request first, exactly as a user's drag does.
 //!
 //! - **LIVE-02**: [`demo_commands`] is the ENTIRE demo: Place, Configure, Rotate, DrawBelt,
@@ -31,6 +31,7 @@ use fabrico_core::command::{Command, ResultEvent};
 use fabrico_core::event::EventPayload;
 use fabrico_core::ids::NodeId;
 use fabrico_core::persist::StoreError;
+use fabrico_engine::board::{BoardError, parse_board};
 use fabrico_protocol::GridCommand;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -53,22 +54,22 @@ pub const DEMO_ITEM: &[u8] = b"{}";
 /// 62.5 t/s loop).
 ///
 /// This is a PIN, not an installer. The shipped cadence is authored as a
-/// `Configure{Source, Timer}` record in `scenes/demo_scene.ron` and installed by
+/// `Configure{Source, Timer}` record in `examples/boards/demo_scene.board.ron` and installed by
 /// projecting it back out of the edit-log ([`timers_from_log`]);
 /// `demo_scene_authors_its_source_timer_as_a_logged_edit` asserts the RON's value
 /// equals this constant, so the two can never drift. Re-pacing the demo means
 /// editing BOTH (the test will tell you if you edit only one).
 pub const DEMO_INJECT_EVERY: u64 = 8;
 
-/// The build-embedded demo scene asset (EX-01): the verbatim `Vec<GridCommand>`
-/// list, authored as data in `scenes/demo_scene.ron`. Editing the shipped factory
-/// is now a data-file edit, not a recompile of this module.
-const DEMO_SCENE_RON: &str = include_str!("scenes/demo_scene.ron");
+/// The build-embedded demo board (EX-01), authored as data in
+/// `examples/boards/demo_scene.board.ron`. No file is read at run time, and editing the
+/// shipped factory is a data-file edit, not a change to this module.
+const DEMO_SCENE_RON: &str = include_str!("../../../examples/boards/demo_scene.board.ron");
 
 /// The build-embedded order-processing teaching scene asset (EX-02): the second
 /// shipped scene — webhook Source -> validate/split Factory -> invoice +
 /// fulfillment corridors over belts -> invoice Debug sink + HTTP sink. Same substrate as
-/// [`DEMO_SCENE_RON`]: RON `Vec<GridCommand>` through [`load_scene_from_ron`].
+/// [`DEMO_SCENE_RON`]: RON `Vec<GridCommand>` through [`load_command_list`].
 const ORDER_SCENE_RON: &str = include_str!("scenes/order_processing.ron");
 
 /// The build-embedded "advanced" scene asset (quick 260916-adv): the third shipped scene, a
@@ -76,7 +77,7 @@ const ORDER_SCENE_RON: &str = include_str!("scenes/order_processing.ron");
 /// validate/split Factory with a wired dead-letter Sink on its Fault port ->
 /// parallel worker Factories behind a Balancer, re-merged into an HTTP sink, plus
 /// an invoice Factory -> Debug sink). Same substrate as the other two:
-/// RON `Vec<GridCommand>` through [`load_scene_from_ron`].
+/// RON `Vec<GridCommand>` through [`load_command_list`].
 const ADVANCED_SCENE_RON: &str = include_str!("scenes/advanced.ron");
 
 /// The order-processing scene's genesis seed — fixed for determinism, DISTINCT
@@ -109,7 +110,7 @@ pub const ADVANCED_GENESIS_SEED: u64 = 88;
 /// OrderProcessing, and the larger Advanced order-fulfilment example (quick 260916-adv).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneId {
-    /// The command-built default demo scene (`scenes/demo_scene.ron`).
+    /// The command-built default demo scene (`examples/boards/demo_scene.board.ron`).
     Demo,
     /// The order-processing teaching example (`scenes/order_processing.ron`).
     OrderProcessing,
@@ -155,13 +156,13 @@ impl SceneId {
     /// and goldens, where a broken embed genuinely IS a broken build.
     ///
     /// # Errors
-    /// [`SeedError::Ron`] with the `ron` line/col span if the embedded asset is
+    /// [`SeedError::Board`] with the `ron` line/col span if the embedded asset is
     /// not well-formed `Vec<GridCommand>`.
     pub fn commands(self) -> Result<Vec<GridCommand>, SeedError> {
         match self {
-            Self::Demo => load_scene_from_ron(DEMO_SCENE_RON),
-            Self::OrderProcessing => load_scene_from_ron(ORDER_SCENE_RON),
-            Self::Advanced => load_scene_from_ron(ADVANCED_SCENE_RON),
+            Self::Demo => load_board_commands(DEMO_SCENE_RON),
+            Self::OrderProcessing => load_command_list(ORDER_SCENE_RON),
+            Self::Advanced => load_command_list(ADVANCED_SCENE_RON),
         }
     }
 
@@ -192,26 +193,28 @@ impl SceneId {
     }
 }
 
-/// Deserialize a RON scene source into the frozen protocol [`Vec<GridCommand>`]
-/// directly (no host-side mirror type - `GridCommand` and its whole payload tree
-/// already derive `serde::Deserialize` in `fabrico-protocol`).
+/// Parse a board file's text and return its command list.
 ///
 /// # Errors
-/// Returns [`SeedError::Ron`] with a descriptive line/col span if `src` is not
-/// well-formed RON or does not match the `Vec<GridCommand>` shape - a typed `Err`,
-/// never a panic (the fail-loud load contract; threat T-48-01).
-pub fn load_scene_from_ron(src: &str) -> Result<Vec<GridCommand>, SeedError> {
-    ron::from_str::<Vec<GridCommand>>(src).map_err(SeedError::Ron)
+/// Returns [`SeedError::Board`] carrying the [`BoardError`], with a line and column if `src` isn't
+/// a well-formed board: a typed `Err`, never a panic.
+pub fn load_board_commands(src: &str) -> Result<Vec<GridCommand>, SeedError> {
+    Ok(parse_board(src)?.commands)
+}
+
+/// The two scenes that haven't moved to board files yet.
+fn load_command_list(src: &str) -> Result<Vec<GridCommand>, SeedError> {
+    ron::from_str::<Vec<GridCommand>>(src).map_err(|e| SeedError::Board(BoardError::Parse(e)))
 }
 
 /// THE replayable scene (LIVE-02/LIVE-04): the ENTIRE default factory as one
 /// [`GridCommand`] list exercising all four command families, materialized from
-/// the build-embedded `DEMO_SCENE_RON` asset.
+/// the build-embedded demo board.
 ///
 /// Handle convention: dense `u64` handles are minted monotonic from 0 in
 /// mint order (machines first, in Place order; then belts, in DrawBelt order) -
 /// the SAME convention `GridView` and the render producer use, so the static
-/// handles authored in `scenes/demo_scene.ron` resolve identically on every
+/// handles authored in `examples/boards/demo_scene.board.ron` resolve identically on every
 /// applier. Every Dock/Rotate appears strictly AFTER the command that mints its
 /// target; combined with the one-command-per-tick application discipline
 /// ([`seed_scene`]) that makes handle resolution structurally safe (each
@@ -227,10 +230,10 @@ pub fn demo_commands() -> Vec<GridCommand> {
     // The embedded RON is a TRUSTED build-time asset: a broken embed is a broken
     // build (the boot-`expect` style already used at app/lib.rs:322), so the
     // infallible `#[must_use]` signature is preserved via `.expect`. The fallible
-    // `load_scene_from_ron` above carries the typed-error story for any runtime
+    // `load_board_commands` above carries the typed-error story for any runtime
     // path and for the malformed-input test.
-    load_scene_from_ron(DEMO_SCENE_RON)
-        .expect("embedded demo_scene.ron is a build-time asset and must parse")
+    load_board_commands(DEMO_SCENE_RON)
+        .expect("embedded demo_scene.board.ron is a build-time asset and must parse")
 }
 
 /// THE order-processing scene (EX-02): the ENTIRE teaching factory as one
@@ -246,7 +249,7 @@ pub fn demo_commands() -> Vec<GridCommand> {
 pub fn order_commands() -> Vec<GridCommand> {
     // Embedded RON is a TRUSTED build-time asset (same discipline as
     // `demo_commands`): a broken embed is a broken build.
-    load_scene_from_ron(ORDER_SCENE_RON)
+    load_command_list(ORDER_SCENE_RON)
         .expect("embedded order_processing.ron is a build-time asset and must parse")
 }
 
@@ -263,11 +266,8 @@ pub enum SeedError {
     /// The applied list minted no nodes (structurally impossible for a shipped list,
     /// kept so seeding has no panic path).
     EmptyScene,
-    /// A scene RON source failed to deserialize into `Vec<GridCommand>`. Carries
-    /// the `ron` line/col span - descriptive by construction (the fail-loud load
-    /// contract; threat T-48-01). Produced by [`load_scene_from_ron`] via
-    /// `.map_err`, so no `From<SpannedError>` impl is added.
-    Ron(ron::error::SpannedError),
+    /// A board file was refused. A parse failure carries the `ron` line and column.
+    Board(BoardError),
 }
 
 impl std::fmt::Display for SeedError {
@@ -276,7 +276,7 @@ impl std::fmt::Display for SeedError {
             Self::Command(e) => write!(f, "a scene command was rejected: {e}"),
             Self::Store(e) => write!(f, "a scene seed tick failed to persist: {e}"),
             Self::EmptyScene => write!(f, "the scene minted no nodes"),
-            Self::Ron(e) => write!(f, "scene RON failed to parse: {e}"),
+            Self::Board(e) => write!(f, "the scene's board file was refused: {e}"),
         }
     }
 }
@@ -289,17 +289,21 @@ impl From<CommandError> for SeedError {
     }
 }
 
+impl From<BoardError> for SeedError {
+    fn from(e: BoardError) -> Self {
+        Self::Board(e)
+    }
+}
+
 impl From<StoreError> for SeedError {
     fn from(e: StoreError) -> Self {
         Self::Store(e)
     }
 }
 
-/// The sim ticks [`seed_scene`] folds AFTER a scene's last command: the history seal
-/// (plan 85-06, D-10), one record in one tick. A seeded core therefore sits at
-/// `commands.len() + HISTORY_SEAL_TICKS`, which the tick-parity tests read through this
-/// name rather than a bare `+ 1`.
-pub const HISTORY_SEAL_TICKS: u64 = 1;
+/// The sim ticks [`seed_scene`] folds AFTER a scene's last command. The engine owns the number,
+/// because a board's boot end depends on it; the tick-parity tests read it through this name.
+pub use fabrico_engine::board::HISTORY_SEAL_TICKS;
 
 /// Apply a scene's `commands` to a fresh-genesis `host` through the certified
 /// live path - `apply_gesture` -> `enqueue_edit` -> `tick_once`, ONE COMMAND PER
@@ -431,7 +435,7 @@ fn boot_scene_from(
 /// `demo-timer-wiped-on-first-edit`, v7.0). Reading the set from the log at boot
 /// too means the boot set and the post-edit set are the SAME derivation of the
 /// SAME records, and can never disagree again. The demo's cadence is authored
-/// where the rest of the board is authored: `scenes/demo_scene.ron`.
+/// where the rest of the board is authored: `examples/boards/demo_scene.board.ron`.
 ///
 /// # The timers-after-seeding contract (unchanged)
 /// Call this strictly AFTER the scene is seeded ([`boot_scene`] does: build Host ->
@@ -576,15 +580,22 @@ mod tests {
         );
     }
 
-    /// Fail-loud contract (threat T-48-01): malformed RON returns a typed
-    /// `SeedError::Ron`, NEVER a panic and never a silently-wrong scene.
+    /// Fail-loud contract (threat T-48-01): a malformed board returns a typed
+    /// `SeedError::Board`, NEVER a panic and never a silently-wrong scene.
     #[test]
     fn malformed_ron_errors_loudly() {
-        let err = load_scene_from_ron("this is not ron [[[").unwrap_err();
+        let err = load_board_commands("this is not ron [[[").unwrap_err();
         assert!(
-            matches!(err, SeedError::Ron(_)),
-            "malformed RON must surface as a typed SeedError::Ron, not a panic"
+            matches!(err, SeedError::Board(BoardError::Parse(_))),
+            "malformed RON must surface as a typed SeedError::Board(BoardError::Parse), not a panic"
         );
+    }
+
+    /// The seed constant and the board file say the same thing, so the two can't drift.
+    #[test]
+    fn the_demo_board_carries_the_demo_seed() {
+        let board = parse_board(DEMO_SCENE_RON).expect("the embedded demo board parses");
+        assert_eq!(board.seed, DEMO_GENESIS_SEED);
     }
 
     /// Phase-55 (EX-02) substrate proof: the RON format is expressive enough to
@@ -595,7 +606,8 @@ mod tests {
     fn configure_factory_ron_parses() {
         use fabrico_protocol::MachineConfig;
         let src = r#"[Configure(node: 1, config: Factory(source: "export default (i)=>i"))]"#;
-        let cmds = load_scene_from_ron(src).expect("a Configure(Factory) command parses from RON");
+        let cmds = ron::from_str::<Vec<GridCommand>>(src)
+            .expect("a Configure(Factory) command parses from RON");
         assert!(
             matches!(
                 cmds[0],
@@ -608,7 +620,7 @@ mod tests {
         );
 
         // Phase-55 Assumption A1: RON raw strings (`r#"..."#`) carry a MULTI-LINE JS
-        // body byte-verbatim — the form `scenes/order_processing.ron` uses so its
+        // body byte-verbatim — the form `examples/boards/order_processing.board.ron` uses so its
         // teaching JS stays readable (double quotes unescaped). If this case ever
         // regresses, the scene falls back to ordinary RON strings with single-quoted
         // JS string literals.
@@ -617,7 +629,7 @@ export default function (input, ctx) {
   if (!input || !input.id) { throw new Error("not an order"); }
   ctx.emit(0, { kind: "ok", order: input.id });
 }"#))]"##;
-        let raw_cmds = load_scene_from_ron(raw_src)
+        let raw_cmds = ron::from_str::<Vec<GridCommand>>(raw_src)
             .expect("a raw-string multi-line Factory source parses from RON (A1)");
         match &raw_cmds[0] {
             GridCommand::Configure {
@@ -795,7 +807,7 @@ export default function (input, ctx) {
     fn every_scene_load_error_names_its_scene() {
         for id in SceneId::ALL {
             let cases: [(&str, Result<Vec<GridCommand>, SeedError>); 2] = [
-                ("a malformed RON", load_scene_from_ron("this is not ron [[[")),
+                ("a malformed RON", load_board_commands("this is not ron [[[")),
                 ("an empty command list", Ok(Vec::new())),
             ];
             for (what, commands) in cases {
@@ -979,7 +991,7 @@ export default function (input, ctx) {
 
     // ── DEMO-06: the jobs, proved on the seeded board (plan 85-08, D-14, D-15) ──────────
 
-    /// The handles these tests address, read from `demo_scene.ron`'s own legend and pinned by
+    /// The handles these tests address, read from `demo_scene.board.ron`'s own legend and pinned by
     /// [`the_demo_job_handles_are_the_ones_the_ron_docks`].
     const FACTORY: u64 = 1;
     const ROUTER: u64 = 7;
@@ -1082,7 +1094,7 @@ export default function (input, ctx) {
         }
     }
 
-    /// The handle constants above are the ones `demo_scene.ron` docks, read off the list.
+    /// The handle constants above are the ones `demo_scene.board.ron` docks, read off the list.
     #[test]
     fn the_demo_job_handles_are_the_ones_the_ron_docks() {
         let cmds = demo_commands();

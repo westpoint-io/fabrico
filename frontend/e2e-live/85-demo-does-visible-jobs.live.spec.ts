@@ -23,7 +23,7 @@ import {
 // 85-demo-does-visible-jobs.live.spec.ts (plan 85-08, DEMO-06, SC4, D-14 to D-18).
 //
 // Every machine on the shipped demo does a job a viewer can see, on the REAL dev host:
-//   - the order Factory runs the D-14 code from `demo_scene.ron` (it numbers each order, sizes
+//   - the order Factory runs the D-14 code from `demo_scene.board.ron` (it numbers each order, sizes
 //     it small, medium or large with `ctx.randomInt`, and throws about one in twenty down its
 //     fault belt into the Rejects sink);
 //   - the Router docks all three of its outputs and sorts by size (D-15), so items ride all
@@ -55,7 +55,7 @@ const KIND_ROUTER = 5;
 const KIND_MERGE = 6;
 const KIND_SINK = 7;
 const KIND_LABEL = 11;
-/** The demo Source's timer interval (`Timer(interval_ticks: 8)` in demo_scene.ron). */
+/** The demo Source's timer interval (`Timer(interval_ticks: 8)` in demo_scene.board.ron). */
 const INJECT_EVERY_TICKS = 8;
 /** The demo Factory rejects when `ctx.randomInt(0, REJECT_ONE_IN) === 0`. */
 const REJECT_ONE_IN = 20;
@@ -69,16 +69,16 @@ const EMPTY_CELL: readonly [number, number] = [1, 12];
 /** At most three plain words a label (D-17). */
 const PLAIN_WORDS = /^[A-Za-z]+( [A-Za-z]+){0,2}$/;
 
-/** The order Factory's code as `demo_scene.ron` authors it: the Factory Configure that emits. */
+/** The order Factory's code as `demo_scene.board.ron` authors it: the Factory Configure that emits. */
 function demoFactorySource(): string {
   const ron = readFileSync(
-    fileURLToPath(new URL('../../crates/fabrico-host/src/scenes/demo_scene.ron', import.meta.url)),
+    fileURLToPath(new URL('../../examples/boards/demo_scene.board.ron', import.meta.url)),
     'utf8',
   );
   const sources = [...ron.matchAll(/Factory\(source: r#"([\s\S]*?)"#\)/g)].map((m) => m[1]);
   const maker = sources.find((src) => src.includes('ctx.emit('));
   if (maker === undefined) {
-    throw new Error('demoFactorySource: demo_scene.ron configures no Factory that emits orders');
+    throw new Error('demoFactorySource: demo_scene.board.ron configures no Factory that emits orders');
   }
   return maker;
 }

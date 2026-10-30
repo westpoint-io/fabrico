@@ -28,7 +28,7 @@ import {
 //
 // THE CENSUS IS READ FROM THE SCENE FILE (plan 85-08, D-06). Every node (kind, anchor,
 // size), every belt (its exact cells, both docks) and both cables are compared with
-// `crates/fabrico-host/src/scenes/demo_scene.ron`, parsed here, rather than with a
+// `examples/boards/demo_scene.board.ron`, parsed here, rather than with a
 // retyped copy, so a layout edit cannot leave this file checking the old board. The
 // machines' PORT GEOMETRY is still written out cell by cell below: that is the catalog
 // as the user sees it on this board, and a catalog change must fail here by naming the
@@ -76,7 +76,7 @@ const CATALOG_BOX: Record<number, [number, number]> = {
 type NodeFacts = SceneFacts['nodes'][number];
 type BeltFacts = SceneFacts['belts'][number];
 
-/** One placed node as `demo_scene.ron` authors it. */
+/** One placed node as `demo_scene.board.ron` authors it. */
 interface RonPlace {
   handle: number;
   kind: number;
@@ -84,7 +84,7 @@ interface RonPlace {
   box: [number, number];
   label: { text: string; colour: number } | null;
 }
-/** One drawn belt as `demo_scene.ron` authors it, with its two catalog-port docks. */
+/** One drawn belt as `demo_scene.board.ron` authors it, with its two catalog-port docks. */
 interface RonBelt {
   handle: number;
   cells: [number, number][];
@@ -92,10 +92,10 @@ interface RonBelt {
   head: { node: number; port: number } | null;
 }
 
-/** `demo_scene.ron`, parsed into its census: places, belts and the one paired DrawWire. */
+/** `demo_scene.board.ron`, parsed into its census: places, belts and the one paired DrawWire. */
 function demoCensus(): { places: RonPlace[]; belts: RonBelt[]; wire: { from: number; to: number } } {
   const src = readFileSync(
-    fileURLToPath(new URL('../../crates/fabrico-host/src/scenes/demo_scene.ron', import.meta.url)),
+    fileURLToPath(new URL('../../examples/boards/demo_scene.board.ron', import.meta.url)),
     'utf8',
   )
     .split('\n')
@@ -132,7 +132,7 @@ function demoCensus(): { places: RonPlace[]; belts: RonBelt[]; wire: { from: num
     }
   }
   if (places.length === 0 || belts.length === 0 || wire === null) {
-    throw new Error('demoCensus: demo_scene.ron parsed to an empty census');
+    throw new Error('demoCensus: demo_scene.board.ron parsed to an empty census');
   }
   return { places, belts, wire };
 }
@@ -214,7 +214,7 @@ test.describe('E2E-02 cold boot: the SHIPPED default scene is faithful on the re
     // Configure's w x h; every machine's is the catalog's.
     for (const p of census.places) {
       const n = mustNode(s, p.handle);
-      expect(n.kind, `node ${p.handle} kind is ${p.kind}, as demo_scene.ron places it`).toBe(p.kind);
+      expect(n.kind, `node ${p.handle} kind is ${p.kind}, as demo_scene.board.ron places it`).toBe(p.kind);
       const b = boxOf(n);
       expect(b.anchor, `node ${p.handle} is anchored at (${p.anchor})`).toEqual(p.anchor);
       expect([b.w, b.h], `node ${p.handle} is ${p.box[0]}x${p.box[1]}`).toEqual(p.box);
@@ -475,7 +475,7 @@ test.describe('E2E-02 cold boot: the SHIPPED default scene is faithful on the re
       // Every tile, exact (never a loose "some tiles" count): the drawn path is the authored path.
       expect(
         b.tiles.map((t) => [t.cell_x, t.cell_y]),
-        `belt ${rb.handle} runs exactly the cells demo_scene.ron draws`,
+        `belt ${rb.handle} runs exactly the cells demo_scene.board.ron draws`,
       ).toEqual(rb.cells);
       expect(rb.tail, `belt ${rb.handle} is Tail-docked in the scene file`).not.toBeNull();
       expect(rb.head, `belt ${rb.handle} is Head-docked in the scene file`).not.toBeNull();

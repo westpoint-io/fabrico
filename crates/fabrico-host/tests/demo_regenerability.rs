@@ -34,6 +34,8 @@ use fabrico_command::GridSession;
 use fabrico_core::core::Core;
 use fabrico_core::event::{LogHeader, SCHEMA_VERSION};
 use fabrico_core::persist::RedbStore;
+use fabrico_engine::board::{boot_engine, parse_board};
+use fabrico_engine::engine::Engine;
 use fabrico_host::demo_scene::{
     DEMO_GENESIS_SEED, DEMO_INJECT_EVERY, SceneId, boot_scene, demo_commands, seed_scene,
     timers_from_log,
@@ -285,6 +287,26 @@ use fabrico_scenario::tick_hash;
 ///   NEW `ae70bc15f8d6d77e8d4cbfab7536c72404312c73e9bd73c10ccd0ae8a35a9cbe`
 const GOLDEN_TICK_HASH: &str =
     "ae70bc15f8d6d77e8d4cbfab7536c72404312c73e9bd73c10ccd0ae8a35a9cbe";
+
+/// A third applier with no host at all: the board file, parsed and booted on a bare [`Engine`],
+/// lands on the pinned hash. So the host's boot and the headless boot build one board.
+#[test]
+fn the_demo_board_boots_on_an_engine_with_no_host_to_the_pinned_hash() {
+    let board = parse_board(include_str!("../../../examples/boards/demo_scene.board.ron"))
+        .expect("the demo board parses");
+    let mut engine = Engine::from_core(Core::genesis(LogHeader {
+        schema_version: SCHEMA_VERSION,
+        seed: board.seed,
+    }));
+    let minted = boot_engine(&mut engine, &board).expect("the demo board boots with no host");
+    assert_eq!(tick_hash(engine.core()), GOLDEN_TICK_HASH);
+    assert_eq!(
+        engine.timers().interval_for(minted[0]),
+        Some(DEMO_INJECT_EVERY),
+        "the boot installs the Source's timer from the log it wrote"
+    );
+    assert!(!engine.can_undo(), "the boot seals the history");
+}
 
 #[test]
 fn demo_scene_regenerates_to_an_identical_hash_from_two_appliers() {

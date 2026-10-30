@@ -34,11 +34,11 @@ import { CONFIG_NOT_APPLIED_MARKER } from '../../src/chrome/configCopy';
 
 /** The shipped demo's scene file, read from this module's own location (never the cwd). */
 const DEMO_SCENE_RON = fileURLToPath(
-  new URL('../../../crates/fabrico-host/src/scenes/demo_scene.ron', import.meta.url),
+  new URL('../../../examples/boards/demo_scene.board.ron', import.meta.url),
 );
 
 /**
- * How many `Place(` commands `demo_scene.ron` holds, outside `//` comments: the demo's node
+ * How many `Place(` commands `demo_scene.board.ron` holds, outside `//` comments: the demo's node
  * count as the scene oracle reports it (machines, the Route and HTTP Handler, and labels; belts
  * and cables are listed apart). THE ONE SOURCE every live spec reads, so a change to the demo's
  * content moves every spec at once instead of 25 hand-kept copies going stale one by one (D-19).

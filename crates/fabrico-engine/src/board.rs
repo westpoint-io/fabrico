@@ -205,22 +205,84 @@ impl From<CommandError> for BoardError {
     }
 }
 
+/// Only the format field, so the version is read before the shape: a newer file can change every
+/// other field and still get [`BoardError::UnknownFormat`]. RON skips the fields this struct
+/// doesn't name, which a test holds it to.
+#[derive(Deserialize)]
+#[serde(rename = "Board")]
+struct FormatOnly {
+    format: u32,
+}
+
 /// Parse and check a board file's text.
 ///
 /// # Errors
 /// [`BoardError`] names what is wrong with the text.
-pub fn parse_board(_src: &str) -> Result<BoardFile, BoardError> {
-    Err(BoardError::EmptyBoard)
+pub fn parse_board(src: &str) -> Result<BoardFile, BoardError> {
+    let FormatOnly { format } = ron::from_str(src).map_err(BoardError::Parse)?;
+    if format != BOARD_FORMAT {
+        return Err(BoardError::UnknownFormat(format));
+    }
+    let board: BoardFile = ron::from_str(src).map_err(BoardError::Parse)?;
+    validate(&board)?;
+    Ok(board)
+}
+
+/// The checks RON can't make. The boot end comes from the command count because each command
+/// takes one tick.
+fn validate(board: &BoardFile) -> Result<(), BoardError> {
+    if board.commands.is_empty() {
+        return Err(BoardError::EmptyBoard);
+    }
+    let outcomes = std::iter::once(&board.executor.default).chain(board.executor.rules.iter().map(|rule| &rule.outcome));
+    for outcome in outcomes {
+        if matches!(outcome, OutboundOutcome::Reply { after_ticks: 0 } | OutboundOutcome::Error { after_ticks: 0 }) {
+            return Err(BoardError::ZeroAfterTicks);
+        }
+    }
+    let boot_end = board.commands.len() as u64 + HISTORY_SEAL_TICKS;
+    let mut previous = 0;
+    for entry in &board.script {
+        if entry.tick <= boot_end {
+            return Err(BoardError::ScriptTickBeforeBoot { tick: entry.tick, boot_end });
+        }
+        if entry.tick < previous {
+            return Err(BoardError::ScriptOutOfOrder { tick: entry.tick });
+        }
+        previous = entry.tick;
+    }
+    if board.end_tick < boot_end {
+        return Err(BoardError::EndTickBeforeBoot { end_tick: board.end_tick, boot_end });
+    }
+    Ok(())
 }
 
 /// Build `board` on `engine`, which must be a fresh genesis at `board.seed`, and return the minted
 /// nodes in handle order: handle `h` is element `h`.
 ///
+/// One command per tick, so each command's targets folded a tick before it and a board's dense
+/// handles resolve the way they do on a user's own board. Then the history seal, in one more tick,
+/// so the board's own commands aren't undo steps. The timers come last, projected from the log the
+/// boot just wrote: a timer installed earlier fires into a half-built board.
+///
 /// # Errors
 /// [`BoardError::Command`] if a command is refused, and [`BoardError::EmptyBoard`] if the commands
 /// minted nothing.
-pub fn boot_engine(_engine: &mut Engine, _board: &BoardFile) -> Result<Vec<NodeId>, BoardError> {
-    Ok(Vec::new())
+pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>, BoardError> {
+    let mut minted: Vec<NodeId> = Vec::new();
+    for cmd in &board.commands {
+        apply_gesture(engine, cmd.clone(), |h| minted.get(h as usize).copied())?;
+        engine.step(vec![], vec![]);
+        minted.extend(engine.core().last_tick.placed.iter().copied());
+    }
+    engine.seal_history();
+    engine.step(vec![], vec![]);
+    if minted.is_empty() {
+        return Err(BoardError::EmptyBoard);
+    }
+    let timers = project_timers(engine.session().edit_log());
+    engine.set_timers(timers);
+    Ok(minted)
 }
 
 #[cfg(test)]
