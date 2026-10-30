@@ -434,7 +434,14 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// repository root when measured on 2026-09-30. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 5] = ["determinism", "golden-corpus", "e2e", "e2e-live", "unit"];
+const HEAVY_JOBS: [&str; 6] = [
+    "determinism",
+    "headless-build",
+    "golden-corpus",
+    "e2e",
+    "e2e-live",
+    "unit",
+];
 
 /// Jobs that run on every push: each reads files a docs-only change can edit, or costs
 /// about a minute.
@@ -519,6 +526,47 @@ fn job_blocks() -> Vec<(&'static str, Vec<&'static str>)> {
         }
     }
     blocks
+}
+
+/// The job that compiles the engine and the core with `redb` off, and the exact lines that do it.
+const HEADLESS_JOB: &str = "headless-build";
+const HEADLESS_RUN_LINES: [&str; 4] = [
+    "run: cargo check -p fabrico-engine --locked",
+    "run: cargo check -p fabrico-core --no-default-features --locked",
+    "run: cargo clippy -p fabrico-engine --locked -- -D warnings",
+    "run: cargo clippy -p fabrico-core --no-default-features --locked -- -D warnings",
+];
+
+/// Every other cargo line in the workflow turns `redb` on, so these four are the only ones that
+/// can see the headless build break. The lines are matched whole because adding `--all-features`
+/// or `--workspace` to one turns `redb` back on while the job stays green.
+#[test]
+fn the_headless_build_is_compiled_with_redb_off_in_its_own_job() {
+    let blocks = job_blocks();
+    let job = blocks
+        .iter()
+        .find(|(id, _)| *id == HEADLESS_JOB)
+        .map(|(_, lines)| lines.as_slice())
+        .unwrap_or_default();
+    let mut wrong: Vec<String> = Vec::new();
+    for line in HEADLESS_RUN_LINES {
+        let in_job = job.iter().filter(|l| **l == line).count();
+        let in_file = code_lines().iter().filter(|l| **l == line).count();
+        if in_job != 1 || in_file != 1 {
+            wrong.push(format!(
+                "`{line}` appears {in_job} time(s) in job `{HEADLESS_JOB}` and {in_file} time(s) \
+                 in the workflow, expected 1 and 1."
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the headless build is not wired as review 93 WR-05 requires:\n{}\n\
+         Without these lines `use fabrico_core::persist::RedbStore` in the engine, or a dropped \
+         `#[cfg(feature = \"redb\")]` in persist.rs, leaves CI green with that build broken. \
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
 }
 
 /// The CI spend controls are wired, and wired in the fail-safe direction.

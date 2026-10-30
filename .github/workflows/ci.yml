@@ -87,8 +87,8 @@ jobs:
   # `frontend/`, and every non-markdown file are NOT docs. `scripts/ci-classify-change.sh`
   # decides it.
   #
-  # GATED (skipped on a docs-only change): determinism, golden-corpus, e2e, e2e-live and
-  # unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
+  # GATED (skipped on a docs-only change): determinism, headless-build, golden-corpus, e2e,
+  # e2e-live and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
   # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
   # private-residue and neutrality. Each always-on job either reads files a docs-only
   # change can edit or costs about one minute, so gating it would save little and risk a
@@ -947,6 +947,61 @@ jobs:
       - name: Disk and memory after the certification suite (Linux; The 2026-10-09 run died with ld Bus error)
         if: ${{ always() && runner.os == 'Linux' }}
         run: df -h / && free -m
+
+  # ===================================================================================
+  # THE HEADLESS BUILD: the engine and the core with `redb` off.
+  #
+  # WHY IT IS ITS OWN JOB. Every other cargo line in this file turns `redb` on: `--all-features`
+  # does it directly, and a `--workspace` run does it through feature unification, because
+  # fabrico-host takes the core's default features. tests/deps_headless.rs only reads
+  # `cargo tree` and compiles nothing. So `use fabrico_core::persist::RedbStore` in the engine,
+  # or a dropped `#[cfg(feature = "redb")]` in persist.rs, left all of them green with the
+  # headless build broken (review 93 WR-05). A `-p` run with no `--workspace` and no
+  # `--all-features` resolves features for that package alone.
+  #
+  # Clippy runs on the same two configurations, because a dead import under the off
+  # configuration is only a warning to `cargo check`. Each clippy step has its own pin check
+  # immediately before it, as the determinism job's do. `ci_wiring_parity.rs` asserts these
+  # four lines, and that they stay in this job.
+  #
+  # No apt step: neither package reaches the Tauri shell. The vendored QuickJS needs the C
+  # compiler the runner image already has. Linux only: the determinism job compiles each
+  # platform, and which features are on does not depend on the platform.
+  headless-build:
+    name: the engine and the core build with redb off
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          rustup show
+          rustup component add clippy || true
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check the engine on its own feature set
+        run: cargo check -p fabrico-engine --locked
+
+      - name: Check the core with its default features off
+        run: cargo check -p fabrico-core --no-default-features --locked
+
+      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
+        run: bash scripts/check-toolchain-pin.sh
+
+      - name: Clippy on the engine, redb off
+        run: cargo clippy -p fabrico-engine --locked -- -D warnings
+
+      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
+        run: bash scripts/check-toolchain-pin.sh
+
+      - name: Clippy on the core, redb off
+        run: cargo clippy -p fabrico-core --no-default-features --locked -- -D warnings
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand
