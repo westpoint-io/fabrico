@@ -9,4 +9,5 @@
 #![deny(clippy::disallowed_types, clippy::disallowed_methods)]
 #![warn(clippy::all)]
 
+pub mod engine;
 pub mod timer;

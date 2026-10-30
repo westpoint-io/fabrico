@@ -163,3 +163,6 @@ crates/fabrico-core/tests/rquickjs_spike.rs
 # The code is unchanged, and the host re-exports it from the old paths.
 crates/fabrico-engine/src/lib.rs
 crates/fabrico-engine/src/timer.rs
+# The per-tick loop body moves out of the desktop host. Its order among stamps and fold is
+# unchanged, and no golden fixture moves.
+crates/fabrico-engine/src/engine.rs

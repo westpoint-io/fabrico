@@ -23,24 +23,34 @@
 //!   state while dispatching ZERO real effects.
 //!
 //! # The fixed per-tick order ([`Host::tick_once`])
-//! 1. drain the ingress channel (`try_recv`) into this tick's inbound batch;
-//! 2. drain the result channel (`try_recv`) — a result CLEARS its in-flight entry
-//!    (drained BEFORE timeout synthesis, RESEARCH Pitfall 5, so an in-time result
-//!    can never produce a spurious Timeout) and marks the ledger `Done`;
+//! `tick_once` drains both channels with `try_recv` and calls [`Engine::step`], which does no
+//! I/O. It then hands the [`StepOutput`] to [`Host::finish_tick`], which performs the durable
+//! writes and the sends.
+//!
+//! In the engine:
+//! 1. timers, then the drained ingress, stamped into this tick's inbound batch;
+//! 2. the drained results: a result CLEARS its in-flight entry (handled BEFORE timeout
+//!    synthesis, RESEARCH Pitfall 5, so an in-time result can never produce a spurious
+//!    Timeout);
 //! 3. synthesize a [`EventPayload::Timeout`] for every still-in-flight command
 //!    whose `deadline <= tick`, iterating the in-flight `BTreeMap<CommandId>` in
 //!    deterministic order;
-//! 4. append EVERY inbound event (ingress + result + timeout) to the durable log,
-//!    stamped with a monotonic `(partition, sequence)` and the current tick —
-//!    NEVER a wall-clock value — BEFORE folding; then drain + stamp + append this
-//!    tick's enqueued topology edits to the EDITS table (ELOG-01);
+//! 4. stamp every inbound event with a monotonic `(partition, sequence)` and the current
+//!    tick (NEVER a wall-clock value), and stamp this tick's enqueued topology edits;
 //! 5. fold one tick EDITS-FIRST:
 //!    `core.advance_edits(&edits, &inbound) -> Vec<Command>` (the topology edits
-//!    fold ahead of the events this tick);
-//! 6. for each emitted command: write the durable `InFlight` ledger row (the
-//!    write-ahead marker) THEN send it to the executor and track its deadline in
-//!    the in-flight map;
-//! 7. persist a snapshot if the cadence is due at the new tick boundary.
+//!    fold ahead of the events this tick), and track each emitted command's deadline.
+//!
+//! Then in the host:
+//! 6. mark each resolved command `Done` in the ledger, append every inbound event to the
+//!    durable log, and append every stamped edit to the EDITS table (ELOG-01);
+//! 7. for each emitted command: write the durable `InFlight` ledger row (the
+//!    write-ahead marker) THEN send it to the executor;
+//! 8. persist a snapshot if the cadence is due at the new tick boundary.
+//!
+//! The fold runs before the durable writes. A crash loses the in-memory fold either way, so
+//! recovery behaves the same. If a write fails the core sits one tick ahead of the log, the
+//! sim loop stops on that error, and nothing reads the core or saves after it.
 //!
 //! # Single-writer invariant
 //! The host loop is the ONE redb writer (the event log, the snapshots, and the
@@ -48,98 +58,46 @@
 //! [`ResultEvent`]s back over a channel for the loop to drain, log, and mark
 //! `Done`. This keeps the single-writer guarantee without a mutex.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use fabrico_command::GridSession;
 use fabrico_core::command::{Command, ResultEvent};
 use fabrico_core::core::Core;
-use fabrico_core::edit::{EDIT_SCHEMA_VERSION, EditOp, EditRecord};
+use fabrico_core::edit::{EDIT_SCHEMA_VERSION, EditRecord};
 use fabrico_core::event::{DecodeError, Event, EventPayload, LogHeader, SCHEMA_VERSION};
-use fabrico_core::ids::{CommandId, NodeId};
+use fabrico_core::ids::CommandId;
 use fabrico_core::persist::{PersistenceStore, RedbStore, StoreError};
 use fabrico_core::snapshot::{persist_snapshot, restore, snapshot, snapshot_due};
-use fabrico_core::state::Node;
+use fabrico_engine::engine::{Engine, StepOutput};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::ingress::seen_set::SeenSet;
 use crate::ingress::timer::TimerSet;
 use crate::ledger::DispatchLedger;
 
-/// The sync, single-thread driver: owns [`Core`], the redb event-log/snapshot
-/// store (the single writer), the durable dispatch [`DispatchLedger`], and the
-/// host-side in-flight set.
+/// The sync, single-thread driver: owns the [`Engine`], which holds [`Core`], plus the redb
+/// event-log/snapshot store (the single writer) and the durable dispatch
+/// [`DispatchLedger`].
 ///
-/// Per-command in-flight tracking is a [`BTreeMap<CommandId, u64>`] (command ->
-/// deadline tick), NEVER a randomly-ordered hashed set, so that same-tick
-/// host-synthesized timeouts are emitted in a deterministic order (EXEC-03).
+/// The engine holds everything a tick needs that is not durable, including the in-flight set.
+/// The host holds everything that touches the disk, and it performs what each
+/// [`Engine::step`] returns.
 pub struct Host {
-    /// The single topology authority: the `fabrico-command` [`GridSession`] whose
-    /// embedded [`Core`] is the deterministic sim (Phase 19 decision (c) Option B —
-    /// no second core, no shadow). Owned by — and never moved off — the driver
-    /// thread (the Core caches `!Send` rquickjs runtimes, so it is built on and
-    /// stays on its owning thread). Reads delegate through [`Host::core`]
-    /// (`session.core()`) so every existing reader (render_packet, sim_loop,
-    /// demo_scene, project, tests) is unaffected; the tick-boundary EDITS-FIRST fold
-    /// runs through [`GridSession::fold_live`] (certified `advance_edits` verbatim);
-    /// live Undo/Redo route through [`GridSession::resolve_undo`]/`resolve_redo`.
-    session: GridSession,
+    /// The tick loop body and its non-durable state. Owned by, and never moved off, the
+    /// driver thread (the Core caches `!Send` rquickjs runtimes, so it is built on and
+    /// stays on its owning thread).
+    engine: Engine,
     /// The single redb writer for the append-only event log + periodic snapshots.
     store: RedbStore,
     /// The durable write-ahead dispatch ledger (the exactly-once backbone).
     ledger: DispatchLedger,
-    /// Commands dispatched but not yet resolved, mapped to their deadline tick.
-    /// A `BTreeMap` (not a hashed set) so the timeout-synthesis order is
-    /// deterministic (EXEC-03 / threat T-05-06-DET-LOG).
-    in_flight: BTreeMap<CommandId, u64>,
-    /// Monotonic log sequence counter — the `(partition, sequence)` key the store
-    /// orders by. Stamped onto every logged event; never derived from a clock.
-    next_seq: u64,
-    /// Monotonic EDIT-log sequence counter — the `(partition, sequence)` key the
-    /// EDITS table orders by (ELOG-01). The host is the edit-sequence authority:
-    /// every enqueued [`EditRecord`] is stamped with the next value here. Derived
-    /// from the persisted edit-log high-water mark in [`Host::new`] (mirror
-    /// `next_seq`), so resuming over a populated edit-log never overwrites it.
-    next_edit_seq: u64,
-    /// Monotonic EDIT-log ACTION (coalescing group) counter — the id
-    /// `reconstruct_projection` groups an undo step by (command.rs). The host is the
-    /// action authority on the LIVE path (GridSession's own `action` counter is only
-    /// consumed inside its `apply`/`move`/`append_inverse_group`, none of which run
-    /// live). One id per NORMAL gesture (via [`Host::enqueue_edit_with_new_action`]),
-    /// ONE shared id across an undo/redo inverse group (via
-    /// [`Host::enqueue_action_group`]). Derived from the persisted edit-log's action
-    /// high-water mark in [`Host::new`] / [`Host::recover`], so a resume over a
-    /// populated log never reuses an action id. WITHOUT this every record carries
-    /// `action = 0` and `reconstruct_projection` groups the WHOLE log as one action —
-    /// a single Ctrl+Z would clear the entire grid (RESEARCH Pitfall 1).
-    next_action: u64,
     /// Periodic snapshot cadence (ticks). `None` => on-demand only.
     snapshot_every: Option<u64>,
-    /// Tick-interval timer sources injected at the head of every tick. Empty by
-    /// default; a pure function of the tick (no clock — SRC-03).
-    timers: TimerSet,
-    /// Whether timer ingress is currently HELD (no `timers` events appended by
-    /// [`Host::tick_once`]). Defaults `false` (timers fire) so every direct
-    /// `tick_once` caller is unaffected; flipped per tick by the sim loop via
-    /// [`Host::set_timers_gated`] — Draining only (Finding 3).
-    timers_gated: bool,
     /// The persisted webhook delivery-id dedup store (INGRESS-02). `None` => no
     /// webhook ingress on this host (the seed/timer paths are already trusted).
     /// When present, the host loop records a delivery id BEFORE logging its
     /// event — and the record is durable across a restart.
     seen: Option<SeenSet>,
-    /// This tick's enqueued topology edits, in enqueue order — the edit-log batch
-    /// the gesture producer fills (ELOG-01). The gesture PRODUCER (08-06) calls
-    /// [`Host::enqueue_edit`]; [`Host::tick_once`] drains, stamps, persists, and
-    /// folds them EDITS-FIRST before the event fold each tick.
-    pending_edits: Vec<EditRecord>,
-    /// Whether THIS tick's folded edit batch contained an `EditOp::Undo`/`EditOp::Redo`
-    /// lineage marker — the keyframe-reset trigger (Plan 03, Open Q2: scan-the-batch,
-    /// not a `fold_live` return flag). Reset at the top of every [`Host::tick_once`],
-    /// set true when the stamped batch carries an undo/redo marker, and read via
-    /// [`Host::took_undo_redo_this_tick`]. An undo/redo re-mints ids + cascade-restores
-    /// belts, which a render DIFF cannot express — Plan 03 emits a full keyframe when
-    /// this is true (RESEARCH Pitfall 3).
-    undo_redo_this_tick: bool,
 }
 
 impl Host {
@@ -204,30 +162,24 @@ impl Host {
             edit_actions.push(er.action);
         }
         let next_action = next_high_water(edit_actions.into_iter(), "action")?;
-        // Wrap the pre-wired core in a GridSession (the single topology authority —
-        // no second core, no shadow). GridSession::new(seed) builds its own genesis
-        // core; we immediately swap in the caller's already-wired core via core_mut.
-        // The session's internal `seed` is irrelevant on the live host path: its only
-        // reader is `reconstruct_projection`, whose slotmap id harvest is documented
-        // deterministic AND seed-independent (command.rs). recover()/load rebuild the
-        // session from the persisted logs, installing the fast-path core as authority.
-        let mut session = GridSession::new(0);
-        *session.core_mut() = core;
         Ok(Self {
-            session,
+            engine: Engine::from_parts(core, next_seq, next_edit_seq, next_action),
             store,
             ledger,
-            in_flight: BTreeMap::new(),
-            next_seq,
-            next_edit_seq,
-            next_action,
             snapshot_every,
-            timers: TimerSet::default(),
-            timers_gated: false,
             seen: None,
-            pending_edits: Vec::new(),
-            undo_redo_this_tick: false,
         })
+    }
+
+    /// Borrow the [`Engine`] this host runs on.
+    #[must_use]
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// Mutably borrow the [`Engine`] this host runs on.
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
     }
 
     /// Install the tick-interval timer sources (in practice always
@@ -237,44 +189,24 @@ impl Host {
     /// existing driver tests — stay unchanged for hosts with no timers.
     #[must_use]
     pub fn with_timers(mut self, timers: TimerSet) -> Self {
-        self.timers = timers;
+        self.engine.set_timers(timers);
         self
     }
 
-    /// Swap the live tick-interval timer set (the mutable sibling of the build-once
-    /// [`Host::with_timers`] builder). Phase 39's certified-config path re-projects
-    /// the [`TimerSet`] from the edit-log on every `Configure` fold and on a
-    /// host-swap (Load/LoadDemo) — mirroring the `project_routes` re-publish — and
-    /// installs it here. The next [`Host::tick_once`] uses the new intervals; the
-    /// schedule stays a pure function of the tick (no clock), so replay is identical.
+    /// See [`Engine::set_timers`].
     pub fn set_timers(&mut self, timers: TimerSet) {
-        self.timers = timers;
+        self.engine.set_timers(timers);
     }
 
-    /// The live tick-interval timer set (read side of [`Host::set_timers`]). The sim
-    /// loop's route table reads it beside the core (DEMO-08): a Source with an entry
-    /// here is on Timer and has no webhook door, and the panel's URL query answers
-    /// `None` for it, so the door and the URL read ONE projection of the trigger.
+    /// See [`Engine::timers`].
     #[must_use]
     pub fn timers(&self) -> &TimerSet {
-        &self.timers
+        self.engine.timers()
     }
 
-    /// Hold (`true`) or release (`false`) timer ingress for subsequent
-    /// [`Host::tick_once`] calls (Finding 3). While gated, `tick_once` appends NO
-    /// timer events — so a drain-to-quiescence Pause on a timer-driven scene can
-    /// actually reach quiescence instead of burning the full max-settle budget
-    /// (and a latched Save then hitting the NotQuiescent refusal).
-    ///
-    /// Gating changes ONLY which events get LOGGED: replay reads the log and
-    /// never re-fires timers, so determinism and `step×N == live×N` (HOST-03) are
-    /// decided by WHERE the loop flips this — that is [`SimLoop`]'s job
-    /// (`tick_body` sets it from `run_state == Draining` ONLY; Playing and Step
-    /// both run ungated).
-    ///
-    /// [`SimLoop`]: crate::sim_loop::SimLoop
+    /// See [`Engine::set_timers_gated`].
     pub fn set_timers_gated(&mut self, gated: bool) {
-        self.timers_gated = gated;
+        self.engine.set_timers_gated(gated);
     }
 
     /// Install the persisted webhook delivery-id dedup store (INGRESS-02). A
@@ -294,63 +226,46 @@ impl Host {
     ///
     /// With no seen-set configured every id is treated as new (no dedup).
     pub fn record_delivery(&mut self, delivery_id: &[u8]) -> Result<bool, StoreError> {
-        let tick = self.session.core().tick;
+        let tick = self.engine.core().tick;
         match &mut self.seen {
             Some(seen) => seen.record(delivery_id, tick),
             None => Ok(true),
         }
     }
 
-    /// Borrow the underlying [`Core`] (state inspection / topology assertions).
-    /// Delegates to the single [`GridSession`] authority so every existing reader
-    /// (render_packet, sim_loop, demo_scene, project, tests) is unchanged.
+    /// See [`Engine::core`].
     #[must_use]
     pub fn core(&self) -> &Core {
-        self.session.core()
+        self.engine.core()
     }
 
-    /// Mutably borrow the underlying [`Core`] (topology construction in tests /
-    /// the shell before the loop starts). A demo/test backdoor that BYPASSES the
-    /// edit-log / undo projection (demo_scene.rs, transport_ws.rs, render_packet.rs
-    /// tests); production topology writes go through [`Host::tick_once`]'s
-    /// [`GridSession::fold_live`]. Delegates to [`GridSession::core_mut`].
+    /// See [`Engine::core_mut`].
     pub fn core_mut(&mut self) -> &mut Core {
-        self.session.core_mut()
+        self.engine.core_mut()
     }
 
-    /// Borrow the single [`GridSession`] topology authority — the read surface the
-    /// gesture adapter uses to route live Undo/Redo through
-    /// [`GridSession::resolve_undo`]/`resolve_redo` and the availability passthroughs
-    /// [`Host::can_undo`]/[`Host::can_redo`] read.
+    /// See [`Engine::session`].
     #[must_use]
     pub fn session(&self) -> &GridSession {
-        &self.session
+        self.engine.session()
     }
 
-    /// Whether a live Undo is currently available (passthrough to
-    /// [`GridSession::can_undo`] — the availability signal Plan 03 ships on every
-    /// render packet).
+    /// See [`Engine::can_undo`].
     #[must_use]
     pub fn can_undo(&self) -> bool {
-        self.session.can_undo()
+        self.engine.can_undo()
     }
 
-    /// Whether a live Redo is currently available (passthrough to
-    /// [`GridSession::can_redo`]).
+    /// See [`Engine::can_redo`].
     #[must_use]
     pub fn can_redo(&self) -> bool {
-        self.session.can_redo()
+        self.engine.can_redo()
     }
 
-    /// Whether THIS tick's folded edit batch contained an `EditOp::Undo`/`EditOp::Redo`
-    /// lineage marker — the keyframe-reset trigger (Plan 03). Valid AFTER
-    /// [`Host::tick_once`] returns for the tick just folded; reset to `false` at the
-    /// top of the next tick. Plan 03 reads this to emit a full render keyframe
-    /// (re-minted ids + cascade-restored belts cannot be expressed as a diff —
-    /// RESEARCH Pitfall 3).
+    /// See [`Engine::took_undo_redo_this_tick`].
     #[must_use]
     pub fn took_undo_redo_this_tick(&self) -> bool {
-        self.undo_redo_this_tick
+        self.engine.took_undo_redo_this_tick()
     }
 
     /// Borrow the durable dispatch ledger (recovery / inspection).
@@ -359,97 +274,42 @@ impl Host {
         &self.ledger
     }
 
-    /// Buffer a topology [`EditRecord`] for this tick, in enqueue order (ELOG-01).
-    /// The gesture producer (08-06) calls this; [`Host::tick_once`] drains, stamps
-    /// (partition + tick + monotonic edit-sequence), persists, and folds the buffer
-    /// EDITS-FIRST. The record's `op`/`action` ride from the producer; the host
-    /// overwrites the `partition`/`sequence`/`tick` provenance on stamp.
+    /// See [`Engine::enqueue_edit`].
     pub fn enqueue_edit(&mut self, record: EditRecord) {
-        self.pending_edits.push(record);
+        self.engine.enqueue_edit(record);
     }
 
-    /// Buffer ONE normal-gesture [`EditRecord`], stamping it with a FRESH action id
-    /// (its own undo step). The action is stamped at ENQUEUE time (Pattern 3) —
-    /// `stamp_edit` at fold time preserves `op`/`action` and only overwrites
-    /// `partition`/`sequence`/`tick`. Every live normal gesture (Place/Delete/
-    /// Rotate/DrawBelt/Dock) rides this instead of the bare [`Host::enqueue_edit`],
-    /// so `reconstruct_projection` sees one action per gesture (RESEARCH Pitfall 1).
-    pub fn enqueue_edit_with_new_action(&mut self, mut record: EditRecord) {
-        record.action = self.next_action;
-        self.next_action += 1;
-        self.enqueue_edit(record);
+    /// See [`Engine::enqueue_edit_with_new_action`].
+    pub fn enqueue_edit_with_new_action(&mut self, record: EditRecord) {
+        self.engine.enqueue_edit_with_new_action(record);
     }
 
-    /// Buffer the HISTORY SEAL (plan 85-06, D-10, DEMO-05): one
-    /// [`EditOp::SealHistory`] record under a fresh action id, folded on the next
-    /// [`Host::tick_once`]. Once folded, everything logged before it sits below the undo
-    /// floor (`GridSession::undo_floor`), so [`Host::can_undo`] is false and an Undo
-    /// resolves to `NothingToUndo` until the user makes an edit of their own.
-    ///
-    /// `demo_scene::seed_scene` is the ONE caller outside tests: it seals after a scene's
-    /// last command, so the demo at boot, every example on `LoadScene` and the dev server
-    /// all get their floor from the same place. Nothing else seals on its own; a user's
-    /// board and a reopened `.fab` carry exactly the seals their log already holds.
+    /// See [`Engine::seal_history`].
     pub fn seal_history(&mut self) {
-        self.enqueue_edit_with_new_action(EditRecord {
-            schema_version: EDIT_SCHEMA_VERSION,
-            partition: 0,
-            sequence: 0,
-            tick: 0,
-            action: 0,
-            op: EditOp::SealHistory,
-        });
+        self.engine.seal_history();
     }
 
-    /// Buffer an undo/redo inverse group under ONE SHARED action id, in order — so the
-    /// whole compensating group (the `EditOp::Undo`/`Redo` lineage marker + its
-    /// retargeted inverse Place/Delete records) is a SINGLE undo step, exactly as the
-    /// headless `GridSession::append_inverse_group` coalesces it. The records arrive
-    /// UNSTAMPED from [`GridSession::resolve_undo`]/`resolve_redo`; this stamps only
-    /// `action` (the host stamps `partition`/`sequence`/`tick` at fold via
-    /// `stamp_edit`). An empty group leaves `next_action` untouched (no wasted id).
+    /// See [`Engine::enqueue_action_group`].
     pub fn enqueue_action_group(&mut self, group: Vec<EditRecord>) {
-        if group.is_empty() {
-            return;
-        }
-        let action = self.next_action;
-        self.next_action += 1;
-        for mut record in group {
-            record.action = action;
-            self.enqueue_edit(record);
-        }
+        self.engine.enqueue_action_group(group);
     }
 
-    /// This tick's enqueued-but-not-yet-folded topology edits, in enqueue order
-    /// (WR-01). The host gesture adapter (`input_apply`) consults the `EditOp::Place`
-    /// cells here so a second same-tick same-cell `Place` sees the first's cell
-    /// BEFORE the core folds it (the core occupancy index only reflects PRIOR ticks
-    /// until `tick_once` folds this tick's edits EDITS-FIRST). Sourcing the same-tick
-    /// occupancy from this single buffer — instead of a parallel per-cell sidecar —
-    /// keeps `core.state` plus this buffer the only occupancy authorities,
-    /// collapsing the WR-01 TOCTOU structurally (SPAT-01).
+    /// See [`Engine::pending_edits`].
     #[must_use]
     pub fn pending_edits(&self) -> &[EditRecord] {
-        &self.pending_edits
+        self.engine.pending_edits()
     }
 
-    /// The number of commands currently tracked as in-flight (dispatched, not yet
-    /// resolved by a result or a synthesized timeout).
+    /// See [`Engine::in_flight_len`].
     #[must_use]
     pub fn in_flight_len(&self) -> usize {
-        self.in_flight.len()
+        self.engine.in_flight_len()
     }
 
-    /// The total number of items currently resting in belt slots across the
-    /// whole grid — the belt half of "quiescence" (the executor half is
-    /// [`in_flight_len`](Self::in_flight_len)). A pure passthrough to
-    /// [`GridState::belt_items_in_flight`](fabrico_core::state::GridState::belt_items_in_flight),
-    /// mirroring `in_flight_len`. The sim has drained its belts when this
-    /// reaches `0`; the drain-to-quiescence Pause freezes only when BOTH this
-    /// and `in_flight_len()` are `0` (or the bounded settle budget is spent).
+    /// See [`Engine::belt_items_in_flight`].
     #[must_use]
     pub fn belt_items_in_flight(&self) -> usize {
-        self.session.core().state.belt_items_in_flight()
+        self.engine.belt_items_in_flight()
     }
 
     /// TEST-ONLY: seed a synthetic in-flight command so a test can drive the
@@ -460,14 +320,14 @@ impl Host {
     /// exactly the stalled drain the max-settle budget must backstop.
     #[cfg(test)]
     pub(crate) fn test_insert_in_flight(&mut self, id: CommandId, deadline: u64) {
-        self.in_flight.insert(id, deadline);
+        self.engine.insert_in_flight(id, deadline);
     }
 
     /// The whole-[`Core`] snapshot bytes — the state-equality oracle used to prove
     /// replay/recovery reproduces the live trajectory byte-for-byte.
     #[must_use]
     pub fn snapshot_bytes(&self) -> Vec<u8> {
-        snapshot(self.session.core())
+        snapshot(self.engine.core())
     }
 
     /// The latest PERSISTED snapshot `(base_tick, bytes)` from the store, or
@@ -549,175 +409,78 @@ impl Host {
         Ok(edits)
     }
 
-    /// Stamp an enqueued [`EditRecord`] with the current tick and the next monotonic
-    /// edit-sequence (mirror [`Host::stamp`]). The host owns the edit-log
-    /// `(partition, sequence, tick)` provenance — integer logged data, NEVER a
-    /// wall-clock read; the producer's `op`/`action`/`schema_version` are preserved.
-    fn stamp_edit(&mut self, tick: u64, mut record: EditRecord) -> EditRecord {
-        let sequence = self.next_edit_seq;
-        self.next_edit_seq += 1;
-        record.schema_version = EDIT_SCHEMA_VERSION;
-        record.partition = 0;
-        record.sequence = sequence;
-        record.tick = tick;
-        record
-    }
-
-    /// Stamp a payload into a logged [`Event`] at the current tick with the next
-    /// monotonic sequence. The sequence + tick are integer, logged data — NEVER a
-    /// wall-clock read (threat T-05-06-DET-LOG).
-    fn stamp(&mut self, tick: u64, payload: EventPayload) -> Event {
-        let sequence = self.next_seq;
-        self.next_seq += 1;
-        Event {
-            schema_version: SCHEMA_VERSION,
-            partition: 0,
-            sequence,
-            tick,
-            payload,
-        }
-    }
-
-    /// Run exactly one deterministic tick in the fixed 7-step order (see the
-    /// module docs). Drains both channels with `try_recv` — it never `.await`s and
-    /// never waits on the executor, so the sim advances using only the items
-    /// already ready (EXEC-01: the grid never blocks).
+    /// Run exactly one deterministic tick (see the module docs). Drains both channels with
+    /// `try_recv`: it never `.await`s and never waits on the executor, so the sim advances
+    /// using only the items already ready (EXEC-01: the grid never blocks).
     pub fn tick_once(
         &mut self,
         ingress_rx: &mut UnboundedReceiver<EventPayload>,
         results_rx: &mut UnboundedReceiver<ResultEvent>,
         cmd_tx: &UnboundedSender<Command>,
     ) -> Result<(), StoreError> {
-        let tick = self.session.core().tick;
-        let mut inbound: Vec<Event> = Vec::new();
-        // Reset the per-tick undo/redo keyframe signal; set true below if this tick's
-        // folded edit batch carries an Undo/Redo lineage marker (Plan 03 trigger).
-        self.undo_redo_this_tick = false;
-
-        // (1a) Tick-interval timer sources (SRC-03): a pure function of the tick,
-        //      no clock. Each due timer contributes one logged ManualInject event
-        //      at the head of this tick's inbound batch, stamped with the next
-        //      monotonic sequence (disjoint field borrows: &self.timers + &mut
-        //      self.next_seq), then appended + folded like any other inbound event.
-        //      HELD while gated (Finding 3): the sim loop gates timer ingress
-        //      during the Draining drain-to-quiescence ONLY, so a Pause on a
-        //      timer-driven scene can settle instead of being re-fed every tick.
-        //
-        //      A FIRE ITS SOURCE WOULD REFUSE IS NOT LOGGED (phase 87, JAM-04, plan
-        //      87-07). The predicate is the core's own refusal, `source_accepts_one`,
-        //      read on the core's state at the head of this tick, before anything is
-        //      folded: the fold's `ManualInject` admit arm refuses that event silently
-        //      (no item, no fault, no wake), so leaving it out of the log changes
-        //      nothing the board does; only `Core::cursor`, the count of events
-        //      folded, counts one fewer, and replay reads the log alone, so the live
-        //      host and any replay of its log still agree byte for byte. Without it a
-        //      Timer Source behind a jam logged one refused event per interval forever
-        //      and the save of a board jammed solid grew without bound. A target that
-        //      is not a Source is accepted exactly as before (the fold drops it on its
-        //      own terms). Only the host's own timer is skipped: webhook ingress in
-        //      (1b) below is the user's input and is always logged.
-        if !self.timers_gated {
-            let core = self.session.core();
-            let accepts = |target: NodeId| match core.state.node(target) {
-                Some(Node::Source(source)) => fabrico_core::admit::source_accepts_one(source),
-                _ => true,
-            };
-            inbound.extend(self.timers.due_events(tick, &mut self.next_seq, accepts));
-        }
-
-        // (1b) Drain ingress — non-blocking; only the items already queued.
+        let mut ingress: Vec<EventPayload> = Vec::new();
         while let Ok(payload) = ingress_rx.try_recv() {
-            inbound.push(self.stamp(tick, payload));
+            ingress.push(payload);
+        }
+        let mut results: Vec<ResultEvent> = Vec::new();
+        while let Ok(re) = results_rx.try_recv() {
+            results.push(re);
+        }
+        let out = self.engine.step(ingress, results);
+        self.finish_tick(out, |cmd, _ledger| {
+            // Unbounded send is sync-callable from the sim thread (no await).
+            let _ = cmd_tx.send(cmd.clone());
+        })
+    }
+
+    /// One [`Engine::step`] with no channels, for a test that calls [`Host::finish_tick`]
+    /// itself so it can look at the ledger from inside the dispatch closure.
+    #[doc(hidden)]
+    pub fn step_engine(
+        &mut self,
+        ingress: Vec<EventPayload>,
+        results: Vec<ResultEvent>,
+    ) -> StepOutput {
+        self.engine.step(ingress, results)
+    }
+
+    /// Perform what one [`Engine::step`] returned, in the durable order: mark resolved
+    /// commands done, append the events, append the edits, write each command ahead and
+    /// dispatch it, then snapshot if due. `dispatch` runs once per command, after that
+    /// command's `InFlight` row is durable, and gets the ledger so a test can check that.
+    #[doc(hidden)]
+    pub fn finish_tick(
+        &mut self,
+        out: StepOutput,
+        mut dispatch: impl FnMut(&Command, &DispatchLedger),
+    ) -> Result<(), StoreError> {
+        for (command_id, outcome) in &out.resolved {
+            self.ledger.mark_done(command_id, outcome)?;
         }
 
-        // (2) Drain results — non-blocking. A result CLEARS its in-flight entry
-        //     (drained BEFORE timeout synthesis, Pitfall 5) and marks the ledger
-        //     Done, then re-enters the fold as a logged CommandResult.
-        while let Ok(mut re) = results_rx.try_recv() {
-            // At-most-once resolution (CR-01): only a command STILL in-flight may be
-            // resolved. A result arriving on a LATER tick than its deadline — the
-            // command already timed out (step 3 removed it from `in_flight` and
-            // logged a Timeout) — is dropped here. Without this gate the log would
-            // carry BOTH a Timeout AND a CommandResult for one CommandId, folding two
-            // resolutions (a double dead-letter/retry that can fire the same
-            // real-world action twice). The invariant is one Timeout XOR one
-            // CommandResult per command, never both.
-            if self.in_flight.remove(&re.command_id).is_none() {
-                continue;
-            }
-            re.tick = tick; // stamp the admit tick (host owns it; the executor sends 0)
-            self.ledger.mark_done(&re.command_id, &re.outcome)?;
-            inbound.push(self.stamp(tick, EventPayload::CommandResult(re)));
-        }
-
-        // (3) Synthesize timeouts for still-in-flight commands past their deadline,
-        //     iterating the in-flight BTreeMap in deterministic CommandId order so
-        //     same-tick host-synthesized timeouts have a stable total order.
-        let mut timed_out: Vec<CommandId> = Vec::new();
-        for (id, &deadline) in &self.in_flight {
-            if deadline <= tick {
-                timed_out.push(*id);
-            }
-        }
-        for command_id in timed_out {
-            self.in_flight.remove(&command_id);
-            inbound.push(self.stamp(tick, EventPayload::Timeout { command_id }));
-        }
-
-        // (4) Append EVERY inbound event to the durable log BEFORE folding.
-        for ev in &inbound {
+        for ev in &out.inbound {
             let bytes = postcard::to_allocvec(ev)
                 .map_err(|e| StoreError::Backend(format!("event encode: {e}")))?;
             self.store.append_event(ev.partition, ev.sequence, &bytes)?;
         }
 
-        // (4b) Drain this tick's enqueued topology edits, stamp each (partition 0,
-        //      the current tick, the next monotonic edit-sequence — the host is the
-        //      edit-sequence authority), and append each to the EDITS table BEFORE
-        //      folding (ELOG-01). The buffer is the edit-log mirror of the inbound
-        //      event batch; the gesture producer (08-06) fills it via enqueue_edit.
-        let pending = std::mem::take(&mut self.pending_edits);
-        let mut stamped_edits: Vec<EditRecord> = Vec::with_capacity(pending.len());
-        for record in pending {
-            let er = self.stamp_edit(tick, record);
-            let bytes = postcard::to_allocvec(&er)
+        for er in &out.stamped_edits {
+            let bytes = postcard::to_allocvec(er)
                 .map_err(|e| StoreError::Backend(format!("edit encode: {e}")))?;
             self.store.append_edit(er.partition, er.sequence, &bytes)?;
-            stamped_edits.push(er);
         }
-        // Surface the undo/redo keyframe signal (Plan 03): true iff this tick's folded
-        // batch carries an `EditOp::Undo`/`EditOp::Redo` lineage marker (the markers
-        // are fold no-ops; the compensating Place/Delete records do the real work).
-        self.undo_redo_this_tick = stamped_edits
-            .iter()
-            .any(|er| matches!(er.op, EditOp::Undo { .. } | EditOp::Redo { .. }));
 
-        // (5) Fold one tick -> the command intent emitted this tick. EDITS-FIRST:
-        //     this tick's stamped topology edits fold ahead of its events, so a
-        //     placed/wired/deleted node takes effect before the events admit. The
-        //     fold runs through GridSession::fold_live, which calls the CERTIFIED
-        //     Core::advance_edits VERBATIM (EDITS-FIRST), advances the event cursor
-        //     (`cursor += events.len()`, mirroring the old in-line accounting so a
-        //     snapshot of the live trajectory stays byte-identical to its replay),
-        //     appends the host-stamped records to the session edit-log as-is (no
-        //     re-stamp — the host is the partition/sequence/tick/action authority),
-        //     and rebuilds the view + undo/redo projection. HOST-03 and the
-        //     persisted-log invariants are preserved (advance_edits is untouched).
-        let cmds = self.session.fold_live(&stamped_edits, &inbound);
-
-        // (6) Write-ahead each emitted command (durable InFlight) THEN dispatch it
-        //     off-thread and track its deadline. The InFlight marker is on disk
-        //     before the effect can run (the exactly-once write-ahead protocol).
-        for cmd in &cmds {
+        // Write-ahead each emitted command (durable InFlight) THEN dispatch it off-thread.
+        // The InFlight marker is on disk before the effect can run (the exactly-once
+        // write-ahead protocol).
+        for cmd in &out.commands {
             self.ledger.before_dispatch(cmd)?;
-            // Unbounded send is sync-callable from the sim thread (no await).
-            let _ = cmd_tx.send(cmd.clone());
-            self.in_flight.insert(cmd.id, cmd.deadline);
+            dispatch(cmd, &self.ledger);
         }
 
-        // (7) Periodic snapshot at the new tick boundary if the cadence is due.
-        if snapshot_due(self.snapshot_every, self.session.core().tick) {
-            persist_snapshot(self.session.core(), &mut self.store)?;
+        // Periodic snapshot at the new tick boundary if the cadence is due.
+        if snapshot_due(self.snapshot_every, self.engine.core().tick) {
+            persist_snapshot(self.engine.core(), &mut self.store)?;
         }
 
         Ok(())
@@ -788,7 +551,7 @@ impl Host {
             // Take the caller-rebuilt core out of the session (a throwaway genesis
             // replaces it; the whole session is rebuilt in step 2 below).
             std::mem::replace(
-                self.session.core_mut(),
+                self.engine.core_mut(),
                 Core::genesis(LogHeader {
                     schema_version: SCHEMA_VERSION,
                     seed: 0,
@@ -827,8 +590,8 @@ impl Host {
         // Every node on a board this build writes or reads was minted by an edit-log
         // record, so the projection rebuild re-folds the edit log alone and its
         // throwaway core mints exactly the ids the real one did.
-        self.session = GridSession::replay_two_logs(0, &edits, &events);
-        *self.session.core_mut() = core;
+        self.engine.replace_session(GridSession::replay_two_logs(0, &edits, &events));
+        *self.engine.core_mut() = core;
         // Keep the host sequences monotonic for any new (timeout) events / edits
         // appended after recovery resumes live ticking. CHECKED high-water + 1 (WR-03):
         // a hostile `.fab` carrying a record with `sequence == u64::MAX` passes every
@@ -837,13 +600,14 @@ impl Host {
         // appends, colliding keys that overwrite the source-of-truth log. Treat an
         // out-of-range high-water as a typed reject instead, consistent with the
         // reject-only untrusted-load contract.
-        self.next_seq = next_high_water(events.iter().map(|e| e.sequence), "event")?;
-        self.next_edit_seq = next_high_water(edits.iter().map(|e| e.sequence), "edit")?;
+        let next_seq = next_high_water(events.iter().map(|e| e.sequence), "event")?;
+        let next_edit_seq = next_high_water(edits.iter().map(|e| e.sequence), "edit")?;
         // The action high-water (mirror the sequence marks): the next id the resumed
         // live path stamps, so a resume over a populated edit-log never reuses an
         // action id (RESEARCH Pitfall 1). CHECKED high-water (WR-03) — a tampered log
         // carrying `action == u64::MAX` is a typed reject, never a panic/wrap.
-        self.next_action = next_high_water(edits.iter().map(|e| e.action), "action")?;
+        let next_action = next_high_water(edits.iter().map(|e| e.action), "action")?;
+        self.engine.set_counters(next_seq, next_edit_seq, next_action);
 
         // (3) Compute the resolved (logged result / timeout) command ids.
         let mut resolved: BTreeSet<CommandId> = BTreeSet::new();
@@ -864,9 +628,9 @@ impl Host {
         //     so it times out (never re-sends). The ledger is the durable source of
         //     "what is in flight" — snapshot-independent and exact.
         let recovery = self.ledger.recover(&resolved)?;
-        self.in_flight.clear();
+        self.engine.clear_in_flight();
         for (id, cmd) in &recovery.do_not_resend {
-            self.in_flight.insert(*id, cmd.deadline);
+            self.engine.insert_in_flight(*id, cmd.deadline);
         }
 
         // (5) Reconcile the muted replay's emitted set against the ledger (WR-05).
@@ -885,7 +649,7 @@ impl Host {
                 continue;
             }
             self.ledger.before_dispatch(cmd)?;
-            self.in_flight.insert(cmd.id, cmd.deadline);
+            self.engine.insert_in_flight(cmd.id, cmd.deadline);
         }
 
         Ok(emitted)
