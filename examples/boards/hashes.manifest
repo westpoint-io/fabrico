@@ -6,3 +6,7 @@
 #
 # Lines are sorted byte-wise by board path. A generator writes this file, so don't edit it by
 # hand. Lines that start with # are comments.
+examples/boards/advanced.board.ron 1200 8f05f1a6adc78b9dd1f910b76b690a9be2f00a56905f5545622226be6e7cc00c
+examples/boards/demo_scene.board.ron 1200 90fe484c14bd0332e332a54813cf7baaa129be40f6a871692779a3fe57738e69
+examples/boards/docs/script-outcomes.board.ron 1000 36c72035162febc3f5b1a9e2dd850a1bc386e34bcb5c0a9f7d1f6b1427dc20ef
+examples/boards/order_processing.board.ron 1200 668d0400451aafaa4d4749650c0165727c3f67d66f631c9a46a68863cb9c0830

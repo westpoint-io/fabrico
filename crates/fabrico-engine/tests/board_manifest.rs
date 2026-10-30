@@ -15,6 +15,8 @@
 // The board files and the manifest live on disk, and the generator writes the manifest.
 #![allow(clippy::disallowed_methods)]
 
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -95,14 +97,129 @@ fn walk_boards() -> Vec<Walked> {
         .collect()
 }
 
+/// One well-formed board line of the manifest.
+struct ManifestLine<'a> {
+    number: usize,
+    path: &'a str,
+    end_tick: u64,
+    hash: &'a str,
+}
+
+/// Read one line's three fields, or `None` if it isn't exactly `<path> <end tick> <hash>`.
+fn parse_line(number: usize, line: &str) -> Option<ManifestLine<'_>> {
+    let fields: Vec<&str> = line.split(' ').collect();
+    let [path, end_tick, hash] = fields[..] else {
+        return None;
+    };
+    let is_hash = hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if path.is_empty() || !end_tick.bytes().all(|b| b.is_ascii_digit()) || !is_hash {
+        return None;
+    }
+    Some(ManifestLine { number, path, end_tick: end_tick.parse().ok()?, hash })
+}
+
+/// The manifest's board lines, keyed by path, and everything wrong with the text itself. Only the
+/// first copy of a path listed twice is kept.
+fn parse_manifest(manifest: &str) -> (BTreeMap<&str, ManifestLine<'_>>, Vec<String>) {
+    let mut lines: BTreeMap<&str, ManifestLine<'_>> = BTreeMap::new();
+    let mut problems = Vec::new();
+    let mut previous: Option<&str> = None;
+    for (index, line) in manifest.lines().enumerate() {
+        let number = index + 1;
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(parsed) = parse_line(number, line) else {
+            problems.push(format!("manifest line {number} is malformed: {line:?}"));
+            continue;
+        };
+        // str compares byte by byte, which is the order the manifest promises.
+        if let Some(first) = lines.get(parsed.path) {
+            problems.push(format!(
+                "manifest line {number} lists {} twice; it's first on line {}",
+                parsed.path, first.number
+            ));
+        } else if previous.is_some_and(|p| parsed.path <= p) {
+            problems.push(format!(
+                "manifest line {number} is out of order: {} comes after {}",
+                parsed.path,
+                previous.unwrap_or_default()
+            ));
+        }
+        previous = Some(parsed.path);
+        lines.entry(parsed.path).or_insert(parsed);
+    }
+    if lines.is_empty() {
+        problems.push("the manifest has no board lines".to_string());
+    }
+    (lines, problems)
+}
+
 /// Everything wrong between the walked boards and the manifest text.
-fn compare(_walked: &[Walked], _manifest: &str) -> Vec<String> {
-    Vec::new()
+fn compare(walked: &[Walked], manifest: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    if walked.len() < BOARD_FLOOR {
+        problems.push(format!(
+            "the walk found {} boards, and there should be at least {BOARD_FLOOR}",
+            walked.len()
+        ));
+    }
+    let (lines, manifest_problems) = parse_manifest(manifest);
+    problems.extend(manifest_problems);
+    for board in walked {
+        let path = &board.path;
+        let Some(line) = lines.get(path.as_str()) else {
+            problems.push(format!("{path} has no manifest line"));
+            continue;
+        };
+        match &board.outcome {
+            Err(reason) => problems.push(format!("{path} could not run: {reason}")),
+            Ok(end) => {
+                if end.tick != line.end_tick {
+                    problems.push(format!(
+                        "{path}: end tick is {} and the manifest says {}",
+                        end.tick, line.end_tick
+                    ));
+                }
+                if end.hash != line.hash {
+                    problems.push(format!(
+                        "{path}: hash is {} and the manifest says {}",
+                        end.hash, line.hash
+                    ));
+                }
+            }
+        }
+    }
+    for line in lines.values() {
+        if !walked.iter().any(|board| board.path == line.path) {
+            problems.push(format!(
+                "manifest line {} names {}, and no such board exists",
+                line.number, line.path
+            ));
+        }
+    }
+    problems
 }
 
 /// The manifest text for these boards, or the reason it can't be written.
-fn render_manifest(_walked: &[Walked]) -> Result<String, String> {
-    Ok(MANIFEST_HEADER.to_string())
+fn render_manifest(walked: &[Walked]) -> Result<String, String> {
+    if walked.len() < BOARD_FLOOR {
+        return Err(format!(
+            "the walk found {} boards, and there should be at least {BOARD_FLOOR}",
+            walked.len()
+        ));
+    }
+    let mut sorted: Vec<&Walked> = walked.iter().collect();
+    sorted.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut text = MANIFEST_HEADER.to_string();
+    for board in sorted {
+        let end = board
+            .outcome
+            .as_ref()
+            .map_err(|reason| format!("{} could not run: {reason}", board.path))?;
+        writeln!(text, "{} {} {}", board.path, end.tick, end.hash).expect("write to a String");
+    }
+    Ok(text)
 }
 
 #[test]

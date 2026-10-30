@@ -146,7 +146,9 @@
 # =====================================================================================
 
 [fixtures]
-NONE
+# The board hash manifest gets its first real lines: one per board file, with the end tick and the
+# final hash the generator measured. The boards and the fold are unchanged.
+examples/boards/hashes.manifest cab238c5c1e3c4dff8124820e2e0ea03e6060c2e96b09eac6bab023b8c303ae5
 
 [source]
 # The Factory memory limit moves into an allocator, so it stops depending on QuickJS's
