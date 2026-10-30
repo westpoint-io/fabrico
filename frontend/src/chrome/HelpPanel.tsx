@@ -38,11 +38,11 @@ const RING_PADDING_Y = '2 * (var(--fab-space-sm) + var(--fab-bezel-ring))';
  * the same `--fab-space-sm` the cluster clearance keeps. 116 + 28 + 8 = 152.
  */
 const LEGEND_BOUND_OFFSET = `${DOCK_TOP} + ${RING_PADDING_Y} + var(--fab-space-sm)`;
-/** The content floor: Help's heading line, 18 px at line height 1.2, and the 8 px gap the column
- *  keeps under it (29.6; phase 92 review IN-B-05: the heading alone left the content 8 px taller than
- *  the box, over the bezel). Below it, outside the supported sizes, Help may cross the strip
+/** The content floor: Help's heading row, as tall as the Lessons button in it, and the 8 px gap the
+ *  column keeps under it (52; phase 92 review IN-B-05: the heading alone left the content 8 px taller
+ *  than the box, over the bezel). Below it, outside the supported sizes, Help may cross the strip
  *  (UI-SPEC A11) rather than lose its own heading. */
-const HEADING_FLOOR = 'calc(var(--fab-font-size-hero) * 1.2 + var(--fab-space-sm))';
+const HEADING_FLOOR = 'calc(var(--fab-min-target) + var(--fab-space-sm))';
 
 /** The Help panel's stable DOM id - the Toolbar "?" button aria-controls it. */
 export const HELP_PANEL_ID = 'fab-help-panel';
@@ -171,7 +171,12 @@ function observeScrollFocus(box: HTMLDivElement | null): (() => void) | undefine
   return () => observer.disconnect();
 }
 
-export function HelpPanel(): JSX.Element {
+export interface HelpPanelProps {
+  /** Swap this panel for the lesson list. */
+  onOpenLessons: () => void;
+}
+
+export function HelpPanel({ onOpenLessons }: HelpPanelProps): JSX.Element {
   return (
     <aside
       id={HELP_PANEL_ID}
@@ -215,18 +220,23 @@ export function HelpPanel(): JSX.Element {
     >
       {/* A real <h2> under the Toolbar <h1> (no skipped level), mirroring Legend:
           Sono title tier (.fab-title) at the hero size. */}
-      <h2
-        id={HELP_HEADING_ID}
-        className="fab-title"
-        style={{
-          margin: 0,
-          fontSize: 'var(--fab-font-size-hero)',
-          color: 'var(--fab-ink)',
-          lineHeight: 1.2,
-        }}
-      >
-        Gestures
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h2
+          id={HELP_HEADING_ID}
+          className="fab-title"
+          style={{
+            margin: 0,
+            fontSize: 'var(--fab-font-size-hero)',
+            color: 'var(--fab-ink)',
+            lineHeight: 1.2,
+          }}
+        >
+          Gestures
+        </h2>
+        <button type="button" className="fab-tool-btn fab-tool-btn--labeled" onClick={onOpenLessons}>
+          Lessons
+        </button>
+      </div>
 
       {/* The rows' scroll box (UI-SPEC 7.3). It scrolls only on a window too short for the list,
           and only then is it a tab stop (`observeScrollFocus`), so the list can be scrolled from

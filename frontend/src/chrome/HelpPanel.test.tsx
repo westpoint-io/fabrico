@@ -200,14 +200,14 @@ describe('HelpPanel GESTURE_ROWS shape (UI-SPEC 8.3 counts)', () => {
 
 describe('HelpPanel render', () => {
   it('renders the Gestures heading on the stable panel id', () => {
-    const tree = HelpPanel();
+    const tree = HelpPanel({ onOpenLessons: () => undefined });
     expect(HELP_PANEL_ID).toBe('fab-help-panel');
     expect(walk(tree).some((n) => n.type === 'h2' && n.props.children === 'Gestures')).toBe(true);
     expect(walk(tree).filter((n) => n.props.id === HELP_PANEL_ID)).toHaveLength(1);
   });
 
   it('renders every row through the one two-column grid', () => {
-    const tree = HelpPanel();
+    const tree = HelpPanel({ onOpenLessons: () => undefined });
     for (const r of GESTURE_ROWS) {
       expect(elementsWithText(tree, r.gesture), `gesture cell: ${r.gesture}`).toHaveLength(1);
       expect(elementsWithText(tree, r.binding), `binding cell: ${r.gesture}`).toHaveLength(1);
@@ -219,7 +219,7 @@ describe('HelpPanel render', () => {
   });
 
   it('lays both cells out at line height 1.4, so wrapped lines never touch (UI-SPEC 8.3)', () => {
-    const tree = HelpPanel();
+    const tree = HelpPanel({ onOpenLessons: () => undefined });
     for (const r of GESTURE_ROWS) {
       for (const text of [r.gesture, r.binding]) {
         const cell = elementsWithText(tree, text)[0]!;
@@ -229,7 +229,7 @@ describe('HelpPanel render', () => {
   });
 
   it('puts the rows in a scroll box below the heading that is a tab stop only while it scrolls (UI-SPEC 7.3, review WR-B-05)', () => {
-    const tree = HelpPanel();
+    const tree = HelpPanel({ onOpenLessons: () => undefined });
     const boxes = walk(tree).filter((n) => n.props['data-fab-help-scroll'] !== undefined);
     expect(boxes).toHaveLength(1);
     // No fixed tab stop: the ref callback sets one while the list scrolls (the mock spec
@@ -288,7 +288,7 @@ describe('Help stops above the open Legend (CHROME-12, D-05)', () => {
   };
 
   it('Help is bounded by the open Legend', () => {
-    const aside = walk(HelpPanel()).find((n) => n.props.id === HELP_PANEL_ID)!;
+    const aside = walk(HelpPanel({ onOpenLessons: () => undefined })).find((n) => n.props.id === HELP_PANEL_ID)!;
     const maxHeight = String((aside.props.style as { maxHeight?: unknown }).maxHeight);
     const cluster =
       `calc(100% - (var(--fab-space-lg) + var(--fab-min-target) + var(--fab-space-2xl)) - ${CAMERA_CLUSTER_CLEARANCE} - ` +
@@ -302,15 +302,15 @@ describe('Help stops above the open Legend (CHROME-12, D-05)', () => {
     expect(legend, `the Legend bound reads var(--fab-legend-top) less a token sum, in ${maxHeight}`).not.toBeNull();
     const [, floor, fallback, offset] = legend!;
     expect(px(offset!), 'Help top 116 + ring padding 28 + gap 8').toBe(152);
-    // The floor is the heading line AND the 8 px gap under it (review IN-B-05): the content column is
+    // The floor is the heading row AND the 8 px gap under it (review IN-B-05): the content column is
     // heading, gap, list, so a floor of the heading alone overflowed the bezel by the gap.
-    expect(px(floor!), "the content floor is Help's heading line, 18 px at line height 1.2, plus the 8 px gap").toBeCloseTo(29.6, 9);
+    expect(px(floor!), "the content floor is Help's heading row, 44 px with the Lessons button in it, plus the 8 px gap").toBe(52);
     // With no Legend open the property is absent and the fallback must never bind.
     expect(Number(fallback), 'the fallback is far below any window').toBeGreaterThanOrEqual(100000);
   });
 
   it('is still not a corner dock: the Legend never reserves Help (D-05)', () => {
-    const aside = walk(HelpPanel()).find((n) => n.props.id === HELP_PANEL_ID)!;
+    const aside = walk(HelpPanel({ onOpenLessons: () => undefined })).find((n) => n.props.id === HELP_PANEL_ID)!;
     expect(aside.props['data-fab-corner-dock']).toBeUndefined();
   });
 });

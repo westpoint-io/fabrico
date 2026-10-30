@@ -77,6 +77,7 @@ import { computeLegendBand, cornerLeftsReachingStrip, type LegendBand } from './
 import { createSelectionEpoch } from './selectionEpoch';
 import { HelpPanel, HELP_PANEL_ID, HELP_SCROLL_ATTR } from './HelpPanel';
 import { WelcomeCard } from './WelcomeCard';
+import { TutorialLayer, idleTutorialProbe, type TutorialProbe } from './tutorial/TutorialLayer';
 import {
   CLIENT_REFUSAL_COPY,
   type ClientRefusalTag,
@@ -164,6 +165,8 @@ declare global {
   interface Window {
     __fabrico?: {
       scene(): FabricoScene;
+      /** The lesson the user is on, with hint rects from the DOM. A fresh object per call, no setter. */
+      tutorial(): TutorialProbe;
       stats(): { packetsApplied: number; decodeErrors: number };
       /**
        * Dev frame-time probe (v3.0 baseline for Phase 28 / GATE-05): the rolling
@@ -1721,7 +1724,7 @@ export function App() {
   // when the board is dirty, open the 3-choice discard guard FIRST (no swap until a
   // choice); a clean board proceeds directly. A stray New must never silently
   // destroy an in-progress factory (the milestone done-test builds from empty).
-  const doNew = useCallback((): void => {
+  const doNewThen = useCallback((onSent?: () => void): void => {
     if (simStoppedRef.current) return;
     const proceed = (): void => {
       supersedeLoadInFlightRef.current?.();
@@ -1742,6 +1745,7 @@ export function App() {
       sceneActedRef.current = true;
       setLoadedScene(null);
       setDirty(nextDirty(dirtyRef.current, 'new'));
+      onSent?.();
     };
     if (hasUnsavedWork()) {
       openDiscardGuard('new', proceed);
@@ -1749,6 +1753,7 @@ export function App() {
       proceed();
     }
   }, [setDirty, openDiscardGuard]);
+  const doNew = useCallback((): void => doNewThen(), [doNewThen]);
 
   // SAVE-05: open a saved .fab behind the SAME dirty-discard gate as New. The
   // `proceed` body is the Plan-02 smart-Load handler (controlsRef.onLoad: the
@@ -2364,8 +2369,10 @@ export function App() {
   // the Graphics panel (CHROME-03, D-04), so Help is its one member today; a future
   // global disclosure joins THIS union rather than adding a second boolean, which keeps
   // "two open at once" a state that cannot be reached.
-  const [topRightPanel, setTopRightPanel] = useState<'help' | null>(null);
+  const [topRightPanel, setTopRightPanel] = useState<'help' | 'lessons' | null>(null);
   const helpOpen = topRightPanel === 'help';
+  const lessonsOpen = topRightPanel === 'lessons';
+  const tutorialProbeRef = useRef<() => TutorialProbe>(idleTutorialProbe);
   // Plan 74.1-31 (PAUSE-TOOLBAR): WHERE THE TOOLBAR'S STATUS STRIP MAY HANG. The strip
   // (the status readout and the Unsaved badge, out of the button row) is right-aligned
   // under the toolbar's right end by default, but the ConfigPanel is `top: lg` and covers
@@ -2390,7 +2397,7 @@ export function App() {
     }
     const topRightPanels = (): HTMLElement[] => [
       ...document.querySelectorAll<HTMLElement>(
-        `aside[aria-labelledby="fab-config-heading"], #${HELP_PANEL_ID}, #${EXAMPLES_POPOVER_ID}`,
+        `aside[aria-labelledby="fab-config-heading"], #${HELP_PANEL_ID}, #fab-lessons-panel, #${EXAMPLES_POPOVER_ID}`,
       ),
     ];
     const measure = (): void => {
@@ -2425,7 +2432,7 @@ export function App() {
     return () => {
       observer.disconnect();
     };
-  }, [ready, configDockKey, beltDockKey, helpOpen, examplesOpen]);
+  }, [ready, configDockKey, beltDockKey, helpOpen, lessonsOpen, examplesOpen]);
   const onToggleHelp = useCallback((): void => {
     setTopRightPanel((v) => (v === 'help' ? null : 'help'));
   }, []);
@@ -2436,7 +2443,7 @@ export function App() {
   // selection) until Help closes again. `inspectorDirty` is the mounted panel's not-applied
   // condition, reported up by the panel itself.
   const [inspectorDirty, setInspectorDirty] = useState(false);
-  const inspectorHidden = helpOpen && (configDockKey !== null || selectedBelt !== null);
+  const inspectorHidden = topRightPanel !== null && (configDockKey !== null || selectedBelt !== null);
   /** Bring a hidden inspector back: close Help, which is what hides it. */
   const restoreHiddenInspector = useCallback((): void => {
     setTopRightPanel(null);
@@ -3371,6 +3378,7 @@ export function App() {
       frameProbeRef.current = frameProbe;
       window.__fabrico = {
         scene: () => sceneSnapshot(handle.sceneState),
+        tutorial: () => tutorialProbeRef.current(),
         stats: () => ({ packetsApplied, decodeErrors }),
         frameTime: () => frameProbe.avg(),
         // MOTION-04 deterministic probe spine: read the effective render frame and
@@ -4834,7 +4842,7 @@ export function App() {
           <RefusalMessage
             message={refusalMessage}
             avoid={refusalAvoid}
-            dodgeKey={`${configDockKey ?? ''}|${beltDockKey ?? ''}|${helpOpen ? 'help' : ''}|${inspectorHidden ? 'hidden' : ''}`}
+            dodgeKey={`${configDockKey ?? ''}|${beltDockKey ?? ''}|${helpOpen ? 'help' : ''}|${lessonsOpen ? 'lessons' : ''}|${inspectorHidden ? 'hidden' : ''}`}
           />
           {/* UNDO-09: the card that says why a file will not open. Mounted from its own
               slot, at the viewport centre rather than this band's anchor, so a gesture
@@ -4865,7 +4873,17 @@ export function App() {
           {/* ONB-03: the collapsible Help panel, mounted ONLY while open (closed
               by default — the Toolbar "?" button toggles helpOpen), mirroring the
               Legend mount exactly. */}
-          {helpOpen && <HelpPanel />}
+          {helpOpen && <HelpPanel onOpenLessons={() => setTopRightPanel('lessons')} />}
+          <TutorialLayer
+            handleRef={handleRef}
+            armed={armed}
+            selectedNode={selectedNode}
+            playing={playing}
+            lessonsOpen={lessonsOpen}
+            onLessonsOpenChange={(open) => setTopRightPanel(open ? 'lessons' : null)}
+            doNewThen={doNewThen}
+            probeRef={tutorialProbeRef}
+          />
           {/* Phase 76 (plan 76-02, D-06): a label's WORDS, a DOM overlay pinned to each
               label every frame. ALWAYS mounted (a note's words are not an alt-mode
               reveal), z-index 1 under every panel. It reads the same read-only camera
