@@ -259,11 +259,17 @@ test('Undo goes back and a swap pauses', async ({ page }) => {
   const before = await swapFacts(page);
   await waitForEditVerdicts(page);
   await page.keyboard.press('Control+z');
+  // The card and the step together, so a failure says whether the lesson read this Undo as a swap.
   await expect
-    .poll(async () => (await readProbe(page)).stepId, { message: 'Undo sent the lesson back to the Sink step', timeout: frameBudgetMs(SWAP_FRAMES) })
-    .toBe('place-sink');
+    .poll(
+      async () => {
+        const probe = await readProbe(page);
+        return `${probe.card}:${probe.stepId}`;
+      },
+      { message: 'Undo sent the lesson back to the Sink step, still running', timeout: frameBudgetMs(SWAP_FRAMES) },
+    )
+    .toBe('running:place-sink');
   const back = await readProbe(page);
-  expect(back.card, 'an Undo never reads as a swap').toBe('running');
   await expect(card, 'the note says why').toContainText('Step 2 needs doing again, so the lesson went back.');
   await expect(card).not.toContainText('Lesson paused');
   const undone = await readScene(page);
