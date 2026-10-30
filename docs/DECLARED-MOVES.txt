@@ -179,3 +179,7 @@ crates/fabrico-engine/src/render_packet.rs
 # request and a real one go through one serializer. The field order and the bytes are unchanged,
 # and a test pins them to a literal.
 crates/fabrico-engine/src/envelope.rs
+# The board format, its parser and its typed refusals, and the boot a board runs with no host. The
+# three shipped scenes become data files in this format, so the app, the tests and later the browser
+# read one file. No golden fixture moves.
+crates/fabrico-engine/src/board.rs

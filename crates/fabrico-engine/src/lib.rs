@@ -9,6 +9,7 @@
 #![deny(clippy::disallowed_types, clippy::disallowed_methods)]
 #![warn(clippy::all)]
 
+pub mod board;
 pub mod engine;
 pub mod envelope;
 pub mod gesture;
