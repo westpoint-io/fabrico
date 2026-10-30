@@ -1,0 +1,149 @@
+import { describe, expect, it } from 'vitest';
+import {
+  EMPTY_PROGRESS,
+  PROGRESS_KEY,
+  localStorageProgress,
+  parseProgress,
+  withLessonDone,
+  withLessonStarted,
+  type Progress,
+} from './progress.ts';
+
+const KNOWN = ['your-first-line'] as const;
+const LESSON = 'your-first-line';
+
+const stored = (value: unknown): string => JSON.stringify(value);
+
+/** The part of `Storage` the store uses, backed by a plain object. */
+function fakeStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; data: Record<string, string> } {
+  const data = { ...initial };
+  return {
+    data,
+    getItem: (k) => data[k] ?? null,
+    setItem: (k, v) => {
+      data[k] = v;
+    },
+  };
+}
+
+describe('parseProgress', () => {
+  it('reads a good value', () => {
+    expect(parseProgress(stored({ version: 1, lessons: { [LESSON]: 'done' } }), KNOWN)).toEqual({
+      version: 1,
+      lessons: { [LESSON]: 'done' },
+    });
+  });
+
+  it('reads nothing stored as empty', () => {
+    expect(parseProgress(null, KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads invalid JSON as empty', () => {
+    expect(parseProgress('not json', KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads a wrong version as empty', () => {
+    expect(parseProgress(stored({ version: 2, lessons: { [LESSON]: 'done' } }), KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads a value with no version as empty', () => {
+    expect(parseProgress(stored({ lessons: { [LESSON]: 'done' } }), KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads a top level that is not an object as empty', () => {
+    expect(parseProgress(stored(['done']), KNOWN)).toEqual(EMPTY_PROGRESS);
+    expect(parseProgress(stored(null), KNOWN)).toEqual(EMPTY_PROGRESS);
+    expect(parseProgress(stored(7), KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads a lessons field that is not an object as empty', () => {
+    expect(parseProgress(stored({ version: 1, lessons: 'done' }), KNOWN)).toEqual(EMPTY_PROGRESS);
+    expect(parseProgress(stored({ version: 1, lessons: null }), KNOWN)).toEqual(EMPTY_PROGRESS);
+    expect(parseProgress(stored({ version: 1, lessons: [LESSON] }), KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads an unknown status as empty', () => {
+    expect(parseProgress(stored({ version: 1, lessons: { [LESSON]: 'finished' } }), KNOWN)).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('drops an unknown lesson id and keeps the known ones', () => {
+    expect(parseProgress(stored({ version: 1, lessons: { gone: 'done', [LESSON]: 'inProgress' } }), KNOWN)).toEqual({
+      version: 1,
+      lessons: { [LESSON]: 'inProgress' },
+    });
+  });
+
+  it('ignores a __proto__ key in the stored text', () => {
+    const parsed = parseProgress(`{"version":1,"lessons":{"__proto__":"done","${LESSON}":"done"}}`, KNOWN);
+    expect(Object.keys(parsed.lessons)).toEqual([LESSON]);
+    expect(Object.getPrototypeOf(parsed.lessons)).toBe(Object.prototype);
+  });
+});
+
+describe('localStorageProgress', () => {
+  it('reads back what it wrote, under the one key', () => {
+    const storage = fakeStorage();
+    const store = localStorageProgress(storage, KNOWN);
+    const written: Progress = { version: 1, lessons: { [LESSON]: 'done' } };
+    store.write(written);
+    expect(Object.keys(storage.data)).toEqual([PROGRESS_KEY]);
+    expect(PROGRESS_KEY).toBe('fab.tutorial.v1');
+    expect(store.read()).toEqual(written);
+  });
+
+  it('reads a corrupt stored value as empty', () => {
+    const store = localStorageProgress(fakeStorage({ [PROGRESS_KEY]: 'not json' }), KNOWN);
+    expect(store.read()).toEqual(EMPTY_PROGRESS);
+  });
+
+  it('reads empty when getItem throws', () => {
+    const store = localStorageProgress(
+      {
+        getItem: () => {
+          throw new Error('blocked');
+        },
+        setItem: () => {},
+      },
+      KNOWN,
+    );
+    expect(store.read()).toEqual(EMPTY_PROGRESS);
+  });
+
+  it("doesn't throw when setItem throws", () => {
+    const store = localStorageProgress(
+      {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('full');
+        },
+      },
+      KNOWN,
+    );
+    expect(() => store.write({ version: 1, lessons: { [LESSON]: 'done' } })).not.toThrow();
+  });
+
+  it('works with no storage at all', () => {
+    const store = localStorageProgress(null, KNOWN);
+    expect(store.read()).toEqual(EMPTY_PROGRESS);
+    expect(() => store.write(EMPTY_PROGRESS)).not.toThrow();
+  });
+});
+
+describe('the marks a lesson leaves', () => {
+  it('a started lesson reads in progress', () => {
+    expect(withLessonStarted(EMPTY_PROGRESS, LESSON).lessons[LESSON]).toBe('inProgress');
+  });
+
+  it('a finished lesson reads done', () => {
+    expect(withLessonDone(withLessonStarted(EMPTY_PROGRESS, LESSON), LESSON).lessons[LESSON]).toBe('done');
+  });
+
+  it('done sticks when a finished lesson starts again', () => {
+    expect(withLessonStarted(withLessonDone(EMPTY_PROGRESS, LESSON), LESSON).lessons[LESSON]).toBe('done');
+  });
+
+  it("leaves the shared empty value alone", () => {
+    withLessonStarted(EMPTY_PROGRESS, LESSON);
+    expect(EMPTY_PROGRESS.lessons).toEqual({});
+  });
+});

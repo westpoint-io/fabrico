@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { LESSONS } from './lessons/index.ts';
+import { YOUR_FIRST_LINE } from './lessons/yourFirstLine.ts';
 import {
   IDLE,
   currentStage,
   floorSpot,
   noteTokens,
   reduce,
+  rowViews,
   viewKey,
+  type RowView,
   type TutorialState,
 } from './machine.ts';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, auditLessonWords, phrasePlain } from './phrase.ts';
-import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
+import { EMPTY_PROGRESS, withLessonStarted, type Progress } from './progress.ts';
+import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -402,5 +406,344 @@ describe('floorSpot', () => {
       board: board({ nodes: [node(1, SINK, free[0], free[1])] }),
     });
     expect(taken).toEqual([free[0], free[1] + 1]);
+  });
+});
+
+const SINK_KEY = '7@8,2';
+const SOURCE_KEY = '0@2,2';
+
+describe('reduce: a swapped board', () => {
+  it('a higher swap floor while running moves the card to swapped', () => {
+    const s = frame(atStep(2), { nodes: BOTH, swapFloor: FLOOR + 2, generation: 7 });
+    expect(s.card).toBe('swapped');
+    expect(s.stepIndex, 'the lesson keeps its place').toBe(2);
+  });
+
+  it("the lesson's own swap isn't a swap: the floor it started on stays the lesson's floor", () => {
+    const s = frame(frame(started(), { nodes: [THE_SOURCE], swapFloor: FLOOR + 1 }), { nodes: [THE_SOURCE], swapFloor: FLOOR + 1 });
+    expect(s.card).toBe('running');
+    expect(s.floor, 'the floor of the board the lesson runs on').toBe(FLOOR + 1);
+  });
+
+  it('Undo raises the generation and not the swap floor, and the card stays running', () => {
+    const s = atStep(2);
+    const undone = frame(s, { nodes: BOTH, generation: 2 });
+    expect(undone.card).toBe('running');
+    expect(undone.stepIndex).toBe(2);
+    expect(undone.note).toBeNull();
+  });
+
+  it('a swapped card never carries on against that board', () => {
+    const swapped = frame(atStep(0), { swapFloor: FLOOR + 2 });
+    expect(swapped.card).toBe('swapped');
+    const next = frame(swapped, { nodes: [THE_SOURCE], swapFloor: FLOOR + 2 });
+    expect(next).toBe(swapped);
+  });
+
+  it('a finished card stays finished when the board is swapped', () => {
+    const finished = { ...atStep(5), card: 'finished' as const };
+    expect(frame(finished, { swapFloor: FLOOR + 2 }).card).toBe('finished');
+  });
+
+  it('a swapped card has no stage, so the ring has nothing to mark', () => {
+    const swapped = frame(atStep(2), { nodes: BOTH, swapFloor: FLOOR + 2 });
+    expect(currentStage(swapped, board({ nodes: BOTH }), chrome(), LESSONS)).toBeNull();
+  });
+});
+
+describe('reduce: leave and resume', () => {
+  const left = (s: TutorialState): TutorialState => reduce(s, { type: 'left' }, LESSONS);
+  const resumed = (s: TutorialState): TutorialState => reduce(s, { type: 'resumed' }, LESSONS);
+
+  it('leaving records the floor the lesson runs on', () => {
+    const s = left(atStep(1));
+    expect(s.card).toBe('none');
+    expect(s.leftFloor).toBe(FLOOR + 1);
+    expect(s.stepIndex, 'the saved step stays').toBe(1);
+    expect(s.bindings.source?.nodeKey, 'and the bindings').toBe(SOURCE_KEY);
+  });
+
+  it('leaving a swapped card records no floor, so it can never resume', () => {
+    expect(left(frame(atStep(2), { nodes: BOTH, swapFloor: FLOOR + 2 })).leftFloor).toBeNull();
+  });
+
+  it('leaving a lesson still starting records no floor: it has no step to come back to', () => {
+    const sent = reduce(IDLE, { type: 'newSent', lessonId: LESSON, floorAtSend: FLOOR }, LESSONS);
+    expect(left(sent).leftFloor).toBeNull();
+  });
+
+  it('Resume with nothing changed puts the card back on the saved step, with no note', () => {
+    const s = frame(resumed(left(atStep(1))), { nodes: [THE_SOURCE] });
+    expect(s.card).toBe('running');
+    expect(s.stepIndex).toBe(1);
+    expect(s.note).toBeNull();
+    expect(s.leftFloor, 'it is no longer left').toBeNull();
+  });
+
+  it('a Source placed while left finishes step 1 on Resume, and the note says so', () => {
+    const s = frame(resumed(left(atStep(0))), { nodes: [THE_SOURCE] });
+    expect(s.stepIndex).toBe(1);
+    expect(s.note).toEqual({ kind: 'skippedOne', a: 1, b: 1 });
+    expect(s.bindings.source?.id).toBe(THE_SOURCE.id);
+  });
+
+  it('several steps done while left read as a range from the saved step', () => {
+    const s = frame(resumed(left(atStep(0))), { nodes: BOTH });
+    expect(s.stepIndex).toBe(2);
+    expect(s.note).toEqual({ kind: 'skippedMany', a: 1, b: 2 });
+  });
+
+  it('only the first frame after Resume reads as a re-check', () => {
+    const first = frame(resumed(left(atStep(0))), {});
+    expect(first.stepIndex).toBe(0);
+    const later = frame(first, { nodes: [THE_SOURCE] });
+    expect(later.stepIndex).toBe(1);
+    expect(later.note, 'a step the user does after Resume carries no note').toBeNull();
+  });
+
+  it('a board swapped while left stops the lesson on Resume, whatever the list showed', () => {
+    const s = frame(resumed(left(atStep(1))), { nodes: [THE_SOURCE], swapFloor: FLOOR + 2 });
+    expect(s.card).toBe('swapped');
+  });
+
+  it('Resume means nothing with no lesson left', () => {
+    expect(resumed(IDLE)).toBe(IDLE);
+    const running = atStep(1);
+    expect(resumed(running)).toBe(running);
+  });
+
+  it('a result removed while left sends the lesson back on Resume', () => {
+    const s = frame(resumed(left(atStep(2))), { nodes: [THE_SINK] });
+    expect(s.stepIndex).toBe(0);
+    expect(s.note).toEqual({ kind: 'wentBack', a: 1, b: 1 });
+  });
+});
+
+describe('reduce: going back', () => {
+  it('removing a bound Source at step 3 returns to step 1 with the wentBack note', () => {
+    const s = frame(atStep(2), { nodes: [THE_SINK], generation: 2 });
+    expect(s.stepIndex).toBe(0);
+    expect(s.card).toBe('running');
+    expect(s.note).toEqual({ kind: 'wentBack', a: 1, b: 1 });
+  });
+
+  it('clears the bindings from that step on and forgets their keys', () => {
+    const s = frame(atStep(2), { nodes: [THE_SINK], generation: 2 });
+    expect(s.bindings).toEqual({});
+    expect(s.baseline?.knownKeys, 'the Sink still there can finish its step again').not.toContain(SINK_KEY);
+    expect(s.baseline?.knownKeys).not.toContain(SOURCE_KEY);
+  });
+
+  it('removing the Sink at step 3 keeps the Source and returns to step 2', () => {
+    const s = frame(atStep(2), { nodes: [THE_SOURCE], generation: 2 });
+    expect(s.stepIndex).toBe(1);
+    expect(s.note).toEqual({ kind: 'wentBack', a: 2, b: 2 });
+    expect(s.bindings.source?.id, 'the earlier binding stands').toBe(THE_SOURCE.id);
+    expect(s.bindings.sink).toBeUndefined();
+    expect(s.baseline?.knownKeys).toContain(SOURCE_KEY);
+    expect(s.baseline?.knownKeys).not.toContain(SINK_KEY);
+  });
+
+  it('the earliest gone step wins', () => {
+    expect(frame(atStep(4), { nodes: [], generation: 2 }).stepIndex).toBe(0);
+  });
+
+  it('a host answer reading Webhook returns to the Timer step', () => {
+    const s = frame(atStep(3), { nodes: BOTH }, { appliedTrigger: { node: THE_SOURCE.id, kind: 'Webhook' } });
+    expect(s.stepIndex).toBe(2);
+    expect(s.note).toEqual({ kind: 'wentBack', a: 3, b: 3 });
+    expect(s.bindings.source?.id, 'the machines stay bound').toBe(THE_SOURCE.id);
+    expect(s.bindings.sink?.id).toBe(THE_SINK.id);
+  });
+
+  it("no answer about the trigger isn't an answer of Webhook", () => {
+    expect(frame(atStep(3), { nodes: BOTH }, { appliedTrigger: null }).stepIndex).toBe(3);
+  });
+
+  it("an answer about another handle says nothing about the bound Source", () => {
+    expect(frame(atStep(3), { nodes: BOTH }, { appliedTrigger: { node: 99, kind: 'Webhook' } }).stepIndex).toBe(3);
+  });
+
+  it('a belt no longer joining its machines returns to the belt step', () => {
+    const s = frame(atStep(4), { nodes: BOTH, belts: [], tick: 10 }, TIMER);
+    expect(s.stepIndex).toBe(3);
+    expect(s.note).toEqual({ kind: 'wentBack', a: 4, b: 4 });
+    expect(s.bindings.belt).toBeUndefined();
+  });
+
+  it("a machine put back by Undo counts again: the step it finished comes back with the note gone", () => {
+    const back = frame(atStep(2), { nodes: [THE_SOURCE], generation: 2 });
+    expect(back.stepIndex).toBe(1);
+    const again = frame(back, { nodes: BOTH, generation: 3 });
+    expect(again.stepIndex).toBe(2);
+    expect(again.bindings.sink?.id).toBe(THE_SINK.id);
+    expect(again.note).toBeNull();
+  });
+
+  it('a re-minted handle with the same kind and cell keeps its binding and sends nothing back', () => {
+    const s = atStep(2);
+    const reminted = [node(40, SOURCE, 2, 2), node(41, SINK, 8, 2)];
+    const next = frame(s, { nodes: reminted, generation: 2 });
+    expect(next.stepIndex).toBe(2);
+    expect(next.note).toBeNull();
+    expect(next.bindings.source).toEqual({ nodeKey: SOURCE_KEY, id: 40 });
+    expect(next.bindings.sink).toEqual({ nodeKey: SINK_KEY, id: 41 });
+  });
+
+  it('a machine moved to another cell comes straight back to the same step with no note', () => {
+    const moved = node(4, SOURCE, 3, 2);
+    const s = frame(atStep(2), { nodes: [moved, THE_SINK], generation: 2 });
+    expect(s.stepIndex).toBe(2);
+    expect(s.note).toBeNull();
+    expect(s.bindings.source?.nodeKey).toBe('0@3,2');
+  });
+
+  it('the latched steps send nothing back on their own: a falling tick and an empty belt', () => {
+    const s = frame(atStep(5), { nodes: BOTH, belts: [JOINED], tick: 1 }, TIMER);
+    expect(s.stepIndex).toBe(5);
+  });
+
+  it('a finished lesson goes nowhere when its machines go', () => {
+    const finished = { ...atStep(5), card: 'finished' as const };
+    expect(frame(finished, { nodes: [] }).stepIndex).toBe(5);
+  });
+});
+
+describe('reduce: the end of a run', () => {
+  it('cancelledRun forgets the run', () => {
+    expect(reduce(atStep(2), { type: 'cancelledRun' }, LESSONS)).toEqual(IDLE);
+  });
+
+  it('a new lesson while one runs ends the running one', () => {
+    const s = reduce(atStep(2), { type: 'newSent', lessonId: LESSON, floorAtSend: FLOOR + 1 }, LESSONS);
+    expect(s.card).toBe('starting');
+    expect(s.stepIndex).toBe(0);
+    expect(s.bindings).toEqual({});
+    expect(s.leftFloor).toBeNull();
+  });
+});
+
+describe('noteTokens: going back', () => {
+  it('reads the copy, inside its budget', () => {
+    const text = phrasePlain(noteTokens({ kind: 'wentBack', a: 3, b: 3 }));
+    expect(text).toBe('Step 3 needs doing again, so the lesson went back.');
+    expect(text.length).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+  });
+});
+
+describe('rowViews', () => {
+  const lessonNamed = (id: string): Lesson => ({ ...YOUR_FIRST_LINE, id: id as LessonId, title: id });
+  const FIVE = ['one', 'two', 'three', 'four', 'five'].map(lessonNamed);
+  const ONE = [YOUR_FIRST_LINE];
+  const SWAP = FLOOR + 1;
+  const NOTHING: Progress = EMPTY_PROGRESS;
+  const stored = (status: 'inProgress' | 'done', ...ids: string[]): Progress => ({
+    version: 1,
+    lessons: Object.fromEntries(ids.map((id) => [id, status])) as Progress['lessons'],
+  });
+  const rows = (over: Partial<Parameters<typeof rowViews>[0]> = {}): RowView[] =>
+    rowViews({ lessons: ONE, progress: NOTHING, state: IDLE, swapFloor: SWAP, simStopped: false, ...over });
+  const leftRun = (): TutorialState => reduce(atStep(1), { type: 'left' }, LESSONS);
+
+  it('not started: Start, in the accent', () => {
+    expect(rows()[0]).toEqual({ id: LESSON, title: YOUR_FIRST_LINE.title, status: 'notStarted', actions: ['start'], accent: 'start', disabled: false });
+  });
+
+  it('left, with its board still on screen: Resume in the accent, and Restart', () => {
+    const [row] = rows({ state: leftRun(), progress: stored('inProgress', LESSON) });
+    expect(row?.status).toBe('inProgress');
+    expect(row?.actions).toEqual(['resume', 'restart']);
+    expect(row?.accent).toBe('resume');
+  });
+
+  it('running now: Restart alone, with no accent', () => {
+    const [row] = rows({ state: atStep(1), progress: stored('inProgress', LESSON) });
+    expect(row?.status).toBe('inProgress');
+    expect(row?.actions).toEqual(['restart']);
+    expect(row?.accent).toBeNull();
+  });
+
+  it('left, and the board was swapped: Restart alone', () => {
+    const [row] = rows({ state: leftRun(), progress: stored('inProgress', LESSON), swapFloor: SWAP + 1 });
+    expect(row?.status).toBe('inProgress');
+    expect(row?.actions).toEqual(['restart']);
+    expect(row?.accent).toBeNull();
+  });
+
+  it('left, and the app reloaded: Restart alone', () => {
+    const [row] = rows({ progress: stored('inProgress', LESSON) });
+    expect(row?.status).toBe('inProgress');
+    expect(row?.actions).toEqual(['restart']);
+  });
+
+  it('finished: Done, with Restart and no accent', () => {
+    const [row] = rows({ progress: stored('done', LESSON) });
+    expect(row?.status).toBe('done');
+    expect(row?.actions).toEqual(['restart']);
+    expect(row?.accent).toBeNull();
+  });
+
+  it('a finished lesson restarted reads in progress while its run is live, and done when the run is gone', () => {
+    const done = stored('done', LESSON);
+    expect(rows({ state: atStep(1), progress: done })[0]?.status, 'running').toBe('inProgress');
+    expect(rows({ state: leftRun(), progress: done })[0]?.status, 'left with its board').toBe('inProgress');
+    expect(rows({ state: leftRun(), progress: done, swapFloor: SWAP + 1 })[0]?.status, 'left, board swapped').toBe('done');
+    expect(rows({ state: IDLE, progress: done })[0]?.status, 'after a reload').toBe('done');
+  });
+
+  it('a run that has just finished reads done even if the store could not write', () => {
+    const finished = { ...atStep(5), card: 'finished' as const };
+    expect(rows({ state: finished })[0]?.status).toBe('done');
+  });
+
+  it('a swapped card reads in progress with Restart', () => {
+    const swapped = frame(atStep(1), { nodes: [THE_SOURCE], swapFloor: FLOOR + 2 });
+    const [row] = rows({ state: swapped, swapFloor: FLOOR + 2 });
+    expect(row?.status).toBe('inProgress');
+    expect(row?.actions).toEqual(['restart']);
+  });
+
+  it('with the first two of five done, exactly one row has an accent, on the third row\'s Start', () => {
+    const views = rows({ lessons: FIVE, progress: stored('done', 'one', 'two') });
+    expect(views.filter((r) => r.accent !== null).map((r) => [r.id, r.accent])).toEqual([['three', 'start']]);
+  });
+
+  it('with nothing done, exactly one of five rows has an accent, on the first', () => {
+    const views = rows({ lessons: FIVE });
+    expect(views.filter((r) => r.accent !== null).map((r) => [r.id, r.accent])).toEqual([['one', 'start']]);
+  });
+
+  it('with every row done, no row has an accent', () => {
+    const views = rows({ lessons: FIVE, progress: stored('done', 'one', 'two', 'three', 'four', 'five') });
+    expect(views.every((r) => r.accent === null)).toBe(true);
+  });
+
+  it('a first unfinished row with only Restart leaves the later rows without the accent', () => {
+    const views = rows({ lessons: FIVE, progress: stored('inProgress', 'one') });
+    expect(views.every((r) => r.accent === null)).toBe(true);
+  });
+
+  it('keeps the order of the lessons whatever their status', () => {
+    const views = rows({ lessons: FIVE, progress: { version: 1, lessons: { five: 'done', one: 'inProgress', three: 'done' } as Progress['lessons'] } });
+    expect(views.map((r) => r.id)).toEqual(['one', 'two', 'three', 'four', 'five']);
+  });
+
+  it('a stopped simulation disables the row', () => {
+    expect(rows({ simStopped: true })[0]?.disabled).toBe(true);
+    expect(rows({ simStopped: false })[0]?.disabled).toBe(false);
+  });
+
+  it('starting a lesson while another runs leaves the first in progress in the store', () => {
+    const [first, second] = FIVE as [Lesson, Lesson];
+    const lessons = [first, second];
+    let progress = withLessonStarted(EMPTY_PROGRESS, first.id);
+    const running = reduce(atStep(1), { type: 'newSent', lessonId: second.id, floorAtSend: SWAP }, lessons);
+    progress = withLessonStarted(progress, second.id);
+    expect(progress.lessons[first.id]).toBe('inProgress');
+    const views = rows({ lessons, progress, state: running });
+    expect(views[0]?.status).toBe('inProgress');
+    expect(views[0]?.actions, 'the first has no run to resume').toEqual(['restart']);
+    expect(views[1]?.status).toBe('inProgress');
+    expect(views[1]?.actions).toEqual(['restart']);
   });
 });

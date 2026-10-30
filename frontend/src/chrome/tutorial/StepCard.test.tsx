@@ -188,4 +188,51 @@ describe('StepCard', () => {
       }
     });
   });
+
+  describe('the swapped card', () => {
+    const SWAPPED: StepCardView = { state: 'swapped' };
+    const buttonsOf = (els: El[]): El[] => els.filter((el) => el.type === 'button');
+
+    it('says the lesson paused and why', () => {
+      const text = textOf(StepCard({ view: SWAPPED, ...NOOPS }));
+      expect(text).toContain('Lesson paused');
+      expect(text).toContain('The board changed, so this lesson stopped. Restart it, or leave it.');
+      expect(text).not.toMatch(/Step \d/);
+    });
+
+    it('offers Restart in the accent and Leave beside it', () => {
+      const buttons = buttonsOf(render(SWAPPED));
+      expect(buttons.map((b) => textOf(b))).toEqual(['Restart', 'Leave']);
+      expect(buttons[0]?.props.className).toBe('fab-cta');
+      expect(String(buttons[1]?.props.className)).toContain('fab-tool-btn--labeled');
+    });
+
+    it('passes the two presses to the two props', () => {
+      const pressed: string[] = [];
+      const els = elements(
+        StepCard({ view: SWAPPED, ...NOOPS, onLeave: () => pressed.push('leave'), onRestart: () => pressed.push('restart') }),
+      );
+      for (const b of buttonsOf(els)) (b.props.onClick as () => void)();
+      expect(pressed).toEqual(['restart', 'leave']);
+    });
+
+    it('disables Restart with the stopped title while the simulation is stopped, and leaves Leave alone', () => {
+      const buttons = buttonsOf(elements(StepCard({ view: SWAPPED, ...NOOPS, simStopped: true })));
+      expect(buttons[0]?.props.disabled).toBe(true);
+      expect(buttons[0]?.props.title).toBe('Unavailable: the simulation stopped');
+      expect(buttons[1]?.props.disabled).toBeFalsy();
+    });
+
+    it('takes the pointer only on its buttons', () => {
+      expect(styleOf(render(SWAPPED)[0]!).pointerEvents).toBe('none');
+      const box = render(SWAPPED).find((el) => styleOf(el).pointerEvents === 'auto');
+      expect(buttonsOf(elements(box)).length).toBe(2);
+    });
+  });
+
+  it('shows the going-back note above the step', () => {
+    const text = textOf(StepCard({ view: { ...RUNNING, note: noteTokens({ kind: 'wentBack', a: 2, b: 2 }) } as StepCardView, ...NOOPS }));
+    expect(text).toContain('Step 2 needs doing again, so the lesson went back.');
+    expect(text.indexOf('needs doing again')).toBeLessThan(text.indexOf('Step 1 of 6'));
+  });
 });
