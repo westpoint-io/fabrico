@@ -420,6 +420,8 @@ describe('GATE 4: no ring carrier is a scroll container', () => {
     // same reuse of the registered class, so it joins this scan and declares no overflow.
     // 14 -> 13 in plan 91-03 on 2026-10-24 (GraphicsPanel.tsx deleted, D-04): the Graphics
     // panel and its no-op belt step setting removed with its trigger (CHROME-03).
+    // 13 -> 14 with `LessonPanel.tsx`, the lesson list: it reuses the registered class and
+    // declares no overflow.
     //
     // THIS TALLY IS NOT THE RING-CARRIER SET, and confusing the two costs a needless
     // edit in one direction or a missed one in the other. `BEZEL_CLASSES` above counts
@@ -427,7 +429,7 @@ describe('GATE 4: no ring carrier is a scroll container', () => {
     // R-17 of plan 73-04 is about that one, and it held: neither `BEZEL_CLASSES` nor
     // `chromeCss.ts` moved). This literal counts inline SITES, one per component that
     // carries the class, so it moves for every such component.
-    expect(sites, 'inline panel sites scanned').toBe(13);
+    expect(sites, 'inline panel sites scanned').toBe(14);
     expect(
       offenders,
       'A ring-carrying panel is also a scroll container. Move the overflow onto an inner ' +

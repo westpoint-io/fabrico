@@ -220,8 +220,11 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  * 53 -> 51 in plan 91-03 on 2026-10-24 (GraphicsPanel.tsx and graphicsSettings.ts deleted,
  * D-04): the Graphics panel and its belt step setting, removed with their trigger
  * (CHROME-03). Two plain decrements; their deleted test siblings were never counted.
+ *
+ * 51 -> 55 with the tutorial's chrome folder (LessonPanel.tsx, TutorialLayer.tsx, HintPointer.tsx,
+ * cameraRead.ts): four plain additions, each scanned like the rest.
  */
-const EXPECTED_CHROME_SOURCE_FILES = 51;
+const EXPECTED_CHROME_SOURCE_FILES = 55;
 
 describe('the nearest-neighbour rendering hint is retired from frontend/src/chrome', () => {
   const files = chromeSourceFiles();

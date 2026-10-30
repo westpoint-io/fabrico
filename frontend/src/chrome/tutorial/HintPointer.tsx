@@ -15,9 +15,9 @@ import { KIND_NAMES } from '../../../shared/kindNames';
 import type { HintAnchor } from '../../tutorial/types';
 import { readCamera } from './cameraRead';
 
-/** What the layer asks the ring to mark. `key` is `stageKey(stepIndex, stage.id)`. */
+/** What the layer asks the ring to mark. `stageKey` is `stageKey(stepIndex, stage.id)` from the lesson machine. */
 export interface HintTarget {
-  key: string;
+  stageKey: string;
   hint: HintAnchor | null;
   cell: readonly [number, number] | null;
 }
@@ -94,7 +94,7 @@ export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Elem
         ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
         ring.style.width = `${box.width}px`;
         ring.style.height = `${box.height}px`;
-        ring.setAttribute('data-fab-hint-stage', target.key);
+        ring.setAttribute('data-fab-hint-stage', target.stageKey);
         ring.style.visibility = 'visible';
       }
     };

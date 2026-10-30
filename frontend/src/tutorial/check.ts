@@ -30,5 +30,5 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
     .sort((a, b) => a.id - b.id);
   const first = candidates[0];
   if (first === undefined) return { done: false };
-  return { done: true, bound: { name: check.bind, node: { key: nodeKey(first), id: first.id } } };
+  return { done: true, bound: { name: check.bind, node: { nodeKey: nodeKey(first), id: first.id } } };
 }

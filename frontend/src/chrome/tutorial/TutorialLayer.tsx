@@ -167,7 +167,7 @@ export function TutorialLayer({
         targetRef.current =
           stage === null
             ? null
-            : { key: stageKey(next.stepIndex, stage.id), hint: stage.hint, cell: next.spot?.cell ?? null };
+            : { stageKey: stageKey(next.stepIndex, stage.id), hint: stage.hint, cell: next.spot?.cell ?? null };
       }
       raf = requestAnimationFrame(frame);
     };

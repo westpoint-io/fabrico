@@ -8,9 +8,13 @@ import { CELL } from '../../shared/geometry';
 import { evaluateCheck, nodeKey } from './check';
 import type { BindingName, BoardFacts, ChromeFacts, Lesson, LessonId, Stage, StageWhen } from './types';
 
-/** A bound machine. `key` is `${kind}@${x},${y}`, which survives a re-minted handle; `id` is the current handle. */
+/**
+ * A bound machine. `nodeKey` is `${kind}@${x},${y}`, which survives a re-minted handle; `id` is the
+ * current handle. It isn't called `key` because the keyboard gate in `shortcuts.test.ts` treats any
+ * shipped `.key` read as a keyboard read.
+ */
 export interface BoundNode {
-  key: string;
+  nodeKey: string;
   id: number;
 }
 
@@ -110,7 +114,7 @@ function withSpot(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
     return s.spot === null ? s : { ...s, spot: null };
   }
   if (s.spot?.stageId === stage.id) return s;
-  const sourceKey = s.bindings.source?.key;
+  const sourceKey = s.bindings.source?.nodeKey;
   const cell = floorSpot({
     spot: stage.hint.spot,
     view: chrome.view,
@@ -136,7 +140,7 @@ function advance(s: TutorialState, board: BoardFacts, lessons: readonly Lesson[]
       card: isLast ? 'finished' : 'running',
       stepIndex: isLast ? next.stepIndex : next.stepIndex + 1,
       bindings: { ...next.bindings, [result.bound.name]: result.bound.node },
-      baseline: { knownKeys: [...next.baseline.knownKeys, result.bound.node.key], tick: board.tick },
+      baseline: { knownKeys: [...next.baseline.knownKeys, result.bound.node.nodeKey], tick: board.tick },
     };
   }
   return next;

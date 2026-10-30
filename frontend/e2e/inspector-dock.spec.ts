@@ -631,7 +631,7 @@ test.describe('the selected machine stays visible beside the inspector, once per
     const size = SIZES[0];
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.addInitScript(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
-    const LOW: InjectNode = { id: 37, kind: 7, cell_x: 33, cell_y: 26, ports: [{ index: 0, cell_x: 33, cell_y: 26, side: 3, role: 0, medium: 0 }] };
+    const LOW: InjectNode = { id: 37, kind: 7, cell_x: 33, cell_y: 27, ports: [{ index: 0, cell_x: 33, cell_y: 27, side: 3, role: 0, medium: 0 }] };
     const h = await mockRenderSocket(page, {
       answerQuery: (verb, args) => {
         if (verb === 'machine_config') {
