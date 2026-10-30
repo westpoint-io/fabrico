@@ -684,11 +684,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   }
   // Steps 3 and 5 change no board cell, so no byte compare can grade them. What a person sees is the
   // pressed segment and the clock still moving, so that's what these read.
-  if (step.done.is === 'triggerApplied') {
-    const pressed = await page.locator('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]').textContent();
-    expect(pressed?.trim(), `${label}: the inspector's pressed segment reads the trigger it asked for`).toBe(step.done.trigger);
-  }
   if (step.done.is === 'triggerApplied' || step.done.is === 'tickRose') {
+    const asked = lesson.steps.flatMap((s) => (s.done.is === 'triggerApplied' ? [s.done.trigger] : []));
+    const pressed = await page.locator('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]').textContent();
+    expect(asked, `${label}: the lesson's data names the trigger it asks for`).toHaveLength(1);
+    expect(pressed?.trim(), `${label}: the inspector's pressed segment reads the trigger the lesson asked for`).toBe(asked[0]);
     await expectToolbarTickRises(page, label);
   }
   await expectRenderLoopAlive(page, `after ${label}`);
