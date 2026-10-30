@@ -171,3 +171,7 @@ crates/fabrico-engine/src/engine.rs
 # old signature. The headless test proves the path from gesture to command. No golden fixture moves.
 crates/fabrico-engine/src/gesture.rs
 crates/fabrico-engine/tests/headless_slice.rs
+# The render-packet builder moves out of the desktop host, so a board with no host can emit real
+# packets. The builder now reads a RenderSource, which the engine and the host both implement. Its
+# output is unchanged, and the host keeps the producer, the relay and their channels.
+crates/fabrico-engine/src/render_packet.rs

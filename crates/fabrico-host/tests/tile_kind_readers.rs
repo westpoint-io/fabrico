@@ -67,7 +67,7 @@ use std::path::{Path, PathBuf};
 
 /// The four files allowed to read a tile kind, as paths relative to the `crates` dir.
 const ALLOWED: [&str; 4] = [
-    "fabrico-host/src/render_packet.rs",
+    "fabrico-engine/src/render_packet.rs",
     "fabrico-command/src/route.rs",
     "fabrico-command/src/wire_route.rs",
     "fabrico-core/src/state.rs",
@@ -259,7 +259,7 @@ fn no_file_outside_the_four_reads_a_tile_kind() {
 /// The allowed files that DO read a tile kind in non-test code today. `wire_route.rs` is
 /// allowed (it produces cable tiles through `route()`) but reads no kind itself yet.
 const READING_TODAY: [&str; 3] = [
-    "fabrico-host/src/render_packet.rs",
+    "fabrico-engine/src/render_packet.rs",
     "fabrico-command/src/route.rs",
     "fabrico-core/src/state.rs",
 ];

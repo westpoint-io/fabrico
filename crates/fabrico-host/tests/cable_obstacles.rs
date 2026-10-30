@@ -372,7 +372,7 @@ fn obstacles_exclude_labels_belts_wires() {
 /// counts; the stripper is checked against the file it strips.
 #[test]
 fn render_packet_calls_only_the_avoiding_router() {
-    let src = include_str!("../src/render_packet.rs");
+    let src = include_str!("../../fabrico-engine/src/render_packet.rs");
     let code: String = src
         .lines()
         .filter(|l| !l.trim_start().starts_with("//"))

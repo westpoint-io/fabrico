@@ -1,5 +1,5 @@
-//! The whole path with no host: an [`Engine`] takes gestures, ticks, and turns a real item into
-//! a command for the outside world.
+//! The whole path with no host: an [`Engine`] takes gestures, ticks, turns a real item into a
+//! command for the outside world, and builds a render packet that decodes.
 //!
 //! This file uses only `fabrico-engine` and its dev dependencies. `fabrico-host` isn't among
 //! them, so the test can't compile if the path needs the host.
@@ -10,7 +10,8 @@ use fabrico_core::event::{EventPayload, LogHeader, SCHEMA_VERSION};
 use fabrico_core::ids::{Item, NodeId};
 use fabrico_engine::engine::Engine;
 use fabrico_engine::gesture::apply_gesture;
-use fabrico_protocol::{BeltEnd, GridCommand, machine_kind};
+use fabrico_engine::render_packet::RenderPacketBuilder;
+use fabrico_protocol::{BeltEnd, GridCommand, RenderPacket, machine_kind};
 
 /// How many ticks an injected item gets to reach the Sink before the test fails. The belt is
 /// three cells long, so a working board takes far fewer.
@@ -80,6 +81,30 @@ fn an_engine_with_no_host_turns_a_gesture_built_board_and_an_item_into_a_command
     }
     assert_eq!(command.id.1, minted[1], "the Sink is the node that emitted the command");
     assert_eq!(engine.in_flight_len(), 1, "the emitted command is recorded as in flight");
+
+    // The slice ends in the bytes a renderer would receive.
+    let packet = RenderPacketBuilder::new().build_keyframe(&engine);
+    let bytes = postcard::to_allocvec(&packet).expect("a render packet encodes");
+    let decoded: RenderPacket = postcard::from_bytes(&bytes).expect("a render packet decodes");
+    assert_eq!(decoded, packet, "the packet survives the wire unchanged");
+    assert!(decoded.full, "a keyframe says it is full");
+    assert_eq!(decoded.tick, engine.core().tick, "the packet describes the current tick");
+
+    let cell_of_kind = |kind: u8| -> Vec<(i32, i32)> {
+        decoded
+            .placed
+            .iter()
+            .filter(|n| n.kind == kind)
+            .map(|n| (n.cell_x, n.cell_y))
+            .collect()
+    };
+    assert_eq!(cell_of_kind(machine_kind::SOURCE), vec![(1, 6)], "the Source is listed at its cell");
+    assert_eq!(cell_of_kind(machine_kind::SINK), vec![(5, 6)], "the Sink is listed at its cell");
+
+    assert_eq!(decoded.belts.len(), 1, "the one belt is listed");
+    let belt_cells: Vec<(i32, i32)> =
+        decoded.belts[0].tiles.iter().map(|t| (t.cell_x, t.cell_y)).collect();
+    assert_eq!(belt_cells, vec![(2, 6), (3, 6), (4, 6)], "the belt is listed with its drawn cells");
 }
 
 #[test]

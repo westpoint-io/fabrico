@@ -11,4 +11,5 @@
 
 pub mod engine;
 pub mod gesture;
+pub mod render_packet;
 pub mod timer;
