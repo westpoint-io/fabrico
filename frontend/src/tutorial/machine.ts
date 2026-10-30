@@ -59,6 +59,7 @@ export function stageKey(stepIndex: number, stageId: string): string {
 
 function holds(when: StageWhen, chrome: ChromeFacts): boolean {
   if (when.is === 'always') return true;
+  if (when.is === 'paused') return chrome.playing === false;
   const armedKind = chrome.armed?.kind === 'machine' ? chrome.armed.machineKind : null;
   return when.is === 'toolArmed' ? armedKind === when.machineKind : armedKind !== when.machineKind;
 }

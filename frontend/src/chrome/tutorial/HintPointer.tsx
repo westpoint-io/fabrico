@@ -37,13 +37,19 @@ interface RingBox {
   zIndex: string;
 }
 
+/** A panel target's selector, by the control's accessible name, so a renamed control fails the walk. */
+function panelSelector(target: Extract<HintAnchor, { on: 'panel' }>['target']): string {
+  return target.kind === 'playButton'
+    ? 'header button[aria-label="Play"]'
+    : `button[aria-label="Place ${KIND_NAMES[target.machineKind]}"]`;
+}
+
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
 function ringBox(target: HintTarget, layer: HTMLElement): RingBox | null {
   const hint = target.hint;
   if (hint === null) return null;
   if (hint.on === 'panel') {
-    const word = KIND_NAMES[hint.target.machineKind];
-    const control = document.querySelector<HTMLElement>(`button[aria-label="Place ${word}"]`);
+    const control = document.querySelector<HTMLElement>(panelSelector(hint.target));
     if (control === null) return null;
     const r = control.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return null;
