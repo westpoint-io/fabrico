@@ -686,4 +686,29 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
     await expect(card, 'the card goes').toHaveCount(0);
     await expect(page.locator('#fab-lessons-panel'), 'and the list opens').toBeVisible();
   });
+
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 1024, height: 768 },
+  ]) {
+    test(`the inspector stays clear of both machines at ${size.width}x${size.height}`, async ({ page }) => {
+      await page.setViewportSize(size);
+      const host = configuredHost();
+      const h = await boot(page, host.opts);
+      await startLesson(page, h);
+      // An empty mock board boots at the zoom limit, where six cells doesn't fit any window.
+      await page.mouse.move(640, 300);
+      for (let i = 0; i < 12 && (await cameraOf(page)).scale > 1; i++) await zoomOut(page);
+
+      const { source, sink } = await placeBoth(page, h);
+      await pressTimer(page);
+      const panel = await boxOf(page.locator('aside[aria-labelledby="fab-config-heading"]'), 'the inspector');
+      const cam = await cameraOf(page);
+      const rightEdgeOf = (n: InjectNode): number => (n.cell_x + 1) * CELL * cam.scale + cam.x;
+      // The port dot is the belt's release point, so the whole machine has to clear the panel.
+      expect(rightEdgeOf(source), 'the Source sits left of the inspector').toBeLessThan(panel.x);
+      expect(rightEdgeOf(sink), 'the Sink sits left of the inspector').toBeLessThan(panel.x);
+      expect(sink.cell_x, 'the Sink is east of the Source, so the belt runs straight').toBeGreaterThan(source.cell_x);
+    });
+  }
 });
