@@ -1,8 +1,9 @@
 // TutorialLayer.tsx - the React side of the lesson engine.
 //
 // It reads the board and the chrome once a frame and hands them to the pure reducer. Its one way
-// of changing anything is the `doNewThen` prop: the tutorial asks the host for a new board and
-// never holds the transport, so it can't place a machine or finish a step for the user.
+// of changing the board is the `doNewThen` prop: the tutorial asks the host for a new board and
+// never holds the transport, so it can't place a machine or finish a step for the user. Progress goes
+// through a `ProgressStore` and stays on this machine.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react';
 import type { SceneHandle } from '../../render/pixiApp';
@@ -10,7 +11,8 @@ import { sceneSnapshot } from '../../render/sceneState';
 import { devWsInvoke } from '../../transport/devWsInvoke';
 import { transportKind } from '../../transport/transport';
 import { LESSONS } from '../../tutorial/lessons';
-import { IDLE, currentStage, noteTokens, reduce, stageKey, viewKey, type Card, type TutorialState } from '../../tutorial/machine';
+import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
+import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import type { BindingName, BoardFacts, ChromeFacts, LessonId, Stage } from '../../tutorial/types';
 import { loadConfig, tauriInvoke } from '../ConfigPanel';
 import type { ArmedTool } from '../Palette';
@@ -127,11 +129,28 @@ function readFreeArea(): ChromeFacts['view']['freeArea'] {
 /** What the card shows, or null when it has nothing to show. */
 function cardViewOf(s: TutorialState, stage: Stage | null): StepCardView | null {
   if (s.card === 'starting') return { state: 'starting' };
+  if (s.card === 'swapped') return { state: 'swapped' };
   const lesson = LESSONS.find((l) => l.id === s.lessonId);
   if (s.card === 'finished' && lesson !== undefined) return { state: 'finished', text: lesson.closing };
   if (s.card !== 'running' || stage === null) return null;
   const note = s.note === null ? null : noteTokens(s.note);
   return { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, note, text: stage.text };
+}
+
+/** A store over this browser's `localStorage`, which a locked-down webview can refuse just by being read. */
+function browserProgress(): ProgressStore {
+  let storage: Storage | null = null;
+  try {
+    storage = localStorage;
+  } catch {
+    // No storage means no saved progress, and the lessons still run.
+  }
+  return localStorageProgress(storage, LESSONS.map((l) => l.id));
+}
+
+/** Where focus goes when the list closes: the toolbar's Help button, which is the way back to the list. */
+function focusHelpButton(): void {
+  document.querySelector<HTMLElement>('button[aria-label="Help"]')?.focus();
 }
 
 /** How often the layer asks the host for the bound Source's trigger: slower than a person presses Apply. */
@@ -163,6 +182,10 @@ export interface TutorialLayerProps {
   probeRef: MutableRefObject<() => TutorialProbe>;
   /** Tells App a lesson is on screen, so the empty-floor text stands down. */
   onActiveChange: (active: boolean) => void;
+  /** False on a stopped or disconnected simulation: the ring hides, and the card keeps its text. */
+  boardLive: boolean;
+  /** New can't reach a stopped host, so Start and Restart say so. */
+  simStopped: boolean;
 }
 
 export function TutorialLayer({
@@ -175,6 +198,8 @@ export function TutorialLayer({
   doNewThen,
   probeRef,
   onActiveChange,
+  boardLive,
+  simStopped,
 }: TutorialLayerProps): JSX.Element {
   // The ref is the truth, and the probe reads it, so a test sees every value `reduce` returns.
   // React state follows only so the panel and the ring can mount and unmount.
@@ -191,6 +216,11 @@ export function TutorialLayer({
   // The frame loop below outlives any one render, so it reads the chrome's props through this.
   const chromeRef = useRef({ armed, selectedNode, playing });
   chromeRef.current = { armed, selectedNode, playing };
+  const boardLiveRef = useRef(boardLive);
+  boardLiveRef.current = boardLive;
+  const progressRef = useRef<ProgressStore | null>(null);
+  progressRef.current ??= browserProgress();
+  const progress = progressRef.current;
 
   // THE TRIGGER READ, only while the lesson sits at or past the Timer step. The model has no Source
   // trigger: `machine_config` is the one read, the same query the inspector makes. It's async, so it
@@ -255,6 +285,9 @@ export function TutorialLayer({
         };
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);
         factsRef.current = { board, chrome };
+        if (next.card === 'finished' && stateRef.current.card !== 'finished' && next.lessonId !== null) {
+          progress.write(withLessonDone(progress.read(), next.lessonId));
+        }
         if (next !== stateRef.current) {
           // The watch step's slot read changes the state on most frames and shows nothing.
           const seen = viewKey(next) !== viewKey(stateRef.current);
@@ -264,7 +297,7 @@ export function TutorialLayer({
         const shown = currentStage(next, board, chrome, LESSONS);
         setStage(shown);
         targetRef.current =
-          shown === null
+          shown === null || !boardLiveRef.current
             ? null
             : { stageKey: stageKey(next.stepIndex, shown.id), hint: shown.hint, cell: next.spot?.cell ?? null, bindings: next.bindings };
       }
@@ -272,7 +305,16 @@ export function TutorialLayer({
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [active, handleRef]);
+  }, [active, handleRef, progress]);
+
+  /** One step of the state that a press caused, as opposed to a frame. */
+  const dispatch = useCallback((e: TutorialEvent): void => {
+    const next = reduce(stateRef.current, e, LESSONS);
+    stateRef.current = next;
+    setState(next);
+    // So the ring can't paint this run's last target before the next frame works out a new one.
+    targetRef.current = null;
+  }, []);
 
   const start = useCallback(
     (lessonId: LessonId): void => {
@@ -280,38 +322,79 @@ export function TutorialLayer({
       // lesson state and the open panel as they were.
       doNewThen(() => {
         const floorAtSend = handleRef.current?.sceneState.swapFloor ?? 0;
-        const next = reduce(stateRef.current, { type: 'newSent', lessonId, floorAtSend }, LESSONS);
-        stateRef.current = next;
-        setState(next);
-        targetRef.current = null;
+        // Done sticks, and a lesson this one replaces stays In progress: one lesson runs at a time.
+        progress.write(withLessonStarted(progress.read(), lessonId));
+        dispatch({ type: 'newSent', lessonId, floorAtSend });
         appliedRef.current = null;
+        setStage(null);
         onLessonsOpenChange(false);
       });
     },
-    [doNewThen, handleRef, onLessonsOpenChange],
+    [dispatch, doNewThen, handleRef, onLessonsOpenChange, progress],
   );
 
+  const resume = useCallback((): void => {
+    dispatch({ type: 'resumed' });
+    onLessonsOpenChange(false);
+  }, [dispatch, onLessonsOpenChange]);
+
+  // Leave asks nothing, because the board stays as it is.
   const leave = useCallback((): void => {
-    const next = reduce(stateRef.current, { type: 'left' }, LESSONS);
-    stateRef.current = next;
-    setState(next);
-    // So a later Start can't paint this lesson's last target before its first frame.
-    targetRef.current = null;
+    dispatch({ type: 'left' });
     setStage(null);
-  }, []);
+  }, [dispatch]);
+
+  // The lesson is over and the board is the user's, so it's gone from the row and the board keeps running.
+  const keepBuilding = useCallback((): void => {
+    dispatch({ type: 'cancelledRun' });
+    setStage(null);
+  }, [dispatch]);
 
   const backToLessons = useCallback((): void => {
-    leave();
+    keepBuilding();
     onLessonsOpenChange(true);
-  }, [leave, onLessonsOpenChange]);
+  }, [keepBuilding, onLessonsOpenChange]);
+
+  const closeList = useCallback((): void => {
+    onLessonsOpenChange(false);
+    focusHelpButton();
+  }, [onLessonsOpenChange]);
+
+  const onRowAction = useCallback(
+    (lessonId: LessonId, action: RowAction): void => {
+      if (action === 'resume') resume();
+      else start(lessonId);
+    },
+    [resume, start],
+  );
 
   const view = cardViewOf(state, stage);
+  // Read at render, which App's 10 Hz re-render keeps fresh enough for a list a person is reading.
+  const rows = lessonsOpen
+    ? rowViews({
+        lessons: LESSONS,
+        progress: progress.read(),
+        state,
+        swapFloor: handleRef.current?.sceneState.swapFloor ?? 0,
+        simStopped,
+      })
+    : [];
+  const lessonId = state.lessonId;
 
   return (
     <>
-      {lessonsOpen && <LessonPanel lessons={LESSONS} onStart={start} onClose={() => onLessonsOpenChange(false)} />}
+      {lessonsOpen && <LessonPanel rows={rows} onAction={onRowAction} onClose={closeList} />}
       {active && <HintPointer handleRef={handleRef} targetRef={targetRef} paintRef={paintRingRef} />}
-      {view !== null && <StepCard view={view} onLeave={leave} onBackToLessons={backToLessons} onKeepBuilding={leave} />}
+      {view !== null && (
+        <StepCard
+          view={view}
+          onLeave={leave}
+          onBackToLessons={backToLessons}
+          onKeepBuilding={keepBuilding}
+          simStopped={simStopped}
+          {...(lessonId === null ? {} : { onRestart: () => start(lessonId) })}
+        />
+      )}
     </>
   );
 }

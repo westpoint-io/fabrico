@@ -4885,6 +4885,8 @@ export function App() {
             doNewThen={doNewThen}
             probeRef={tutorialProbeRef}
             onActiveChange={setLessonActive}
+            boardLive={simFatalReason === null && status.kind !== 'disconnected'}
+            simStopped={simFatalReason !== null}
           />
           {/* Phase 76 (plan 76-02, D-06): a label's WORDS, a DOM overlay pinned to each
               label every frame. ALWAYS mounted (a note's words are not an alt-mode

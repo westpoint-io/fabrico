@@ -43,6 +43,11 @@ const LEGEND_BOUND_OFFSET = `${DOCK_TOP} + ${RING_PADDING_Y} + var(--fab-space-s
  *  than the box, over the bezel). Below it, outside the supported sizes, Help may cross the strip
  *  (UI-SPEC A11) rather than lose its own heading. */
 const HEADING_FLOOR = 'calc(var(--fab-min-target) + var(--fab-space-sm))';
+/**
+ * The most a panel in the top-right slot may hold, so Help and the lesson list stop at one line. The
+ * reasoning is at its use in `HelpPanel` below.
+ */
+export const TOP_RIGHT_PANEL_MAX_HEIGHT = `min(calc(100% - ${DOCK_TOP} - ${CAMERA_CLUSTER_CLEARANCE} - ${RING_PADDING_Y}), max(${HEADING_FLOOR}, calc(var(--fab-legend-top, 100000px) - (${LEGEND_BOUND_OFFSET}))))`;
 
 /** The Help panel's stable DOM id - the Toolbar "?" button aria-controls it. */
 export const HELP_PANEL_ID = 'fab-help-panel';
@@ -157,7 +162,7 @@ export const HELP_SCROLL_ATTR = 'data-fab-help-scroll';
  * hook-free shape `observeBadgeTruncation` in `Toolbar.tsx` uses; the box and its one child are
  * observed, so a window resize and a content change both re-check.
  */
-function observeScrollFocus(box: HTMLDivElement | null): (() => void) | undefined {
+export function observeScrollFocus(box: HTMLDivElement | null): (() => void) | undefined {
   if (box === null) return undefined;
   const check = (): void => {
     if (box.scrollHeight > box.clientHeight) box.tabIndex = 0;
@@ -215,7 +220,7 @@ export function HelpPanel({ onOpenLessons }: HelpPanelProps): JSX.Element {
         // 1024 wide, under its 240 px minimum, and the Legend would refuse to open. And making Help
         // and the Legend shut each other is simpler but hides one to show the other.
         width: 'fit-content',
-        maxHeight: `min(calc(100% - ${DOCK_TOP} - ${CAMERA_CLUSTER_CLEARANCE} - ${RING_PADDING_Y}), max(${HEADING_FLOOR}, calc(var(--fab-legend-top, 100000px) - (${LEGEND_BOUND_OFFSET}))))`,
+        maxHeight: TOP_RIGHT_PANEL_MAX_HEIGHT,
       }}
     >
       {/* A real <h2> under the Toolbar <h1> (no skipped level), mirroring Legend:
