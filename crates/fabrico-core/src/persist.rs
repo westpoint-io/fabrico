@@ -25,8 +25,10 @@
 //! unbounded allocation.
 
 use std::collections::BTreeMap;
+#[cfg(feature = "redb")]
 use std::path::Path;
 
+#[cfg(feature = "redb")]
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
 /// Hard upper bound on a single stored record (event payload or snapshot blob).
@@ -42,6 +44,7 @@ pub const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
 /// element-by-element, so the key sorts lexicographically as
 /// (partition asc, sequence asc) — exactly the order the fold consumes (the
 /// integrity guarantee proven by the ordering test, threat T-1-ORD).
+#[cfg(feature = "redb")]
 const EVENTS: TableDefinition<(u64, u64), &[u8]> = TableDefinition::new("events");
 
 /// redb table: the append-only EDIT log, keyed by `(partition, sequence)`.
@@ -51,9 +54,11 @@ const EVENTS: TableDefinition<(u64, u64), &[u8]> = TableDefinition::new("events"
 /// range scan returns edits in `(partition asc, sequence asc)` fold order. It
 /// lives in the SAME redb [`Database`] as `EVENTS`/`SNAPSHOTS`, so the host's
 /// single-writer invariant is preserved (no second store, no second writer).
+#[cfg(feature = "redb")]
 const EDITS: TableDefinition<(u64, u64), &[u8]> = TableDefinition::new("edits");
 
 /// redb table: full-state snapshots, keyed by the `tick` they were taken at.
+#[cfg(feature = "redb")]
 const SNAPSHOTS: TableDefinition<u64, &[u8]> = TableDefinition::new("snapshots");
 
 /// A typed, non-panicking error from a [`PersistenceStore`].
@@ -84,6 +89,7 @@ impl std::fmt::Display for StoreError {
 impl std::error::Error for StoreError {}
 
 /// Flatten any backend error into a [`StoreError::Backend`].
+#[cfg(feature = "redb")]
 fn backend<E: std::fmt::Display>(e: E) -> StoreError {
     StoreError::Backend(e.to_string())
 }
@@ -234,11 +240,13 @@ impl PersistenceStore for MemStore {
 /// explicit caller-provided path — never ambient). Maps every redb error into
 /// [`StoreError::Backend`]; a missing table on read is treated as empty rather
 /// than an error so a freshly-opened database reads back cleanly.
+#[cfg(feature = "redb")]
 #[derive(Debug)]
 pub struct RedbStore {
     db: Database,
 }
 
+#[cfg(feature = "redb")]
 impl RedbStore {
     /// Open (creating if absent) a redb database at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
@@ -247,6 +255,7 @@ impl RedbStore {
     }
 }
 
+#[cfg(feature = "redb")]
 impl PersistenceStore for RedbStore {
     type Error = StoreError;
 
@@ -524,6 +533,7 @@ mod tests {
         assert!(store.write_snapshot(1, &at_cap).is_ok());
     }
 
+    #[cfg(feature = "redb")]
     fn redb_store() -> (tempfile::TempDir, RedbStore) {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = RedbStore::open(dir.path().join("fabrico-test.redb")).expect("open redb");
@@ -535,6 +545,7 @@ mod tests {
         check_ordering_and_filter(&mut MemStore::new());
     }
 
+    #[cfg(feature = "redb")]
     #[test]
     fn persist_redb_ordering_and_filter() {
         let (_dir, mut store) = redb_store();
@@ -546,6 +557,7 @@ mod tests {
         check_edits_ordering_and_filter(&mut MemStore::new());
     }
 
+    #[cfg(feature = "redb")]
     #[test]
     fn persist_redb_edits_ordering_and_filter() {
         let (_dir, mut store) = redb_store();
@@ -557,6 +569,7 @@ mod tests {
         check_edit_bounds_guard(&mut MemStore::new());
     }
 
+    #[cfg(feature = "redb")]
     #[test]
     fn persist_redb_edit_bounds_guard() {
         let (_dir, mut store) = redb_store();
@@ -568,6 +581,7 @@ mod tests {
         check_snapshot_latest_wins(&mut MemStore::new());
     }
 
+    #[cfg(feature = "redb")]
     #[test]
     fn persist_redb_snapshot_latest_wins() {
         let (_dir, mut store) = redb_store();
@@ -579,6 +593,7 @@ mod tests {
         check_bounds_guard(&mut MemStore::new());
     }
 
+    #[cfg(feature = "redb")]
     #[test]
     fn persist_redb_bounds_guard() {
         let (_dir, mut store) = redb_store();

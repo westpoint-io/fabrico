@@ -1041,6 +1041,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabrico-engine"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fabrico-command",
+ "fabrico-core",
+ "fabrico-protocol",
+ "fabrico-scenario",
+ "postcard",
+ "proptest",
+ "ron",
+ "serde",
+ "serde_json",
+ "slotmap",
+]
+
+[[package]]
 name = "fabrico-host"
 version = "0.1.0"
 dependencies = [

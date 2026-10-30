@@ -1,0 +1,31 @@
+[package]
+name = "fabrico-engine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The Fabrico engine without a desktop host: it loads a board, runs it tick by tick on the
+# deterministic core and builds the render packets, using plain data and no I/O. The desktop
+# host and any other front end sit on top of it. There is no async runtime, HTTP stack, file
+# database or desktop shell in its normal dependency tree, and tests/deps_headless.rs fails the
+# build if one enters. `fabrico-core` is taken with `default-features = false` because its
+# default feature brings in the on-disk store.
+
+[dependencies]
+fabrico-core     = { path = "../fabrico-core", default-features = false }
+fabrico-command  = { path = "../fabrico-command" }
+fabrico-protocol = { path = "../fabrico-protocol" }
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+postcard         = { version = "1", features = ["use-std"] }
+ron              = "0.12"
+blake3           = "1.8"
+slotmap          = "1.1"
+
+[dev-dependencies]
+fabrico-scenario = { path = "../fabrico-scenario" }
+proptest         = "1"
+# The render-packet tests forge invalid grids through `test_remove_inbox`, which this
+# feature exposes. The feature is off in a normal build.
+fabrico-core     = { path = "../fabrico-core", default-features = false, features = ["test-support"] }

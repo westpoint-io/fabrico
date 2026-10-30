@@ -10,7 +10,7 @@ rand_chacha  = { version = "0.9",  features = ["serde"] }   # see RESEARCH Assum
 rand_core    = { version = "0.9" }
 serde        = { version = "1.0",  features = ["derive"] }
 postcard     = { version = "1.1",  features = ["use-std"] }
-redb         = { version = "4.1" }
+redb         = { version = "4.1", optional = true }           # the on-disk store; a headless engine turns it off
 slotmap      = { version = "1.0",  features = ["serde"] }    # resolves to 1.1.1
 rustc-hash   = "2"                                            # point-lookups only
 # rquickjs: the QuickJS-NG factory engine (Phase 04). FIRST C-toolchain runtime dep —
@@ -22,6 +22,9 @@ rustc-hash   = "2"                                            # point-lookups on
 rquickjs     = { version = "0.14", features = ["loader"] }
 
 [features]
+# The durable on-disk store (`RedbStore`). On by default so the desktop host keeps it; the
+# headless engine turns it off, which keeps a file database out of its dependency tree.
+default = ["redb"]
 # Test-only scaffolding (e.g. `GridState::test_remove_inbox`) used to forge the
 # invalid Cores the snapshot trust gate must reject. Empty in normal builds; the
 # self dev-dependency below enables it for this crate's integration tests only.

@@ -19,7 +19,7 @@ publish = false
 
 [dependencies]
 fabrico-command  = { path = "../fabrico-command" }
-fabrico-core     = { path = "../fabrico-core" }
+fabrico-core     = { path = "../fabrico-core", default-features = false }
 fabrico-protocol = { path = "../fabrico-protocol" }
 # THE state-equality digest (blake3 of the snapshot bytes) — pinned to match
 # fabrico-core's dev-only blake3 oracle pin (1.8) so the single digest path is

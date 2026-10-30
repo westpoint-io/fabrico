@@ -14,7 +14,7 @@ publish = false
 # if any renderer/IO/host dependency leaks into the normal tree (CMD-03/SC#1).
 
 [dependencies]
-fabrico-core     = { path = "../fabrico-core" }
+fabrico-core     = { path = "../fabrico-core", default-features = false }
 fabrico-protocol = { path = "../fabrico-protocol" }
 serde            = { version = "1", features = ["derive"] }
 
