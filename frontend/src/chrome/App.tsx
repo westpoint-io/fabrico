@@ -569,6 +569,13 @@ declare global {
        */
       setItemInterpolation(on: boolean): void;
       /**
+       * Shows or hides the item layer (production-inert, on `pinClock`'s model), so the board
+       * spec's negative control can show that its pixel check fails with no item drawn while the
+       * model still reports items. It writes ONLY a render-side container's visibility - never
+       * scene.tick, never a GridCommand, never the event log. Visible by default.
+       */
+      setItemLayerVisible(on: boolean): void;
+      /**
        * SAFE-01 dev-only stream-drop simulator. `simulateStreamDrop(true)` makes
        * the transport.onPacket handler ignore inbound bytes entirely, so the
        * playing-gated stall watchdog stalls EXACTLY as a real render-stream drop
@@ -3488,6 +3495,8 @@ export function App() {
         // docblock for why a DEV gate would be absent from the one build that needs
         // it). Default OFF; it writes a render-side boolean and nothing else.
         setItemInterpolation: (on: boolean) => handle.setItemInterpolation(on),
+        // Review 93 WR-02: the board spec's negative control, a render-side visibility flag.
+        setItemLayerVisible: (on: boolean) => handle.setItemLayerVisible(on),
         // WUI-01: resolve a node handle to its loopback POST URL over the dev-WS
         // webhook_url bridge (40-05) — used by the live wire-visual gate to drive a
         // REAL hop against the demo headline wire's endpoint. Read-only (URL fetch

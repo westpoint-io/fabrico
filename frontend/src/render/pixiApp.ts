@@ -162,6 +162,13 @@ export interface SceneHandle {
    */
   setItemInterpolation(on: boolean): void;
   /**
+   * Shows or hides the item layer (production-inert, on `pinClock`'s model). The board spec's
+   * negative control hides it to show that its pixel check can fail while the model still
+   * reports items. It writes ONLY the visibility of a render-side container; never scene.tick,
+   * a GridCommand or the log. Visible by default, and nothing in the app calls it.
+   */
+  setItemLayerVisible(on: boolean): void;
+  /**
    * SLOT-03 pre-Phase-62 tread-appearance override (production-inert, D-18) -
    * pass-through of `RenderLoop.setTreadAppearanceOverride`, which is where the full
    * argument lives. It writes ONLY a render-side number the belt layer reads when
@@ -349,6 +356,10 @@ export async function bootPixi(): Promise<SceneHandle> {
     // sitting can compare smoothed and raw motion back to back on IDENTICAL geometry,
     // in the real binary, without a rebuild. Whether it ships is decided there.
     setItemInterpolation: (on: boolean): void => loop.setItemInterpolation(on),
+    // Review 93 WR-02: the negative control's switch. A container's visibility, nothing else.
+    setItemLayerVisible: (on: boolean): void => {
+      layers.items.visible = on;
+    },
     // SLOT-03 (D-18): surface the pre-Phase-62 tread-appearance override end to end so
     // FEEL row 60-a can be asked at the sitting on a board that still LOOKS like today's.
     // Null-defaulted at every layer; the only value ever passed comes from the

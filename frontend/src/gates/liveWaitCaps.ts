@@ -167,6 +167,7 @@ export const HOOKS: Readonly<Record<string, { cls: HookClass; why: string }>> = 
   cablePolylines: { cls: 'drawn', why: "handle.wires.cablePolylines(): the cable Graphics' polylines" },
   pinClock: { cls: 'control', why: 'handle.pinClock(n): freezes or frees the render clock' },
   setItemInterpolation: { cls: 'control', why: 'handle.setItemInterpolation(on): switches item interpolation' },
+  setItemLayerVisible: { cls: 'control', why: 'handle.setItemLayerVisible(on): shows or hides the item layer' },
   requestQuit: { cls: 'control', why: 'the dirty-only quit decision, opens the guard' },
   editsAwaitingVerdict: { cls: 'model', why: 'editGesturesRef.size: the edit gestures sent and not yet answered' },
   hasUnsavedWork: { cls: 'model', why: "dirtyRef or queuedEditsRef: the guards' predicate, chrome state" },
