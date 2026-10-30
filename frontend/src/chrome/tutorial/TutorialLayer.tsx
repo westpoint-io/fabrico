@@ -96,14 +96,29 @@ export function idleTutorialProbe(): TutorialProbe {
 const FREE_AREA_TOP_PX = 116;
 /** The window's right edge less `--fab-space-lg`. */
 const FREE_AREA_RIGHT_INSET_PX = 24;
+/** The inspector's padding on both sides, and a gap so a machine beside it isn't touching it. */
+const INSPECTOR_CHROME_PX = 2 * 22 + 8;
 
-/** The part of the window no panel covers: right of the palette, under the toolbar, above the card. */
+/**
+ * The inspector opens at step 3 and stays open while the belt is drawn, so a spot chosen as if it
+ * weren't there puts the Sink under it, with the belt's release point out of reach. This is the panel's
+ * own `min(420px, 33vw)`, kept free from the start. It's the width whether or not the panel is open,
+ * so the two spots don't depend on which step the panel opened at.
+ */
+function inspectorReservePx(): number {
+  return Math.min(420, 0.33 * window.innerWidth) + INSPECTOR_CHROME_PX;
+}
+
+/**
+ * The part of the window no panel covers or will cover: right of the palette, left of where the
+ * inspector opens, under the toolbar, above the card.
+ */
 function readFreeArea(): ChromeFacts['view']['freeArea'] {
   const dock = document.querySelector<HTMLElement>('[data-fab-left-dock]');
   const card = document.querySelector<HTMLElement>('[data-fab-step-card]');
   return {
     left: dock === null ? 0 : dock.getBoundingClientRect().right,
-    right: window.innerWidth - FREE_AREA_RIGHT_INSET_PX,
+    right: window.innerWidth - FREE_AREA_RIGHT_INSET_PX - inspectorReservePx(),
     top: FREE_AREA_TOP_PX,
     bottom: card === null ? window.innerHeight : card.getBoundingClientRect().top,
   };
