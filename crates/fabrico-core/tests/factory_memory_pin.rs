@@ -1,0 +1,193 @@
+//! Pins where a Factory runs out of memory and where its recursion limit trips.
+//!
+//! The memory limit is enforced by `fabrico_qjs_alloc::FenceAllocator`, so these counts have to
+//! stay the same under any compiler, under any optimisation level and under either value of
+//! QuickJS's platform constant `MALLOC_OVERHEAD`. A count that moves on another operating
+//! system means the same board would fault there and run here, and a replay across the two
+//! machines would diverge.
+//!
+//! Each shape runs at N and at N-1 instead of searching for the boundary, which keeps the test
+//! fast. Only a failure searches, so a red on another platform prints the count that holds
+//! there.
+//!
+//! The recursion depth has no exact pin, because it is the stack limit divided by the size of
+//! QuickJS's C stack frames, and that size changes with the compiler and the profile. The two
+//! tests below hold its coarse bounds and prove the limit passed to `build` reaches the engine.
+//!
+//! Every assertion here is clock-free, I/O-free and float-free, so this file passes the crate's
+//! determinism clippy gate.
+
+use fabrico_core::factory::{DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT, FactoryOutcome, FactoryRuntime};
+use fabrico_core::fault::FaultReason;
+use fabrico_core::rng::SimRng;
+
+/// A budget no shape here can spend, so a fault can only come from the fence under test.
+const GAS: u64 = 1 << 40;
+
+/// First-faulting counts at [`DEFAULT_MEM_LIMIT`].
+const PINNED_ARRAYS: u64 = 477;
+const PINNED_STRINGS: u64 = 7416;
+const PINNED_OBJECTS: u64 = 59434;
+const PINNED_CYCLIC: u64 = 1;
+
+/// 1000-element arrays: each one is a block over QuickJS's 512-byte arena limit, so the
+/// allocator sees every allocation directly.
+fn arrays(n: u64) -> String {
+    format!(
+        "export default function(i, ctx) {{ const a = []; for (let k = 0; k < {n}; k++) \
+         a.push(new Array(1000).fill(k)); ctx.state = {{ n: a.length }}; }}"
+    )
+}
+
+/// 1 KiB strings: also over the arena limit, and built by a different path through QuickJS.
+fn strings(n: u64) -> String {
+    format!(
+        "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
+         a.push('y'.repeat(1024) + k); ctx.state = {{ n: a.length }}; }}"
+    )
+}
+
+/// Small objects: these come from QuickJS's arena, so the allocator sees only its chunks.
+fn objects(n: u64) -> String {
+    format!(
+        "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
+         a.push({{k}}); ctx.state = {{ n: a.length }}; }}"
+    )
+}
+
+/// Each object refers to itself. One in two stays in the array and the other is dropped, so
+/// the dropped ones are garbage only the cycle collector can free. QuickJS decides when to run
+/// that collector from a total that still includes `MALLOC_OVERHEAD`, so this is the shape that
+/// would show a difference in collection timing between platforms.
+fn cyclic(n: u64) -> String {
+    format!(
+        "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
+         {{ const o = {{k}}; o.self = o; if (k % 2 === 0) a.push(o); }} \
+         ctx.state = {{ n: a.length }}; }}"
+    )
+}
+
+fn recursion(depth: u64) -> String {
+    format!(
+        "export default function(i, ctx) {{ function f(k) {{ return k === 0 ? 0 : 1 + f(k - 1); }} \
+         ctx.state = {{ d: f({depth}) }}; }}"
+    )
+}
+
+fn run_with_limits(src: &str, mem_limit: u32, stack_limit: u32) -> FactoryOutcome {
+    let mut factory = FactoryRuntime::build(src, GAS, mem_limit, stack_limit).expect("builds");
+    let mut rng = SimRng::from_seed_u64(1);
+    factory.run(b"1", b"{}", &mut rng)
+}
+
+fn run(src: &str) -> FactoryOutcome {
+    run_with_limits(src, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT)
+}
+
+/// The fault text as a string, so a failure message can show it.
+fn message(outcome: &FactoryOutcome) -> String {
+    String::from_utf8_lossy(&outcome.fault_message).into_owned()
+}
+
+/// The first count in `1..=hi` that faults, or `None` if `hi` still runs.
+fn first_fault(hi: u64, shape: fn(u64) -> String) -> Option<u64> {
+    if run(&shape(hi)).fault.is_none() {
+        return None;
+    }
+    let (mut low, mut high) = (1, hi);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if run(&shape(middle)).fault.is_some() {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    Some(low)
+}
+
+/// Asserts that `shape` runs at `pinned - 1` and runs out of memory at `pinned`. On a miss it
+/// searches up to `hi` and prints the count that holds on this build.
+fn assert_first_fault(name: &str, shape: fn(u64) -> String, pinned: u64, hi: u64) {
+    let below = run(&shape(pinned - 1));
+    let at = run(&shape(pinned));
+    if below.fault.is_some() || at.fault.is_none() {
+        let actual = first_fault(hi, shape);
+        panic!(
+            "{name}: pinned first-faulting count is {pinned}, and this build's is {actual:?} \
+             (searched up to {hi}). At {}: {:?} {:?}. At {pinned}: {:?} {:?}.",
+            pinned - 1,
+            below.fault,
+            message(&below),
+            at.fault,
+            message(&at),
+        );
+    }
+    assert_eq!(
+        at.fault,
+        Some(FaultReason::FactoryError),
+        "{name} at {pinned} faulted with a reason other than the memory fence: {}",
+        message(&at)
+    );
+    assert!(
+        message(&at).contains("out of memory"),
+        "{name} at {pinned} faulted for another cause: {}",
+        message(&at)
+    );
+}
+
+#[test]
+fn arrays_run_out_of_memory_at_the_pinned_count() {
+    assert_first_fault("1000-element arrays", arrays, PINNED_ARRAYS, 20_000);
+}
+
+#[test]
+fn strings_run_out_of_memory_at_the_pinned_count() {
+    assert_first_fault("1 KiB strings", strings, PINNED_STRINGS, 50_000);
+}
+
+#[test]
+fn small_objects_run_out_of_memory_at_the_pinned_count() {
+    assert_first_fault("small objects", objects, PINNED_OBJECTS, 2_000_000);
+}
+
+#[test]
+fn cyclic_garbage_runs_out_of_memory_at_the_pinned_count() {
+    assert_first_fault("cyclic garbage", cyclic, PINNED_CYCLIC, 2_000_000);
+}
+
+#[test]
+fn shallow_recursion_runs_and_runaway_recursion_faults() {
+    let shallow = run(&recursion(50));
+    assert_eq!(shallow.fault, None, "depth 50 faulted: {}", message(&shallow));
+
+    let runaway = run(&recursion(100_000));
+    assert_eq!(
+        runaway.fault,
+        Some(FaultReason::FactoryError),
+        "depth 100000 did not fault with the error reason: {}",
+        message(&runaway)
+    );
+    assert!(
+        message(&runaway).contains("Maximum call stack size exceeded"),
+        "depth 100000 faulted for another cause: {}",
+        message(&runaway)
+    );
+}
+
+/// QuickJS keeps a default stack limit of its own, so the bounds above would still hold if
+/// `build` stopped passing its argument on. A depth that runs at the default and overflows
+/// under a small limit can only come from the limit reaching the engine.
+#[test]
+fn the_stack_limit_passed_to_build_reaches_the_engine() {
+    const SMALL_STACK_LIMIT: u32 = 16 * 1024;
+
+    let source = recursion(50);
+    let small = run_with_limits(&source, DEFAULT_MEM_LIMIT, SMALL_STACK_LIMIT);
+    assert!(
+        message(&small).contains("Maximum call stack size exceeded"),
+        "depth 50 under a {SMALL_STACK_LIMIT}-byte limit gave {:?} {:?}",
+        small.fault,
+        message(&small)
+    );
+}
