@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------------
 # WHY THIS EXISTS. The gate has ONE blind spot and it is structural: IT CANNOT SEE EDITS TO
 # ITSELF, OR TO ITS OWN `COVERED_CRATES` LIST. `scripts/` is not a covered path, there is
-# no self-hash, and nothing else asserts that list still names three crates. A change that
+# no self-hash, and nothing else asserts that list still names five crates. A change that
 # deleted "crates/fabrico-protocol" from it would go GREEN and nothing else in this
 # repository would fire, because a comparison taken against a narrowed path set is
 # vacuously empty by construction.
@@ -13,8 +13,8 @@
 # So the proof is a COMMITTED SCRIPT THAT RUNS IN CI, not one manual probe recorded in
 # prose. ACCEPTANCE IS THIS SCRIPT'S EXIT CODE, NEVER A SOURCE GREP.
 #
-# WHAT IS ASSERTED - nine properties. Numbers 1 to 8 are listed in run order; number 9
-# RUNS second-to-last, so that number 8 stays this script's exit condition:
+# WHAT IS ASSERTED - ten properties. Numbers 1 to 8 are listed in run order; numbers 10 and
+# 9 RUN just before number 8, so that number 8 stays this script's exit condition:
 #
 #   1. BASELINE GREEN. With no probe applied, the gate exits 0 over the COMMITTED
 #      declaration. Without this every red below proves nothing: a tree already dirty
@@ -30,10 +30,10 @@
 #   5. THE UNTRACKED WALK BITES. A brand-new untracked file under a covered path exits 1
 #      naming it. This is the hole no diff against a commit can see.
 #   6. THE LOCKFILE CHECK BITES. A one-byte Cargo.lock edit exits 1.
-#   7. THE GATE'S OWN COVERED-PATH LIST STILL HOLDS ALL FOUR ROOTS. The three crate roots
+#   7. THE GATE'S OWN COVERED-PATH LIST STILL HOLDS ALL SEVEN ROOTS. The five crate roots
 #      are read from `COVERED_CRATES` BY BLOCK with comment lines filtered out, so the
-#      gate's header prose - which names all three crates in English - cannot satisfy the
-#      check on its own. The fourth root is the lockfile.
+#      gate's header prose - which names all five crates in English - cannot satisfy the
+#      check on its own. The other two roots are the lockfile and the board manifest.
 #   8. CLEAN REVERT. This run left the working tree exactly as it found it.
 #   9. THE DELETION ARM BITES. `git rm` of an undeclared covered path that EXISTS AT THE
 #      BASE exits 1 NAMING it; an unstage and the path's kept bytes restore it
@@ -44,6 +44,11 @@
 #      would each leave the gate printing its full green line. It RUNS second-to-last,
 #      after the carve-out and before property 8, because property 8 is this script's exit
 #      condition; the number is the property's identity, not its position.
+#  10. THE BOARD MANIFEST EDIT BITES. Appending a comment line to
+#      examples/boards/hashes.manifest exits exactly 1 naming it, and putting its bytes back
+#      returns exit 0. The manifest sits outside every crate root, so it reaches the gate
+#      only through the gate's named BOARD_MANIFEST paths. Taking it out of the diff pathspec
+#      would leave every other property green. It runs after the carve-out, before property 9.
 #
 # ---------------------------------------------------------------------------------
 # EVERY PROBE PATH IS SELECTED AT RUN TIME. NO COVERED PATH IS WRITTEN INTO THIS SCRIPT.
@@ -73,7 +78,8 @@
 # THE ENTRY GUARD, AND ITS ONE CARVE-OUT.
 #
 # The entry guard refuses to run over a dirty tree: any tracked file modified, staged or
-# deleted ANYWHERE, or any untracked file under `crates`, `frontend`, `scripts` or `docs`.
+# deleted ANYWHERE, or any untracked file under `crates`, `frontend`, `scripts`, `docs` or
+# `examples`.
 # That is exit 2, not exit 1: a dirty tree makes property 1 fail for a reason that has
 # nothing to do with the gate, and reporting that as "the gate is vacuous" sends the
 # reader hunting the wrong bug.
@@ -82,7 +88,7 @@
 # `scripts/check-core-declared.sh`. The reason is a reviewer's check of this proof, in
 # which the reader EDITS the gate live - deleting a root from its covered-path list - and
 # then runs this proof expecting to SEE the exit 1 that says the covered set no longer
-# holds all three corpora. Without the carve-out that check could not be made: the guard
+# holds all its roots. Without the carve-out that check could not be made: the guard
 # would refuse with exit 2, and showing a refusal where a bite was promised is precisely
 # the confusion this proof exists to remove.
 #
@@ -129,7 +135,7 @@
 # with the SAME leading-dash refusal on every route.
 #
 # EXIT CODES:
-#   0  PROVEN. All nine properties held and the carve-out behaved as specified.
+#   0  PROVEN. All ten properties held and the carve-out behaved as specified.
 #   1  A property did NOT hold. The gate is vacuous, or weaker than claimed. Every
 #      failing property is named.
 #   2  The proof COULD NOT BE MADE. This is a FAILURE, not a pass - an assertion that
@@ -157,14 +163,17 @@ cd "$(git rev-parse --show-toplevel)"
 GATE="scripts/check-core-declared.sh"
 DECLARATION="docs/DECLARED-MOVES.txt"
 LOCKFILE="Cargo.lock"
+BOARD_MANIFEST="examples/boards/hashes.manifest"
 
-# The three covered crate roots, written out HERE rather than read from the gate. If the
+# The five covered crate roots, written out HERE rather than read from the gate. If the
 # two ever disagree, property 7 below is what says so, and a proof that sourced its
 # subject's own list could not.
 EXPECTED_CRATES=(
     "crates/fabrico-core"
     "crates/fabrico-protocol"
     "crates/fabrico-scenario"
+    "crates/fabrico-engine"
+    "crates/fabrico-qjs-alloc"
 )
 
 # The fixture path prefixes, written out here for the same reason EXPECTED_CRATES is: if
@@ -176,6 +185,7 @@ FIXTURE_PREFIXES=(
     "crates/fabrico-scenario/fixtures/"
     "crates/fabrico-scenario/snapshots/"
     "crates/fabrico-protocol/tests/fixtures/"
+    "examples/boards/hashes.manifest"
 )
 
 GOLDEN_ROOT="crates/fabrico-core/tests/golden"
@@ -189,6 +199,7 @@ SOURCE_TREES=(
     "frontend"
     "scripts"
     "docs"
+    "examples"
 )
 
 PROBE_TEXT="THROWAWAY probe line written by scripts/prove-declared-gate-non-vacuous.sh. If you are seeing this committed, the proof aborted without reverting - delete this line."
@@ -197,10 +208,10 @@ usage() {
     cat >&2 <<'USAGE'
 usage: scripts/prove-declared-gate-non-vacuous.sh [--base <ref> | <ref>]
 
-Proves that scripts/check-core-declared.sh actually BITES, in all nine ways listed
-below, and that the gate's own covered-path list still names all four covered roots.
+Proves that scripts/check-core-declared.sh actually BITES, in all ten ways listed
+below, and that the gate's own covered-path list still names all seven covered roots.
 
-The nine properties, in run order:
+The ten properties, in run order:
   1. baseline green            - the gate exits 0 with no probe applied
   2. the [source] arm bites    - an undeclared source edit exits 1 NAMING the path
   3. the digest arm bites      - a declared path whose digest differs exits 1 printing
@@ -208,8 +219,11 @@ The nine properties, in run order:
   4. declared-but-unmoved      - a line naming a path that did not move exits 1 NAMING it
   5. the untracked walk bites  - a new untracked file under a covered path exits 1
   6. the lockfile check bites  - a one-byte Cargo.lock edit exits 1
-  7. the covered list holds    - COVERED_CRATES still names all three crates, read BY
-                                 BLOCK with comments filtered, plus the lockfile
+  7. the covered list holds    - COVERED_CRATES still names all five crates, read BY
+                                 BLOCK with comments filtered, plus the lockfile and the
+                                 board manifest
+ 10. the manifest edit bites   - a comment line appended to the board manifest exits 1
+                                 NAMING it; putting its bytes back returns exit 0
   9. the deletion arm bites    - `git-rm` of an undeclared covered path that exists at the
                                  base exits 1 NAMING it, and the path is restored
                                  byte-identically. Runs here, second-to-last, so that
@@ -519,7 +533,7 @@ select_undeclared_fixture_probe() {
     listing="$( {
         LC_ALL=C find "$GOLDEN_ROOT" -mindepth 2 -maxdepth 2 -name 'hashes.txt' -print |
             sed 's#/hashes\.txt$##'
-        LC_ALL=C git ls-files -- "${FIXTURE_PREFIXES[1]}" "${FIXTURE_PREFIXES[2]}" "${FIXTURE_PREFIXES[3]}"
+        LC_ALL=C git ls-files -- "${FIXTURE_PREFIXES[1]}" "${FIXTURE_PREFIXES[2]}" "${FIXTURE_PREFIXES[3]}" "${FIXTURE_PREFIXES[4]}"
     } | LC_ALL=C sort)"
     while IFS= read -r f; do
         [ -z "$f" ] && continue
@@ -636,7 +650,7 @@ keep_once() {
         KEPT_PATHS+=("$p")
     done
 }
-keep_once "$DECLARATION" "$LOCKFILE" "$GATE" "$SOURCE_PROBE" "$FIXTURE_EDIT_TARGET" "$DELETION_PROBE"
+keep_once "$DECLARATION" "$LOCKFILE" "$BOARD_MANIFEST" "$GATE" "$SOURCE_PROBE" "$FIXTURE_EDIT_TARGET" "$DELETION_PROBE"
 
 DECL_TMP=""
 GATE_TMP=""
@@ -732,7 +746,7 @@ fail_named() {
 
 # Reads the gate's OWN covered-path list and records every root it no longer names in the
 # global MISSING_ROOTS. The array body is read BY BLOCK and comment lines are dropped, so
-# the gate's header prose - which names all three crates in English - cannot satisfy this
+# the gate's header prose - which names all five crates in English - cannot satisfy this
 # on its own. An array that cannot be located at all is exit 2, not a missing root: the
 # assertion could not be MADE, and an assertion that silently found nothing to check is
 # precisely the vacuous green this family refuses.
@@ -764,15 +778,18 @@ compute_missing_roots() {
     if ! grep -qxF "LOCKFILE=\"${LOCKFILE}\"" "$GATE"; then
         MISSING_ROOTS="${MISSING_ROOTS}${LOCKFILE} "
     fi
+    if ! grep -qxF "BOARD_MANIFEST=\"${BOARD_MANIFEST}\"" "$GATE"; then
+        MISSING_ROOTS="${MISSING_ROOTS}${BOARD_MANIFEST} "
+    fi
 }
 
 failed=0
 STEP=0
-# The 9 properties, plus the carve-out case. The carve-out is a case, not a numbered
+# The 10 properties, plus the carve-out case. The carve-out is a case, not a numbered
 # property, which is why the step counter and the property numbers were never the same
 # sequence. Property 9 (the deletion arm) runs second-to-last so property 8 (clean revert)
 # can stay this script's exit condition.
-TOTAL=10
+TOTAL=11
 
 step() {
     STEP=$((STEP + 1))
@@ -924,10 +941,10 @@ prover_put_back "$LOCKFILE"
 # it stop reddening, which reads as "the gate is broken" rather than "the gate was
 # NARROWED" - and a change that narrowed the list would have every reason to also move the
 # probe.
-step "property 7: the COVERED LIST HOLDS all four roots (read by block, comments filtered)"
+step "property 7: the COVERED LIST HOLDS all seven roots (read by block, comments filtered)"
 compute_missing_roots
 if [ -n "$MISSING_ROOTS" ]; then
-    fail_named "${GATE}'s covered set no longer holds all three corpora and the lockfile. Missing: ${MISSING_ROOTS}"
+    fail_named "${GATE}'s covered set no longer holds all five crate roots, the lockfile and the board manifest. Missing: ${MISSING_ROOTS}"
     echo >&2
     echo "      REMOVING AN ENTRY FROM THAT LIST IS THE GATE-WEAKENING MOVE THE GATE'S OWN" >&2
     echo "      HEADER FORBIDS, and NOTHING ELSE IN THIS REPOSITORY CAN SEE IT. scripts/ is" >&2
@@ -935,7 +952,7 @@ if [ -n "$MISSING_ROOTS" ]; then
     echo "      narrowed path set is vacuously empty by construction. The response is to" >&2
     echo "      restore the entry, never to relax this assertion." >&2
 else
-    echo "      the covered set holds all three corpora and ${LOCKFILE}"
+    echo "      the covered set holds all five crate roots, ${LOCKFILE} and ${BOARD_MANIFEST}"
 fi
 
 # --- The carve-out case ---------------------------------------------------------------
@@ -974,6 +991,37 @@ else
     if [ -n "$(git status --porcelain -- "$GATE")" ]; then
         fail_named "'${GATE}' is still modified after its kept bytes were put back."
     fi
+fi
+
+# --- Property 10: an edit to the board manifest bites ---------------------------------
+# The manifest is outside every crate root, so the gate sees it only through the paths it
+# names itself. This is the check that notices one of those going missing: narrow the diff
+# pathspec and the edit below exits 0.
+#
+# The path is written down here, as the lockfile's is, and that can't go stale the way a
+# [source] probe would. A declared manifest is compared by digest, so this edit exits 1
+# whether or not the declaration lists it.
+step "property 10: the BOARD MANIFEST EDIT BITES (an appended line in ${BOARD_MANIFEST} exits 1 naming it)"
+printf '# %s\n' "$PROBE_TEXT" >>"$BOARD_MANIFEST"
+run_gate
+if [ "$GATE_RC" -eq 0 ]; then
+    fail_named "the gate exited 0 with ${BOARD_MANIFEST} changed and undeclared, so an edit to the manifest can move a board hash unseen."
+elif [ "$GATE_RC" -ne 1 ]; then
+    fail_named "the gate exited ${GATE_RC}, not 1, on a ${BOARD_MANIFEST} edit. Exit 2 means the assertion could not be MADE."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+elif ! printf '%s\n' "$GATE_OUT" | grep -F -- "$BOARD_MANIFEST" >/dev/null; then
+    fail_named "the gate exited 1 but did NOT name '${BOARD_MANIFEST}'."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      manifest probe: gate correctly EXITS 1, naming ${BOARD_MANIFEST}"
+fi
+prover_put_back "$BOARD_MANIFEST"
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then
+    fail_named "the gate exited ${GATE_RC} after ${BOARD_MANIFEST}'s bytes were put back; it must return to green."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      bytes put back: gate exits 0"
 fi
 
 # --- Property 9: the deletion arm bites -----------------------------------------------
@@ -1075,12 +1123,13 @@ fi
 echo "What held: a green baseline; a NAMED red on an undeclared source edit; a NAMED red"
 echo "with BOTH digests on a declared path whose bytes moved elsewhere; a NAMED red on a"
 echo "declaration that outlived its move; a NAMED red on an untracked new file; a red on a"
-echo "${LOCKFILE} edit; the carve-out; a NAMED red on a DELETED covered path, restored"
-echo "byte-identically; and a clean tree on the way out. The covered set still holds, read"
+echo "${LOCKFILE} edit; the carve-out; a NAMED red on an edit to ${BOARD_MANIFEST}; a NAMED"
+echo "red on a DELETED covered path, restored byte-identically; and a clean tree on the way"
+echo "out. The covered set still holds, read"
 echo "by block with comment lines filtered:"
-printf '  %s\n' "${EXPECTED_CRATES[@]}" "$LOCKFILE"
+printf '  %s\n' "${EXPECTED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST"
 echo
 # The last line of a successful run begins with PROVEN:, so a caller can read the verdict
 # off the tail without parsing the transcript above it.
-echo "PROVEN: ${GATE} bites in all nine ways, against '${BASE}' (${BASE_SHA:0:12})."
+echo "PROVEN: ${GATE} bites in all ten ways, against '${BASE}' (${BASE_SHA:0:12})."
 exit 0

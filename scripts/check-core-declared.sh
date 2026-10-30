@@ -11,18 +11,19 @@
 # carry afterwards. Acceptance is THIS SCRIPT'S EXIT CODE, never a human reading a diff.
 #
 # WHAT IT ASSERTS, against a named base ref (by default the annotated tag `public-base`,
-# cut at the first commit of this repository):
+# which sits on the commit its own message names):
 #
-#   1. [fixtures], in BOTH directions, over four corpora: the golden fixture directories
-#      under crates/fabrico-core/tests/golden, the scenario fixtures and snapshots, and
-#      the protocol fixtures.
+#   1. [fixtures], in BOTH directions, over four corpora and one file: the golden fixture
+#      directories under crates/fabrico-core/tests/golden, the scenario fixtures and
+#      snapshots, the protocol fixtures, and the board hash manifest
+#      examples/boards/hashes.manifest.
 #        - a covered path that DIFFERS from the base and is not declared is named;
 #        - a declared path that did NOT differ is named (a stale entry must never become
 #          a blanket permission, and the declaration is cumulative since the base);
 #        - a declared path whose recomputed digest is not the declared one is named, with
 #          BOTH digests printed so correcting the entry is copy-paste, not re-derivation.
 #
-#   2. [source], in BOTH directions, over the tracked non-fixture files under the three
+#   2. [source], in BOTH directions, over the tracked non-fixture files under the five
 #      covered crate roots. A path list with NO digests: a changed source file that is not
 #      listed is named, and a listed source file that did not change is named too.
 #
@@ -37,7 +38,7 @@
 #   digest, because an absent path has no bytes to digest; a DELETED source path is
 #   declared the way every source path is, as a bare path under [source].
 #
-#   3. No UNTRACKED file under the three covered crate roots. A diff against a commit
+#   3. No UNTRACKED file under the five covered crate roots or at the manifest path. A diff against a commit
 #      cannot see a file git has never been told about, so a brand-new module would ride
 #      in green without this walk.
 #
@@ -135,6 +136,8 @@ COVERED_CRATES=(
     "crates/fabrico-core"
     "crates/fabrico-protocol"
     "crates/fabrico-scenario"
+    "crates/fabrico-engine"
+    "crates/fabrico-qjs-alloc"
 )
 
 GOLDEN_DIR="crates/fabrico-core/tests/golden"
@@ -145,6 +148,11 @@ PROTOCOL_FIXTURE_DIR="crates/fabrico-protocol/tests/fixtures"
 # The workspace lockfile. Not a crate path, so it gets its own named check, diffed
 # against the same base as everything else.
 LOCKFILE="Cargo.lock"
+
+# The board hash manifest. It sits outside the crate roots, so it is named here and added to
+# the existence guard, the diff, the untracked walk and the fixture set. Leaving out any one of
+# those four makes an edit to it pass unseen. It is declared under [fixtures], with a digest.
+BOARD_MANIFEST="examples/boards/hashes.manifest"
 
 # The golden corpus has well over 20 fixture directories at the base. The floor is
 # deliberately well below that: it exists to catch a walk that discovers NOTHING (wrong
@@ -190,7 +198,7 @@ EMPTY_STREAM_DIGEST="$(printf '' | "${SHA256_CMD[@]}" | LC_ALL=C awk '{print $1}
 
 # The declaration is resolved by FIXED PATH and is not configurable: a gate that could be
 # pointed at a different declaration could be pointed at an empty one. It sits outside the
-# three covered crate roots on purpose, so declaring a move does not itself become an
+# covered crate roots on purpose, so declaring a move does not itself become an
 # undeclared change to a covered source file.
 DECLARATION="docs/DECLARED-MOVES.txt"
 
@@ -204,12 +212,13 @@ with the digest the path is expected to carry afterwards.
 
 Four checks:
   1. [fixtures], both directions, over the golden fixture directories, the scenario
-     fixtures and snapshots, and the protocol fixtures. An undeclared move is named; a
+     fixtures and snapshots, the protocol fixtures and examples/boards/hashes.manifest.
+     An undeclared move is named; a
      declared path that did not move is named; a digest that does not match the declared
      one is named with BOTH digests printed.
-  2. [source], both directions, over the tracked non-fixture files under the three
+  2. [source], both directions, over the tracked non-fixture files under the five
      covered crate roots. A path list with no digests.
-  3. No untracked new file under the covered crate roots.
+  3. No untracked new file under the covered crate roots or at the manifest path.
   4. Cargo.lock byte-identity. The lockfile is deliberately NOT declarable.
 
 Both covered sets are the UNION of the working tree and the base ref, so a DELETED path is
@@ -238,7 +247,8 @@ Exit codes:
      the floor). This is a FAILURE, not a pass: an assertion that measures nothing must
      never be green.
 
-That the covered path set is still all three crate roots plus the lockfile is checked by
+That the covered path set is still all five crate roots plus the lockfile and the board
+manifest is checked by
 something OTHER than this script, because this script cannot see its own COVERED_CRATES
 array:
     bash scripts/prove-declared-gate-non-vacuous.sh --base public-base
@@ -309,7 +319,7 @@ if ! BASE_SHA="$(git rev-parse --verify --quiet "${BASE}^{commit}")"; then
     echo "green that measures nothing, so this is a hard failure." >&2
     if [ "$BASE" = "$DEFAULT_BASE" ]; then
         echo >&2
-        echo "'${DEFAULT_BASE}' is the annotated tag on this repository's first commit. It is" >&2
+        echo "'${DEFAULT_BASE}' is the annotated tag this gate compares against. It is" >&2
         echo "missing from this clone, which usually means a shallow or tag-less checkout:" >&2
         echo "    git fetch --tags --unshallow    (or: git fetch --tags origin)" >&2
         echo "In CI, check out with 'fetch-depth: 0', which fetches every tag." >&2
@@ -488,7 +498,7 @@ done
 # A rename or deletion empties the compared set, which `git diff --quiet` reports as
 # clean. Existence on BOTH sides is what makes the covered path set load-bearing.
 missing=""
-for p in "${COVERED_CRATES[@]}" "$GOLDEN_DIR" "$SCENARIO_FIXTURE_DIR" "$SCENARIO_SNAPSHOT_DIR" "$PROTOCOL_FIXTURE_DIR" "$LOCKFILE"; do
+for p in "${COVERED_CRATES[@]}" "$GOLDEN_DIR" "$SCENARIO_FIXTURE_DIR" "$SCENARIO_SNAPSHOT_DIR" "$PROTOCOL_FIXTURE_DIR" "$LOCKFILE" "$BOARD_MANIFEST"; do
     if [ ! -e "$p" ]; then
         missing="${missing}  working tree: ${p}"$'\n'
     fi
@@ -652,6 +662,7 @@ COVERED_FIXTURE_PATHS=()
 COVERED_FIXTURE_PATHS+=("${GOLDEN_PATHS[@]}")
 COVERED_FIXTURE_PATHS+=("${SCENARIO_FILES[@]}")
 COVERED_FIXTURE_PATHS+=("${PROTOCOL_FILES[@]}")
+COVERED_FIXTURE_PATHS+=("$BOARD_MANIFEST")
 
 list_contains() {
     local needle="$1"
@@ -668,6 +679,9 @@ list_contains() {
 path_is_under_fixture() {
     local f="$1"
     local d
+    if [ "$f" = "$BOARD_MANIFEST" ]; then
+        return 0
+    fi
     case "$f" in
         "$GOLDEN_DIR"/*)
             for d in "${GOLDEN_PATHS[@]}"; do
@@ -686,7 +700,7 @@ path_is_under_fixture() {
     return 1
 }
 
-# The covered SOURCE set: every tracked file under the three crate roots that is not part
+# The covered SOURCE set: every tracked file under the five crate roots that is not part
 # of a covered fixture path. crates/fabrico-core/tests/golden/README.md sits under the
 # golden directory but is not inside a fixture directory, so it is source, not a fixture -
 # that boundary is deliberate and stated here because it is the one a reader gets wrong.
@@ -720,7 +734,7 @@ done < <(union_listing "$tracked_listing" "$base_tracked_listing")
 if [ "${#COVERED_SOURCE_PATHS[@]}" -eq 0 ]; then
     echo "FAIL: the covered SOURCE walk came back empty, so the assertion could not be made." >&2
     echo >&2
-    echo "The three covered crate roots hold tracked non-fixture files. A walk that found" >&2
+    echo "The five covered crate roots hold tracked non-fixture files. A walk that found" >&2
     echo "none of them compares clean and would report a green that measured nothing." >&2
     exit 2
 fi
@@ -729,7 +743,7 @@ fi
 # One `git diff` over the whole covered surface, rather than one per path: the comparison
 # below is a set membership test against this listing, which keeps a 250-path walk to a
 # single git invocation.
-if ! changed_listing="$(LC_ALL=C git diff --name-only "$BASE_SHA" -- "${COVERED_CRATES[@]}" "$LOCKFILE" | LC_ALL=C sort)"; then
+if ! changed_listing="$(LC_ALL=C git diff --name-only "$BASE_SHA" -- "${COVERED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" | LC_ALL=C sort)"; then
     echo "FAIL: could not diff the covered paths against '${BASE}', so the assertion could not be made." >&2
     exit 2
 fi
@@ -977,9 +991,9 @@ done
 # never-added .rs file under crates/fabrico-core is INVISIBLE to checks 1 and 2 - it would
 # pass green while a new module sat in the core. `--exclude-standard` honours .gitignore,
 # so build output (target/) and other ignored artefacts do not trip the gate.
-untracked="$(git ls-files --others --exclude-standard -- "${COVERED_CRATES[@]}")"
+untracked="$(git ls-files --others --exclude-standard -- "${COVERED_CRATES[@]}" "$BOARD_MANIFEST")"
 if [ -n "$untracked" ]; then
-    echo "FAIL: untracked new file(s) under the covered crate paths:" >&2
+    echo "FAIL: untracked new file(s) under the covered paths:" >&2
     printf '%s\n' "$untracked" | sed 's/^/  /' >&2
     echo "      A path git has never been told about is invisible to every diff above," >&2
     echo "      so it cannot be declared and cannot be reconciled. Add it and declare it," >&2
@@ -992,7 +1006,7 @@ if ! git diff --quiet "$BASE_SHA" -- "$LOCKFILE"; then
     echo "FAIL: ${LOCKFILE} changed against '${BASE}' (${BASE_SHA:0:12})." >&2
     echo "      A dependency bump can change generated code and therefore serialized bytes" >&2
     echo "      without touching a line under crates/, so the lockfile is covered alongside" >&2
-    echo "      the three crate roots. It is deliberately NOT declarable: a dependency" >&2
+    echo "      the five crate roots. It is deliberately NOT declarable: a dependency" >&2
     echo "      change is a reviewed move of the base tag (see BASE MOVES in this script's" >&2
     echo "      header), not a line appended to a data file. Revert the lockfile change," >&2
     echo "      or move the base as that section describes." >&2
@@ -1004,5 +1018,5 @@ if [ "$failed" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: every covered path reconciles with ${DECLARATION} against ${BASE} (${BASE_SHA:0:12}) - discovered ${golden_count} golden fixture directories, ${scenario_count} scenario files, ${protocol_count} protocol files and ${lockfile_count} lockfile; ${declared_matched} declared move(s) matched."
+echo "OK: every covered path reconciles with ${DECLARATION} against ${BASE} (${BASE_SHA:0:12}) - discovered ${golden_count} golden fixture directories, ${scenario_count} scenario files, ${protocol_count} protocol files, ${lockfile_count} lockfile and 1 board manifest (${BOARD_MANIFEST}); ${declared_matched} declared move(s) matched."
 exit 0

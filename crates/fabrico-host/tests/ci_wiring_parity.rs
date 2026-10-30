@@ -56,8 +56,8 @@
 //! private-residue gate and its prover run once each, in the always-on `private-residue`
 //! job.
 
-/// The annotated tag every declared move is resolved against: the first commit of this
-/// repository.
+/// The annotated tag every declared move is resolved against. It sits on the commit its own
+/// message names.
 const DECLARED_MOVES_BASE_TAG: &str = "public-base";
 
 /// The env key that carries it. Asserted as a LINE PREFIX, never as a substring of the

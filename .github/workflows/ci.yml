@@ -145,8 +145,9 @@ jobs:
   # THE DECLARED-MOVES GATE.
   #
   # `scripts/check-core-declared.sh` compares fabrico-core, fabrico-protocol,
-  # fabrico-scenario and Cargo.lock against the annotated tag `public-base`, the first
-  # commit of this repository. A covered path may move, and the move must be declared in
+  # fabrico-scenario, fabrico-engine, fabrico-qjs-alloc, examples/boards/hashes.manifest
+  # and Cargo.lock against the annotated tag `public-base`, which sits on the commit its
+  # own message names. A covered path may move, and the move must be declared in
   # docs/DECLARED-MOVES.txt with the digest it now carries; an undeclared move, a declared
   # move that did not happen, a digest that does not match, an untracked file under a
   # covered crate and any lockfile change each exit 1 by name. It builds and replays
@@ -196,8 +197,8 @@ jobs:
   # dropped a crate from that list would go green with nothing firing.
   # `scripts/prove-declared-gate-non-vacuous.sh` closes that from outside. It proves a
   # green baseline, a NAMED red for an undeclared source edit, a digest mismatch (with both
-  # digests printed), a declared-but-unmoved entry, an untracked file, a lockfile edit and
-  # a deletion, then a clean tree on the way out, and it reads the gate's covered list by
+  # digests printed), a declared-but-unmoved entry, an untracked file, a lockfile edit, an
+  # edit to the board manifest and a deletion, then a clean tree on the way out, and it reads the gate's covered list by
   # block with comments filtered so the gate's own prose cannot satisfy the check.
   #
   # Every probe runs in a private worktree outside the checkout, restored from bytes kept
@@ -601,7 +602,7 @@ jobs:
       # LINUX-ONLY system deps for the Tauri shell (added 2026-08-17).
       #
       # WHY THIS STEP EXISTS. Every cargo invocation in this job below that is not
-      # scoped with `-p` covers ALL SIX workspace members, and one of them -
+      # scoped with `-p` covers every workspace member, and one of them -
       # `fabrico-app` - is the Tauri 2 shell. `cargo tree -p fabrico-app -e normal`
       # lists webkit2gtk-sys 2.0.2, javascriptcore-rs-sys 1.1.1, soup3-sys 0.5.0 and
       # gtk-sys 0.18.2 as NORMAL (not optional, not dev) dependencies. Those crates
@@ -764,8 +765,8 @@ jobs:
       # check the carried Phase-1 obligation requires (T-3-CI).
       #
       # Already carries `--all-features`, so it does not share the certification
-      # step's blind spot. It carries no `-p`, which means it lints ALL SIX workspace
-      # members including the Tauri shell - that is why the Linux apt step above is a
+      # step's blind spot. It carries no `-p`, which means it lints every workspace
+      # member including the Tauri shell - that is why the Linux apt step above is a
       # precondition for this line, not a nicety. `scripts/determinism-gate-negative-test.sh`
       # in the next step runs this exact command itself, so it has the same precondition.
       # `--no-fail-fast` does not exist for clippy (there is no test harness to abort).

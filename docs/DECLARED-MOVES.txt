@@ -3,17 +3,19 @@
 #
 # Read by scripts/check-core-declared.sh at this exact path. The path is fixed and not
 # configurable: a gate that could be pointed at a different declaration could be pointed
-# at an empty one. It lives outside the three covered crate roots on purpose, so editing
+# at an empty one. It lives outside the covered crate roots on purpose, so editing
 # it is not itself an undeclared change to a covered source file.
 #
-# WHAT THIS FILE IS. The golden corpus, the scenario corpus, the protocol fixtures and the
-# source of fabrico-core, fabrico-protocol and fabrico-scenario are COVERED paths. A
-# covered byte may move, and it must be DECLARED here first, with the digest it is
+# WHAT THIS FILE IS. The golden corpus, the scenario corpus, the protocol fixtures, the
+# board hash manifest (examples/boards/hashes.manifest) and the source of fabrico-core,
+# fabrico-protocol, fabrico-scenario, fabrico-engine and fabrico-qjs-alloc are COVERED
+# paths. A covered byte may move, and it must be DECLARED here first, with the digest it is
 # expected to carry afterwards. An undeclared move exits 1 by name. A declared move that
 # did not happen exits 1 by name too, so a stale entry cannot become a blanket permission.
 #
-# ANCHOR. Every comparison is against the annotated tag `public-base`, cut at the first
-# commit of this repository. Not against HEAD, not against the previous commit.
+# ANCHOR. Every comparison is against the annotated tag `public-base`, which sits on the
+# commit its own message names, and moves only as a reviewed change. Not against HEAD, not
+# against the previous commit.
 #
 # CUMULATIVE. Entries accumulate for as long as the base stays where it is. An entry
 # written for one change is still read, and still asserted, by every later run. DO NOT
@@ -115,8 +117,8 @@
 # WHAT THE [source] SECTION CATCHES, AND WHAT IT DOES NOT
 # =====================================================================================
 #
-# [source] is a PATH LIST WITH NO DIGESTS. It catches an edit to a core, protocol or
-# scenario source file that was not declared. It is checked in BOTH directions, exactly
+# [source] is a PATH LIST WITH NO DIGESTS. It catches an edit to a core, protocol,
+# scenario, engine or allocator source file that was not declared. It is checked in BOTH directions, exactly
 # as [fixtures] is: a changed source file that is not listed exits 1, and a listed source
 # file that did not change also exits 1.
 #
