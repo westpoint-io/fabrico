@@ -1,51 +1,37 @@
 import { expect, test } from '@playwright/test';
-import { frameBudgetMs } from '../e2e/support/frameSampler';
-import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
-import type { TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
+import { LESSONS } from '../src/tutorial/lessons';
+import { openLessonsFromHelp, readProbe, startLesson, walkLesson } from './support/lessonRunner';
 import { expectRenderLoopAlive, readScene, resetToDemo, restoreHostAfterFailedTest, waitForAppReady, watchPageErrors } from './support/oracle';
 
-// lessons.walk.ts - plays each lesson on the real host, the way a user would.
-
-/**
- * Drawn frames a New may take to arrive: a playing board drains before it swaps, which is the
- * host's own round trip and can run to some seconds.
- */
-const SWAP_FRAMES = 60;
+// lessons.walk.ts - plays each lesson on the real host, the way a user would. One test per lesson,
+// generated from the data the app runs, so a lesson that adds steps needs no edit here.
 
 test.afterEach(async ({ page }, testInfo) => {
   await restoreHostAfterFailedTest(page, testInfo);
 });
 
-test(`lesson ${YOUR_FIRST_LINE.id}`, async ({ page }) => {
-  const errors = watchPageErrors(page);
-  await page.goto('/');
-  await waitForAppReady(page);
-  await resetToDemo(page);
+for (const lesson of LESSONS) {
+  test(`lesson ${lesson.id}`, async ({ page }) => {
+    const errors = watchPageErrors(page);
+    await page.goto('/');
+    await waitForAppReady(page);
+    await resetToDemo(page);
 
-  await page.getByRole('button', { name: 'Help', exact: true }).click();
-  await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
-  await page.getByRole('button', { name: `Start ${YOUR_FIRST_LINE.title}`, exact: true }).click();
+    await openLessonsFromHelp(page);
+    await startLesson(page, lesson);
 
-  const probe = (): Promise<TutorialProbe> =>
-    page.evaluate(() => {
-      const hook = (window as unknown as { __fabrico?: { tutorial?(): TutorialProbe } }).__fabrico;
-      if (typeof hook?.tutorial !== 'function') throw new Error('window.__fabrico.tutorial() not installed');
-      return hook.tutorial();
-    });
-  await expect
-    .poll(async () => (await probe()).card, {
-      message: `${YOUR_FIRST_LINE.id}: the lesson reached running after Start`,
-      timeout: frameBudgetMs(SWAP_FRAMES),
-    })
-    .toBe('running');
+    const running = await readProbe(page);
+    expect(running.stepIndex, `${lesson.id}: the lesson starts on its first step`).toBe(0);
+    expect(running.stepCount, `${lesson.id}: the probe counts the lesson's steps`).toBe(lesson.steps.length);
+    // The demo's machines would finish the first step if they had survived Start.
+    const scene = await readScene(page);
+    expect(scene.nodes, `${lesson.id}: Start left no machine from the old board`).toEqual([]);
+    expect(scene.belts, `${lesson.id}: Start left no belt from the old board`).toEqual([]);
 
-  const running = await probe();
-  expect(running.stepIndex, `${YOUR_FIRST_LINE.id}: the lesson starts on its first step`).toBe(0);
-  expect(running.stepCount, `${YOUR_FIRST_LINE.id}: the probe counts the lesson's steps`).toBe(2);
-  const scene = await readScene(page);
-  expect(scene.nodes, `${YOUR_FIRST_LINE.id}: Start left no machine from the old board`).toEqual([]);
-  expect(scene.belts, `${YOUR_FIRST_LINE.id}: Start left no belt from the old board`).toEqual([]);
+    await walkLesson(page, lesson);
 
-  await expectRenderLoopAlive(page, 'after a lesson started');
-  errors.assertNone('while a lesson started');
-});
+    expect((await readProbe(page)).card, `${lesson.id}: the lesson finished`).toBe('finished');
+    await expectRenderLoopAlive(page, `after lesson ${lesson.id}`);
+    errors.assertNone(`during lesson ${lesson.id}`);
+  });
+}
