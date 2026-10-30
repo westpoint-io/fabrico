@@ -32,6 +32,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use fabrico_host::project::load_project;
+use fabrico_scenario::oracle::tick_hash;
 
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
@@ -55,9 +57,34 @@ fn main() -> ExitCode {
     }
 }
 
-/// Not written yet: the tests below describe it.
-fn report_for_path(_path: &Path) -> Result<String, String> {
-    Ok(String::new())
+/// Load `path` into a throwaway work dir and print its tick, hash and edit lines.
+///
+/// A broken edit log is an error here rather than an empty list: a comparison over a log
+/// that failed to read would pass for the wrong reason.
+fn report_for_path(path: &Path) -> Result<String, String> {
+    if !path.exists() {
+        return Err(format!("{} does not exist.", path.display()));
+    }
+    // `load_project` requires a fresh, empty work dir, and this reader never writes beside
+    // the bundle it is reading.
+    let work_dir = tempfile::tempdir()
+        .map_err(|e| format!("could not open a temporary work directory: {e}"))?;
+    let host = load_project(path, work_dir.path(), None)
+        .map_err(|e| format!("{} could not be read: {e}", path.display()))?;
+    let edits = host
+        .logged_edits()
+        .map_err(|e| format!("{} holds an edit log that could not be read: {e}", path.display()))?;
+
+    let mut out = String::new();
+    out.push_str(&format!("tick {}\n", host.core().tick));
+    out.push_str(&format!("hash {}\n", tick_hash(host.core())));
+    for edit in &edits {
+        out.push_str(&format!(
+            "edit {} {} {} {:?}\n",
+            edit.sequence, edit.tick, edit.action, edit.op
+        ));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -67,7 +94,6 @@ mod tests {
     //! sets `test = true` in `crates/fabrico-host/Cargo.toml` so these run at all.
 
     use super::*;
-    use fabrico_scenario::oracle::tick_hash;
     use fabrico_core::command::{Command, ResultEvent};
     use fabrico_core::core::Core;
     use fabrico_core::event::{EventPayload, LogHeader, SCHEMA_VERSION};
