@@ -10,9 +10,11 @@
 import type { CSSProperties, JSX } from 'react';
 import { phrase } from '../../tutorial/phrase';
 import type { PhraseToken } from '../../tutorial/types';
+import { SIM_STOPPED_COPY } from '../SimStoppedCard';
 
 export type StepCardView =
   | { state: 'starting' }
+  | { state: 'swapped' }
   | { state: 'running'; stepNumber: number; stepCount: number; note: readonly PhraseToken[] | null; text: readonly PhraseToken[] }
   | { state: 'finished'; text: readonly PhraseToken[] };
 
@@ -21,6 +23,10 @@ export interface StepCardProps {
   onLeave: () => void;
   onBackToLessons: () => void;
   onKeepBuilding: () => void;
+  /** Start the lesson again, behind the same unsaved-work question as New. */
+  onRestart?: () => void;
+  /** New can't reach a stopped host, so Restart says so. Leave sends nothing and still works. */
+  simStopped?: boolean;
 }
 
 const textStyle: CSSProperties = {
@@ -51,7 +57,7 @@ function Words({ tokens }: { tokens: readonly PhraseToken[] }): JSX.Element {
 /** A press on a card button must not leave focus on it, or Space would stop reaching the board. */
 const keepFocusOff = (ev: { preventDefault(): void }): void => ev.preventDefault();
 
-function Buttons({ view, onLeave, onBackToLessons, onKeepBuilding }: StepCardProps): JSX.Element {
+function Buttons({ view, onLeave, onBackToLessons, onKeepBuilding, onRestart, simStopped }: StepCardProps): JSX.Element {
   if (view.state === 'finished') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--fab-space-sm)', pointerEvents: 'auto' }}>
@@ -60,6 +66,26 @@ function Buttons({ view, onLeave, onBackToLessons, onKeepBuilding }: StepCardPro
         </button>
         <button type="button" className="fab-cta" onMouseDown={keepFocusOff} onClick={onKeepBuilding}>
           Keep building
+        </button>
+      </div>
+    );
+  }
+  if (view.state === 'swapped') {
+    const stopped = simStopped === true;
+    return (
+      <div style={{ alignSelf: 'end', display: 'flex', gap: 'var(--fab-space-sm)', pointerEvents: 'auto' }}>
+        <button
+          type="button"
+          className="fab-cta"
+          disabled={stopped}
+          {...(stopped ? { title: SIM_STOPPED_COPY.disabledTitle } : {})}
+          onMouseDown={keepFocusOff}
+          onClick={onRestart}
+        >
+          Restart
+        </button>
+        <button type="button" className="fab-tool-btn fab-tool-btn--labeled" onMouseDown={keepFocusOff} onClick={onLeave}>
+          Leave
         </button>
       </div>
     );
@@ -105,6 +131,12 @@ export function StepCard(props: StepCardProps): JSX.Element {
         style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--fab-space-sm)' }}
       >
         {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
+        {view.state === 'swapped' && (
+          <>
+            <p style={{ ...textStyle, fontWeight: 700 }}>Lesson paused</p>
+            <p style={textStyle}>The board changed, so this lesson stopped. Restart it, or leave it.</p>
+          </>
+        )}
         {view.state === 'running' && (
           <>
             {view.note !== null && <Words tokens={view.note} />}

@@ -6,6 +6,7 @@
 
 import { CELL } from '../../shared/geometry';
 import { beltJoining, evaluateCheck, lowestSlotInto, nodeKey } from './check';
+import type { Progress } from './progress';
 import type {
   BindingName,
   BoardFacts,
@@ -51,11 +52,11 @@ export interface StepBaseline {
   generation: number;
 }
 
-export type Card = 'none' | 'starting' | 'running' | 'finished';
+export type Card = 'none' | 'starting' | 'running' | 'swapped' | 'finished';
 
 /** What the card says about steps the user didn't do. `a` and `b` are step numbers, counted from 1. */
 export interface LessonNote {
-  kind: 'skippedOne' | 'skippedMany' | 'alreadyRunning';
+  kind: 'skippedOne' | 'skippedMany' | 'alreadyRunning' | 'wentBack';
   a: number;
   b: number;
 }
@@ -64,8 +65,15 @@ export interface TutorialState {
   card: Card;
   lessonId: LessonId | null;
   stepIndex: number;
-  /** The swap floor when New was sent. A board swapped in after it has a higher one. */
+  /**
+   * While starting, the swap floor when New was sent. From the first frame of the new board on, that
+   * board's own floor. A board swapped in after either has a higher one.
+   */
   floor: number;
+  /** The floor of the board the lesson was left on, or null when it wasn't left on a running step. */
+  leftFloor: number | null;
+  /** Set by Resume until the next frame, which counts every step already true as one the user didn't do here. */
+  rechecking: boolean;
   bindings: Partial<Record<BindingName, BoundNode>>;
   baseline: StepBaseline | null;
   /** The floor spot of the stage showing now, fixed in world cells when that stage begins, so it follows pan and zoom. */
@@ -78,6 +86,8 @@ export const IDLE: TutorialState = {
   lessonId: null,
   stepIndex: 0,
   floor: 0,
+  leftFloor: null,
+  rechecking: false,
   bindings: {},
   baseline: null,
   spot: null,
@@ -87,6 +97,8 @@ export const IDLE: TutorialState = {
 export type TutorialEvent =
   | { type: 'newSent'; lessonId: LessonId; floorAtSend: number }
   | { type: 'left' }
+  | { type: 'resumed' }
+  | { type: 'cancelledRun' }
   | { type: 'frame'; board: BoardFacts; chrome: ChromeFacts };
 
 /** The value the ring records as `data-fab-hint-stage`. The step index is in it because a stage id can recur across steps. */
@@ -110,6 +122,7 @@ export function viewKey(s: TutorialState): string {
 export function noteTokens(note: LessonNote): readonly PhraseToken[] {
   if (note.kind === 'skippedOne') return [`Step ${note.a} was already done, so the lesson moved on.`];
   if (note.kind === 'skippedMany') return [`Steps ${note.a} to ${note.b} were already done, so the lesson moved on.`];
+  if (note.kind === 'wentBack') return [`Step ${note.a} needs doing again, so the lesson went back.`];
   return [`The board was already running, so step ${note.a} is done. `, { key: 'playPause' }, ' pauses it.'];
 }
 
@@ -262,11 +275,72 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
   }
   if (finished === 0) return next;
   const lastDone = s.stepIndex + finished;
+  // The first step finished in a pass is the one the user was on, unless they've only just come back
+  // from leaving: then they did all of them somewhere the card couldn't see.
+  const firstSkipped = s.rechecking ? s.stepIndex + 1 : s.stepIndex + 2;
   let note: LessonNote | null = null;
-  if (finished === 2) note = { kind: 'skippedOne', a: lastDone, b: lastDone };
-  else if (finished > 2) note = { kind: 'skippedMany', a: s.stepIndex + 2, b: lastDone };
-  else if (endedOnRunningBoard) note = { kind: 'alreadyRunning', a: lastDone, b: lastDone };
+  if (finished === 1 && endedOnRunningBoard) note = { kind: 'alreadyRunning', a: lastDone, b: lastDone };
+  else if (firstSkipped === lastDone) note = { kind: 'skippedOne', a: lastDone, b: lastDone };
+  else if (firstSkipped < lastDone) note = { kind: 'skippedMany', a: firstSkipped, b: lastDone };
   return { ...next, note };
+}
+
+/** Does an earlier step's result still stand? Only a structural step can stop standing: 5 and 6 are latched. */
+function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: ChromeFacts): boolean {
+  switch (check.is) {
+    case 'nodeAppeared': {
+      const bound = s.bindings[check.bind];
+      return bound !== undefined && board.nodes.some((n) => nodeKey(n) === bound.nodeKey);
+    }
+    case 'triggerApplied': {
+      // No answer yet isn't an answer of Webhook, and an answer about an older handle isn't about this machine.
+      const applied = chrome.appliedTrigger;
+      return !(applied !== null && applied.node === s.bindings[check.of]?.id && applied.kind !== check.trigger);
+    }
+    case 'beltJoins': {
+      const a = s.bindings[check.a];
+      const b = s.bindings[check.b];
+      return a !== undefined && b !== undefined && beltJoining(board, a.id, b.id) !== undefined;
+    }
+    case 'tickRose':
+    case 'itemArrived':
+      return true;
+  }
+}
+
+/** The binding a check leaves behind, if any. */
+function bindingOf(check: Check): BindingName | null {
+  return check.is === 'nodeAppeared' || check.is === 'beltJoins' ? check.bind : null;
+}
+
+/**
+ * If Undo, Delete or a config change took away an earlier step's result, go back to the earliest such
+ * step. The bindings from it on are cleared and their keys forgotten, so a machine that's still there
+ * counts again when its step comes back round.
+ */
+function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
+  const steps = lessons.find((l) => l.id === s.lessonId)?.steps;
+  if (steps === undefined || s.baseline === null) return s;
+  const gone = steps.slice(0, s.stepIndex).findIndex((step) => !stillStands(step.done, s, board, chrome));
+  if (gone < 0) return s;
+  const bindings = { ...s.bindings };
+  const forgotten = new Set<string>();
+  for (const step of steps.slice(gone)) {
+    const name = bindingOf(step.done);
+    if (name === null) continue;
+    const key = bindings[name]?.nodeKey;
+    if (key !== undefined) forgotten.add(key);
+    delete bindings[name];
+  }
+  const knownKeys = s.baseline.knownKeys.filter((key) => !forgotten.has(key));
+  return {
+    ...s,
+    stepIndex: gone,
+    bindings,
+    baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings),
+    spot: null,
+    note: { kind: 'wentBack', a: gone + 1, b: gone + 1 },
+  };
 }
 
 /** Find each bound thing again by its key, so a handle re-minted by Undo keeps its binding. */
@@ -297,7 +371,14 @@ function withWatchRead(s: TutorialState, board: BoardFacts, lessons: readonly Le
 
 /** One frame of a running lesson. The check reads last frame's slot, and only then is it replaced. */
 function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
-  return withSpot(withWatchRead(advance(rebound(s, board), board, chrome, lessons), board, lessons), board, chrome, lessons);
+  const found = rebound(s, board);
+  const checked = withGoingBack(found, board, chrome, lessons);
+  let next = advance(checked, board, chrome, lessons);
+  // A machine moved to another cell has a new key, so its step goes back and finishes again in this one
+  // pass. The user is on the step they were on, and there's nothing to tell them.
+  if (checked !== found && next.card === 'running' && next.stepIndex >= found.stepIndex) next = { ...next, note: found.note };
+  if (next.rechecking) next = { ...next, rechecking: false };
+  return withSpot(withWatchRead(next, board, lessons), board, chrome, lessons);
 }
 
 export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Lesson[]): TutorialState {
@@ -305,8 +386,17 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
     return { ...IDLE, card: 'starting', lessonId: e.lessonId, floor: e.floorAtSend };
   }
   if (e.type === 'left') {
-    // The board stays, and so do the step index, bindings and baseline, so the lesson can resume.
-    return { ...s, card: 'none' };
+    // The board stays, and so do the step index, bindings and baseline, so the lesson can resume. Only
+    // a running step can come back: a lesson still starting has no step yet, and a swapped one has lost
+    // its board.
+    return { ...s, card: 'none', leftFloor: s.card === 'running' ? s.floor : null };
+  }
+  if (e.type === 'resumed') {
+    if (s.card !== 'none' || s.leftFloor === null) return s;
+    return { ...s, card: 'running', leftFloor: null, note: null, rechecking: true };
+  }
+  if (e.type === 'cancelledRun') {
+    return IDLE;
   }
   if (s.card === 'starting') {
     // The swap floor, not the generation: Undo raises the generation too, and only a real swap
@@ -317,6 +407,7 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
       ...s,
       card: 'running',
       stepIndex: 0,
+      floor: e.board.swapFloor,
       baseline: baselineFor(
         lessons.find((l) => l.id === s.lessonId)?.steps[0],
         e.board.nodes.map(nodeKey),
@@ -328,7 +419,61 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
     return runFrame(running, e.board, e.chrome, lessons);
   }
   if (s.card === 'running') {
+    // The swap floor again. Undo raises the generation and keeps the lesson going; only Load, an example
+    // or New raises this, and the lesson never carries on against a board it didn't start on.
+    if (e.board.swapFloor > s.floor) return { ...s, card: 'swapped', spot: null, note: null, rechecking: false };
     return runFrame(s, e.board, e.chrome, lessons);
   }
   return s;
+}
+
+export type RowStatus = 'notStarted' | 'inProgress' | 'done';
+export type RowAction = 'start' | 'resume' | 'restart';
+
+export interface RowView {
+  id: LessonId;
+  title: string;
+  status: RowStatus;
+  actions: readonly RowAction[];
+  /** The one action drawn in the accent. Only the first lesson that isn't done can have one. */
+  accent: RowAction | null;
+  disabled: boolean;
+}
+
+function rowOf(lesson: Lesson, progress: Progress, state: TutorialState, swapFloor: number): Pick<RowView, 'status' | 'actions'> {
+  const run = state.lessonId === lesson.id ? state : null;
+  const card = run?.card ?? 'none';
+  if (card === 'starting' || card === 'running' || card === 'swapped') return { status: 'inProgress', actions: ['restart'] };
+  // A lesson never carries on against another board, so Resume needs the board it was left on.
+  if (run !== null && card === 'none' && run.leftFloor !== null && run.leftFloor === swapFloor) {
+    return { status: 'inProgress', actions: ['resume', 'restart'] };
+  }
+  const stored = progress.lessons[lesson.id];
+  if (card === 'finished' || stored === 'done') return { status: 'done', actions: ['restart'] };
+  if (stored === 'inProgress') return { status: 'inProgress', actions: ['restart'] };
+  return { status: 'notStarted', actions: ['start'] };
+}
+
+/**
+ * The list's rows, in the order of the lessons. Done sticks in the store, and a live run reads In
+ * progress on top of it. Restart is never the accent, because it replaces the board.
+ */
+export function rowViews(args: {
+  lessons: readonly Lesson[];
+  progress: Progress;
+  state: TutorialState;
+  swapFloor: number;
+  simStopped: boolean;
+}): RowView[] {
+  const { lessons, progress, state, swapFloor, simStopped } = args;
+  const rows = lessons.map((lesson) => ({ lesson, ...rowOf(lesson, progress, state, swapFloor) }));
+  const first = rows.find((row) => row.status !== 'done');
+  return rows.map(({ lesson, status, actions }) => ({
+    id: lesson.id,
+    title: lesson.title,
+    status,
+    actions,
+    accent: lesson === first?.lesson ? (actions.find((a) => a === 'start' || a === 'resume') ?? null) : null,
+    disabled: simStopped,
+  }));
 }

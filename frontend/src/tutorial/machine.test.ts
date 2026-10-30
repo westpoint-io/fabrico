@@ -251,9 +251,11 @@ describe('reduce: bindings follow a re-minted handle', () => {
     expect(next.bindings.source).toEqual({ nodeKey: '0@2,2', id: 40 });
   });
 
-  it('keeps the old handle when the machine is gone', () => {
+  it("a machine that's gone loses its binding, because its step has to be done again", () => {
     const s = frame(started(), { nodes: [THE_SOURCE] });
-    expect(frame(s, { nodes: [] }).bindings.source?.id).toBe(THE_SOURCE.id);
+    const next = frame(s, { nodes: [] });
+    expect(next.bindings.source).toBeUndefined();
+    expect(next.stepIndex).toBe(0);
   });
 
   it('follows the bound belt through re-minted machines', () => {
