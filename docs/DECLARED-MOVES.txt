@@ -6,7 +6,8 @@
 # at an empty one. It lives outside the covered crate roots on purpose, so editing
 # it is not itself an undeclared change to a covered source file.
 #
-# WHAT THIS FILE IS. The golden corpus, the scenario corpus, the protocol fixtures, the
+# WHAT THIS FILE IS. The golden corpus, the scenario corpus, the protocol fixtures, the host
+# parity fixtures (crates/fabrico-host/tests/fixtures/host_parity), the
 # board hash manifest (examples/boards/hashes.manifest) and the source of fabrico-core,
 # fabrico-protocol, fabrico-scenario, fabrico-engine and fabrico-qjs-alloc are COVERED
 # paths. A covered byte may move, and it must be DECLARED here first, with the digest it is
@@ -149,6 +150,11 @@
 # The board hash manifest gets its first real lines: one per board file, with the end tick and the
 # final hash the generator measured. The boards and the fold are unchanged.
 examples/boards/hashes.manifest cab238c5c1e3c4dff8124820e2e0ea03e6060c2e96b09eac6bab023b8c303ae5
+# The host parity fixtures join the covered set (review 93 WR-06), so a re-record can't pass unseen.
+# The base tag predates them, so they read as additions. These are the bytes commit bc20bb7 recorded.
+crates/fabrico-host/tests/fixtures/host_parity/advanced.hashes cf283b2af3aeb659f22b502f92747d1f3f6bee2593cea6b65bfee4c79fee0e01
+crates/fabrico-host/tests/fixtures/host_parity/demo_scene.hashes 1a6dcd7112d01d8b724e38c0bec3387ae860acb0872d1f4df97d885ea93ef0ec
+crates/fabrico-host/tests/fixtures/host_parity/order_processing.hashes a86eb413eb53317cb75bddda5c8628ecf349d6ed901a17e6936b4e48414b8b2c
 
 [source]
 # The Factory memory limit moves into an allocator, so it stops depending on QuickJS's

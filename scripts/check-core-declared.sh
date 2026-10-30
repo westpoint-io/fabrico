@@ -13,9 +13,10 @@
 # WHAT IT ASSERTS, against a named base ref (by default the annotated tag `public-base`,
 # which sits on the commit its own message names):
 #
-#   1. [fixtures], in BOTH directions, over four corpora and one file: the golden fixture
+#   1. [fixtures], in BOTH directions, over five corpora and one file: the golden fixture
 #      directories under crates/fabrico-core/tests/golden, the scenario fixtures and
-#      snapshots, the protocol fixtures, and the board hash manifest
+#      snapshots, the protocol fixtures, the host parity fixtures under
+#      crates/fabrico-host/tests/fixtures/host_parity, and the board hash manifest
 #      examples/boards/hashes.manifest.
 #        - a covered path that DIFFERS from the base and is not declared is named;
 #        - a declared path that did NOT differ is named (a stale entry must never become
@@ -38,7 +39,7 @@
 #   digest, because an absent path has no bytes to digest; a DELETED source path is
 #   declared the way every source path is, as a bare path under [source].
 #
-#   3. No UNTRACKED file under the five covered crate roots or at the manifest path. A diff against a commit
+#   3. No UNTRACKED file under the five covered crate roots, under the host parity fixtures or at the manifest path. A diff against a commit
 #      cannot see a file git has never been told about, so a brand-new module would ride
 #      in green without this walk.
 #
@@ -159,6 +160,14 @@ LOCKFILE="Cargo.lock"
 # those four makes an edit to it pass unseen. It is declared under [fixtures], with a digest.
 BOARD_MANIFEST="examples/boards/hashes.manifest"
 
+# The host parity fixtures, one hash per tick of the host's tick loop on each shipped scene.
+# crates/fabrico-host/tests/host_parity.rs calls them the only record of how the loop behaved and
+# says not to re-record them, and a re-record there turns that test green, so this gate is what
+# sees it. fabrico-host is not a covered crate, so the directory is named here and added to the
+# existence guard, the diff, the untracked walk and the fixture set, as the manifest is. Each file
+# is one covered path, declared under [fixtures] with a digest.
+HOST_PARITY_FIXTURE_DIR="crates/fabrico-host/tests/fixtures/host_parity"
+
 # The golden corpus has well over 20 fixture directories at the base. The floor is
 # deliberately well below that: it exists to catch a walk that discovers NOTHING (wrong
 # cwd, moved directory, broken find), not to pin the exact corpus size - which
@@ -217,13 +226,15 @@ with the digest the path is expected to carry afterwards.
 
 Four checks:
   1. [fixtures], both directions, over the golden fixture directories, the scenario
-     fixtures and snapshots, the protocol fixtures and examples/boards/hashes.manifest.
+     fixtures and snapshots, the protocol fixtures, the host parity fixtures and
+     examples/boards/hashes.manifest.
      An undeclared move is named; a
      declared path that did not move is named; a digest that does not match the declared
      one is named with BOTH digests printed.
   2. [source], both directions, over the tracked non-fixture files under the five
      covered crate roots. A path list with no digests.
-  3. No untracked new file under the covered crate roots or at the manifest path.
+  3. No untracked new file under the covered crate roots, under the host parity fixtures or
+     at the manifest path.
   4. Cargo.lock byte-identity. The lockfile is deliberately NOT declarable.
 
 Both covered sets are the UNION of the working tree and the base ref, so a DELETED path is
@@ -252,8 +263,8 @@ Exit codes:
      the floor). This is a FAILURE, not a pass: an assertion that measures nothing must
      never be green.
 
-That the covered path set is still all five crate roots plus the lockfile and the board
-manifest is checked by
+That the covered path set is still all five crate roots plus the lockfile, the board
+manifest and the host parity fixtures is checked by
 something OTHER than this script, because this script cannot see its own COVERED_CRATES
 array:
     bash scripts/prove-declared-gate-non-vacuous.sh --base public-base
@@ -512,6 +523,13 @@ for p in "${COVERED_CRATES[@]}" "$GOLDEN_DIR" "$SCENARIO_FIXTURE_DIR" "$SCENARIO
     fi
 done
 
+# On disk only, for now. The base tag predates the host parity fixtures, so at that base they are
+# ADDITIONS: the union below walks them, and [fixtures] declares them. Once the tag moves past
+# them, this directory can join the loop above.
+if [ ! -d "$HOST_PARITY_FIXTURE_DIR" ]; then
+    missing="${missing}  working tree: ${HOST_PARITY_FIXTURE_DIR}"$'\n'
+fi
+
 if [ -n "$missing" ]; then
     echo "FAIL: a covered path is missing, so the assertion could not be made:" >&2
     printf '%s' "$missing" >&2
@@ -522,7 +540,7 @@ if [ -n "$missing" ]; then
     exit 2
 fi
 
-# --- Discovery, all four corpora, on BOTH sides ---------------------------------------
+# --- Discovery, all five corpora, on BOTH sides ---------------------------------------
 # Golden fixtures are discovered by their hashes.txt manifest (the file
 # scripts/regen-golden.sh writes), so a stray non-fixture directory cannot inflate the
 # count. LC_ALL=C sort keeps the walk order stable across locales.
@@ -615,6 +633,14 @@ if ! base_protocol_listing="$(LC_ALL=C git ls-tree -r --name-only "$BASE_SHA" --
     echo "FAIL: could not list ${PROTOCOL_FIXTURE_DIR} at '${BASE}', so the assertion could not be made." >&2
     exit 2
 fi
+if ! host_parity_listing="$(LC_ALL=C git ls-files -- "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort)"; then
+    echo "FAIL: could not list ${HOST_PARITY_FIXTURE_DIR}, so the assertion could not be made." >&2
+    exit 2
+fi
+if ! base_host_parity_listing="$(LC_ALL=C git ls-tree -r --name-only "$BASE_SHA" -- "$HOST_PARITY_FIXTURE_DIR")"; then
+    echo "FAIL: could not list ${HOST_PARITY_FIXTURE_DIR} at '${BASE}', so the assertion could not be made." >&2
+    exit 2
+fi
 
 # Folds a working-tree listing and a base listing into ONE sorted, de-duplicated list. A
 # path present on either side is a covered path: present-only-at-base is a DELETION and
@@ -642,18 +668,28 @@ if [ -n "$protocol_both" ]; then
         PROTOCOL_FILES+=("$f")
     done <<<"$protocol_both"
 fi
+HOST_PARITY_FILES=()
+host_parity_both="$(union_listing "$host_parity_listing" "$base_host_parity_listing")"
+if [ -n "$host_parity_both" ]; then
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        HOST_PARITY_FILES+=("$f")
+    done <<<"$host_parity_both"
+fi
 
 scenario_count="${#SCENARIO_FILES[@]}"
 protocol_count="${#PROTOCOL_FILES[@]}"
+host_parity_count="${#HOST_PARITY_FILES[@]}"
 lockfile_count=1
 
-# A zero on ANY of the four discovery counts is a walk that found nothing, and a walk that
+# A zero on ANY of the discovery counts is a walk that found nothing, and a walk that
 # found nothing compares clean. The OK line reports all four for exactly this reason: a
 # reader who sees a zero there is looking at a green that measured nothing.
-if [ "$scenario_count" -eq 0 ] || [ "$protocol_count" -eq 0 ]; then
+if [ "$scenario_count" -eq 0 ] || [ "$protocol_count" -eq 0 ] || [ "$host_parity_count" -eq 0 ]; then
     echo "FAIL: a corpus discovery walk came back EMPTY, so the assertion could not be made:" >&2
     echo "        scenario files: ${scenario_count}" >&2
     echo "        protocol files: ${protocol_count}" >&2
+    echo "        host parity files: ${host_parity_count}" >&2
     echo >&2
     echo "An empty corpus compares clean against any base. This is a hard failure rather" >&2
     echo "than a green with a zero in it." >&2
@@ -667,6 +703,7 @@ COVERED_FIXTURE_PATHS=()
 COVERED_FIXTURE_PATHS+=("${GOLDEN_PATHS[@]}")
 COVERED_FIXTURE_PATHS+=("${SCENARIO_FILES[@]}")
 COVERED_FIXTURE_PATHS+=("${PROTOCOL_FILES[@]}")
+COVERED_FIXTURE_PATHS+=("${HOST_PARITY_FILES[@]}")
 COVERED_FIXTURE_PATHS+=("$BOARD_MANIFEST")
 
 list_contains() {
@@ -748,7 +785,7 @@ fi
 # One `git diff` over the whole covered surface, rather than one per path: the comparison
 # below is a set membership test against this listing, which keeps a 250-path walk to a
 # single git invocation.
-if ! changed_listing="$(LC_ALL=C git diff --name-only "$BASE_SHA" -- "${COVERED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" | LC_ALL=C sort)"; then
+if ! changed_listing="$(LC_ALL=C git diff --name-only "$BASE_SHA" -- "${COVERED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort)"; then
     echo "FAIL: could not diff the covered paths against '${BASE}', so the assertion could not be made." >&2
     exit 2
 fi
@@ -863,7 +900,8 @@ if [ "${#DECLARED_FIX_PATHS[@]}" -gt 0 ]; then
             echo "FAIL: [fixtures] declares '${dp}', which is not a covered fixture path." >&2
             echo "      Covered fixture paths are the golden fixture DIRECTORIES under" >&2
             echo "      ${GOLDEN_DIR}, the files under ${SCENARIO_FIXTURE_DIR} and" >&2
-            echo "      ${SCENARIO_SNAPSHOT_DIR}, and the files under ${PROTOCOL_FIXTURE_DIR}." >&2
+            echo "      ${SCENARIO_SNAPSHOT_DIR}, the files under ${PROTOCOL_FIXTURE_DIR}, the files" >&2
+            echo "      under ${HOST_PARITY_FIXTURE_DIR}, and ${BOARD_MANIFEST}." >&2
             echo "      A source path belongs in [source], which carries no digest." >&2
             failed=1
             continue
@@ -996,7 +1034,7 @@ done
 # never-added .rs file under crates/fabrico-core is INVISIBLE to checks 1 and 2 - it would
 # pass green while a new module sat in the core. `--exclude-standard` honours .gitignore,
 # so build output (target/) and other ignored artefacts do not trip the gate.
-untracked="$(git ls-files --others --exclude-standard -- "${COVERED_CRATES[@]}" "$BOARD_MANIFEST")"
+untracked="$(git ls-files --others --exclude-standard -- "${COVERED_CRATES[@]}" "$BOARD_MANIFEST" "$HOST_PARITY_FIXTURE_DIR")"
 if [ -n "$untracked" ]; then
     echo "FAIL: untracked new file(s) under the covered paths:" >&2
     printf '%s\n' "$untracked" | sed 's/^/  /' >&2
@@ -1023,5 +1061,5 @@ if [ "$failed" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: every covered path reconciles with ${DECLARATION} against ${BASE} (${BASE_SHA:0:12}) - discovered ${golden_count} golden fixture directories, ${scenario_count} scenario files, ${protocol_count} protocol files, ${lockfile_count} lockfile and 1 board manifest (${BOARD_MANIFEST}); ${declared_matched} declared move(s) matched."
+echo "OK: every covered path reconciles with ${DECLARATION} against ${BASE} (${BASE_SHA:0:12}) - discovered ${golden_count} golden fixture directories, ${scenario_count} scenario files, ${protocol_count} protocol files, ${host_parity_count} host parity files, ${lockfile_count} lockfile and 1 board manifest (${BOARD_MANIFEST}); ${declared_matched} declared move(s) matched."
 exit 0

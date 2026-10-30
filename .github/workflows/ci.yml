@@ -145,8 +145,8 @@ jobs:
   # THE DECLARED-MOVES GATE.
   #
   # `scripts/check-core-declared.sh` compares fabrico-core, fabrico-protocol,
-  # fabrico-scenario, fabrico-engine, fabrico-qjs-alloc, examples/boards/hashes.manifest
-  # and Cargo.lock against the annotated tag `public-base`, which sits on the commit its
+  # fabrico-scenario, fabrico-engine, fabrico-qjs-alloc, examples/boards/hashes.manifest,
+  # the host parity fixtures and Cargo.lock against the annotated tag `public-base`, which sits on the commit its
   # own message names. A covered path may move, and the move must be declared in
   # docs/DECLARED-MOVES.txt with the digest it now carries; an undeclared move, a declared
   # move that did not happen, a digest that does not match, an untracked file under a
@@ -198,7 +198,7 @@ jobs:
   # `scripts/prove-declared-gate-non-vacuous.sh` closes that from outside. It proves a
   # green baseline, a NAMED red for an undeclared source edit, a digest mismatch (with both
   # digests printed), a declared-but-unmoved entry, an untracked file, a lockfile edit, an
-  # edit to the board manifest and a deletion, then a clean tree on the way out, and it reads the gate's covered list by
+  # edit to the board manifest, a re-recorded host parity fixture and a deletion, then a clean tree on the way out, and it reads the gate's covered list by
   # block with comments filtered so the gate's own prose cannot satisfy the check.
   #
   # Every probe runs in a private worktree outside the checkout, restored from bytes kept

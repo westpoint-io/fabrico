@@ -13,8 +13,8 @@
 # So the proof is a COMMITTED SCRIPT THAT RUNS IN CI, not one manual probe recorded in
 # prose. ACCEPTANCE IS THIS SCRIPT'S EXIT CODE, NEVER A SOURCE GREP.
 #
-# WHAT IS ASSERTED - ten properties. Numbers 1 to 8 are listed in run order; numbers 10 and
-# 9 RUN just before number 8, so that number 8 stays this script's exit condition:
+# WHAT IS ASSERTED - eleven properties. Numbers 1 to 8 are listed in run order; numbers 10, 11
+# and 9 RUN just before number 8, so that number 8 stays this script's exit condition:
 #
 #   1. BASELINE GREEN. With no probe applied, the gate exits 0 over the COMMITTED
 #      declaration. Without this every red below proves nothing: a tree already dirty
@@ -30,10 +30,11 @@
 #   5. THE UNTRACKED WALK BITES. A brand-new untracked file under a covered path exits 1
 #      naming it. This is the hole no diff against a commit can see.
 #   6. THE LOCKFILE CHECK BITES. A one-byte Cargo.lock edit exits 1.
-#   7. THE GATE'S OWN COVERED-PATH LIST STILL HOLDS ALL SEVEN ROOTS. The five crate roots
+#   7. THE GATE'S OWN COVERED-PATH LIST STILL HOLDS ALL EIGHT ROOTS. The five crate roots
 #      are read from `COVERED_CRATES` BY BLOCK with comment lines filtered out, so the
 #      gate's header prose - which names all five crates in English - cannot satisfy the
-#      check on its own. The other two roots are the lockfile and the board manifest.
+#      check on its own. The other three roots are the lockfile, the board manifest and the
+#      host parity fixtures.
 #   8. CLEAN REVERT. This run left the working tree exactly as it found it.
 #   9. THE DELETION ARM BITES. `git rm` of an undeclared covered path that EXISTS AT THE
 #      BASE exits 1 NAMING it; an unstage and the path's kept bytes restore it
@@ -49,6 +50,12 @@
 #      returns exit 0. The manifest sits outside every crate root, so it reaches the gate
 #      only through the gate's named BOARD_MANIFEST paths. Taking it out of the diff pathspec
 #      would leave every other property green. It runs after the carve-out, before property 9.
+#  11. A RE-RECORDED HOST PARITY FIXTURE BITES. Appending a line to the first file under
+#      crates/fabrico-host/tests/fixtures/host_parity exits exactly 1 naming it, putting its bytes
+#      back returns exit 0, and a new untracked file in that directory exits exactly 1 naming it.
+#      fabrico-host is not a covered crate, so these files reach the gate only through its named
+#      HOST_PARITY_FIXTURE_DIR paths. A re-record turns host_parity.rs green, so nothing else would
+#      see one. It runs after property 10, before property 9.
 #
 # ---------------------------------------------------------------------------------
 # EVERY PROBE PATH IS SELECTED AT RUN TIME. NO COVERED PATH IS WRITTEN INTO THIS SCRIPT.
@@ -135,7 +142,7 @@
 # with the SAME leading-dash refusal on every route.
 #
 # EXIT CODES:
-#   0  PROVEN. All ten properties held and the carve-out behaved as specified.
+#   0  PROVEN. All eleven properties held and the carve-out behaved as specified.
 #   1  A property did NOT hold. The gate is vacuous, or weaker than claimed. Every
 #      failing property is named.
 #   2  The proof COULD NOT BE MADE. This is a FAILURE, not a pass - an assertion that
@@ -164,6 +171,7 @@ GATE="scripts/check-core-declared.sh"
 DECLARATION="docs/DECLARED-MOVES.txt"
 LOCKFILE="Cargo.lock"
 BOARD_MANIFEST="examples/boards/hashes.manifest"
+HOST_PARITY_FIXTURE_DIR="crates/fabrico-host/tests/fixtures/host_parity"
 
 # The five covered crate roots, written out HERE rather than read from the gate. If the
 # two ever disagree, property 7 below is what says so, and a proof that sourced its
@@ -208,10 +216,10 @@ usage() {
     cat >&2 <<'USAGE'
 usage: scripts/prove-declared-gate-non-vacuous.sh [--base <ref> | <ref>]
 
-Proves that scripts/check-core-declared.sh actually BITES, in all ten ways listed
-below, and that the gate's own covered-path list still names all seven covered roots.
+Proves that scripts/check-core-declared.sh actually BITES, in all eleven ways listed
+below, and that the gate's own covered-path list still names all eight covered roots.
 
-The ten properties, in run order:
+The eleven properties, in run order:
   1. baseline green            - the gate exits 0 with no probe applied
   2. the [source] arm bites    - an undeclared source edit exits 1 NAMING the path
   3. the digest arm bites      - a declared path whose digest differs exits 1 printing
@@ -220,10 +228,13 @@ The ten properties, in run order:
   5. the untracked walk bites  - a new untracked file under a covered path exits 1
   6. the lockfile check bites  - a one-byte Cargo.lock edit exits 1
   7. the covered list holds    - COVERED_CRATES still names all five crates, read BY
-                                 BLOCK with comments filtered, plus the lockfile and the
-                                 board manifest
+                                 BLOCK with comments filtered, plus the lockfile, the
+                                 board manifest and the host parity fixtures
  10. the manifest edit bites   - a comment line appended to the board manifest exits 1
                                  NAMING it; putting its bytes back returns exit 0
+ 11. a re-recorded fixture     - a line appended to a host parity fixture exits 1 NAMING it,
+     bites                       putting its bytes back returns exit 0, and a new untracked
+                                 file in that directory exits 1 NAMING it
   9. the deletion arm bites    - `git-rm` of an undeclared covered path that exists at the
                                  base exits 1 NAMING it, and the path is restored
                                  byte-identically. Runs here, second-to-last, so that
@@ -610,6 +621,16 @@ if ! DELETION_PROBE="$(select_undeclared_deletable_probe)"; then
     exit 2
 fi
 
+# Property 11's probe: the first host parity fixture the index lists. Read from git rather than
+# written down, so a renamed fixture can't leave this property probing nothing. An empty
+# directory is exit 2 like every other lost probe.
+HOST_PARITY_PROBE="$(LC_ALL=C git ls-files -- "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort | sed -n 1p)"
+if [ -z "$HOST_PARITY_PROBE" ]; then
+    echo "FAIL: property 11 (the host parity fixtures) lost its probe, so the assertion could not" >&2
+    echo "      be made: git lists no file under ${HOST_PARITY_FIXTURE_DIR}." >&2
+    exit 2
+fi
+
 # The byte to touch when the fixture probe must be made to DIFFER from the base. For a
 # golden fixture DIRECTORY that is its hashes.txt, one of the five files the directory
 # digest is taken over; for every other covered path it is the file itself.
@@ -628,6 +649,7 @@ fi
 # An untracked probe path that cannot collide with anything in the tree, built at run time
 # so this script carries no literal a future edit might accidentally make real.
 UNTRACKED_PROBE="${EXPECTED_CRATES[0]}/src/prover-nonce-$$-$(date +%s).rs"
+UNTRACKED_HOST_PARITY_PROBE="${HOST_PARITY_FIXTURE_DIR}/prover-nonce-$$-$(date +%s).hashes"
 
 # --- The kept bytes -------------------------------------------------------------------
 # Every path a property below writes has its bytes kept HERE, at entry, after selection and
@@ -650,7 +672,7 @@ keep_once() {
         KEPT_PATHS+=("$p")
     done
 }
-keep_once "$DECLARATION" "$LOCKFILE" "$BOARD_MANIFEST" "$GATE" "$SOURCE_PROBE" "$FIXTURE_EDIT_TARGET" "$DELETION_PROBE"
+keep_once "$DECLARATION" "$LOCKFILE" "$BOARD_MANIFEST" "$HOST_PARITY_PROBE" "$GATE" "$SOURCE_PROBE" "$FIXTURE_EDIT_TARGET" "$DELETION_PROBE"
 
 DECL_TMP=""
 GATE_TMP=""
@@ -781,15 +803,18 @@ compute_missing_roots() {
     if ! grep -qxF "BOARD_MANIFEST=\"${BOARD_MANIFEST}\"" "$GATE"; then
         MISSING_ROOTS="${MISSING_ROOTS}${BOARD_MANIFEST} "
     fi
+    if ! grep -qxF "HOST_PARITY_FIXTURE_DIR=\"${HOST_PARITY_FIXTURE_DIR}\"" "$GATE"; then
+        MISSING_ROOTS="${MISSING_ROOTS}${HOST_PARITY_FIXTURE_DIR} "
+    fi
 }
 
 failed=0
 STEP=0
-# The 10 properties, plus the carve-out case. The carve-out is a case, not a numbered
+# The 11 properties, plus the carve-out case. The carve-out is a case, not a numbered
 # property, which is why the step counter and the property numbers were never the same
 # sequence. Property 9 (the deletion arm) runs second-to-last so property 8 (clean revert)
 # can stay this script's exit condition.
-TOTAL=11
+TOTAL=12
 
 step() {
     STEP=$((STEP + 1))
@@ -800,6 +825,7 @@ echo "Proving ${GATE} bites, against '${BASE}' (${BASE_SHA:0:12})."
 echo "property 2 probe: ${SOURCE_PROBE}"
 echo "property 3/4 probe: ${FIXTURE_PROBE}"
 echo "property 9 probe: ${DELETION_PROBE}"
+echo "property 11 probe: ${HOST_PARITY_PROBE}"
 echo
 
 # --- Property 1: baseline green -------------------------------------------------------
@@ -941,10 +967,10 @@ prover_put_back "$LOCKFILE"
 # it stop reddening, which reads as "the gate is broken" rather than "the gate was
 # NARROWED" - and a change that narrowed the list would have every reason to also move the
 # probe.
-step "property 7: the COVERED LIST HOLDS all seven roots (read by block, comments filtered)"
+step "property 7: the COVERED LIST HOLDS all eight roots (read by block, comments filtered)"
 compute_missing_roots
 if [ -n "$MISSING_ROOTS" ]; then
-    fail_named "${GATE}'s covered set no longer holds all five crate roots, the lockfile and the board manifest. Missing: ${MISSING_ROOTS}"
+    fail_named "${GATE}'s covered set no longer holds all five crate roots, the lockfile, the board manifest and the host parity fixtures. Missing: ${MISSING_ROOTS}"
     echo >&2
     echo "      REMOVING AN ENTRY FROM THAT LIST IS THE GATE-WEAKENING MOVE THE GATE'S OWN" >&2
     echo "      HEADER FORBIDS, and NOTHING ELSE IN THIS REPOSITORY CAN SEE IT. scripts/ is" >&2
@@ -952,7 +978,7 @@ if [ -n "$MISSING_ROOTS" ]; then
     echo "      narrowed path set is vacuously empty by construction. The response is to" >&2
     echo "      restore the entry, never to relax this assertion." >&2
 else
-    echo "      the covered set holds all five crate roots, ${LOCKFILE} and ${BOARD_MANIFEST}"
+    echo "      the covered set holds all five crate roots, ${LOCKFILE}, ${BOARD_MANIFEST} and ${HOST_PARITY_FIXTURE_DIR}"
 fi
 
 # --- The carve-out case ---------------------------------------------------------------
@@ -1023,6 +1049,50 @@ if [ "$GATE_RC" -ne 0 ]; then
 else
     echo "      bytes put back: gate exits 0"
 fi
+
+# --- Property 11: a re-recorded host parity fixture bites -----------------------------
+# fabrico-host is not a covered crate, so these files reach the gate only through the paths it
+# names itself. Take the directory out of the diff pathspec or the fixture list and the edit below
+# exits 0. Take it out of the untracked walk and the new file below exits 0.
+#
+# The files are declared with digests, so the edit exits through the digest arm, and it would exit
+# through the undeclared arm if the declaration lost them. Either one is exit 1 naming the path.
+step "property 11: a RE-RECORDED HOST PARITY FIXTURE BITES (an appended line in ${HOST_PARITY_PROBE} exits 1 naming it)"
+printf '%s\n' "$PROBE_TEXT" >>"$HOST_PARITY_PROBE"
+run_gate
+if [ "$GATE_RC" -eq 0 ]; then
+    fail_named "the gate exited 0 with ${HOST_PARITY_PROBE} changed, so a re-record of the host parity fixtures can ride in unseen beside a green host_parity.rs."
+elif [ "$GATE_RC" -ne 1 ]; then
+    fail_named "the gate exited ${GATE_RC}, not 1, on a ${HOST_PARITY_PROBE} edit. Exit 2 means the assertion could not be MADE."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+elif ! printf '%s\n' "$GATE_OUT" | grep -F -- "$HOST_PARITY_PROBE" >/dev/null; then
+    fail_named "the gate exited 1 but did NOT name '${HOST_PARITY_PROBE}'."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      fixture probe: gate correctly EXITS 1, naming ${HOST_PARITY_PROBE}"
+fi
+prover_put_back "$HOST_PARITY_PROBE"
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then
+    fail_named "the gate exited ${GATE_RC} after ${HOST_PARITY_PROBE}'s bytes were put back; it must return to green."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      bytes put back: gate exits 0"
+fi
+printf '%s\n' "$PROBE_TEXT" >"$UNTRACKED_HOST_PARITY_PROBE"
+run_gate
+if [ "$GATE_RC" -eq 0 ]; then
+    fail_named "the gate exited 0 with an untracked new file under ${HOST_PARITY_FIXTURE_DIR}, so a new fixture can ride in unseen."
+elif [ "$GATE_RC" -ne 1 ]; then
+    fail_named "the gate exited ${GATE_RC}, not 1, on an untracked file under ${HOST_PARITY_FIXTURE_DIR}."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+elif ! printf '%s\n' "$GATE_OUT" | grep -F -- "$UNTRACKED_HOST_PARITY_PROBE" >/dev/null; then
+    fail_named "the gate exited 1 but did NOT name '${UNTRACKED_HOST_PARITY_PROBE}'."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      untracked fixture probe: gate correctly EXITS 1, naming it"
+fi
+rm -f "$UNTRACKED_HOST_PARITY_PROBE"
 
 # --- Property 9: the deletion arm bites -----------------------------------------------
 # THE BLIND SPOT THIS CLOSES, and it was a live one. Every covered path set the gate built
@@ -1124,12 +1194,13 @@ echo "What held: a green baseline; a NAMED red on an undeclared source edit; a N
 echo "with BOTH digests on a declared path whose bytes moved elsewhere; a NAMED red on a"
 echo "declaration that outlived its move; a NAMED red on an untracked new file; a red on a"
 echo "${LOCKFILE} edit; the carve-out; a NAMED red on an edit to ${BOARD_MANIFEST}; a NAMED"
+echo "red on a re-recorded host parity fixture and on a new file beside it; a NAMED"
 echo "red on a DELETED covered path, restored byte-identically; and a clean tree on the way"
 echo "out. The covered set still holds, read"
 echo "by block with comment lines filtered:"
-printf '  %s\n' "${EXPECTED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST"
+printf '  %s\n' "${EXPECTED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" "$HOST_PARITY_FIXTURE_DIR"
 echo
 # The last line of a successful run begins with PROVEN:, so a caller can read the verdict
 # off the tail without parsing the transcript above it.
-echo "PROVEN: ${GATE} bites in all ten ways, against '${BASE}' (${BASE_SHA:0:12})."
+echo "PROVEN: ${GATE} bites in all eleven ways, against '${BASE}' (${BASE_SHA:0:12})."
 exit 0

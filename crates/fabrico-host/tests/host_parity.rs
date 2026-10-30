@@ -9,7 +9,9 @@
 //! The fixtures are the only record of how the loop behaved when they were written, so they
 //! are worth more than a green test. Don't re-record them to make this test pass. A mismatch
 //! means the order of work inside a tick moved, and that's what this file exists to report.
-//! `record_host_parity_fixture` is ignored for that reason and only runs by hand.
+//! `record_host_parity_fixture` is ignored for that reason and only runs by hand, and
+//! `scripts/check-core-declared.sh` reddens on any change to the fixtures unless
+//! `docs/DECLARED-MOVES.txt` declares it.
 //!
 //! No single scene catches every reordering, so the compare test checks all three scenes and
 //! reports each one before it fails. It also checks its own coverage, because a run that
