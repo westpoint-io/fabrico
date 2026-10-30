@@ -41,7 +41,12 @@
 #      `scripts/regen-golden.sh` drives one at a time, so the two can never disagree
 #      about what "authoring" means;
 #   5. digests again;
-#   6. emits a per-fixture, per-file digest table with a roll-up and the invoking sha.
+#   6. emits a per-fixture, per-file digest table with a roll-up and the invoking sha;
+#   7. measures the board hash manifest the same way, as a second section: it copies
+#      examples/boards/hashes.manifest aside, runs its `#[ignore]`d generator
+#      (`regenerate_board_manifest` in crates/fabrico-engine/tests/board_manifest.rs), and
+#      compares the two files byte for byte, printing `board manifest: IDENTICAL` or
+#      `board manifest: MOVED` with a diff.
 #
 # IT RUNS IN A PRIVATE WORKTREE (phase 84 plan 06, GATE-03, decision D-08). Step 4
 # rewrites every file of the tracked corpus in place; the generators write to a fixed
@@ -58,18 +63,19 @@
 # `fabrico-core`'s regen test from scratch (no warm target/ to reuse), in CI as well.
 #
 # EXIT CODES, inherited in shape from the earlier core-freeze gate:
-#   0  every digested file is byte-identical: the corpus still reproduces from its
-#      own generators.
-#   1  at least one file MOVED. Every moved fixture and file is named in the table.
+#   0  every digested file is byte-identical and the board manifest is too: both still
+#      reproduce from their own generators.
+#   1  at least one corpus file MOVED, or the board manifest did. Every moved fixture and
+#      file is named in the table, and a RESULT line names each section that moved.
 #   2  the measurement COULD NOT BE MADE. This is a FAILURE, not a pass. An assertion
 #      that measures nothing must never present as green -- that is the failure mode
 #      this whole family of scripts exists to refuse.
 #
 # ANTI-VACUOUS GUARDS, each a named, numbered guard with its own exit, never an `||`
 # chain. This script exits 2 rather than passing if:
-#   - GUARD 1: the corpus tree is already dirty. A measurement taken over an edited
-#     corpus compares the generators against a human's uncommitted edit and reports on
-#     neither.
+#   - GUARD 1: the corpus tree or the board manifest is already dirty. A measurement taken
+#     over an edited file compares the generators against a human's uncommitted edit and
+#     reports on neither.
 #   - GUARD 2: the discovered fixture count differs from EXPECTED_GOLDEN_FIXTURES.
 #     This is deliberately an EQUALITY assertion and deliberately NOT the freeze gate's
 #     discovery floor (which is 5, exists to catch a walk that discovered nothing, and
@@ -79,6 +85,10 @@
 #   - GUARD 3: `cargo` is absent, or the regeneration run failed to COMPILE. A build
 #     that did not run measured nothing, so that is exit 2 and not exit 1.
 #   - GUARD 4: the regeneration ran the wrong number of generators. See below.
+#   - The board manifest section has the same three refusals of its own: the manifest is
+#     missing, its generator failed to compile, or the count of generators that passed
+#     differs from EXPECTED_BOARD_GENERATORS. A comparison of the two files that can't be
+#     made is exit 2 as well.
 #   (GUARD 5, "the restore did not restore", was retired by phase 84 plan 06: nothing
 #   is restored any more, because the regenerated corpus is a private worktree's.)
 #
@@ -184,6 +194,11 @@ GOLDEN_DIR="crates/fabrico-core/tests/golden"
 # 77, which took none; the reservation table in `cert_cross_platform.rs` records the handover.
 EXPECTED_GOLDEN_FIXTURES=40
 
+# The second measured section. The manifest holds one line per board file, and it comes from
+# one generator, so this count is about the generator and not about the number of boards.
+BOARD_MANIFEST="examples/boards/hashes.manifest"
+EXPECTED_BOARD_GENERATORS=1
+
 # The five files every generator writes (regen.rs `freeze()`).
 GOLDEN_FILES=(genesis.snapshot log.postcard edit-log.postcard hashes.txt meta.toml)
 
@@ -197,10 +212,12 @@ usage() {
     cat >&2 <<'USAGE'
 usage: scripts/measure-golden-corpus.sh [--label <text> | <text>]
 
-Regenerates the whole golden corpus into a comparison against the committed bytes and
-reports, per fixture and per file, whether the committed bytes still equal what the
-generators produce now. It runs in a private worktree with a private cargo target, so
-your checkout's corpus is never written.
+Measures two things against the committed bytes. It regenerates the whole golden corpus
+and reports, per fixture and per file, whether the committed bytes still equal what the
+generators produce now. Then it regenerates the board hash manifest
+(examples/boards/hashes.manifest) and reports whether that file is byte-identical. It runs
+in a private worktree with a private cargo target, so your checkout's corpus and manifest
+are never written.
 
   --label <text>  a label for the emitted table (also accepts --label=<text>)
   <text>          the same thing, positionally
@@ -211,13 +228,17 @@ your checkout's corpus is never written.
 Precedence: command-line label > $CORPUS_LABEL > "(unlabelled)".
 
 Exit codes:
-  0  every digested file is byte-identical
-  1  at least one file MOVED; the table names every one
-  2  the measurement could not be made (a dirty corpus tree, a fixture count that
-     differs from EXPECTED_GOLDEN_FIXTURES, no cargo on the PATH, a regeneration that
-     failed to compile, a regeneration that ran the wrong number of generators, or a
-     private worktree that could not be made or removed). This is a FAILURE, not a
-     pass: an assertion that measures nothing must never be green.
+  0  every digested file is byte-identical, and so is the board manifest
+  1  at least one corpus file MOVED, or the board manifest did; the table names every
+     moved fixture, and a RESULT line names each section that moved
+  2  the measurement could not be made (a dirty corpus tree or board manifest, a fixture
+     count that differs from EXPECTED_GOLDEN_FIXTURES, no cargo on the PATH, a
+     regeneration that failed to compile, a regeneration that ran the wrong number of
+     generators, a missing board manifest, a board manifest generator that failed to
+     compile or whose passed count differs from EXPECTED_BOARD_GENERATORS, a comparison
+     of the two manifests that could not be made, or a private worktree that could not
+     be made or removed). This is a FAILURE, not a pass: an assertion that measures
+     nothing must never be green.
 USAGE
 }
 
@@ -290,12 +311,12 @@ fi
 # measurement goes on.
 prover_run_in_worktree "$@"
 
-# --- GUARD 1: the corpus tree must be clean before it is measured ------------------
-# A measurement taken over an already-edited corpus compares the generators against a
+# --- GUARD 1: the corpus tree and the manifest must be clean before they are measured
+# A measurement taken over an already-edited file compares the generators against a
 # human's uncommitted edit and reports on neither of them.
-dirty="$(git status --porcelain -- "$GOLDEN_DIR")"
+dirty="$(git status --porcelain -- "$GOLDEN_DIR" "$BOARD_MANIFEST")"
 if [ -n "$dirty" ]; then
-    echo "FAIL: ${GOLDEN_DIR} is already dirty, so no measurement was made:" >&2
+    echo "FAIL: ${GOLDEN_DIR} or ${BOARD_MANIFEST} is already dirty, so no measurement was made:" >&2
     printf '%s\n' "$dirty" | sed 's/^/  /' >&2
     echo >&2
     echo "This script compares the COMMITTED bytes against freshly-authored ones. Over a" >&2
@@ -536,10 +557,113 @@ echo "label: ${LABEL}"
 echo "commit: ${HEAD_SHA}"
 echo
 
-if [ "$moved" -ne 0 ]; then
-    echo "RESULT: the corpus has MOVED. ${moved} fixture(s) no longer reproduce from their own generators." >&2
-    exit 1
+# --- The second section: the board manifest ------------------------------------------
+# The same question for one more file: do the committed bytes equal what the generator
+# writes now? It runs even when the corpus moved, so one run reports both sections. The
+# generator writes this private worktree's manifest, which is discarded at exit.
+if [ ! -f "$BOARD_MANIFEST" ]; then
+    echo "FAIL: ${BOARD_MANIFEST} does not exist, so the board manifest was not measured." >&2
+    exit 2
 fi
 
-echo "RESULT: the corpus is IDENTICAL. All ${fixture_count} fixtures still reproduce byte-for-byte from their own generators."
+cp "$BOARD_MANIFEST" "${SCRATCH}/hashes.manifest.before"
+
+BOARD_CMD=(cargo test -p fabrico-engine --locked --test board_manifest -- --ignored regenerate_board_manifest)
+BOARD_LOG="${SCRATCH}/board-manifest.log"
+
+echo "[measure-golden-corpus] regenerating the board manifest with:"
+echo "    ${BOARD_CMD[*]}"
+echo
+
+board_rc=0
+CARGO_TERM_COLOR=never "${BOARD_CMD[@]}" 2>&1 | tee "$BOARD_LOG" || board_rc="${PIPESTATUS[0]}"
+
+# A compile failure measured nothing, as in GUARD 3b.
+if grep -qE "$COMPILE_FAILURE_RE" "$BOARD_LOG"; then
+    echo >&2
+    echo "FAIL: the board manifest generator did not COMPILE, so the manifest was not" >&2
+    echo "      regenerated and nothing was measured." >&2
+    echo >&2
+    grep -E "$COMPILE_FAILURE_RE" "$BOARD_LOG" | head -20 | sed 's/^/    /' >&2
+    echo >&2
+    echo "A build error is not a clean manifest. cargo exited ${board_rc}." >&2
+    exit 2
+fi
+
+# `-- --ignored` exits 0 when nothing ran, as in GUARD 4. The two files would then compare
+# equal, and this section would report a clean manifest with nothing written.
+board_summary_lines="$(grep -cE '^test result: ' "$BOARD_LOG" || true)"
+board_generators_passed="$(
+    awk '/^test result: / { for (i = 1; i <= NF; i++) if ($i == "passed;") s += $(i - 1) } END { print s + 0 }' "$BOARD_LOG"
+)"
+
+if [ "$board_summary_lines" -eq 0 ]; then
+    echo >&2
+    echo "FAIL: no harness summary line was recognised in the board manifest run, so the" >&2
+    echo "      number of generators that ran is unknown and the manifest was not measured." >&2
+    echo "      cargo exited ${board_rc}." >&2
+    echo >&2
+    echo "Last 20 lines of the run:" >&2
+    tail -20 "$BOARD_LOG" | sed 's/^/    /' >&2
+    exit 2
+fi
+
+if [ "$board_generators_passed" -ne "$EXPECTED_BOARD_GENERATORS" ]; then
+    echo >&2
+    echo "FAIL: the board manifest run reported ${board_generators_passed} generator(s) passed, but" >&2
+    echo "      EXPECTED_BOARD_GENERATORS=${EXPECTED_BOARD_GENERATORS} must run for this comparison to" >&2
+    echo "      mean anything. A renamed generator, or an #[ignore] attribute removed from it," >&2
+    echo "      leaves the manifest comparing equal to itself. cargo exited ${board_rc}." >&2
+    exit 2
+fi
+
+if [ "$board_rc" -ne 0 ]; then
+    echo >&2
+    echo "FAIL: the board manifest run exited ${board_rc}, so the regenerated manifest is not" >&2
+    echo "      trustworthy and nothing was measured." >&2
+    exit 2
+fi
+
+echo
+echo "### Board manifest measurement: ${LABEL}"
+echo
+echo "Taken at \`${HEAD_SHA}\` with \`${BOARD_CMD[*]}\`."
+echo
+
+board_cmp_rc=0
+cmp -s "${SCRATCH}/hashes.manifest.before" "$BOARD_MANIFEST" || board_cmp_rc=$?
+
+board_moved=0
+case "$board_cmp_rc" in
+    0)
+        echo "board manifest: IDENTICAL"
+        ;;
+    1)
+        board_moved=1
+        echo "board manifest: MOVED"
+        diff -u "${SCRATCH}/hashes.manifest.before" "$BOARD_MANIFEST" || true
+        ;;
+    *)
+        echo "FAIL: cmp exited ${board_cmp_rc} comparing the two copies of ${BOARD_MANIFEST}, so the" >&2
+        echo "      board manifest was not measured." >&2
+        exit 2
+        ;;
+esac
+echo
+
+if [ "$moved" -ne 0 ]; then
+    echo "RESULT: the corpus has MOVED. ${moved} fixture(s) no longer reproduce from their own generators." >&2
+else
+    echo "RESULT: the corpus is IDENTICAL. All ${fixture_count} fixtures still reproduce byte-for-byte from their own generators."
+fi
+
+if [ "$board_moved" -ne 0 ]; then
+    echo "RESULT: the board manifest has MOVED. ${BOARD_MANIFEST} no longer reproduces from its generator." >&2
+else
+    echo "RESULT: the board manifest is IDENTICAL. ${BOARD_MANIFEST} still reproduces byte-for-byte from its generator."
+fi
+
+if [ "$moved" -ne 0 ] || [ "$board_moved" -ne 0 ]; then
+    exit 1
+fi
 exit 0
