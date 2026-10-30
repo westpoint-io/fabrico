@@ -199,3 +199,6 @@ crates/fabrico-engine/tests/board_manifest.rs
 # in the repo has such a delay, so no hash moves.
 # Review 93 WR-07, in board.rs listed above: ScriptInput and OutboundOutcome refuse an unknown field.
 # Only text is affected, and no board file holds one, so no hash moves.
+# Review 93 WR-04: the headless dependency check compares the tree with a committed list of packages.
+# It is a test file only, and no hash moves.
+crates/fabrico-engine/tests/deps_headless.rs
