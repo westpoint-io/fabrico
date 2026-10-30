@@ -4779,6 +4779,10 @@ export function App() {
             setTopRightPanel('help');
             dismissWelcome();
           }}
+          onStartLesson={() => {
+            setTopRightPanel('lessons');
+            dismissWelcome();
+          }}
         />
       )}
 

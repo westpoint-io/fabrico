@@ -10,7 +10,7 @@
 //
 // It reuses the Legend panel shell (`.fab-panel`, `<h2>` under the Toolbar `<h1>`,
 // `--fab-*` tokens, React text children only — no innerHTML) and the
-// DeleteGuardDialog button-row discipline for its two real buttons. The heading
+// DeleteGuardDialog button-row discipline for its real buttons. The heading
 // rides the shared Sono title tier (`.fab-title`, Phase 47); body and buttons
 // stay on the Martian Mono tokens.
 //
@@ -35,9 +35,11 @@ export interface WelcomeCardProps {
   onStartBuilding: () => void;
   /** Secondary "Show the gestures" — opens the "?" help panel and dismisses. */
   onShowGestures: () => void;
+  /** Secondary "Start a lesson": opens the lesson list and dismisses. */
+  onStartLesson: () => void;
 }
 
-export function WelcomeCard({ onStartBuilding, onShowGestures }: WelcomeCardProps): JSX.Element {
+export function WelcomeCard({ onStartBuilding, onShowGestures, onStartLesson }: WelcomeCardProps): JSX.Element {
   // No keyboard listener here (IX-07): Escape is owned by the Phase-30 gesture
   // stack, which dismisses this card only as its lowest-priority fallback (after
   // disarm + clear-selection). The two buttons below are the card's only dismiss.
@@ -58,7 +60,10 @@ export function WelcomeCard({ onStartBuilding, onShowGestures }: WelcomeCardProp
         gap: 'var(--fab-space-md)',
         // Ring padding (plan 59-03): the 6px the retired border reserved.
         padding: 'calc(var(--fab-space-md) + var(--fab-bezel-ring))',
-        maxWidth: 480,
+        // Three buttons take 508 px, so the card is 528 wide. `left: 50%` would otherwise cap an
+        // absolutely placed box at half the window, and at 1024 wide the labels would wrap.
+        width: 'max-content',
+        maxWidth: 528,
         // Non-blocking (UI-SPEC): the card is a SOFT first-run overlay, not the
         // alertdialog — it must never scrim-block or intercept canvas gestures
         // underneath (the EmptyState precedent). The panel itself lets pointer
@@ -105,7 +110,7 @@ export function WelcomeCard({ onStartBuilding, onShowGestures }: WelcomeCardProp
         You are looking at a demo factory - a live automation running on the
         deterministic engine. Watch items flow along the belts, or place your own
         machines from the palette. The ? button in the toolbar opens the gesture
-        reference any time.
+        reference and the lessons any time.
       </p>
 
       <div
@@ -126,6 +131,13 @@ export function WelcomeCard({ onStartBuilding, onShowGestures }: WelcomeCardProp
           onClick={onShowGestures}
         >
           <span>Show the gestures</span>
+        </button>
+        <button
+          type="button"
+          className="fab-tool-btn fab-tool-btn--labeled"
+          onClick={onStartLesson}
+        >
+          <span>Start a lesson</span>
         </button>
         {/* Primary CTA: the one sanctioned build-accent fill on this surface. */}
         <button type="button" className="fab-cta" onClick={onStartBuilding}>

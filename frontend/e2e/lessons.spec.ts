@@ -9,6 +9,7 @@ import {
   buildPacket,
   cameraOf,
   mockRenderSocket,
+  screenCellCentre,
   waitForBoard,
   waitForChrome,
   type Harness,
@@ -75,6 +76,47 @@ function expectRingAround(ring: Box, target: Box, what: string): void {
   expect(Math.abs(ring.height - (target.height + 2 * OUTSET)), `${what}: height`).toBeLessThanOrEqual(TOLERANCE);
 }
 
+/** Well inside the 800 ms a playing board's silence takes to read as a dropped stream, even on a busy machine. */
+const STREAM_RESEND_MS = 200;
+const streamStops = new WeakMap<Page, () => void>();
+
+/**
+ * The same frame as a diff. A full keyframe clears the selection, and a re-sent one would do that to a
+ * case that had just selected a machine. The `full` byte comes straight after the tick's varint.
+ */
+function asDiff(frame: Buffer): Buffer {
+  let i = 0;
+  while ((frame[i] as number) & 0x80) i += 1;
+  const copy = Buffer.from(frame);
+  copy[i + 1] = 0;
+  return copy;
+}
+
+/**
+ * The app reads a playing board's silence as a dropped stream, and the ring hides on one, so a case
+ * that waits a moment on a quiet mock would lose its ring. This sends the last packet again until
+ * `stopStream`, which leaves the board as it was: same tick, same machines, and a case's `inject` still
+ * decides what the board holds.
+ */
+function keepStreamAlive(page: Page, h: Harness): void {
+  const inject = h.inject.bind(h);
+  let last: Buffer | null = null;
+  h.inject = (frame: Buffer): void => {
+    last = asDiff(frame);
+    inject(frame);
+  };
+  const timer = setInterval(() => {
+    if (last !== null) inject(last);
+  }, STREAM_RESEND_MS);
+  const stop = (): void => clearInterval(timer);
+  streamStops.set(page, stop);
+  page.once('close', stop);
+}
+
+function stopStream(page: Page): void {
+  streamStops.get(page)?.();
+}
+
 /** Boot on the mock host with one machine on the board. */
 async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>[1] = {}): Promise<Harness> {
   await page.addInitScript(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
@@ -82,6 +124,7 @@ async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>[1] = {
   await page.goto('/');
   await waitForChrome(page);
   await h.connected;
+  keepStreamAlive(page, h);
   h.inject(buildPacket({ full: true, tick: 3, nodes: [OLD_MACHINE] }));
   await waitForBoard(page, { machines: 1, tick: 3 });
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
@@ -685,6 +728,9 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
     await card.getByRole('button', { name: 'Back to lessons', exact: true }).click();
     await expect(card, 'the card goes').toHaveCount(0);
     await expect(page.locator('#fab-lessons-panel'), 'and the list opens').toBeVisible();
+    // The row a real finish leaves, with the board still as the lesson left it.
+    await expectRow(page, 'Done', ['Restart Your first line'], []);
+    expect(h.controls.filter((c) => c === 'new'), 'going back to the list sent no New').toEqual(['new']);
   });
 
   for (const size of [
@@ -711,4 +757,424 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
       expect(sink.cell_x, 'the Sink is east of the Source, so the belt runs straight').toBeGreaterThan(source.cell_x);
     });
   }
+});
+
+// THE LESSON LIST AND THE LESSON'S LIFECYCLE, on a mock host.
+
+const PANEL = '#fab-lessons-panel';
+const START = `Start ${YOUR_FIRST_LINE.title}`;
+const RESUME = `Resume ${YOUR_FIRST_LINE.title}`;
+const RESTART = `Restart ${YOUR_FIRST_LINE.title}`;
+const GUARD_HEADING = 'Start a new board?';
+const STOPPED_TITLE = 'Unavailable: the simulation stopped';
+const SWAPPED_SENTENCE = 'The board changed, so this lesson stopped. Restart it, or leave it.';
+
+const lessonRow = (page: Page): Locator => page.locator(`${PANEL} [data-fab-lesson-row="${YOUR_FIRST_LINE.id}"]`);
+const guardButton = (page: Page, name: 'Cancel' | 'Discard' | 'Save'): Locator => page.locator('.fab-dialog-panel').getByRole('button', { name });
+
+/** A row is read whole, so a test can't pass on the word alone. The buttons' names are read by their aria-label. */
+async function expectRow(page: Page, status: string, buttons: readonly string[], accents: readonly string[]): Promise<void> {
+  const row = lessonRow(page);
+  await expect(row, `the row reads ${status}`).toContainText(status);
+  await expect
+    .poll(() => row.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label'))), { message: `the row offers ${buttons.join(', ')}` })
+    .toEqual([...buttons]);
+  const accented = await page.locator(`${PANEL} .fab-cta`).evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+  expect(accented, 'the accent').toEqual([...accents]);
+}
+
+async function openLessons(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Help', exact: true }).click();
+  await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
+  await expect(page.locator(PANEL)).toBeVisible();
+}
+
+async function pressLeave(page: Page): Promise<void> {
+  await page.locator(CARD).getByRole('button', { name: 'Leave', exact: true }).click();
+  await expect(page.locator(CARD), 'Leave closes the card').toHaveCount(0);
+}
+
+const newCount = (h: Harness): number => h.controls.filter((c) => c === 'new').length;
+const modelNodes = (page: Page): Promise<Array<{ id: number; kind: number }>> =>
+  page.evaluate(() => (window as unknown as { __fabrico: { scene(): { nodes: Array<{ id: number; kind: number }> } } }).__fabrico.scene().nodes);
+
+/** A second board from the host, as a Load, an example or a New would bring. */
+function swappedBoard(floor: number, tick: number): Buffer {
+  return buildPacket({ full: true, tick, generation: floor, swapFloor: floor });
+}
+
+test.describe('the lesson list', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('each row state reads right', async ({ page }) => {
+    const h = await boot(page);
+
+    await openLessons(page);
+    await expect(page.locator(PANEL)).toContainText('Each lesson starts on a new board, and you do the work with your own mouse.');
+    await expectRow(page, 'Not started', [START], [START]);
+    const start = page.getByRole('button', { name: START, exact: true });
+    await expect(start, 'the button shows the plain word').toHaveText('Start');
+    await expect(start, 'the list focuses its first action').toBeFocused();
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.locator(PANEL)).toHaveCount(0);
+
+    await startLesson(page, h);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESTART], []);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
+    await expect(page.getByRole('button', { name: RESUME, exact: true })).toHaveText('Resume');
+    await expect(page.getByRole('button', { name: RESTART, exact: true })).toHaveText('Restart');
+
+    // Left, and then the board was swapped: Resume goes, because a lesson never carries on against it.
+    h.inject(swappedBoard(2, 6));
+    await expectRow(page, 'In progress', [RESTART], []);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+    expect((await readProbe(page)).card, 'the swap woke nothing up').toBe('none');
+  });
+
+  test('a stored status reads right on a fresh load', async ({ page }) => {
+    await page.addInitScript((id) => {
+      localStorage.setItem('fab.tutorial.v1', JSON.stringify({ version: 1, lessons: { [id]: 'done' } }));
+    }, YOUR_FIRST_LINE.id);
+    const h = await boot(page);
+    await openLessons(page);
+    await expectRow(page, 'Done', [RESTART], []);
+
+    // A finished lesson running again reads In progress on top of the stored Done.
+    await page.getByRole('button', { name: RESTART, exact: true }).click();
+    await expect.poll(() => newCount(h), { message: 'Restart sent New' }).toBe(1);
+    h.inject(swappedBoard(1, 5));
+    await expect(page.locator(CARD)).toContainText(`Step 1 of ${STEP_COUNT}`);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESTART], []);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+
+    // And goes back to Done once that run is gone.
+    await pressLeave(page);
+    h.inject(swappedBoard(2, 6));
+    await openLessons(page);
+    await expectRow(page, 'Done', [RESTART], []);
+  });
+
+  test('a lesson can be left, resumed and restarted', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    const card = page.locator(CARD);
+
+    h.inject(sourceOn([20, 10], 6));
+    await expect(card).toContainText(`Step 2 of ${STEP_COUNT}`);
+
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
+
+    await page.getByRole('button', { name: RESUME, exact: true }).click();
+    await expect(card, 'Resume comes back on the saved step').toContainText(`Step 2 of ${STEP_COUNT}`);
+    await expect(page.locator(PANEL), 'and closes the list').toHaveCount(0);
+    expect(newCount(h), 'Resume sent no New').toBe(1);
+    expect((await modelNodes(page)).map((n) => n.kind), 'the Source is still on the board').toEqual([0]);
+
+    await pressLeave(page);
+    await openLessons(page);
+    await page.getByRole('button', { name: RESTART, exact: true }).click();
+    // The Source made the board dirty, so Restart asks the question New asks.
+    await expect(page.getByRole('alertdialog').getByText(GUARD_HEADING)).toBeVisible();
+    expect(newCount(h), 'nothing is sent while the question is open').toBe(1);
+    await guardButton(page, 'Discard').click();
+    await expect.poll(() => newCount(h), { message: 'Discard sent a second New' }).toBe(2);
+    await expect(card).toContainText('Clearing the board.');
+
+    h.inject(swappedBoard(2, 8));
+    await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
+    expect((await readProbe(page)).stepId).toBe('place-source');
+    expect(await modelNodes(page), 'the new board is empty').toEqual([]);
+  });
+
+  test('Help and Lessons share one slot', async ({ page }) => {
+    await boot(page);
+    const help = page.locator('#fab-help-panel');
+    const lessons = page.locator(PANEL);
+
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await expect(help).toBeVisible();
+    await help.getByRole('button', { name: 'Lessons', exact: true }).click();
+    await expect(help, 'opening the list closes Help').toHaveCount(0);
+    await expect(lessons).toBeVisible();
+
+    // The two dock in one place, and the status strip stays clear of the list.
+    const box = await boxOf(lessons, 'the list');
+    expect(Math.abs(box.y - 116), "the list's top is the shared dock").toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(1280 - (box.x + box.width) - 24), "the list's right edge").toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(box.width - (432 + 28)), 'the list is 432 px of content inside its padding').toBeLessThanOrEqual(TOLERANCE);
+    const strip = await page.locator('[data-fab-status-strip]').boundingBox();
+    if (strip !== null && strip.width > 0 && strip.height > 0) {
+      const apart = strip.y + strip.height <= box.y + TOLERANCE || strip.x + strip.width <= box.x + TOLERANCE;
+      expect(apart, 'the status strip dodges the list').toBe(true);
+    }
+
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await expect(lessons, "the toolbar's Help closes the list").toHaveCount(0);
+    await expect(help).toBeVisible();
+
+    await help.getByRole('button', { name: 'Lessons', exact: true }).click();
+    await expect(lessons).toBeVisible();
+    await lessons.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(lessons).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Help', exact: true }), 'Close hands focus back to Help').toBeFocused();
+
+    await openLessons(page);
+    await page.keyboard.press('Escape');
+    await expect(lessons, 'Escape closes the list').toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Help', exact: true }), 'and hands focus back to Help').toBeFocused();
+
+    // A selection closes it.
+    await openLessons(page);
+    const at = await screenCellCentre(page, OLD_MACHINE.cell_x, OLD_MACHINE.cell_y);
+    await page.mouse.click(at.x, at.y);
+    await expect(lessons, 'a selection closes the list').toHaveCount(0);
+    const inspector = page.locator('aside[aria-labelledby="fab-config-heading"]');
+    await expect(inspector, 'and the inspector opens').toBeVisible();
+
+    // The inspector hides under the list and comes back, as it does for Help.
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await help.getByRole('button', { name: 'Lessons', exact: true }).click();
+    await expect(lessons).toBeVisible();
+    await expect(inspector, 'the list hides the inspector').toBeHidden();
+    await lessons.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(inspector, 'closing the list brings it back').toBeVisible();
+  });
+
+  test('declining the question leaves everything as it was', async ({ page }) => {
+    const h = await boot(page);
+    h.inject(buildPacket({ full: false, tick: 4, nodes: [{ id: 2, kind: 0, cell_x: 14, cell_y: 8 }] }));
+    await waitForBoard(page, { machines: 2 });
+
+    await openLessons(page);
+    await expectRow(page, 'Not started', [START], [START]);
+    await page.getByRole('button', { name: START, exact: true }).click();
+    await expect(page.getByRole('alertdialog').getByText(GUARD_HEADING)).toBeVisible();
+
+    await guardButton(page, 'Cancel').click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    expect(h.controls, 'Cancel sent no New').not.toContain('new');
+    expect((await modelNodes(page)).length, 'both machines are still there').toBe(2);
+    await expect(page.locator(PANEL), 'the list is still open').toBeVisible();
+    await expectRow(page, 'Not started', [START], [START]);
+    const probe = await readProbe(page);
+    expect(probe.card, 'no lesson runs').toBe('none');
+    expect(probe.lessonId, 'and none was marked').toBeNull();
+    await expect(page.locator(CARD)).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('fab.tutorial.v1')), 'nothing was stored').toBeNull();
+
+    await page.getByRole('button', { name: START, exact: true }).click();
+    await guardButton(page, 'Discard').click();
+    await expect.poll(() => h.controls, { message: 'Discard sent New' }).toContain('new');
+    await expect(page.locator(CARD)).toContainText('Clearing the board.');
+    await expect(page.locator(PANEL), 'the list closes on the way').toHaveCount(0);
+  });
+
+  test('the list scrolls on a short window', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 340 });
+    await boot(page);
+    await openLessons(page);
+
+    const panel = await boxOf(page.locator(PANEL), 'the list');
+    const box = page.locator(`${PANEL} [data-fab-help-scroll]`);
+    await expect
+      .poll(() => box.evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 0), { message: 'the list scrolls in its own box' })
+      .toBe(true);
+    await expect.poll(() => box.evaluate((el) => (el as HTMLElement).tabIndex), { message: 'and that box is a tab stop' }).toBe(0);
+
+    const inside = (b: Box, what: string): void => {
+      expect(b.y, `${what} starts inside the list`).toBeGreaterThanOrEqual(panel.y - TOLERANCE);
+      expect(b.y + b.height, `${what} ends inside the list`).toBeLessThanOrEqual(panel.y + panel.height + TOLERANCE);
+    };
+    inside(await boxOf(page.locator('#fab-lessons-heading'), 'the heading'), 'the heading');
+    inside(await boxOf(page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }), 'Close'), 'Close');
+    // 104 px is the camera cluster's clearance, the same bound Help keeps.
+    expect(panel.y + panel.height, "the list's bottom keeps Help's height bound").toBeLessThanOrEqual(340 - 104 + TOLERANCE);
+  });
+
+  test('a stopped simulation disables Start and hides the ring', async ({ page }) => {
+    const h = await boot(page);
+    await openLessons(page);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+    await startLesson(page, h);
+    const ring = await ringAt(page, 'source-tool');
+    expect(ring.width, 'the ring is up before the stop').toBeGreaterThan(0);
+    await pressLeave(page);
+
+    await openLessons(page);
+    await page.getByRole('button', { name: RESUME, exact: true }).click();
+    await ringAt(page, 'source-tool');
+
+    h.injectText(JSON.stringify({ kind: 'simFatal', reason: 'test' }));
+    await expect.poll(async () => (await readProbe(page)).hint, { message: 'the ring hides a frame after the stop' }).toBeNull();
+    await expect(page.locator('[data-fab-hint]'), 'and it is off the screen').toBeHidden();
+    const card = page.locator(CARD);
+    await expect(card, 'the card keeps its text').toContainText(`Step 1 of ${STEP_COUNT}`);
+
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
+    const restart = page.getByRole('button', { name: RESTART, exact: true });
+    await expect(restart).toBeDisabled();
+    await expect(restart).toHaveAttribute('title', STOPPED_TITLE);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+
+    await card.getByRole('button', { name: 'Leave', exact: true }).click();
+    await expect(card, 'Leave still works').toHaveCount(0);
+    expect(newCount(h), 'and nothing tried to reach the stopped host').toBe(1);
+  });
+
+  test('a stopped simulation disables a row that has not started', async ({ page }) => {
+    const h = await boot(page);
+    h.injectText(JSON.stringify({ kind: 'simFatal', reason: 'test' }));
+    await openLessons(page);
+    const start = page.getByRole('button', { name: START, exact: true });
+    await expect(start).toBeDisabled();
+    await expect(start).toHaveAttribute('title', STOPPED_TITLE);
+    await expect(page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }), 'focus falls to Close').toBeFocused();
+  });
+
+  test('a dropped stream hides the ring and keeps the card', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await ringAt(page, 'source-tool');
+    stopStream(page);
+    await expect.poll(async () => (await readProbe(page)).hint, { message: 'the ring hides on a silent stream', timeout: 15_000 }).toBeNull();
+    const card = page.locator(CARD);
+    await expect(card, 'the card keeps its text').toContainText(`Step 1 of ${STEP_COUNT}`);
+    h.inject(buildPacket({ full: false, tick: 20, generation: 1, swapFloor: 1 }));
+    await ringAt(page, 'source-tool');
+    await card.getByRole('button', { name: 'Leave', exact: true }).click();
+    await expect(card, 'Leave still works').toHaveCount(0);
+  });
+
+  test('a corrupt stored value reads as empty', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('fab.tutorial.v1', 'not json'));
+    await boot(page);
+    await openLessons(page);
+    await expectRow(page, 'Not started', [START], [START]);
+  });
+});
+
+test.describe('a swapped board and going back', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('a swap moves the card to Lesson paused, and Restart starts again', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await ringAt(page, 'source-tool');
+    const card = page.locator(CARD);
+
+    h.inject(buildPacket({ full: true, tick: 9, generation: 2, swapFloor: 2, nodes: [OLD_MACHINE] }));
+    await expect(card, 'the card says the lesson stopped').toContainText('Lesson paused');
+    await expect(card).toContainText(SWAPPED_SENTENCE);
+    await expect(card).not.toContainText(/Step \d/);
+    await expect.poll(async () => (await readProbe(page)).hint, { message: 'the ring goes' }).toBeNull();
+    await expect(page.locator('[data-fab-hint]')).toBeHidden();
+    expect((await readProbe(page)).card).toBe('swapped');
+
+    // A Source on that board finishes nothing.
+    h.inject(buildPacket({ full: false, tick: 10, generation: 2, swapFloor: 2, nodes: [OLD_MACHINE, { id: 2, kind: 0, cell_x: 14, cell_y: 8 }] }));
+    await waitForBoard(page, { machines: 2 });
+    expect((await readProbe(page)).stepIndex, 'the lesson did not carry on against that board').toBe(0);
+
+    await card.getByRole('button', { name: 'Restart', exact: true }).click();
+    await expect(page.getByRole('alertdialog').getByText(GUARD_HEADING), 'that Source made the board dirty').toBeVisible();
+    await guardButton(page, 'Discard').click();
+    await expect.poll(() => newCount(h), { message: 'Restart sent New' }).toBe(2);
+    h.inject(swappedBoard(3, 12));
+    await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
+  });
+
+  test('Leave on a swapped card leaves Restart alone in the row', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    h.inject(swappedBoard(2, 9));
+    await expect(page.locator(CARD)).toContainText('Lesson paused');
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESTART], []);
+  });
+
+  test('a keyframe that keeps the floor is not a swap, and a handle it re-mints keeps its binding', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    const card = page.locator(CARD);
+    h.inject(sourceOn([20, 10], 6));
+    await expect(card).toContainText(`Step 2 of ${STEP_COUNT}`);
+
+    h.inject(buildPacket({ full: true, tick: 7, generation: 2, swapFloor: 1, nodes: [{ id: 40, kind: 0, cell_x: 20, cell_y: 10 }] }));
+    await expect.poll(async () => (await readProbe(page)).bound.source, { message: 'the binding follows the new handle' }).toBe(40);
+    const probe = await readProbe(page);
+    expect(probe.card, 'an Undo never reads as a swap').toBe('running');
+    expect(probe.stepId).toBe('place-sink');
+    await expect(card).not.toContainText('Lesson paused');
+  });
+
+  test('a keyframe that removes the Source goes back to step 1 with a note', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    const card = page.locator(CARD);
+    h.inject(sourceOn([20, 10], 6));
+    await expect(card).toContainText(`Step 2 of ${STEP_COUNT}`);
+
+    h.inject(buildPacket({ full: true, tick: 7, generation: 2, swapFloor: 1 }));
+    await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
+    await expect(card).toContainText('Step 1 needs doing again, so the lesson went back.');
+    expect((await readProbe(page)).card).toBe('running');
+  });
+
+  test('a Source placed while left finishes step 1 on Resume, and the note says so', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await pressLeave(page);
+    h.inject(sourceOn([20, 10], 6));
+    await waitForBoard(page, { machines: 1 });
+
+    await openLessons(page);
+    await page.getByRole('button', { name: RESUME, exact: true }).click();
+    const card = page.locator(CARD);
+    await expect(card).toContainText(`Step 2 of ${STEP_COUNT}`);
+    await expect(card).toContainText('Step 1 was already done, so the lesson moved on.');
+    expect(newCount(h), 'Resume leaves the board as it is').toBe(1);
+  });
+});
+
+test.describe('the welcome card opens the list', () => {
+  // The mock configs preset the first-run flag, so this block clears it to see the card.
+  test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1280, height: 800 } });
+
+  test('the welcome card opens the list', async ({ page }) => {
+    const h = await mockRenderSocket(page);
+    await page.goto('/');
+    await waitForChrome(page);
+    await h.connected;
+    h.inject(buildPacket({ full: true, tick: 3, nodes: [OLD_MACHINE] }));
+    await waitForBoard(page, { machines: 1, tick: 3 });
+
+    const heading = page.getByRole('heading', { name: 'Welcome to Fabrico' });
+    await expect(heading, 'the first-run card shows').toBeVisible();
+    const buttons = page.locator('aside[aria-labelledby="fab-welcome-heading"]').getByRole('button');
+    await expect(buttons).toHaveText(['Show the gestures', 'Start a lesson', 'Start building']);
+    // Three labels fit on one line each at the narrowest supported window.
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const lines = await buttons.evaluateAll((els) => els.map((el) => (el.querySelector('span') as HTMLElement).getClientRects().length));
+    expect(lines, 'each label sits on one line').toEqual([1, 1, 1]);
+    const palette = await boxOf(page.locator('[data-fab-left-dock]'), 'the palette');
+    const welcome = await boxOf(page.locator('aside[aria-labelledby="fab-welcome-heading"]'), 'the card');
+    expect(welcome.x, 'the card stays clear of the palette').toBeGreaterThan(palette.x + palette.width);
+    await page.getByRole('button', { name: 'Start a lesson', exact: true }).click();
+
+    await expect(page.locator(PANEL), 'the list opens').toBeVisible();
+    await expect(heading, 'the card goes').toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('fab.onboarding.seen.v1')), 'and it stays gone').toBe('1');
+    await expectRow(page, 'Not started', [START], [START]);
+    expect(h.controls, 'opening the list starts nothing').not.toContain('new');
+  });
 });

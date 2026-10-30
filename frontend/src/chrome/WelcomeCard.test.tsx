@@ -43,10 +43,10 @@ function textOf(node: unknown): string[] {
 }
 
 const render = (): string[] =>
-  textOf(WelcomeCard({ onStartBuilding: () => {}, onShowGestures: () => {} }));
+  textOf(WelcomeCard({ onStartBuilding: () => {}, onShowGestures: () => {}, onStartLesson: () => {} }));
 
 /** The sentence that replaced the false keypress claim (52-UI-SPEC Copywriting). */
-const GESTURE_SENTENCE = 'The ? button in the toolbar opens the gesture reference any time.';
+const GESTURE_SENTENCE = 'The ? button in the toolbar opens the gesture reference and the lessons any time.';
 /** U+2014, written as an escape so this guard cannot be defeated by its own copy. */
 const EM_DASH = '\u2014';
 
@@ -68,9 +68,44 @@ describe('WelcomeCard gesture-reference copy (QA-02)', () => {
     }
   });
 
-  it('leaves both button labels frozen', () => {
+  it('has all three buttons, in order', () => {
     const body = render();
-    expect(body).toContain('Show the gestures');
-    expect(body).toContain('Start building');
+    const labels = body.filter((s) => ['Show the gestures', 'Start a lesson', 'Start building'].includes(s));
+    expect(labels).toEqual(['Show the gestures', 'Start a lesson', 'Start building']);
+  });
+
+  it('asserts the sentence as one line of text, the way a person reads it', () => {
+    const body = render().join(' ').replace(/\s+/g, ' ');
+    expect(body).toContain('The ? button in the toolbar opens the gesture reference and the lessons any time.');
+  });
+
+  it('wires each button to its own prop, and only Start building takes the accent', () => {
+    const pressed: string[] = [];
+    const card = WelcomeCard({
+      onStartBuilding: () => pressed.push('building'),
+      onShowGestures: () => pressed.push('gestures'),
+      onStartLesson: () => pressed.push('lesson'),
+    });
+    const buttons: El[] = [];
+    const walk = (n: unknown): void => {
+      if (Array.isArray(n)) n.forEach(walk);
+      else if (isEl(n)) {
+        if (n.type === 'button') buttons.push(n);
+        walk(n.props.children);
+      }
+    };
+    walk(card);
+    for (const b of buttons) (b.props.onClick as () => void)();
+    expect(pressed).toEqual(['gestures', 'lesson', 'building']);
+    expect(buttons.map((b) => b.props.className)).toEqual([
+      'fab-tool-btn fab-tool-btn--labeled',
+      'fab-tool-btn fab-tool-btn--labeled',
+      'fab-cta',
+    ]);
+  });
+
+  it('is wide enough for the three buttons', () => {
+    const card = WelcomeCard({ onStartBuilding: () => {}, onShowGestures: () => {}, onStartLesson: () => {} }) as unknown as El;
+    expect((card.props.style as Record<string, unknown>).maxWidth).toBe(528);
   });
 });
