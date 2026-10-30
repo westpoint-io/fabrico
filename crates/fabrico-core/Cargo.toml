@@ -19,7 +19,7 @@ rustc-hash   = "2"                                            # point-lookups on
 # shipped pre-generated bindings → no libclang, the documented Windows-MSVC failure path,
 # issue #76); NO `full-async`/`futures`/`parallel` (suspend/resume is FACT-05/v2 — v1 is
 # synchronous). Minimal feature set for Windows-MSVC build health (RESEARCH Pitfall 6).
-rquickjs     = { version = "0.12", features = ["loader"] }
+rquickjs     = { version = "0.14", features = ["loader"] }
 
 [features]
 # Test-only scaffolding (e.g. `GridState::test_remove_inbox`) used to forge the
