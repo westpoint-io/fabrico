@@ -85,7 +85,7 @@
 #   - a declared path escapes the repo root or contains "..";
 #   - a covered path or corpus directory is absent on disk or at the base ref;
 #   - the golden discovery walk fails, or discovers fewer than MIN_GOLDEN_FIXTURES;
-#   - any of the four discovery counts comes back zero.
+#   - the scenario, protocol or host parity discovery count comes back zero.
 #
 # THE DIGEST RECIPE, so a declaration line is reproducible by hand:
 #
@@ -682,8 +682,8 @@ protocol_count="${#PROTOCOL_FILES[@]}"
 host_parity_count="${#HOST_PARITY_FILES[@]}"
 lockfile_count=1
 
-# A zero on ANY of the discovery counts is a walk that found nothing, and a walk that
-# found nothing compares clean. The OK line reports all four for exactly this reason: a
+# A zero on ANY of these discovery counts is a walk that found nothing, and a walk that
+# found nothing compares clean. The OK line reports each count for exactly this reason: a
 # reader who sees a zero there is looking at a green that measured nothing.
 if [ "$scenario_count" -eq 0 ] || [ "$protocol_count" -eq 0 ] || [ "$host_parity_count" -eq 0 ]; then
     echo "FAIL: a corpus discovery walk came back EMPTY, so the assertion could not be made:" >&2

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # ci-classify-change.sh - decide whether a CI run's change is DOCS-ONLY, so the heavy
-# jobs in .github/workflows/ci.yml (determinism, golden-corpus, e2e, e2e-live, unit) can
-# be skipped (2026-09-30).
+# jobs in .github/workflows/ci.yml (determinism, golden-corpus, e2e, e2e-live, unit,
+# headless-build) can be skipped (2026-09-30).
 #
 # WHY. The heavy jobs cost thousands of Linux-equivalent CI minutes a day, and many
 # pushes change only markdown notes, which no heavy job reads.

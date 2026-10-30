@@ -631,8 +631,14 @@ fi
 
 # Property 11's probe: the first host parity fixture the index lists. Read from git rather than
 # written down, so a renamed fixture can't leave this property probing nothing. An empty
-# directory is exit 2 like every other lost probe.
-HOST_PARITY_PROBE="$(LC_ALL=C git ls-files -- "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort | sed -n 1p)"
+# directory is exit 2 like every other lost probe, and so is a git that fails here. The listing
+# runs under `if !` because a bare assignment would abort under `set -e` before the empty check,
+# printing nothing that says which property lost its probe.
+if ! HOST_PARITY_PROBE="$(LC_ALL=C git ls-files -- "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort | sed -n 1p)"; then
+    echo "FAIL: property 11 (the host parity fixtures) lost its probe, so the assertion could not" >&2
+    echo "      be made: git could not list ${HOST_PARITY_FIXTURE_DIR}." >&2
+    exit 2
+fi
 if [ -z "$HOST_PARITY_PROBE" ]; then
     echo "FAIL: property 11 (the host parity fixtures) lost its probe, so the assertion could not" >&2
     echo "      be made: git lists no file under ${HOST_PARITY_FIXTURE_DIR}." >&2
@@ -1134,7 +1140,11 @@ rm -f "$UNTRACKED_HOST_PARITY_PROBE"
 # the kept bytes back.
 step "property 12: a RENAMED COVERED PATH READS AS DELETED (git mv of ${DELETION_PROBE} with only the new name declared exits 1 naming the old path)"
 git mv "$DELETION_PROBE" "$RENAME_TARGET"
-RENAME_LISTING="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=true git diff --name-only "$BASE_SHA" -- "$DELETION_PROBE" "$RENAME_TARGET")"
+if ! RENAME_LISTING="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=true git diff --name-only "$BASE_SHA" -- "$DELETION_PROBE" "$RENAME_TARGET")"; then
+    echo "FAIL: property 12 could not make its assertion: git could not diff the renamed probe" >&2
+    echo "      against '${BASE}'." >&2
+    exit 2
+fi
 if [ "$RENAME_LISTING" != "$RENAME_TARGET" ]; then
     echo "FAIL: property 12 could not make its assertion: git's rename detection does not read the" >&2
     echo "      move of '${DELETION_PROBE}' as a rename, so this run would measure nothing. It listed:" >&2
