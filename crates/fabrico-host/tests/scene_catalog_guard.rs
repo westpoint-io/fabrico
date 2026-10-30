@@ -311,6 +311,7 @@ fn scene_name(id: SceneId) -> &'static str {
 /// belongs in `examples/boards/docs/`, out of the Examples list. The walk isn't recursive, so the
 /// docs folder never counts.
 #[test]
+#[allow(clippy::disallowed_methods)] // A test reading the repo's own files is not sim-core I/O.
 fn board_files_match_the_scene_catalog() {
     let boards_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/boards");
     let mut stems: Vec<String> = std::fs::read_dir(&boards_dir)
