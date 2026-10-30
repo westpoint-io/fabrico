@@ -49,10 +49,15 @@
 #      to a data file.
 #
 # BASE MOVES. The base tag moves only as a reviewed change of its own: the tag is cut at
-# the new commit and pushed first, and the commit that relies on it resets both sections
-# of docs/DECLARED-MOVES.txt to NONE, because every move declared against the old base is
-# part of the new one. Moving the tag to make a red pass is the gate-weakening move named
-# at the bottom of this header.
+# the new commit, and the commit that relies on it resets both sections of
+# docs/DECLARED-MOVES.txt to NONE, because every move declared against the old base is part
+# of the new one. The branch and the moved tag then go to origin TOGETHER, in one atomic push:
+#     git push --atomic --force-with-lease=refs/tags/public-base:<old tag object> \
+#         origin <branch> refs/tags/public-base
+# A plain `git push` leaves an existing tag where it is, so CI would fetch the old tag and
+# compare against it. Pushing the tag alone is no better, because its commit is not on origin's
+# branch yet. Moving the tag to make a red pass is the gate-weakening move named at the bottom
+# of this header.
 #
 # WHAT IT DOES NOT ASSERT, stated plainly so no downstream artifact overstates its
 # coverage: it does not build, test, or replay anything. It is a pure git-level and
