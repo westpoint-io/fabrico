@@ -1198,7 +1198,7 @@ describe('a wired electrical port reads IDLE, not "not connected" (WIRE-05)', ()
   });
 
   it('the demo HTTP Handler reads its In and its Out as wired: each cable docks its own nub', () => {
-    // demo_scene.ron (plan 85-08): the handler is a palette HTTP Handler, 3x3, with an
+    // demo_scene.board.ron (plan 85-08): the handler is a palette HTTP Handler, 3x3, with an
     // electrical In at index 0 (W), an electrical Out at index 1 (E) and a mechanical
     // Fault at index 2 (S). The request cable enters its In and the reply leaves its Out,
     // so EACH row carries one cable and reads idle; the Fault carries none. Until plan

@@ -1,9 +1,8 @@
-// THE "advanced" example scene as DATA (quick 260916-adv): a larger, more sophisticated
-// order-fulfilment board than `demo_scene.ron` / `order_processing.ron`, shipped
-// as the third loadable Examples entry (SceneId::Advanced) and booted by the dev
-// render server for demos. Embedded via `include_str!` and parsed by
-// `load_scene_from_ron` into the frozen `Vec<GridCommand>` (fabrico-protocol);
-// same substrate and conventions as the other two scenes.
+// The "advanced" example as data: a larger, more sophisticated order-fulfilment board than
+// `demo_scene.board.ron` and `order_processing.board.ron`, shipped as the third loadable
+// Examples entry (SceneId::Advanced) and booted by the dev render server for demos. The app
+// embeds this file at build time and parses it with `parse_board`, with the same conventions as
+// the other two boards.
 //
 // What it shows off (all wired, belt-side):
 //   - TWO ingress Sources (a Timer for auto-flow on stage + a Webhook for a live
@@ -30,7 +29,7 @@
 //   SOURCE   Out=0
 //   FACTORY  In=0, Out=1, Fault=2   (default 3x3: In (0,1)W, Out (2,1)E, Fault (1,2)S)
 //   FACTORY(+1 AddPort Out) keeps its catalog seats and takes the new Out on the
-//     slot below the first (the 74.1-14 centre-out re-seat): In (0,1)W, Out0 (2,1)E,
+//     slot below the first (the centre-out re-seat): In (0,1)W, Out0 (2,1)E,
 //     Out1 (2,2)E, Fault (1,2)S -> CATALOG In=0, Out0=1, Fault=2, Out1=3 (the
 //     order-scene note).
 //   BALANCER In0=0, In1=1, Out0=2, Out1=3 (2x2: In (0,0)/(0,1)W, Out (1,0)/(1,1)E)
@@ -51,16 +50,19 @@
 // auto-running showcase clean and fully offline-safe. Retarget the fulfilment
 // terminal to Http(url: ...) in the panel for the real call (the
 // order_processing example ships that shape).
-[
+Board(
+    format: 1,
+    seed: 88,
+    commands: [
     // ── Machines (handles 0..=11, mint order == Place order) ─────────────────
-    // The two Sources sit in column 0 on rows 6 and 8, one empty row apart (EX-03
-    // floor 2: stacked flush they read as one 1x2 block at fit zoom). Source 0
+    // The two Sources sit in column 0 on rows 6 and 8, one empty row apart (floor 2
+    // in scene_floors.rs: stacked flush they read as one 1x2 block at fit zoom). Source 0
     // feeds ingress-Merge In0 with a straight belt on row 6; Source 1 leaves east
     // on row 8 and jogs up one row to arrive east into In1 on row 7. The spine runs
     // left-to-right on row 6 and dips to row 7 through the validate Factory, whose In
-    // and first Out sit on its middle row (plan 74.1-14). The Balancer and everything
-    // after it on the fulfilment side sit two columns east of where 260916-adv put them
-    // (plan 85-10; see the belt notes below). The invoice branch (10, 11) keeps its place.
+    // and first Out sit on its middle row. The Balancer and everything after it on the
+    // fulfilment side sit far enough east to keep the invoice branch (10, 11) clear of them
+    // (see the belt notes below).
     Place(kind: 0, cell_x: 0,  cell_y: 6),   // 0: SOURCE Timer (auto-flow; also live-POST addressable)
     Place(kind: 0, cell_x: 0,  cell_y: 8),   // 1: SOURCE Webhook (live orders)
     Place(kind: 6, cell_x: 4,  cell_y: 6),   // 2: MERGE ingress (2x2): In0 (4,6), In1 (4,7), Out (5,6)
@@ -77,15 +79,11 @@
     // Grow the validate Factory's second Out (UI: Ports "+ output"). role 1 = Out,
     // side 1 = E, medium 0 = Mechanical. Appends catalog 3 -> emit 1; the re-seat
     // keeps every existing port (In (0,1)W, Out0 (2,1)E, Out1 (2,2)E, Fault (1,2)S)
-    // -> world In (8,7), Out0 (10,7), Out1 (10,8), Fault (9,8)S. Until 74.1-14 the
-    // re-seat was by index and the belts below ended one row higher.
+    // -> world In (8,7), Out0 (10,7), Out1 (10,8), Fault (9,8)S.
     AddPort(node: 3, role: 1, side: 1, medium: 0),
 
-    // Two clockwise quarter-turns take the dead-letter sink's In from W to E. Until plan
-    // 74.1-14 ONE turn (W to N) sufficed: the validate Factory's Fault sat at (8,8),
-    // straight above the sink, and its belt dropped (8,9) -> (8,10) into the N-facing In.
-    // Since the 74.1-14 re-seat keeps the Factory's catalog Fault at (1,2), world (9,8),
-    // one column east of the sink, a belt into an N-facing In would have to step WEST to
+    // Two clockwise quarter-turns take the dead-letter sink's In from W to E. The validate
+    // Factory's catalog Fault is at (1,2), world (9,8), one column east of the sink, so a belt into an N-facing In would have to step WEST to
     // (8,10), which floor 4 (no net-backwards run) forbids. Every machine keeps its place;
     // the sink turns once more, its In faces E with its doorstep at (9,11), and the fault
     // belt drops straight down (9,9) -> (9,11) and turns into it.
@@ -97,18 +95,16 @@
     // (scene_floors.rs floor 6): once a belt has stepped one way along an axis it never
     // steps the other way. A belt whose In sits on another row either jogs in its middle
     // and arrives along the port facing, or runs straight to the In's doorstep and turns
-    // into the port there (accepted since 74.1, D-02).
+    // into the port there.
     //
-    // Plan 85-10 (the PR #2 review's WR-05 and IN-04) re-laid the fulfilment side. The
+    // The fulfilment side is laid out so the two branches read apart at fit zoom. The
     // Balancer and everything after it (the two workers, the fan-in Merge, the HTTP Sink)
-    // sit two columns further east, so the invoice belt (17) turns south at (12,8) with a
+    // sit far enough east that the invoice belt (17) turns south at (12,8) with a
     // clear column (13) and the Balancer's unused In1 mouth (14,7) beyond it: at fit zoom
-    // the billing branch no longer reads as feeding the Balancer. Belt 17 runs straight
-    // down column 12 into the invoice Factory's doorstep (12,13) instead of jogging west
-    // at (12,12); belt 21 climbs column 24 into the fan-in Merge's In1 doorstep (24,7)
-    // instead of jogging west at (22,8) and running one row under belt 20 for two
-    // columns. The box is x 0..29, exactly floor 5's 30-cell cap. Every Dock port and
-    // every Configure is unchanged.
+    // the billing branch doesn't read as feeding the Balancer. Belt 17 runs straight down
+    // column 12 into the invoice Factory's doorstep (12,13), and belt 21 climbs column 24
+    // into the fan-in Merge's In1 doorstep (24,7), so neither jogs west. The box is
+    // x 0..29, exactly floor 5's 30-cell cap.
     DrawBelt(cells: [(1, 6), (2, 6), (3, 6)]),                                           // 12: SourceTimer Out -> ingress Merge In0
     DrawBelt(cells: [(1, 8), (2, 8), (2, 7), (3, 7)]),                                   // 13: SourceWebhook Out -> ingress Merge In1
     DrawBelt(cells: [(6, 6), (6, 7), (7, 7)]),                                           // 14: ingress Merge Out -> validate In (drops to row 7)
@@ -163,7 +159,7 @@
     // with no id (a typo'd `order_id`, an array, a bare string) is dead-lettered,
     // never laundered into a fabricated order.
     //
-    // Assumption (quick 260929-p7p): a live POST whose body is exactly `{}` is
+    // Assumption: a live POST whose body is exactly `{}` is
     // byte-identical to the Timer heartbeat. A Factory receives only the payload
     // bytes (the ctx built by `__fab_make_ctx` in fabrico-core `factory.rs`, and
     // the webhook's `ManualInject` in fabrico-host `sim_loop.rs`); no origin
@@ -212,4 +208,9 @@ export default function (input, ctx) {
     // terminal keeps the auto-running showcase clean and fully offline-safe; a
     // user retargets the fulfilment sink to Http(url: ...) in the panel (as the
     // order_processing example ships it) when they want the real call.
-]
+    ],
+    script: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 1200,
+)

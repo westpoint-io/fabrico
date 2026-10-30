@@ -32,7 +32,7 @@ import {
 //   4. POST an id-less body (a typo'd `order_id` key) at the webhook Source's own
 //      URL, and the dead-letter belt carries an item that the Sink then takes.
 //
-// Cells are the scene's authored anchors (scenes/advanced.ron), resolved to live
+// Cells are the scene's authored anchors (examples/boards/advanced.board.ron), resolved to live
 // handles off the packet; nothing here hardcodes a handle.
 
 const KIND_SOURCE = 0;
@@ -40,7 +40,7 @@ const KIND_FACTORY = 2;
 const KIND_BALANCER = 4;
 const KIND_SINK = 7;
 
-/** Authored anchors in scenes/advanced.ron. */
+/** Authored anchors in examples/boards/advanced.board.ron. */
 const AT = {
   webhookSource: [0, 8] as const,
   deadLetterSink: [8, 11] as const,

@@ -37,11 +37,11 @@ use fabrico_core::state::{Footprint, Node, Port, Role, belt_end_world, port_worl
 use fabrico_host::demo_scene::{DEMO_GENESIS_SEED, demo_commands};
 use fabrico_protocol::{GridCommand, machine_kind};
 
-/// The demo Factory's dense handle (`demo_scene.ron`: machines 0..=10 in Place order).
+/// The demo Factory's dense handle (`demo_scene.board.ron`: machines 0..=10 in Place order).
 const FACTORY: u64 = 1;
 /// The demo Router's dense handle.
 const ROUTER: u64 = 7;
-/// The belt from the Factory's Out to the Tee (`demo_scene.ron`: belts 18..=28).
+/// The belt from the Factory's Out to the Tee (`demo_scene.board.ron`: belts 18..=28).
 const FACTORY_OUT_BELT: u64 = 19;
 
 /// The demo board, folded headlessly.

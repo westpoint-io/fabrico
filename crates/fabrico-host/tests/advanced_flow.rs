@@ -1,6 +1,6 @@
 //! The "advanced" example scene (quick 260916-adv): it seeds, and it RUNS.
 //!
-//! The scene is authored as RON data (`src/scenes/advanced.ron`). The first test
+//! The scene is authored as RON data (`examples/boards/advanced.board.ron`). The first test
 //! seeds it through the ONE certified applier (`seed_scene` -> `apply_gesture` ->
 //! `tick_once`, one command per tick) exactly as the app's Examples load path does,
 //! so every command's geometry (footprints, dock legality, belt paths, the AddPort
@@ -32,7 +32,7 @@ use fabrico_protocol::GridCommand;
 use tokio::sync::mpsc::unbounded_channel;
 
 /// Mint-order handles of the machines the runtime tests address (Place order in
-/// `advanced.ron`, machines first).
+/// `advanced.board.ron`, machines first).
 const WEBHOOK_SOURCE: usize = 1;
 const DEAD_LETTER_SINK: usize = 4;
 const FULFILMENT_SINK: usize = 9;
@@ -56,11 +56,11 @@ fn test_host(dir: &std::path::Path) -> Host {
 fn advanced_scene_ron_parses_and_every_command_is_accepted() {
     let cmds = SceneId::Advanced
         .commands()
-        .expect("advanced.ron is a well-formed Vec<GridCommand>");
+        .expect("advanced.board.ron is a well-formed board");
 
     // Census: 12 Place + 1 AddPort + 2 Rotate + 12 DrawBelt + 24 Dock + 6 Configure.
     // (2 Rotates since plan 74.1-14: the dead-letter sink turns W -> E, not W -> N, so the
-    // fault belt from the re-seated Fault at (9,8) never runs west; see advanced.ron.)
+    // fault belt from the re-seated Fault at (9,8) never runs west; see advanced.board.ron.)
     // Exhaustive: any other variant (Undo, Delete, a wire op...) is a defect here.
     let mut places = 0;
     let mut add_ports = 0;
@@ -133,7 +133,7 @@ struct Run {
 fn run(ticks: u64, extra: &[(usize, u64, &[u8])]) -> Run {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut host = test_host(dir.path());
-    let cmds = SceneId::Advanced.commands().expect("advanced.ron parses");
+    let cmds = SceneId::Advanced.commands().expect("advanced.board.ron parses");
     let minted = seed_scene(&mut host, &cmds).expect("seed the advanced scene");
     let timers = timers_from_log(&host).expect("project timers from the seeded log");
     let mut host = host.with_timers(timers);

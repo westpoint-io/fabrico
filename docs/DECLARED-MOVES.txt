@@ -183,3 +183,5 @@ crates/fabrico-engine/src/envelope.rs
 # three shipped scenes become data files in this format, so the app, the tests and later the browser
 # read one file. No golden fixture moves.
 crates/fabrico-engine/src/board.rs
+# A comment line only: the demo's list moved out of the host into a board file.
+crates/fabrico-core/src/tick.rs

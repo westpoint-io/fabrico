@@ -93,7 +93,7 @@ import { nubAnchor } from '../shared/geometry';
 //
 // Shared-host note: the live suite runs workers:1 against ONE mutable dev host,
 // so this spec resets to the demo baseline at its start (`DEMO_NODE_COUNT`, the
-// demo's node count, comes from the oracle, read off demo_scene.ron; plan 85-08).
+// demo's node count, comes from the oracle, read off demo_scene.board.ron; plan 85-08).
 
 /** The Route the MediumMismatch legs place from the palette: the belt's source. */
 const OWN_CALLER_ANCHOR = [2, 10] as const;
@@ -112,7 +112,7 @@ const BELT_CELLS = [
 
 /**
  * The cell the tracer clicks: belt 10's FIRST tile in the demo scene
- * (`demo_scene.ron`, `DrawBelt(cells: [(7, 3), (8, 3)])`, the factory -> tee run).
+ * (`demo_scene.board.ron`, `DrawBelt(cells: [(7, 3), (8, 3)])`, the factory -> tee run).
  *
  * A belt tile is in the host's occupancy index exactly like a machine footprint cell
  * (BELT-06), so a `Place` anchored here is refused with `FootprintCollision` - the

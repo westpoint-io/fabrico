@@ -1,5 +1,5 @@
-// THE order-processing teaching scene as DATA (EX-02) — the thing the v6.2
-// done-test rebuilds by hand from an empty board. A real webhook order flows:
+// The order-processing teaching board as data, the one a person can rebuild by hand from an
+// empty board. A real webhook order flows:
 //
 //   SOURCE(1,6) -b6-> FACTORY validate/split(5,5 3x3) --emit 0 (invoice)---b7--> FACTORY invoice(13,2 3x3) -b9--> SINK Debug(21,3)
 //                                                     \-emit 1 (fulfill)--b8--> FACTORY fulfill(13,9 3x3) -b10-> SINK Http(21,10)
@@ -13,7 +13,7 @@
 //
 // Census: 6 Place + 1 AddPort + 5 DrawBelt + 10 Dock + 6 Configure = 28 commands.
 // EVERY command is UI-producible (palette place, Ports "+ output", belt drag with
-// nub docks, config panel bodies) — enforced by the Rust census test
+// nub docks, config panel bodies), enforced by the Rust census test
 // `order_scene_vocabulary_is_ui_producible` (tests/order_flow.rs).
 //
 // machine_kind u8 legend (source of truth: fabrico-protocol `machine_kind` consts):
@@ -39,7 +39,7 @@
 // earlier command (one-command-per-tick seeding makes resolution structural).
 //
 // Sink targets: the HTTP sink defaults to a user-editable loopback URL
-// (port 8799, path /fulfillment) — NEVER a third-party endpoint.
+// (port 8799, path /fulfillment), NEVER a third-party endpoint.
 // This default is NOT "harmless" in the unqualified sense an earlier revision of
 // this comment claimed. Fabrico does not reserve 8799 and cannot know what owns
 // it, so loading this example and firing one order makes the app POST the
@@ -55,7 +55,10 @@
 // is already Debug), for the same teaching reason as the Source's Webhook trigger.
 // `method: Post` matches the executor's behavior (it always POSTs;
 // the field is inert host-side, authored Post so data == behavior).
-[
+Board(
+    format: 1,
+    seed: 55,
+    commands: [
     // ── Machines (handles 0..=5, mint order == Place order) ──────────────
     Place(kind: 0, cell_x: 1,  cell_y: 6),   // 0: SOURCE, the webhook front door, 1x1
     Place(kind: 2, cell_x: 5,  cell_y: 5),   // 1: FACTORY validate/split, 3x3
@@ -72,7 +75,7 @@
     // ── Drawn belts (handles 6..=10, mint order == DrawBelt order) ────────
     // Every run >= 2 cells; both branch corridors leave the splitter mouth heading
     // E (the dock facing-opposite rule), then jog apart at x=9 to their corridors
-    // (invoice row 3, fulfillment row 10 — >= 3 rows apart away from the mouth).
+    // (invoice row 3, fulfillment row 10, >= 3 rows apart away from the mouth).
     DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),                                           // 6: source -> splitter In (straight on row 6)
     DrawBelt(cells: [(8, 6), (9, 6), (9, 5), (9, 4), (9, 3), (10, 3), (11, 3), (12, 3)]), // 7: splitter Out1 -> invoice In (jogs up at x9)
     DrawBelt(cells: [(8, 7), (9, 7), (9, 8), (9, 9), (9, 10), (10, 10), (11, 10), (12, 10)]), // 8: splitter Out2 -> fulfillment In (jogs down at x9)
@@ -93,10 +96,10 @@
 
     // ── Configures (all panel-producible) ─────────────────────────────────
     // Explicit webhook trigger (a fresh Source is webhook-ready with no Configure;
-    // authored anyway for teaching explicitness — the panel's segmented control).
+    // authored anyway for teaching explicitness: the panel's segmented control).
     Configure(node: 0, config: Source(trigger: Webhook)),
     // The validate/split Factory: a structurally-non-order JSON body (missing `id`
-    // or an `items` array) THROWS — the honest red-state teaching moment, leaving
+    // or an `items` array) THROWS: the honest red-state teaching moment, leaving
     // the machine FAULTED for that item with zero emissions. A genuinely malformed
     // (non-JSON) body already faults at the sandbox's canonical-JSON boundary
     // before this JS runs. A passing order emits exactly one invoice job on emit 0
@@ -119,4 +122,15 @@ export default function (input, ctx) {
 }"#)),
     Configure(node: 4, config: Sink(target: Debug)),
     Configure(node: 5, config: Sink(target: Http(url: "http://localhost:8799/fulfillment", method: Post))),
-]
+    ],
+    // Two real orders for a scripted run, so the board moves with no webhook. The app ignores
+    // this track, so in the app nothing moves on this board until a real order arrives. Handle 0
+    // is the Source, and the boot ends on tick 29.
+    script: [
+        At(tick: 60, input: Webhook(source: 0, body: r#"{"id":"ord-1","items":[{"sku":"widget","qty":2,"price":5}]}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"id":"ord-2","items":[{"sku":"gadget","qty":1,"price":9}]}"#)),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 1200,
+)

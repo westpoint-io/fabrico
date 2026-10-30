@@ -83,7 +83,7 @@ const KIND_SINK = 7;
 /** Port role byte for an output (oracle `PortFacts.role`). */
 const ROLE_OUT = 1;
 
-/** The demo board's anchors (`demo_scene.ron`): the Source (node 0), the Tee (2), the Audit
+/** The demo board's anchors (`demo_scene.board.ron`): the Source (node 0), the Tee (2), the Audit
  *  Sink (4), the Router (7) and the caller Route (29); belt 21's middle tile (the Tee copy into
  *  the Audit Sink); a floor cell clear of everything to deselect on. */
 const DEMO_SOURCE_AT: [number, number] = [1, 3];

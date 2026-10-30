@@ -74,7 +74,7 @@ import {
 
 test.describe.configure({ mode: 'serial' });
 
-// ── The scene, as authored (crates/fabrico-host/src/scenes/order_processing.ron)
+// ── The scene, as authored (examples/boards/order_processing.board.ron)
 //
 // ONE constants table, transcribed from the RON, so every coordinate in this file
 // has a single provenance. The rebuild targets these cells because the equivalence
@@ -103,7 +103,7 @@ const STATE_FAULTED = 2;
 
 /** The five authored belt runs: source port cell -> destination port cell, and the
  *  EXACT cell path between them (RON `DrawBelt` order). The three splitter runs moved
- *  one row down in 74.1-14 with `order_processing.ron`: the splitter's AddPort now keeps
+ *  one row down in 74.1-14 with `order_processing.board.ron`: the splitter's AddPort now keeps
  *  its catalog ports (In (5,6), Out_0 (7,6)) and seats the new Out at (7,7). */
 const BELT_RUNS = [
   {
@@ -280,7 +280,7 @@ test.beforeAll(async () => {
   if (v4 instanceof Error) {
     bindFailure =
       `could not bind the fulfillment listener on 127.0.0.1:${HTTP_PORT} (${v4.message}). ` +
-      `Port ${HTTP_PORT} is the SHIPPED sink URL in order_processing.ron, so this spec cannot ` +
+      `Port ${HTTP_PORT} is the SHIPPED sink URL in order_processing.board.ron, so this spec cannot ` +
       `observe the real outbound action without it. Free port ${HTTP_PORT} and re-run.`;
     return;
   }

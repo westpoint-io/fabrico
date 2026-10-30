@@ -43,6 +43,7 @@ use fabrico_core::event::{LogHeader, SCHEMA_VERSION};
 use fabrico_core::ids::NodeId;
 use fabrico_core::persist::RedbStore;
 use fabrico_core::state::{Footprint, Port};
+use fabrico_engine::board::parse_board;
 use fabrico_host::demo_scene::{SceneId, boot_scene};
 use fabrico_host::driver::Host;
 use fabrico_host::ledger::DispatchLedger;
@@ -302,6 +303,42 @@ fn scene_name(id: SceneId) -> &'static str {
         SceneId::Demo => "demo",
         SceneId::OrderProcessing => "order processing",
         SceneId::Advanced => "advanced",
+    }
+}
+
+/// The board files at the top of `examples/boards/` are exactly the shipped scenes. A new board
+/// placed there with no [`SceneId`] fails here by name, and that is what keeps a docs board, which
+/// belongs in `examples/boards/docs/`, out of the Examples list. The walk isn't recursive, so the
+/// docs folder never counts.
+#[test]
+fn board_files_match_the_scene_catalog() {
+    let boards_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/boards");
+    let mut stems: Vec<String> = std::fs::read_dir(&boards_dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", boards_dir.display()))
+        .map(|entry| entry.expect("read a directory entry").file_name().to_string_lossy().into_owned())
+        .filter_map(|name| name.strip_suffix(".board.ron").map(str::to_owned))
+        .collect();
+    stems.sort();
+    let mut wire_ids: Vec<String> = SceneId::ALL.iter().map(|id| id.wire_id().to_owned()).collect();
+    wire_ids.sort();
+    assert_eq!(
+        stems, wire_ids,
+        "the board files at the top of examples/boards must be exactly SceneId::ALL; a docs-only \
+         board goes in examples/boards/docs/"
+    );
+    assert_eq!(stems.len(), SceneId::ALL.len(), "one file per scene");
+
+    for id in SceneId::ALL {
+        let path = boards_dir.join(format!("{}.board.ron", id.wire_id()));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let board = parse_board(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(
+            board.commands,
+            id.commands().expect("the embedded board parses"),
+            "{}: the file and the build's embedded copy differ",
+            id.wire_id()
+        );
+        assert_eq!(board.seed, id.genesis_seed(), "{}: seed", id.wire_id());
     }
 }
 

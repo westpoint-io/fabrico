@@ -1381,7 +1381,7 @@ fn fold_unlink(
 /// # ANY blocked, not ALL, and the demo board FORCED that (ruling R-10)
 ///
 /// A Tee has two output ports. Under an ALL-blocked predicate the shipped demo board
-/// would never jam at all: `scenes/demo_scene.ron` wires the Tee's short branch out to
+/// would never jam at all: `examples/boards/demo_scene.board.ron` wires the Tee's short branch out to
 /// belt 11 (which runs on to the Router, Balancer, Merge and terminal Sink) and its long
 /// branch out to belt 12, and the acceptance walk slows belt 12 ONLY. The short branch
 /// keeps draining, so an ALL-blocked Tee never stops, belt 10's head is taken every

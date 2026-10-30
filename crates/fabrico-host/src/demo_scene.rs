@@ -1,5 +1,10 @@
 //! The shipped scenes as DATA, and THE one function that boots any of them.
 //!
+//! The boards live in `examples/boards/`, with one `<wire id>.board.ron` per [`SceneId`]. This
+//! module embeds them at build time, so no file is read at run time and [`SceneId`] stays a closed
+//! list: a board in `examples/boards/docs/` never reaches the Examples menu. A test in
+//! `tests/scene_catalog_guard.rs` holds the files and the catalog together.
+//!
 //! Every shipped board (the demo, the order-processing example and the advanced example) is
 //! a build-embedded board file (`examples/boards/*.board.ron`) holding a list of
 //! [`GridCommand`]s, the same commands a user's own gestures produce. [`boot_scene`] applies a scene to a fresh-genesis [`Host`] through
@@ -68,17 +73,16 @@ const DEMO_SCENE_RON: &str = include_str!("../../../examples/boards/demo_scene.b
 
 /// The build-embedded order-processing teaching scene asset (EX-02): the second
 /// shipped scene — webhook Source -> validate/split Factory -> invoice +
-/// fulfillment corridors over belts -> invoice Debug sink + HTTP sink. Same substrate as
-/// [`DEMO_SCENE_RON`]: RON `Vec<GridCommand>` through [`load_command_list`].
-const ORDER_SCENE_RON: &str = include_str!("scenes/order_processing.ron");
+/// fulfillment corridors over belts -> invoice Debug sink + HTTP sink. A board file, like
+/// [`DEMO_SCENE_RON`].
+const ORDER_SCENE_RON: &str = include_str!("../../../examples/boards/order_processing.board.ron");
 
 /// The build-embedded "advanced" scene asset (quick 260916-adv): the third shipped scene, a
 /// larger order-fulfilment board (two ingress Sources -> ingress Merge -> a
 /// validate/split Factory with a wired dead-letter Sink on its Fault port ->
 /// parallel worker Factories behind a Balancer, re-merged into an HTTP sink, plus
-/// an invoice Factory -> Debug sink). Same substrate as the other two:
-/// RON `Vec<GridCommand>` through [`load_command_list`].
-const ADVANCED_SCENE_RON: &str = include_str!("scenes/advanced.ron");
+/// an invoice Factory -> Debug sink). A board file, like the other two.
+const ADVANCED_SCENE_RON: &str = include_str!("../../../examples/boards/advanced.board.ron");
 
 /// The order-processing scene's genesis seed — fixed for determinism, DISTINCT
 /// from [`DEMO_GENESIS_SEED`] (7) so no two of the three shipped scenes share a
@@ -112,9 +116,9 @@ pub const ADVANCED_GENESIS_SEED: u64 = 88;
 pub enum SceneId {
     /// The command-built default demo scene (`examples/boards/demo_scene.board.ron`).
     Demo,
-    /// The order-processing teaching example (`scenes/order_processing.ron`).
+    /// The order-processing teaching example (`examples/boards/order_processing.board.ron`).
     OrderProcessing,
-    /// The larger "advanced" order-fulfilment example (`scenes/advanced.ron`):
+    /// The larger "advanced" order-fulfilment example (`examples/boards/advanced.board.ron`):
     /// two Sources -> Merge -> validate/split Factory (dead-letter on Fault) ->
     /// Balancer + parallel worker Factories -> Merge -> HTTP sink, plus an invoice
     /// Factory -> Debug sink. Shipped as the third Examples entry.
@@ -161,8 +165,8 @@ impl SceneId {
     pub fn commands(self) -> Result<Vec<GridCommand>, SeedError> {
         match self {
             Self::Demo => load_board_commands(DEMO_SCENE_RON),
-            Self::OrderProcessing => load_command_list(ORDER_SCENE_RON),
-            Self::Advanced => load_command_list(ADVANCED_SCENE_RON),
+            Self::OrderProcessing => load_board_commands(ORDER_SCENE_RON),
+            Self::Advanced => load_board_commands(ADVANCED_SCENE_RON),
         }
     }
 
@@ -202,11 +206,6 @@ pub fn load_board_commands(src: &str) -> Result<Vec<GridCommand>, SeedError> {
     Ok(parse_board(src)?.commands)
 }
 
-/// The two scenes that haven't moved to board files yet.
-fn load_command_list(src: &str) -> Result<Vec<GridCommand>, SeedError> {
-    ron::from_str::<Vec<GridCommand>>(src).map_err(|e| SeedError::Board(BoardError::Parse(e)))
-}
-
 /// THE replayable scene (LIVE-02/LIVE-04): the ENTIRE default factory as one
 /// [`GridCommand`] list exercising all four command families, materialized from
 /// the build-embedded demo board.
@@ -242,15 +241,15 @@ pub fn demo_commands() -> Vec<GridCommand> {
 /// [`ORDER_SCENE_RON`] asset. Every command is UI-producible (the v6.2 done-test
 /// contract — enforced by `tests/order_flow.rs`'s census test).
 ///
-/// Same handle + port conventions as [`demo_commands`]; see the RON header for
+/// Same handle + port conventions as [`demo_commands`]; see the board file's header for
 /// the AddPort re-seat note (the splitter's grown second Out is catalog 3 ->
 /// emit 1).
 #[must_use]
 pub fn order_commands() -> Vec<GridCommand> {
     // Embedded RON is a TRUSTED build-time asset (same discipline as
     // `demo_commands`): a broken embed is a broken build.
-    load_command_list(ORDER_SCENE_RON)
-        .expect("embedded order_processing.ron is a build-time asset and must parse")
+    load_board_commands(ORDER_SCENE_RON)
+        .expect("embedded order_processing.board.ron is a build-time asset and must parse")
 }
 
 /// A [`seed_scene`] failure - a typed error, never a panic. Scene-neutral on purpose: the
@@ -560,23 +559,23 @@ mod tests {
         assert_eq!(SceneId::OrderProcessing.genesis_seed(), ORDER_GENESIS_SEED);
         assert_eq!(SceneId::Advanced.genesis_seed(), ADVANCED_GENESIS_SEED);
         assert_eq!(
-            SceneId::Demo.commands().expect("the embedded demo RON parses"),
+            SceneId::Demo.commands().expect("the embedded demo board parses"),
             demo_commands()
         );
         assert_eq!(
             SceneId::OrderProcessing
                 .commands()
-                .expect("the embedded order RON parses"),
+                .expect("the embedded order board parses"),
             order_commands()
         );
         // The advanced scene's genesis seed is distinct from the other two, so no
         // two shipped scenes share a factory sub-seed stream.
         assert_ne!(ADVANCED_GENESIS_SEED, DEMO_GENESIS_SEED);
         assert_ne!(ADVANCED_GENESIS_SEED, ORDER_GENESIS_SEED);
-        // The advanced RON is a well-formed command list too.
+        // The advanced board is a well-formed command list too.
         assert!(
             SceneId::Advanced.commands().is_ok(),
-            "the embedded advanced RON parses"
+            "the embedded advanced board parses"
         );
     }
 
@@ -591,11 +590,15 @@ mod tests {
         );
     }
 
-    /// The seed constant and the board file say the same thing, so the two can't drift.
+    /// The seed constants and the board files say the same thing, so they can't drift.
     #[test]
-    fn the_demo_board_carries_the_demo_seed() {
-        let board = parse_board(DEMO_SCENE_RON).expect("the embedded demo board parses");
-        assert_eq!(board.seed, DEMO_GENESIS_SEED);
+    fn each_board_carries_its_scene_seed() {
+        let demo = parse_board(DEMO_SCENE_RON).expect("the embedded demo board parses");
+        assert_eq!(demo.seed, DEMO_GENESIS_SEED);
+        let order = parse_board(ORDER_SCENE_RON).expect("the embedded order board parses");
+        assert_eq!(order.seed, ORDER_GENESIS_SEED);
+        let advanced = parse_board(ADVANCED_SCENE_RON).expect("the embedded advanced board parses");
+        assert_eq!(advanced.seed, ADVANCED_GENESIS_SEED);
     }
 
     /// Phase-55 (EX-02) substrate proof: the RON format is expressive enough to

@@ -58,7 +58,7 @@ import {
 
 /**
  * The cell this spec clicks to select a belt: belt 10's first tile in the demo
- * scene (`demo_scene.ron`, `DrawBelt(cells: [(7, 3), (8, 3)])` - the factory ->
+ * scene (`demo_scene.board.ron`, `DrawBelt(cells: [(7, 3), (8, 3)])` - the factory ->
  * tee run). The same cell `18-refusal.spec.ts` places onto to provoke
  * `FootprintCollision`, so it is a cell whose belt-tile occupancy is already
  * asserted elsewhere in this suite.

@@ -1,6 +1,6 @@
 //! EX-03 BREATHING-ROOM FLOORS: "spaced for legibility" as CHECKABLE DATA over
-//! ALL THREE shipped RON scenes (`scenes/demo_scene.ron`, `scenes/order_processing.ron`,
-//! `scenes/advanced.ron`). A shipped scene this file does not enumerate is not checked,
+//! ALL THREE shipped boards (`examples/boards/demo_scene.board.ron`,
+//! `order_processing.board.ron` and `advanced.board.ron`). A shipped scene this file does not enumerate is not checked,
 //! so a new Examples entry must be enrolled here.
 //!
 //! The UI-SPEC's Breathing-Room Contract states five floors. They are FLOORS, not a
@@ -321,16 +321,16 @@ fn parse_scene(name: &'static str, commands: &[GridCommand]) -> Scene {
 
 /// The demo scene: its command list, the Route and HTTP Handler included (plan 85-08).
 fn demo_scene() -> Scene {
-    parse_scene("demo_scene.ron", &demo_commands())
+    parse_scene("demo_scene.board.ron", &demo_commands())
 }
 
 fn order_scene() -> Scene {
-    parse_scene("order_processing.ron", &order_commands())
+    parse_scene("order_processing.board.ron", &order_commands())
 }
 
 fn advanced_scene() -> Scene {
     parse_scene(
-        "advanced.ron",
+        "advanced.board.ron",
         &SceneId::Advanced
             .commands()
             .expect("the embedded advanced RON parses"),
@@ -898,7 +898,7 @@ fn demo_scene_passes_all_floors() {
     assert_eq!(
         scene.labels.len(),
         DEMO_LABELS,
-        "demo_scene.ron: the parse yielded {} labels, not the expected {DEMO_LABELS}",
+        "demo_scene.board.ron: the parse yielded {} labels, not the expected {DEMO_LABELS}",
         scene.labels.len()
     );
     assert_floors(&scene, StageFlow::Staged(&DEMO_STAGES), DEMO_MACHINES, DEMO_BELTS);

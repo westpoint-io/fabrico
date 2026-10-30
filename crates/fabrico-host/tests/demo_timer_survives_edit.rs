@@ -65,7 +65,7 @@ const MIN_INJECTS_AFTER: usize = 40;
 
 /// The dense render handle of the demo scene's FACTORY. Handles mint monotonic
 /// from 0 in mint order and the FACTORY is the second `Place` in
-/// `scenes/demo_scene.ron`; the `configure` arm asserts the JS actually changed,
+/// `examples/boards/demo_scene.board.ron`; the `configure` arm asserts the JS actually changed,
 /// so a drift in this convention fails loudly rather than passing vacuously.
 const FACTORY_HANDLE: u64 = 1;
 

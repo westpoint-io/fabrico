@@ -69,9 +69,9 @@ test.describe.configure({ mode: 'serial' });
 
 /** The Sink's wire kind (kinds.ts). */
 const KIND_SINK = 7;
-/** The Audit Sink's cell on the demo board (demo_scene.ron, node 4). */
+/** The Audit Sink's cell on the demo board (demo_scene.board.ron, node 4). */
 const SINK_CELL = [14, 4] as const;
-/** Belt 21's cells on the demo board, Tail first (demo_scene.ron). */
+/** Belt 21's cells on the demo board, Tail first (demo_scene.board.ron). */
 const BELT_CELLS: ReadonlyArray<readonly [number, number]> = [
   [11, 4],
   [12, 4],

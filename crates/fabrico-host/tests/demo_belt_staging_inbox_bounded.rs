@@ -16,7 +16,7 @@
 //!
 //! PILE-03's clause reads *"on the SHIPPED demo board (belt 12, the long branch, at
 //! 25 px/sec with the Source on Timer every 2 ticks)"*. **Both of those are settings
-//! the clause imposes, not values `scenes/demo_scene.ron` carries.** The shipped RON
+//! the clause imposes, not values `examples/boards/demo_scene.board.ron` carries.** The shipped RON
 //! authors `Timer(interval_ticks: 8)` (`DEMO_INJECT_EVERY`) and no belt pace at all,
 //! so every demo belt runs at `DEFAULT_TICKS_PER_SLOT` = 2 - about 250 px/sec at the
 //! 62.5 t/s loop, ten times the clause's 25 px/sec. (25 px/sec IS 20 ticks/slot: 4
@@ -49,7 +49,7 @@
 //! -> `timers_from_log` -> install, kept as those steps here because the test needs the
 //! mint-order ledger `seed_scene` returns). Nothing here hand-builds a
 //! chain, hand-links a port or hand-installs a timer: every node and every dock comes
-//! from `scenes/demo_scene.ron` through the certified gesture path, and the two clause
+//! from `examples/boards/demo_scene.board.ron` through the certified gesture path, and the two clause
 //! settings are applied as ordinary `GridCommand::Configure` gestures - the same
 //! gestures a user makes in the config panel - with the `TimerSet` re-projected from
 //! the edit-log afterwards exactly as `SimLoop::tick_body` does it. A test that built
@@ -106,7 +106,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 /// Audit sink at (14,4), minted at handle 21 (11 machines and 7 labels, then belts 18..=28
 /// in `DrawBelt` order, so it is the fourth drawn belt still). The clause's subject is the
 /// same queue - the Tee's second branch, slowed to 25 px/sec while its feeder runs fast -
-/// and only its handle and length moved. `scenes/demo_scene.ron` names it at its
+/// and only its handle and length moved. `examples/boards/demo_scene.board.ron` names it at its
 /// `Dock(belt: 21, ...)` lines, and `belt_12_is_the_long_branch_belt_the_clause_names`
 /// below asserts the resolution rather than trusting the convention.
 const BELT_12_HANDLE: u64 = 21;
@@ -411,7 +411,7 @@ fn demo_belt_12_staging_inbox_is_level_between_tick_3600_and_6000() {
 
 /// The handle convention is ASSERTED, not assumed: the clause's belt really is the TEE's
 /// second branch, the 3-tile audit copy belt from (11,4) to (13,4) (plan 85-08). Without this, a future edit to
-/// `demo_scene.ron`'s command order would silently repoint the test above at a
+/// `demo_scene.board.ron`'s command order would silently repoint the test above at a
 /// different belt and it would keep passing while measuring the wrong queue.
 #[test]
 fn belt_12_is_the_long_branch_belt_the_clause_names() {
@@ -423,7 +423,7 @@ fn belt_12_is_the_long_branch_belt_the_clause_names() {
     };
     assert_eq!(
         belt.tiles, 3,
-        "the Tee's second branch is the 3-tile audit copy run authored at `demo_scene.ron`'s \
+        "the Tee's second branch is the 3-tile audit copy run authored at `demo_scene.board.ron`'s \
          fourth DrawBelt; handle {BELT_12_HANDLE} resolved to a {}-tile belt instead, so the \
          mint-order convention has drifted and the clause above is measuring the wrong \
          queue",
@@ -444,6 +444,6 @@ fn belt_12_is_the_long_branch_belt_the_clause_names() {
         fabrico_core::belt_slots::DEFAULT_TICKS_PER_SLOT.get(),
         "and it ships at the DEFAULT pace, not the clause's 25 px/sec - the record that \
          the clause's settings are imposed by the test above rather than authored in \
-         `scenes/demo_scene.ron`"
+         `examples/boards/demo_scene.board.ron`"
     );
 }

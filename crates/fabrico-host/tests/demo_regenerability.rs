@@ -46,7 +46,7 @@ use fabrico_scenario::tick_hash;
 
 /// The demo scene's absolute state digest (Proof B): the blake3 `tick_hash` the
 /// shipped demo produces at the seed boundary. It turns the relative two-applier
-/// equality into an ABSOLUTE anchor: any edit to `scenes/demo_scene.ron` moves it, so
+/// equality into an ABSOLUTE anchor: any edit to `examples/boards/demo_scene.board.ron` moves it, so
 /// every layout change is a named re-pin below rather than a silent drift.
 ///
 /// Note: `fabrico_scenario::tick_hash` returns the hex `String` digest (never a
@@ -325,7 +325,7 @@ fn demo_scene_regenerates_to_an_identical_hash_from_two_appliers() {
     let live_hash = tick_hash(host.core());
 
     // Proof B (absolute anchor): the RON-sourced scene reproduces the pinned
-    // pre-extraction state hash. A transcription drift in demo_scene.ron that
+    // pre-extraction state hash. A transcription drift in demo_scene.board.ron that
     // slipped past the derived-Eq gate would move this hash and fail here.
     assert_eq!(
         live_hash, GOLDEN_TICK_HASH,

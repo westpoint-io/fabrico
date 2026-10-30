@@ -100,7 +100,7 @@ import {
 const STATE_TAG = { IDLE: 0, WORKING: 1, FAULTED: 2, BACKED_UP: 3 } as const;
 
 /**
- * Belt 9's first tile: the source -> factory run (`demo_scene.ron`,
+ * Belt 9's first tile: the source -> factory run (`demo_scene.board.ron`,
  * `DrawBelt(cells: [(2, 3), (3, 3)])`). Two tiles, so eight slots.
  */
 const BELT9_TILE: readonly [number, number] = [2, 3];

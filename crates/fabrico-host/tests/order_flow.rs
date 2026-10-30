@@ -1,5 +1,5 @@
 //! THE ORDER-PROCESSING FLOW PROOF (Phase 55, EX-02 — the SC1 Rust half): the
-//! shipped `order_processing.ron` teaching scene, seeded through the certified
+//! shipped `order_processing.board.ron` teaching scene, seeded through the certified
 //! one-command-per-tick path onto a real `Host`, proven end-to-end — a real
 //! order JSON body injected at the webhook Source flows
 //! `source -> validate/split Factory -> both corridors over belts -> both sinks`,

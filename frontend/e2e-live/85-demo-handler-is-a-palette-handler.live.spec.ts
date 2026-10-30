@@ -23,7 +23,7 @@ import {
 // 85-demo-handler-is-a-palette-handler.live.spec.ts (plan 85-08, DEMO-01, DEMO-02, SC1).
 //
 // The demo's caller and handler are built by ordinary logged commands (a Place of a Route, a
-// Place of an HTTP Handler, two Configures and two DrawWires in `demo_scene.ron`), so on the
+// Place of an HTTP Handler, two Configures and two DrawWires in `demo_scene.board.ron`), so on the
 // real host they must be the SAME machines a user places from the palette. Until plan 85-08
 // the handler was a 1x1 Factory minted outside the edit log with both cables on one nub
 // (walk-112, SWEEP Appendix C); this spec is red on that board.

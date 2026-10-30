@@ -20,7 +20,7 @@
 //! from the throwaway fold named a node 4 slots too early.
 //!
 //! SINCE PLAN 85-08 THE DEMO MINTS NOTHING OUTSIDE THE LOG: its Route and HTTP Handler
-//! and both cables are ordinary logged commands at the end of `demo_scene.ron`. The
+//! and both cables are ordinary logged commands at the end of `demo_scene.board.ron`. The
 //! demo-board arms below now run on that board, which must stay correct for the plain
 //! reason that it is what a user edits first. The guard arms that need a misaligned
 //! projection build one on purpose and by logged commands only (plan 85-09): four
