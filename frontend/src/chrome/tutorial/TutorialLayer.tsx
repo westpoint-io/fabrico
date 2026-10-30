@@ -123,6 +123,7 @@ export function TutorialLayer({
   const [state, setState] = useState<TutorialState>(IDLE);
   const factsRef = useRef<FrameFacts | null>(null);
   const targetRef = useRef<HintTarget | null>(null);
+  const paintRingRef = useRef<(() => void) | null>(null);
   // The frame loop below outlives any one render, so it reads the chrome's props through this.
   const chromeRef = useRef({ armed, selectedNode, playing });
   chromeRef.current = { armed, selectedNode, playing };
@@ -135,12 +136,16 @@ export function TutorialLayer({
   }, [probeRef]);
 
   const active = state.card !== 'none';
-  // `HintPointer` mounts in the same commit and its layout effect runs first, so each frame runs the
-  // ring, then this loop. A reader that starts later reads the probe after both.
+  // ONE LOOP, RING FIRST, so each frame paints the ring from the last frame's target and only then
+  // works out the lesson. A reader that starts later reads the probe after both, which is the frame
+  // a stale rect would show under a new stage. Two separate animation-frame loops can't hold that
+  // order: StrictMode re-runs a newly mounted child's effect after its parent's, which in a dev build
+  // put the ring's loop behind this one, so the stale frame the walk has to see never happened there.
   useLayoutEffect(() => {
     if (!active) return undefined;
     let raf = 0;
     const frame = (): void => {
+      paintRingRef.current?.();
       const handle = handleRef.current;
       const camera = readCamera();
       if (handle !== null && camera !== null) {
@@ -182,7 +187,7 @@ export function TutorialLayer({
   return (
     <>
       {lessonsOpen && <LessonPanel lessons={LESSONS} onStart={start} onClose={() => onLessonsOpenChange(false)} />}
-      {active && <HintPointer targetRef={targetRef} />}
+      {active && <HintPointer targetRef={targetRef} paintRef={paintRingRef} />}
     </>
   );
 }

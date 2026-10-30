@@ -4,12 +4,12 @@
 // any frame. `pointer-events: none` on the whole layer means the gesture the step asks for lands on
 // the control or the floor under the ring.
 //
-// THE RING RECORDS WHICH STAGE IT WAS PLACED FOR, in `data-fab-hint-stage`. This loop and the
-// layer's are separate animation-frame callbacks, and this one runs first, so a stage change reaches
-// the ring a frame after the lesson state has moved. Until then its rect belongs to the old stage.
-// The attribute is what lets a reader tell the two apart, and only this file writes it.
+// THE RING RECORDS WHICH STAGE IT WAS PLACED FOR, in `data-fab-hint-stage`. The layer's frame loop
+// paints the ring first and works out the lesson second, so a stage change reaches the ring a frame
+// after the lesson state has moved. Until then its rect belongs to the old stage. The attribute is
+// what lets a reader tell the two apart, and only this file writes it.
 
-import { useLayoutEffect, useRef, type JSX, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObject } from 'react';
 import { CELL } from '../../../shared/geometry';
 import { KIND_NAMES } from '../../../shared/kindNames';
 import type { HintAnchor } from '../../tutorial/types';
@@ -71,37 +71,39 @@ function ringBox(target: HintTarget, layer: HTMLElement): RingBox | null {
 export interface HintPointerProps {
   /** Written by the layer's frame loop; null when there is no stage. */
   targetRef: RefObject<HintTarget | null>;
+  /** Where the ring leaves its paint function, for the layer's frame loop to call. */
+  paintRef: MutableRefObject<(() => void) | null>;
 }
 
-export function HintPointer({ targetRef }: HintPointerProps): JSX.Element {
+export function HintPointer({ targetRef, paintRef }: HintPointerProps): JSX.Element {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
-    let raf = 0;
     const project = (): void => {
       const layer = layerRef.current;
       const ring = ringRef.current;
-      if (layer !== null && ring !== null) {
-        const target = targetRef.current;
-        const box = target === null ? null : ringBox(target, layer);
-        if (target === null || box === null) {
-          ring.style.visibility = 'hidden';
-          ring.removeAttribute('data-fab-hint-stage');
-        } else {
-          layer.style.zIndex = box.zIndex;
-          ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
-          ring.style.width = `${box.width}px`;
-          ring.style.height = `${box.height}px`;
-          ring.setAttribute('data-fab-hint-stage', target.key);
-          ring.style.visibility = 'visible';
-        }
+      if (layer === null || ring === null) return;
+      const target = targetRef.current;
+      const box = target === null ? null : ringBox(target, layer);
+      if (target === null || box === null) {
+        ring.style.visibility = 'hidden';
+        ring.removeAttribute('data-fab-hint-stage');
+      } else {
+        layer.style.zIndex = box.zIndex;
+        ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
+        ring.style.width = `${box.width}px`;
+        ring.style.height = `${box.height}px`;
+        ring.setAttribute('data-fab-hint-stage', target.key);
+        ring.style.visibility = 'visible';
       }
-      raf = requestAnimationFrame(project);
     };
     project();
-    return () => cancelAnimationFrame(raf);
-  }, [targetRef]);
+    paintRef.current = project;
+    return () => {
+      paintRef.current = null;
+    };
+  }, [targetRef, paintRef]);
 
   return (
     <div
