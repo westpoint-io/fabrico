@@ -785,7 +785,12 @@ fi
 # One `git diff` over the whole covered surface, rather than one per path: the comparison
 # below is a set membership test against this listing, which keeps a 250-path walk to a
 # single git invocation.
-if ! changed_listing="$(LC_ALL=C git diff --name-only "$BASE_SHA" -- "${COVERED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort)"; then
+#
+# --no-renames, because A DELETION IS A MOVE and a rename is a deletion plus an addition. With
+# git's default rename detection only the new name is listed, so the old path reads as unchanged:
+# it goes undeclared, and an honest declaration of it is refused as DECLARED but UNMOVED. The flag
+# also keeps the verdict from depending on the runner's diff.renames setting.
+if ! changed_listing="$(LC_ALL=C git diff --no-renames --name-only "$BASE_SHA" -- "${COVERED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" "$HOST_PARITY_FIXTURE_DIR" | LC_ALL=C sort)"; then
     echo "FAIL: could not diff the covered paths against '${BASE}', so the assertion could not be made." >&2
     exit 2
 fi

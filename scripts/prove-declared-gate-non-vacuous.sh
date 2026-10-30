@@ -13,8 +13,8 @@
 # So the proof is a COMMITTED SCRIPT THAT RUNS IN CI, not one manual probe recorded in
 # prose. ACCEPTANCE IS THIS SCRIPT'S EXIT CODE, NEVER A SOURCE GREP.
 #
-# WHAT IS ASSERTED - eleven properties. Numbers 1 to 8 are listed in run order; numbers 10, 11
-# and 9 RUN just before number 8, so that number 8 stays this script's exit condition:
+# WHAT IS ASSERTED - twelve properties. Numbers 1 to 8 are listed in run order; numbers 10, 11,
+# 12 and 9 RUN just before number 8, so that number 8 stays this script's exit condition:
 #
 #   1. BASELINE GREEN. With no probe applied, the gate exits 0 over the COMMITTED
 #      declaration. Without this every red below proves nothing: a tree already dirty
@@ -56,6 +56,12 @@
 #      fabrico-host is not a covered crate, so these files reach the gate only through its named
 #      HOST_PARITY_FIXTURE_DIR paths. A re-record turns host_parity.rs green, so nothing else would
 #      see one. It runs after property 10, before property 9.
+#  12. A RENAMED COVERED PATH READS AS DELETED. `git mv` of an undeclared covered path that exists
+#      at the base, with only the new name declared, exits exactly 1 naming the OLD path, and
+#      declaring both names exits 0. With git's default rename detection the gate's diff lists
+#      only the new name, so the old path goes undeclared and declaring it is refused as DECLARED
+#      but UNMOVED. Property 9 can't see this, because a plain deletion is listed either way. It
+#      runs after property 11, before property 9.
 #
 # ---------------------------------------------------------------------------------
 # EVERY PROBE PATH IS SELECTED AT RUN TIME. NO COVERED PATH IS WRITTEN INTO THIS SCRIPT.
@@ -142,7 +148,7 @@
 # with the SAME leading-dash refusal on every route.
 #
 # EXIT CODES:
-#   0  PROVEN. All eleven properties held and the carve-out behaved as specified.
+#   0  PROVEN. All twelve properties held and the carve-out behaved as specified.
 #   1  A property did NOT hold. The gate is vacuous, or weaker than claimed. Every
 #      failing property is named.
 #   2  The proof COULD NOT BE MADE. This is a FAILURE, not a pass - an assertion that
@@ -216,10 +222,10 @@ usage() {
     cat >&2 <<'USAGE'
 usage: scripts/prove-declared-gate-non-vacuous.sh [--base <ref> | <ref>]
 
-Proves that scripts/check-core-declared.sh actually BITES, in all eleven ways listed
+Proves that scripts/check-core-declared.sh actually BITES, in all twelve ways listed
 below, and that the gate's own covered-path list still names all eight covered roots.
 
-The eleven properties, in run order:
+The twelve properties, in run order:
   1. baseline green            - the gate exits 0 with no probe applied
   2. the [source] arm bites    - an undeclared source edit exits 1 NAMING the path
   3. the digest arm bites      - a declared path whose digest differs exits 1 printing
@@ -235,6 +241,8 @@ The eleven properties, in run order:
  11. a re-recorded fixture     - a line appended to a host parity fixture exits 1 NAMING it,
      bites                       putting its bytes back returns exit 0, and a new untracked
                                  file in that directory exits 1 NAMING it
+ 12. a rename reads as deleted - `git-mv` of an undeclared covered path with only the new name
+                                 declared exits 1 NAMING the old path; declaring both exits 0
   9. the deletion arm bites    - `git-rm` of an undeclared covered path that exists at the
                                  base exits 1 NAMING it, and the path is restored
                                  byte-identically. Runs here, second-to-last, so that
@@ -651,6 +659,10 @@ fi
 UNTRACKED_PROBE="${EXPECTED_CRATES[0]}/src/prover-nonce-$$-$(date +%s).rs"
 UNTRACKED_HOST_PARITY_PROBE="${HOST_PARITY_FIXTURE_DIR}/prover-nonce-$$-$(date +%s).hashes"
 
+# Property 12 renames property 9's probe, which already meets the same requirement: undeclared, and
+# present at the base. The new name sits beside it, so it stays under the same covered root.
+RENAME_TARGET="$(dirname "$DELETION_PROBE")/prover-nonce-$$-$(date +%s)-$(basename "$DELETION_PROBE")"
+
 # --- The kept bytes -------------------------------------------------------------------
 # Every path a property below writes has its bytes kept HERE, at entry, after selection and
 # before the first probe, and every restore puts those bytes back. Nothing is restored from
@@ -695,6 +707,16 @@ run_gate() {
     GATE_OUT="$(bash "$GATE" --base "$BASE" 2>&1)" || GATE_RC=$?
 }
 
+# run_gate with git's rename detection forced on, whatever this runner's diff.renames says. Property
+# 12 needs it: on a runner with diff.renames=false, a gate that lost --no-renames would still pass
+# the probe, so the probe would be measuring the runner's config and not the gate.
+run_gate_with_rename_detection() {
+    GATE_OUT=""
+    GATE_RC=0
+    GATE_OUT="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=true \
+        bash "$GATE" --base "$BASE" 2>&1)" || GATE_RC=$?
+}
+
 # The digest recipe, written out here rather than sourced from the gate, for the same
 # reason EXPECTED_CRATES is: this proof must be able to disagree with its subject. Property
 # 3 is where a disagreement surfaces - it asserts the gate PRINTS the digest this function
@@ -718,13 +740,14 @@ prover_digest_of() {
     fi
 }
 
-# Inserts one entry into the [fixtures] section and drops that section's NONE line, which
+# Inserts one entry into the named section and drops that section's NONE line, which
 # cannot coexist with an entry. Removed again by `unmint`, which puts the declaration's
 # kept bytes back; the closing residue assertion is what proves the removal took.
-mint_fixture_line() {
-    local entry="$1"
+mint_section_line() {
+    local section="[$1]"
+    local entry="$2"
     DECL_TMP="$(mktemp)"
-    LC_ALL=C awk -v entry="$entry" '
+    LC_ALL=C awk -v section="$section" -v entry="$entry" '
         {
             line = $0
             trimmed = $0
@@ -732,17 +755,21 @@ mint_fixture_line() {
             sub(/[[:space:]]+$/, "", trimmed)
         }
         trimmed ~ /^\[/ {
-            in_fixtures = (trimmed == "[fixtures]")
+            in_section = (trimmed == section)
             print line
-            if (in_fixtures) { print entry }
+            if (in_section) { print entry }
             next
         }
-        in_fixtures && trimmed == "NONE" { next }
+        in_section && trimmed == "NONE" { next }
         { print line }
     ' "$DECLARATION" >"$DECL_TMP"
     cat "$DECL_TMP" >"$DECLARATION"
     rm -f "$DECL_TMP"
     DECL_TMP=""
+}
+
+mint_fixture_line() {
+    mint_section_line fixtures "$1"
 }
 
 unmint() {
@@ -810,11 +837,11 @@ compute_missing_roots() {
 
 failed=0
 STEP=0
-# The 11 properties, plus the carve-out case. The carve-out is a case, not a numbered
+# The 12 properties, plus the carve-out case. The carve-out is a case, not a numbered
 # property, which is why the step counter and the property numbers were never the same
 # sequence. Property 9 (the deletion arm) runs second-to-last so property 8 (clean revert)
 # can stay this script's exit condition.
-TOTAL=12
+TOTAL=13
 
 step() {
     STEP=$((STEP + 1))
@@ -826,6 +853,7 @@ echo "property 2 probe: ${SOURCE_PROBE}"
 echo "property 3/4 probe: ${FIXTURE_PROBE}"
 echo "property 9 probe: ${DELETION_PROBE}"
 echo "property 11 probe: ${HOST_PARITY_PROBE}"
+echo "property 12 probe: ${DELETION_PROBE} renamed to ${RENAME_TARGET}"
 echo
 
 # --- Property 1: baseline green -------------------------------------------------------
@@ -1094,6 +1122,54 @@ else
 fi
 rm -f "$UNTRACKED_HOST_PARITY_PROBE"
 
+# --- Property 12: a renamed covered path reads as deleted -----------------------------
+# The gate's diff has to list a rename as a deletion plus an addition. Git's default rename
+# detection lists only the new name, so the old path, still in the base's covered set, reads as
+# unchanged. Take --no-renames out of the gate's diff and the first run below exits 0.
+#
+# The second run is the other half of the same defect: with detection on, the honest declaration
+# of both names exits 1 as DECLARED but UNMOVED, so the gate refuses the correct answer.
+#
+# Restored the way property 9 is: unstage inside this private worktree, drop the new name, and put
+# the kept bytes back.
+step "property 12: a RENAMED COVERED PATH READS AS DELETED (git mv of ${DELETION_PROBE} with only the new name declared exits 1 naming the old path)"
+git mv "$DELETION_PROBE" "$RENAME_TARGET"
+RENAME_LISTING="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=true git diff --name-only "$BASE_SHA" -- "$DELETION_PROBE" "$RENAME_TARGET")"
+if [ "$RENAME_LISTING" != "$RENAME_TARGET" ]; then
+    echo "FAIL: property 12 could not make its assertion: git's rename detection does not read the" >&2
+    echo "      move of '${DELETION_PROBE}' as a rename, so this run would measure nothing. It listed:" >&2
+    printf '%s\n' "$RENAME_LISTING" | sed 's/^/        /' >&2
+    exit 2
+fi
+mint_section_line source "$RENAME_TARGET"
+run_gate_with_rename_detection
+if [ "$GATE_RC" -eq 0 ]; then
+    fail_named "the gate exited 0 with '${DELETION_PROBE}' renamed and only the new name declared, so a rename takes a covered path out of the declaration unseen."
+elif [ "$GATE_RC" -ne 1 ]; then
+    fail_named "the gate exited ${GATE_RC}, not 1, on a renamed covered path. Exit 2 means the assertion could not be MADE."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+elif ! printf '%s\n' "$GATE_OUT" | grep -F -- "$DELETION_PROBE" >/dev/null; then
+    fail_named "the gate exited 1 but did NOT name the old path '${DELETION_PROBE}'."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      renamed probe: gate correctly EXITS 1, naming ${DELETION_PROBE}"
+fi
+mint_section_line source "$DELETION_PROBE"
+run_gate_with_rename_detection
+if [ "$GATE_RC" -ne 0 ]; then
+    fail_named "the gate exited ${GATE_RC} with both '${DELETION_PROBE}' and '${RENAME_TARGET}' declared, so it refuses the honest declaration of a rename."
+    printf '%s\n' "$GATE_OUT" | sed 's/^/        /' >&2
+else
+    echo "      both names declared: gate exits 0"
+fi
+git reset -q -- "$DELETION_PROBE" "$RENAME_TARGET"
+rm -f "$RENAME_TARGET"
+prover_put_back "$DELETION_PROBE"
+unmint
+if [ -n "$(git status --porcelain -- "$DELETION_PROBE" "$RENAME_TARGET" "$DECLARATION")" ]; then
+    fail_named "'${DELETION_PROBE}', its new name or ${DECLARATION} is still dirty after the rename was undone."
+fi
+
 # --- Property 9: the deletion arm bites -----------------------------------------------
 # THE BLIND SPOT THIS CLOSES, and it was a live one. Every covered path set the gate built
 # was discovered from the WORKING TREE or the INDEX, so a path that existed at the base and
@@ -1195,6 +1271,7 @@ echo "with BOTH digests on a declared path whose bytes moved elsewhere; a NAMED 
 echo "declaration that outlived its move; a NAMED red on an untracked new file; a red on a"
 echo "${LOCKFILE} edit; the carve-out; a NAMED red on an edit to ${BOARD_MANIFEST}; a NAMED"
 echo "red on a re-recorded host parity fixture and on a new file beside it; a NAMED"
+echo "red on the old name of a RENAMED covered path, and a green once both names are declared; a NAMED"
 echo "red on a DELETED covered path, restored byte-identically; and a clean tree on the way"
 echo "out. The covered set still holds, read"
 echo "by block with comment lines filtered:"
@@ -1202,5 +1279,5 @@ printf '  %s\n' "${EXPECTED_CRATES[@]}" "$LOCKFILE" "$BOARD_MANIFEST" "$HOST_PAR
 echo
 # The last line of a successful run begins with PROVEN:, so a caller can read the verdict
 # off the tail without parsing the transcript above it.
-echo "PROVEN: ${GATE} bites in all eleven ways, against '${BASE}' (${BASE_SHA:0:12})."
+echo "PROVEN: ${GATE} bites in all twelve ways, against '${BASE}' (${BASE_SHA:0:12})."
 exit 0
