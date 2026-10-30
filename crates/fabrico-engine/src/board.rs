@@ -172,6 +172,20 @@ pub enum BoardError {
     },
     /// A command in the board was refused while it was being applied.
     Command(CommandError),
+    /// A script entry names a handle that no command has minted by its tick.
+    UnknownHandle {
+        /// The entry's tick.
+        tick: u64,
+        /// The handle it names.
+        handle: u64,
+    },
+    /// The command layer refused a scripted edit.
+    ScriptEditRefused {
+        /// The entry's tick.
+        tick: u64,
+        /// Why it was refused.
+        source: CommandError,
+    },
 }
 
 impl std::fmt::Display for BoardError {
@@ -193,6 +207,12 @@ impl std::fmt::Display for BoardError {
                 write!(f, "end_tick {end_tick} is before the boot end, tick {boot_end}")
             }
             Self::Command(e) => write!(f, "a board command was refused: {e}"),
+            Self::UnknownHandle { tick, handle } => {
+                write!(f, "the script entry at tick {tick} names handle {handle}, which isn't minted yet")
+            }
+            Self::ScriptEditRefused { tick, source } => {
+                write!(f, "the scripted edit at tick {tick} was refused: {source}")
+            }
         }
     }
 }
@@ -230,7 +250,7 @@ pub fn parse_board(src: &str) -> Result<BoardFile, BoardError> {
 
 /// The checks RON can't make. The boot end comes from the command count because each command
 /// takes one tick.
-fn validate(board: &BoardFile) -> Result<(), BoardError> {
+pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
     if board.commands.is_empty() {
         return Err(BoardError::EmptyBoard);
     }
