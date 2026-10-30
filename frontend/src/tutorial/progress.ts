@@ -74,7 +74,7 @@ export function localStorageProgress(storage: Pick<Storage, 'getItem' | 'setItem
   };
 }
 
-/** Mark a lesson started. Done sticks: a finished lesson that runs again goes back to Done once that run is gone. */
+/** Record a lesson as started. Done sticks: a finished lesson that runs again goes back to Done once that run is gone. */
 export function withLessonStarted(p: Progress, id: LessonId): Progress {
   if (p.lessons[id] === 'done') return p;
   return { version: 1, lessons: { ...p.lessons, [id]: 'inProgress' } };

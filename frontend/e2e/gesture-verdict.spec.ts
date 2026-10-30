@@ -345,7 +345,8 @@ test.describe('V10: the WelcomeCard and the refusal never co-occupy the anchor',
       'the first-run welcome card is showing before the gesture',
     ).toHaveCount(1);
 
-    await placeAt(page, 12, 8);
+    // Below the card: its button row spans its width, and only those buttons take a press.
+    await placeAt(page, 12, 12);
     await expectExactlyOneFrame(page, h, CMD.Place);
     await expect(page.locator(REFUSAL)).toHaveText(FOOTPRINT_SENTENCE);
 
