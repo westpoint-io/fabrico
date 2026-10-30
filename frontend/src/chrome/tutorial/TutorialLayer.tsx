@@ -169,7 +169,12 @@ export function TutorialLayer({
       const camera = readCamera();
       if (handle !== null && camera !== null) {
         const board = sceneSnapshot(handle.sceneState);
-        const chrome: ChromeFacts = { ...chromeRef.current, view: { camera, freeArea: readFreeArea() } };
+        const chrome: ChromeFacts = {
+          ...chromeRef.current,
+          triggerPressed: null,
+          appliedTrigger: null,
+          view: { camera, freeArea: readFreeArea() },
+        };
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);
         factsRef.current = { board, chrome };
         if (next !== stateRef.current) {

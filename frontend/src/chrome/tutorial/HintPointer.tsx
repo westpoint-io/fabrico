@@ -12,7 +12,8 @@
 import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObject } from 'react';
 import { CELL } from '../../../shared/geometry';
 import { KIND_NAMES } from '../../../shared/kindNames';
-import type { HintAnchor } from '../../tutorial/types';
+import { machine_kind } from '../../protocol/kinds';
+import type { HintAnchor, PanelTarget } from '../../tutorial/types';
 import { readCamera } from './cameraRead';
 
 /** What the layer asks the ring to mark. `stageKey` is `stageKey(stepIndex, stage.id)` from the lesson machine. */
@@ -37,11 +38,28 @@ interface RingBox {
   zIndex: string;
 }
 
-/** A panel target's selector, by the control's accessible name, so a renamed control fails the walk. */
-function panelSelector(target: Extract<HintAnchor, { on: 'panel' }>['target']): string {
-  return target.kind === 'playButton'
-    ? 'header button[aria-label="Play"]'
-    : `button[aria-label="Place ${KIND_NAMES[target.machineKind]}"]`;
+/** The first button under `root` whose whole text reads `word`. */
+function buttonReading(root: Element | null, word: string): HTMLElement | null {
+  if (root === null) return null;
+  return [...root.querySelectorAll<HTMLElement>('button')].find((b) => b.textContent?.trim() === word) ?? null;
+}
+
+/** A panel target's control, by its name or its state, so a renamed control fails the walk. */
+function panelControl(target: PanelTarget): HTMLElement | null {
+  switch (target.kind) {
+    case 'playButton':
+      return document.querySelector<HTMLElement>('header button[aria-label="Play"]');
+    case 'placeMachine':
+      return document.querySelector<HTMLElement>(`button[aria-label="Place ${KIND_NAMES[target.machineKind]}"]`);
+    case 'armedTool':
+      return document.querySelector<HTMLElement>('[data-fab-left-dock] button.is-armed');
+    case 'beltTool':
+      return buttonReading(document.querySelector('[data-fab-left-dock]'), KIND_NAMES[machine_kind.BELT] as string);
+    case 'segment':
+      return buttonReading(document.querySelector(`[role="group"][aria-label="${target.group}"]`), target.label);
+    case 'applyButton':
+      return buttonReading(document.querySelector('aside[aria-labelledby="fab-config-heading"]'), 'Apply');
+  }
 }
 
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
@@ -49,7 +67,7 @@ function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean): R
   const hint = target.hint;
   if (hint === null) return null;
   if (hint.on === 'panel') {
-    const control = document.querySelector<HTMLElement>(panelSelector(hint.target));
+    const control = panelControl(hint.target);
     if (control === null) return null;
     // Once, when the stage begins: a palette row can sit below the fold of its scrolling column.
     // This moves chrome only, so the camera and the board stay as they were.

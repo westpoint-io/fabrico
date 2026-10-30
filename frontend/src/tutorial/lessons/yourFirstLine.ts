@@ -13,8 +13,8 @@ const SINK_KIND = 7;
 const BELT_KIND = 1;
 
 /**
- * First in each step: a paused board holds a Place in the host's queue, so steps 1 and 2 can't finish
- * until it runs, and the user has to be told why nothing happened.
+ * First in steps 1 to 4 and 6: a paused board holds an edit in the host's queue and moves no item, so
+ * the step can't finish until it runs, and the user has to be told why nothing happened.
  */
 const BOARD_PAUSED: Stage = {
   id: 'board-paused',
@@ -71,6 +71,100 @@ export const YOUR_FIRST_LINE: Lesson = {
         },
       ],
       done: { is: 'nodeAppeared', kind: SINK_KIND, bind: 'sink' },
+    },
+    {
+      id: 'set-timer',
+      // Four stages, because machine tools stay armed after a place, a press on the Source with a tool
+      // still armed sends another Place, and a trigger change does nothing until Apply.
+      stages: [
+        BOARD_PAUSED,
+        {
+          id: 'tool-down',
+          when: { is: 'anyToolArmed' },
+          hint: { on: 'panel', target: { kind: 'armedTool' } },
+          gesture: { do: 'key', shortcut: 'escape' },
+          text: ['Press ', { key: 'escape' }, ' to put the tool down, or click it again in the palette.'],
+        },
+        {
+          id: 'select-source',
+          when: { is: 'notSelected', of: 'source' },
+          hint: { on: 'machine', of: 'source' },
+          gesture: { do: 'pressHint' },
+          text: ['A new ', { kind: SOURCE_KIND }, ' waits for a web request, so it makes nothing yet. Click it to select it.'],
+        },
+        {
+          id: 'press-timer',
+          when: { is: 'triggerNotPressed', trigger: 'Timer' },
+          hint: { on: 'panel', target: { kind: 'segment', group: 'Trigger', label: 'Timer' } },
+          gesture: { do: 'pressHint' },
+          text: ['Under Trigger, press Timer so it makes items on its own.'],
+        },
+        {
+          id: 'apply-timer',
+          when: { is: 'triggerNotApplied', trigger: 'Timer' },
+          hint: { on: 'panel', target: { kind: 'applyButton' } },
+          gesture: { do: 'pressHint' },
+          text: ['Press Apply to put the change on the board.'],
+        },
+      ],
+      done: { is: 'triggerApplied', of: 'source', trigger: 'Timer' },
+    },
+    {
+      id: 'draw-belt',
+      stages: [
+        BOARD_PAUSED,
+        {
+          id: 'belt-tool',
+          when: { is: 'beltNotArmed' },
+          hint: { on: 'panel', target: { kind: 'beltTool' } },
+          gesture: { do: 'pressHint' },
+          text: ['A ', { kind: BELT_KIND }, ' carries items between machines. Click ', { kind: BELT_KIND }, ' in the palette.'],
+        },
+        {
+          id: 'belt-draw',
+          when: { is: 'beltArmed' },
+          hint: { on: 'port', of: 'source', role: 'out', to: { of: 'sink', role: 'in' } },
+          gesture: { do: 'dragHint' },
+          text: ['Drag from the ', { kind: SOURCE_KIND }, "'s output dot to the ", { kind: SINK_KIND }, "'s input dot."],
+        },
+      ],
+      done: { is: 'beltJoins', a: 'source', b: 'sink', bind: 'belt' },
+    },
+    {
+      id: 'press-play',
+      // A running board finishes this on its next higher tick, about one drawn frame, so it needs a
+      // stage of its own for that frame, with nothing to ask for.
+      stages: [
+        {
+          id: 'board-paused',
+          when: { is: 'paused' },
+          hint: { on: 'panel', target: { kind: 'playButton' } },
+          gesture: { do: 'pressHint' },
+          text: ['Press Play in the toolbar, or press ', { key: 'playPause' }, '.'],
+        },
+        {
+          id: 'board-running',
+          when: { is: 'always' },
+          hint: null,
+          gesture: { do: 'none' },
+          text: ['The board is running.'],
+        },
+      ],
+      done: { is: 'tickRose' },
+    },
+    {
+      id: 'watch-items',
+      stages: [
+        BOARD_PAUSED,
+        {
+          id: 'watch',
+          when: { is: 'always' },
+          hint: { on: 'machine', of: 'sink' },
+          gesture: { do: 'watch' },
+          text: ['Watch the dots ride the ', { kind: BELT_KIND }, ' into the ', { kind: SINK_KIND }, '.'],
+        },
+      ],
+      done: { is: 'itemArrived', at: 'sink' },
     },
   ],
   closing: [

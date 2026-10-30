@@ -43,25 +43,58 @@ export interface ChromeFacts {
   armed: ArmedFact;
   selectedNode: number | null;
   playing: boolean;
+  /** The pressed segment in the inspector's Trigger group, read from the DOM. This is the unapplied buffer. */
+  triggerPressed: 'Webhook' | 'Timer' | null;
+  /** The host's last answer about a node's trigger. Only this says a trigger has been applied. */
+  appliedTrigger: { node: number; kind: 'Webhook' | 'Timer' } | null;
   view: {
     camera: { x: number; y: number; scale: number };
     freeArea: { left: number; right: number; top: number; bottom: number };
   };
 }
 
-export type Check = { is: 'nodeAppeared'; kind: number; bind: BindingName };
+export type Check =
+  | { is: 'nodeAppeared'; kind: number; bind: BindingName }
+  | { is: 'triggerApplied'; of: BindingName; trigger: 'Timer' }
+  | { is: 'beltJoins'; a: BindingName; b: BindingName; bind: BindingName }
+  | { is: 'tickRose' }
+  | { is: 'itemArrived'; at: BindingName };
 
 export type StageWhen =
   | { is: 'always' }
   | { is: 'paused' }
   | { is: 'toolArmed'; machineKind: number }
-  | { is: 'toolNotArmed'; machineKind: number };
+  | { is: 'toolNotArmed'; machineKind: number }
+  | { is: 'anyToolArmed' }
+  | { is: 'beltNotArmed' }
+  | { is: 'beltArmed' }
+  | { is: 'notSelected'; of: BindingName }
+  | { is: 'triggerNotPressed'; trigger: 'Timer' }
+  | { is: 'triggerNotApplied'; trigger: 'Timer' };
+
+/** A chrome control a ring can mark. Each resolves by the control's own name or state, so a renamed control fails the walk. */
+export type PanelTarget =
+  | { kind: 'placeMachine'; machineKind: number }
+  | { kind: 'playButton' }
+  | { kind: 'armedTool' }
+  | { kind: 'beltTool' }
+  | { kind: 'segment'; group: 'Trigger'; label: 'Timer' }
+  | { kind: 'applyButton' };
+
+export type PortRoleName = 'out' | 'in';
 
 export type HintAnchor =
-  | { on: 'panel'; target: { kind: 'placeMachine'; machineKind: number } | { kind: 'playButton' } }
-  | { on: 'floor'; spot: 'source' | 'sink' };
+  | { on: 'panel'; target: PanelTarget }
+  | { on: 'floor'; spot: 'source' | 'sink' }
+  | { on: 'machine'; of: BindingName }
+  | { on: 'port'; of: BindingName; role: PortRoleName; to?: { of: BindingName; role: PortRoleName } };
 
-export type Gesture = { do: 'pressHint' } | { do: 'none' };
+export type Gesture =
+  | { do: 'pressHint' }
+  | { do: 'dragHint' }
+  | { do: 'key'; shortcut: ShortcutId }
+  | { do: 'watch' }
+  | { do: 'none' };
 
 /** Lesson words: plain text, a key named through `SHORTCUTS`, or a machine named through `KIND_NAMES`. */
 export type PhraseToken = string | { key: ShortcutId } | { kind: number };
