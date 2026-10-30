@@ -105,6 +105,8 @@ export interface TutorialLayerProps {
   /** New, behind the same unsaved-work question. `onSent` runs only if New really went out. */
   doNewThen: (onSent?: () => void) => void;
   probeRef: MutableRefObject<() => TutorialProbe>;
+  /** Tells App a lesson is on screen, so the empty-floor text stands down. */
+  onActiveChange: (active: boolean) => void;
 }
 
 export function TutorialLayer({
@@ -116,6 +118,7 @@ export function TutorialLayer({
   onLessonsOpenChange,
   doNewThen,
   probeRef,
+  onActiveChange,
 }: TutorialLayerProps): JSX.Element {
   // The ref is the truth, and the probe reads it, so a test sees every value `reduce` returns.
   // React state follows only so the panel and the ring can mount and unmount.
@@ -136,6 +139,9 @@ export function TutorialLayer({
   }, [probeRef]);
 
   const active = state.card !== 'none';
+  useLayoutEffect(() => {
+    onActiveChange(active);
+  }, [active, onActiveChange]);
   // ONE LOOP, RING FIRST, so each frame paints the ring from the last frame's target and only then
   // works out the lesson. A reader that starts later reads the probe after both, which is the frame
   // a stale rect would show under a new stage. Two separate animation-frame loops can't hold that

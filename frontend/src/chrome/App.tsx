@@ -2373,6 +2373,7 @@ export function App() {
   const helpOpen = topRightPanel === 'help';
   const lessonsOpen = topRightPanel === 'lessons';
   const tutorialProbeRef = useRef<() => TutorialProbe>(idleTutorialProbe);
+  const [lessonActive, setLessonActive] = useState(false);
   // Plan 74.1-31 (PAUSE-TOOLBAR): WHERE THE TOOLBAR'S STATUS STRIP MAY HANG. The strip
   // (the status readout and the Unsaved badge, out of the button row) is right-aligned
   // under the toolbar's right end by default, but the ConfigPanel is `top: lg` and covers
@@ -4763,7 +4764,7 @@ export function App() {
           it reads `nodeCount`, every node, labels included, because a board holding only
           a label is not an empty floor. Phase 91 (D-10): the gate is `boardEmpty`, set by the
           packet handler on the edge, not the 10 Hz poll. */}
-      {ready && boardEmpty && <EmptyState />}
+      {ready && boardEmpty && !lessonActive && <EmptyState />}
 
       {/* ONB-01: the first-run welcome card — a SEPARATE first-run-gated surface,
           INDEPENDENT of the EmptyState empty-board gate above, so it shows
@@ -4883,6 +4884,7 @@ export function App() {
             onLessonsOpenChange={(open) => setTopRightPanel(open ? 'lessons' : null)}
             doNewThen={doNewThen}
             probeRef={tutorialProbeRef}
+            onActiveChange={setLessonActive}
           />
           {/* Phase 76 (plan 76-02, D-06): a label's WORDS, a DOM overlay pinned to each
               label every frame. ALWAYS mounted (a note's words are not an alt-mode
