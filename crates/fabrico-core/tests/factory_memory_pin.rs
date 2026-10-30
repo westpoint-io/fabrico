@@ -28,7 +28,7 @@ const GAS: u64 = 1 << 40;
 const PINNED_ARRAYS: u64 = 477;
 const PINNED_STRINGS: u64 = 7416;
 const PINNED_OBJECTS: u64 = 59434;
-const PINNED_CYCLIC: u64 = 98873;
+const PINNED_CYCLIC: u64 = 62134;
 
 /// 1000-element arrays: each one is a block over QuickJS's 512-byte arena limit, so the
 /// allocator sees every allocation directly.
@@ -56,9 +56,9 @@ fn objects(n: u64) -> String {
 }
 
 /// Each object refers to itself. One in two stays in the array and the other is dropped, so
-/// the dropped ones are garbage only the cycle collector can free. QuickJS decides when to run
-/// that collector from a total that still includes `MALLOC_OVERHEAD`, so this is the shape that
-/// would show a difference in collection timing between platforms.
+/// the dropped ones are garbage only the cycle collector can free. QuickJS's automatic collector
+/// decides when to run from a total that includes `MALLOC_OVERHEAD`, so this count moves with
+/// that constant unless the automatic collector is off.
 fn cyclic(n: u64) -> String {
     format!(
         "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
@@ -196,4 +196,102 @@ fn the_stack_limit_passed_to_build_reaches_the_engine() {
         small.fault,
         message(&small)
     );
+}
+
+/// The count comes from the input here, so one runtime can run several sizes in a row.
+fn by_input(body: &str) -> String {
+    format!(
+        "export default function(i, ctx) {{ const a=[]; const n=JSON.parse(String(i)); \
+         for (let k = 0; k < n; k++) {body} ctx.state = {{ n: a.length }}; }}"
+    )
+}
+
+fn build(src: &str) -> FactoryRuntime {
+    FactoryRuntime::build(src, GAS, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT).expect("builds")
+}
+
+fn tick(factory: &mut FactoryRuntime, count: u64) -> FactoryOutcome {
+    let mut rng = SimRng::from_seed_u64(1);
+    factory.run(count.to_string().as_bytes(), b"{}", &mut rng)
+}
+
+/// The first count that faults on a runtime that has run nothing else.
+fn first_fault_when_fresh(src: &str, hi: u64) -> u64 {
+    let (mut low, mut high) = (1, hi);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if tick(&mut build(src), middle).fault.is_some() {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    low
+}
+
+/// More small ticks than it took the garbage from each tick's fresh context to fill the limit
+/// when nothing collected it.
+const SMALL_TICKS: u32 = 500;
+
+/// A snapshot restore builds a fresh runtime, so a long-lived runtime has to fault at the same
+/// counts as a fresh one, or a restored core would part from one that kept running. This also
+/// drops the runtime at the end, and collecting after a fault used to be able to abort there.
+#[test]
+fn a_runtime_that_has_faulted_behaves_like_a_fresh_one() {
+    let shapes = [
+        ("arrays", "a.push(new Array(1000).fill(k));", 20_000),
+        ("strings", "a.push('y'.repeat(1024) + k);", 50_000),
+        ("objects", "a.push({k});", 2_000_000),
+        ("cyclic", "{ const o = {k}; o.self = o; if (k % 2 === 0) a.push(o); }", 2_000_000),
+    ];
+    for (name, body, hi) in shapes {
+        let src = by_input(body);
+        let first = first_fault_when_fresh(&src, hi);
+        let mut factory = build(&src);
+        assert!(tick(&mut factory, first).fault.is_some(), "{name} at {first} did not fault");
+
+        for number in 0..SMALL_TICKS {
+            let outcome = tick(&mut factory, 10);
+            assert_eq!(
+                outcome.fault,
+                None,
+                "{name}: small tick {number} after a fault faulted: {}",
+                message(&outcome)
+            );
+        }
+        let below = tick(&mut factory, first - 1);
+        assert_eq!(
+            below.fault,
+            None,
+            "{name}: {} ran on a fresh runtime and faulted on this one: {}",
+            first - 1,
+            message(&below)
+        );
+        assert!(
+            tick(&mut factory, first).fault.is_some(),
+            "{name}: {first} faulted on a fresh runtime and ran on this one"
+        );
+    }
+}
+
+/// One large tick that stays under the limit used to raise the automatic collector's threshold
+/// past the limit. After that nothing collected, the garbage from each fresh context piled up,
+/// and about 200 ticks later every tick faulted for good.
+#[test]
+fn one_large_tick_does_not_stop_later_ticks_from_running() {
+    let src = by_input("a.push({k});");
+    let first = first_fault_when_fresh(&src, 2_000_000);
+    let mut factory = build(&src);
+    let large = tick(&mut factory, first / 10 * 9);
+    assert_eq!(large.fault, None, "the large tick faulted: {}", message(&large));
+
+    for number in 0..SMALL_TICKS {
+        let outcome = tick(&mut factory, 10);
+        assert_eq!(
+            outcome.fault,
+            None,
+            "small tick {number} after a large one faulted: {}",
+            message(&outcome)
+        );
+    }
 }

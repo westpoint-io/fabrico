@@ -492,6 +492,14 @@ impl FactoryRuntime {
         let rt = Runtime::new_with_alloc(FenceAllocator::new(mem_limit as usize))
             .map_err(FactoryBuildError::engine)?;
         rt.set_max_stack_size(stack_limit as usize);
+        // Automatic collection is off, and `run` collects before each call instead. QuickJS
+        // decides when to collect from a total that includes its platform constant, so an
+        // automatic collection would fall at a different moment on Apple and move where a
+        // Factory holding cyclic garbage runs out of memory. Its threshold also grows to
+        // 1.5x the total at the last collection, so one large tick can put it past the
+        // memory limit. Collection then stops for good, because QuickJS doesn't collect
+        // when an allocation fails, and every later tick faults.
+        rt.set_gc_threshold(usize::MAX);
 
         // The fuse: a shared budget counted down in the interrupt handler. Held
         // UNMETERED during construction so the prelude/parse cannot trip it; armed
@@ -615,7 +623,10 @@ impl FactoryRuntime {
         self.commands.borrow_mut().clear();
         *self.rng.borrow_mut() = rng.clone();
 
-        // 3. Run the user entry inside the curated, fenced context.
+        // 3. Collect what the previous call's context left behind, so each call starts
+        //    from the same total however long this runtime has lived, then run the user
+        //    entry inside the curated, fenced context.
+        self._rt.run_gc();
         let inner = self.run_inner(input_str, &state_str);
 
         // 4. Write the advanced rng substream back to the caller (the draws that
