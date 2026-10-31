@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import {
+  CAPTURE_FRAMES,
   CELL,
   captureClip,
   cameraOf,
@@ -439,6 +440,16 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     // a clip of the first belt alone stayed the same with 33 item samples in the model. A clip this
     // size can be slow to capture on a busy machine, so the loop also waits for enough samples, and
     // it can't exit having checked nothing.
+    //
+    // The loop has its own deadline because the test's limit can't end it. Each capture raises that
+    // limit by more than a capture takes, so on a host that stopped ticking the limit keeps moving
+    // away and the worker spins until the run's global timeout.
+    const samplingDeadline =
+      Date.now() +
+      addWaitBudget(
+        tickBudgetMs(FIRST_BELT_TICKS) + CONTROL_SAMPLES * frameBudgetMs(CAPTURE_FRAMES),
+        'the samples after a POST was held across a scene load',
+      );
     const swapped = await readScene(page);
     const swapTick = swapped.tick;
     const clip = await clipAroundBelts(page, swapped.belts);
@@ -450,6 +461,10 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     for (;;) {
       const scene = await readScene(page);
       if (scene.tick >= swapTick + FIRST_BELT_TICKS && samples >= CONTROL_SAMPLES) break;
+      expect(
+        Date.now(),
+        `the new board moved ${scene.tick - swapTick} of ${FIRST_BELT_TICKS} ticks past the load, with ${samples} of ${CONTROL_SAMPLES} samples taken, when the budget ran out`,
+      ).toBeLessThan(samplingDeadline);
       itemsSeen += scene.belts.reduce((sum, b) => sum + b.items, 0);
       if (!(await captureClip(page, clip)).equals(reference)) clipChanges += 1;
       samples += 1;
