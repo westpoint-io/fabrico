@@ -52,6 +52,7 @@ const JOINED: BoardBelt = {
   id: 9,
   items: 0,
   occupiedSlots: [],
+  tiles: [],
   docks: [
     { end: 'Tail', node: THE_SOURCE.id, port: 0 },
     { end: 'Head', node: THE_SINK.id, port: 0 },
@@ -283,6 +284,7 @@ describe('reduce: a line drawn in two pieces', () => {
     id: 20,
     items: 0,
     occupiedSlots: [],
+    tiles: [],
     docks: [
       { end: 'Head', node: 21, port: 0 },
       { end: 'Tail', node: THE_SOURCE.id, port: 0 },
@@ -292,6 +294,7 @@ describe('reduce: a line drawn in two pieces', () => {
     id: 21,
     items: 0,
     occupiedSlots: [],
+    tiles: [],
     docks: [
       { end: 'Head', node: THE_SINK.id, port: 0 },
       { end: 'Tail', node: 20, port: 0 },
@@ -460,6 +463,29 @@ describe('floorSpot', () => {
         expect(spot, `scale ${scale}, right ${right}`).not.toEqual([3, 3]);
       }
     }
+  });
+
+  it('goes one row down when a belt tile holds that cell, because the host refuses a Place there too', () => {
+    const b = board({ belts: [{ ...JOINED, tiles: [7, 8, 9].map((x) => ({ cell_x: x, cell_y: 2 })) }] });
+    expect(floorSpot({ spot: 'sink', view: VIEW, board: b, sourceKey: sourceAt(2, 2) })).toEqual([8, 3]);
+  });
+
+  it('keeps going down past a machine and a belt in turn', () => {
+    const b = board({
+      nodes: [node(1, SINK, 8, 2)],
+      belts: [{ ...JOINED, tiles: [{ cell_x: 8, cell_y: 3 }] }],
+    });
+    expect(floorSpot({ spot: 'sink', view: VIEW, board: b, sourceKey: sourceAt(2, 2) })).toEqual([8, 4]);
+  });
+
+  it('moves the Source spot down when a belt runs through it', () => {
+    const free = floorSpot({ spot: 'source', view: VIEW, board: board() });
+    const taken = floorSpot({
+      spot: 'source',
+      view: VIEW,
+      board: board({ belts: [{ ...JOINED, tiles: [{ cell_x: free[0], cell_y: free[1] }] }] }),
+    });
+    expect(taken).toEqual([free[0], free[1] + 1]);
   });
 
   it('moves the Source spot down when a machine already sits there', () => {

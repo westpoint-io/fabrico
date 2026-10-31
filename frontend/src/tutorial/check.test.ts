@@ -12,6 +12,7 @@ const belt = (id: number, slots: readonly number[], docks: BoardBelt['docks']): 
   id,
   items: slots.length,
   occupiedSlots: slots,
+  tiles: [],
   docks,
 });
 

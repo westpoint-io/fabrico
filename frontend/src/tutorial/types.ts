@@ -20,6 +20,8 @@ export interface BoardBelt {
   id: number;
   items: number;
   occupiedSlots: readonly number[];
+  /** The cells the belt runs over. The host refuses a Place on any of them. */
+  tiles: ReadonlyArray<{ cell_x: number; cell_y: number }>;
   docks: ReadonlyArray<{ end: string; node: number; port: number }>;
 }
 

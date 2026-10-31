@@ -172,8 +172,8 @@ const SINK_OFFSET_CELLS = 6;
  * Where a floor ring goes. New keeps the camera, so a fixed cell could be off screen and the spot
  * is worked out from what the user can see: the Source under the point 40% across and 50% down the
  * free area, the Sink on the Source's row, six cells east, or west when east is past the free area's
- * right edge. Either one moves down a row at a time past any machine already there, so the ring marks a
- * free cell and is never the Source's own.
+ * right edge. Either one moves down a row at a time past any machine or belt tile already there, so the
+ * ring marks a cell the host will take and is never the Source's own.
  */
 export function floorSpot(args: {
   spot: 'source' | 'sink';
@@ -184,8 +184,11 @@ export function floorSpot(args: {
   const { camera, freeArea } = args.view;
   const size = CELL * camera.scale;
   const free = (x: number, y: number): readonly [number, number] => {
+    const taken = (cy: number): boolean =>
+      args.board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === cy)) ||
+      args.board.belts.some((b) => b.tiles.some((t) => t.cell_x === x && t.cell_y === cy));
     let row = y;
-    while (args.board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === row))) row += 1;
+    while (taken(row)) row += 1;
     return [x, row];
   };
   const source = /@(-?\d+),(-?\d+)$/.exec(args.sourceKey ?? '');
