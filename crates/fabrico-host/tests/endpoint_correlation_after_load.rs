@@ -137,10 +137,11 @@ fn logged_correlations(sim: &SimLoop) -> Vec<u64> {
         .collect()
 }
 
-fn ask(tx: &Sender<EndpointIngress>, target: NodeId, body: &str) -> oneshot::Receiver<HttpResponse> {
+fn ask(tx: &Sender<EndpointIngress>, target: NodeId, board: u64, body: &str) -> oneshot::Receiver<HttpResponse> {
     let (respond, rx) = oneshot::channel();
     tx.try_send(EndpointIngress {
         target,
+        board,
         envelope: format!("{{\"body\":\"{body}\"}}").into_bytes(),
         respond,
     })
@@ -183,7 +184,8 @@ fn build_and_save_with_a_on_the_wire(rt: &tokio::runtime::Runtime, fab: &std::pa
         },
     );
 
-    let _a_on_the_old_board = ask(&endpoint_tx, route, "AAAA");
+    let board = sim.routes_receiver().borrow().board;
+    let _a_on_the_old_board = ask(&endpoint_tx, route, board, "AAAA");
     sim.run(Some(1), Duration::ZERO).expect("admit A");
     assert_eq!(
         (logged_correlations(&sim).len(), in_flight(&sim)),
@@ -215,7 +217,8 @@ fn a_request_saved_on_the_wire_does_not_answer_the_next_caller_after_load() {
     ctx.send(ControlMsg::Load(fab)).expect("send load");
     sim.step().expect("service the Load on the held board");
     ctx.send(ControlMsg::Resume).expect("send resume");
-    let mut b = ask(&endpoint_tx, route, "BBBB");
+    let board = sim.routes_receiver().borrow().board;
+    let mut b = ask(&endpoint_tx, route, board, "BBBB");
     sim.step().expect("resume and admit B");
     sim.run(Some(60), Duration::from_millis(2)).expect("drive both round trips");
 

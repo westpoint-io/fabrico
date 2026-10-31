@@ -425,6 +425,7 @@ fn replay_registry_empty_zero_writes() {
         let (tx, mut socket) = oneshot::channel();
         etx.try_send(EndpointIngress {
             target: ep,
+            board: 0,
             envelope: br#"{"body":1}"#.to_vec(),
             respond: tx,
         })
@@ -434,6 +435,7 @@ fn replay_registry_empty_zero_writes() {
         let (ack_tx, _ack_rx) = oneshot::channel();
         wtx.try_send(Ingress {
             target: source,
+            board: 0,
             delivery_id: None,
             body: vec![0xAB],
             ack: ack_tx,

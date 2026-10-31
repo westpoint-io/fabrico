@@ -106,8 +106,10 @@ impl HttpResponse {
     /// answered by the loaded scene (their correlation/deadline belong to a timeline
     /// that no longer exists), so on swap the registry is drained: each parked caller
     /// gets this deterministic `503` and the map is cleared, so the loaded scene
-    /// starts with an EMPTY registry (matching crash-recovery semantics). Body is the
-    /// canonical `{"error":"scene reloaded"}` JSON object.
+    /// starts with an EMPTY registry (matching crash-recovery semantics). It also answers
+    /// a request still queued at the swap, and one refused later because the route table
+    /// it read belongs to the replaced board. Body is the canonical
+    /// `{"error":"scene reloaded"}` JSON object.
     pub fn reloaded_503() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -206,6 +208,9 @@ pub fn descriptor_to_response(payload: &Item) -> HttpResponse {
 pub struct EndpointIngress {
     /// The resolved endpoint node this request targets (from the route table).
     pub target: NodeId,
+    /// The board the table that gave `target` was published for
+    /// ([`RouteTable::board`](crate::ingress::webhook::RouteTable::board)).
+    pub board: u64,
     /// The request as an opaque JSON envelope `{method,path,query,headers,body}`
     /// — carried verbatim as the injected item's bytes. NEVER decoded/trusted as
     /// structure by the sim; it is opaque `Item` bytes the moment it crosses in.
@@ -330,6 +335,8 @@ pub(crate) async fn endpoint(
         .endpoint_tx
         .try_send(EndpointIngress {
             target: node,
+            // From the same snapshot as `node`, so the two can't disagree about the board.
+            board: routes.board,
             envelope,
             respond: resp_tx,
         })
@@ -454,7 +461,9 @@ mod response_tests {
 #[cfg(test)]
 mod handler_tests {
     use super::*;
-    use crate::ingress::webhook::{Ingress, WEBHOOK_INGRESS_CAPACITY, webhook_router};
+    use crate::ingress::webhook::{
+        Ingress, RouteTable, RoutesRx, WEBHOOK_INGRESS_CAPACITY, webhook_router,
+    };
     use axum::body::Body;
     use axum::http::Request;
     use std::sync::Arc;
@@ -487,16 +496,49 @@ mod handler_tests {
     /// directions - it would silently move a source key into the endpoint namespace, and
     /// the cross-door test below would then be asserting the opposite of what it says.
     /// So the caller spells the namespace and this inserts what it is given.
-    fn watched(key: &str, node: NodeId) -> watch::Receiver<Arc<BTreeMap<String, NodeId>>> {
+    fn watched(key: &str, node: NodeId) -> RoutesRx {
+        watched_on_board(key, node, 0)
+    }
+
+    /// [`watched`], with the table published for board number `board`.
+    fn watched_on_board(key: &str, node: NodeId, board: u64) -> RoutesRx {
         let mut routes = BTreeMap::new();
         routes.insert(key.to_owned(), node);
-        let (_tx, rx) = watch::channel(Arc::new(routes));
+        let (_tx, rx) = watch::channel(Arc::new(RouteTable { board, routes }));
         rx
     }
 
     /// A throwaway webhook ingress sender (these tests only POST `/endpoint/...`).
     fn no_webhook_tx() -> crate::ingress::webhook::IngressTx {
         channel::<Ingress>(WEBHOOK_INGRESS_CAPACITY).0
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_endpoint_request_carries_the_stamp_of_the_table_it_read() {
+        // The sim loop refuses a request by this number, so it has to be the number of the
+        // table the node came from.
+        let node = a_node();
+        let (ep_tx, mut ep_rx) = channel::<EndpointIngress>(ENDPOINT_INGRESS_CAPACITY);
+        let app = webhook_router(
+            watched_on_board("/ep-1", node, 7),
+            no_webhook_tx(),
+            ep_tx,
+            4096,
+            playing(),
+        );
+        let drained = tokio::spawn(async move {
+            let ing = ep_rx.recv().await.expect("an endpoint ingress");
+            let _ = ing.respond.send(HttpResponse::reloaded_503());
+            ing.board
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/endpoint/ep-1")
+            .body(Body::from("x"))
+            .expect("build request");
+        app.oneshot(req).await.expect("route the request");
+        assert_eq!(drained.await.expect("drain task"), 7);
     }
 
     #[tokio::test]
@@ -622,6 +664,7 @@ mod handler_tests {
         ep_tx
             .try_send(EndpointIngress {
                 target: node,
+                board: 0,
                 envelope: Vec::new(),
                 respond: fill_tx,
             })

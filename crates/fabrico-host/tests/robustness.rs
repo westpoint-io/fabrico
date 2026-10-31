@@ -41,15 +41,14 @@ use fabrico_host::config::HostConfig;
 use fabrico_host::driver::Host;
 use fabrico_host::ingress::endpoint::{EndpointIngress, ENDPOINT_INGRESS_CAPACITY};
 use fabrico_host::ingress::seen_set::SeenSet;
-use fabrico_host::ingress::webhook::{webhook_router, Ingress, WEBHOOK_INGRESS_CAPACITY};
+use fabrico_host::ingress::webhook::{webhook_router, Ingress, RoutesRx, WEBHOOK_INGRESS_CAPACITY};
 use fabrico_host::ledger::DispatchLedger;
 use fabrico_host::render_packet::RenderProducer;
 use fabrico_host::sim_loop::{ControlMsg, SimLoop, gesture_channel};
 use slotmap::Key;
-use std::collections::BTreeMap;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{channel, unbounded_channel, Sender};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 
 /// A real-time driver window generous enough for a stream of loopback POSTs (each POST's
 /// ack) plus the belt hop to the downstream collector to complete within the run.
@@ -141,7 +140,7 @@ fn collector_depth(sim: &SimLoop, collector: NodeId) -> usize {
 /// bound base URL + server handle. POSTs to it are real HTTP over `127.0.0.1`.
 fn spawn_live_listener(
     rt: &tokio::runtime::Runtime,
-    routes_rx: watch::Receiver<Arc<BTreeMap<String, NodeId>>>,
+    routes_rx: RoutesRx,
     web_tx: Sender<Ingress>,
     is_playing: Arc<AtomicBool>,
 ) -> (String, tokio::task::JoinHandle<()>) {
@@ -266,6 +265,7 @@ fn webhook_burst_pause_resume_stays_live() {
     probe
         .try_send(Ingress {
             target: source,
+            board: 0,
             delivery_id: Some(b"np-inflight".to_vec()),
             body: b"x".to_vec(),
             ack: np_ack,
@@ -346,6 +346,7 @@ fn webhook_burst_pause_resume_stays_live() {
     while probe
         .try_send(Ingress {
             target: source,
+            board: 0,
             delivery_id: None,
             body: Vec::new(),
             ack: oneshot::channel().0,

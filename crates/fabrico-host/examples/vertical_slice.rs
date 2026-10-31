@@ -31,7 +31,7 @@ use fabrico_core::state::SinkTemplate;
 use fabrico_host::driver::Host;
 use fabrico_host::ingress::seen_set::SeenSet;
 use fabrico_host::ingress::endpoint::EndpointIngress;
-use fabrico_host::ingress::webhook::{Ingress, WEBHOOK_INGRESS_CAPACITY, webhook_router};
+use fabrico_host::ingress::webhook::{Ingress, RouteTable, WEBHOOK_INGRESS_CAPACITY, webhook_router};
 use fabrico_host::ledger::DispatchLedger;
 use fabrico_host::sinks::debug::dispatch_debug;
 use slotmap::Key;
@@ -95,7 +95,7 @@ async fn main() {
     // The route table now crosses the boundary as a `watch` snapshot (HOST-07). This
     // example uses a static table, so wrap it once and drop the sender (a receiver
     // still borrows the last value after all senders drop).
-    let (_routes_tx, routes_rx) = tokio::sync::watch::channel(std::sync::Arc::new(routes));
+    let (_routes_tx, routes_rx) = tokio::sync::watch::channel(std::sync::Arc::new(RouteTable { board: 0, routes }));
     // This slice exercises only `/hook/...`; a throwaway endpoint ingress sender
     // satisfies the shared-router signature (38-02).
     let (endpoint_tx, _endpoint_rx) = tokio::sync::mpsc::channel::<EndpointIngress>(fabrico_host::ingress::endpoint::ENDPOINT_INGRESS_CAPACITY);
@@ -144,6 +144,7 @@ async fn main() {
     // sim; a duplicate would be dropped.
     let Ingress {
         target,
+        board: _,
         delivery_id,
         body,
         ack,

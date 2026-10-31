@@ -27,7 +27,7 @@ use fabrico_host::driver::Host;
 use fabrico_host::ingress::seen_set::SeenSet;
 use fabrico_host::ingress::timer::TimerSet;
 use fabrico_host::ingress::endpoint::EndpointIngress;
-use fabrico_host::ingress::webhook::{Ingress, WEBHOOK_INGRESS_CAPACITY, webhook_router};
+use fabrico_host::ingress::webhook::{Ingress, RouteTable, RoutesRx, WEBHOOK_INGRESS_CAPACITY, webhook_router};
 use fabrico_host::ledger::DispatchLedger;
 use fabrico_host::render_packet::RenderProducer;
 use fabrico_host::sim_loop::{GestureSink, SimLoop, gesture_channel};
@@ -35,7 +35,6 @@ use fabrico_protocol::{machine_kind, GridCommand};
 use std::sync::atomic::AtomicBool;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{Receiver, Sender, channel, unbounded_channel};
-use tokio::sync::watch;
 
 /// A fixed always-Playing signal for the ingress tests that never pause the sim
 /// (Gate A stays open; these exercise the normal one-POST-one-event path).
@@ -169,7 +168,7 @@ fn spawn_webhook(
     // (a receiver still `borrow()`s the last value after all senders drop, and the
     // handler only ever borrows). The LIVE-projection path is exercised by
     // `spawn_webhook_watched` below.
-    let (_routes_tx, routes_rx) = tokio::sync::watch::channel(std::sync::Arc::new(routes));
+    let (_routes_tx, routes_rx) = tokio::sync::watch::channel(std::sync::Arc::new(RouteTable { board: 0, routes }));
     let listener = rt
         .block_on(async { TcpListener::bind("127.0.0.1:0").await })
         .expect("bind loopback");
@@ -191,7 +190,7 @@ fn spawn_webhook(
 /// hand-built table (HOST-07).
 fn spawn_webhook_live(
     rt: &tokio::runtime::Runtime,
-    routes_rx: watch::Receiver<Arc<BTreeMap<String, NodeId>>>,
+    routes_rx: RoutesRx,
     web_tx: Sender<Ingress>,
     is_playing: Arc<AtomicBool>,
 ) -> (String, tokio::task::JoinHandle<()>) {

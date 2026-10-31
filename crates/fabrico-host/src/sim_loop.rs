@@ -49,7 +49,7 @@ use crate::driver::Host;
 use crate::executor::dispatch;
 use crate::ingress::endpoint::{EndpointIngress, HttpResponse, descriptor_to_response};
 use crate::ingress::seen_set::SeenSet;
-use crate::ingress::webhook::Ingress;
+use crate::ingress::webhook::{Ingress, RouteTable, RoutesRx};
 use crate::registry::Registry;
 use crate::ingress::timer::{TimerSet, project_timers};
 use crate::input_apply::apply_gesture_frame;
@@ -772,11 +772,15 @@ pub struct SimLoop {
     drain_settles_on_effects: bool,
     // ── Live webhook route projection (Phase 18, plan 18-03) ──
     /// The publish half of the LIVE webhook route table (HOST-07). The sim thread
-    /// swaps a FRESH immutable `Arc<BTreeMap<String,NodeId>>` over this whenever the
+    /// swaps a FRESH immutable `Arc<RouteTable>` over this whenever the
     /// Source set changes; the axum webhook handler holds the paired
     /// [`watch::Receiver`] (obtained via [`SimLoop::routes_receiver`]) and reads the
     /// latest snapshot per request. NEVER an imperatively-mutated map.
-    routes_tx: watch::Sender<Arc<BTreeMap<String, NodeId>>>,
+    routes_tx: watch::Sender<Arc<RouteTable>>,
+    /// The number of the board this loop holds, published on each route table and moved only
+    /// by a host swap. `acquire_input` refuses a request stamped with any other number.
+    /// Host-side only: it never enters an event, the fold, the log or a snapshot.
+    board_generation: u64,
     /// The routable-set fingerprint the recompute guard compares each tick (see
     /// [`route_ids`] — Source and Endpoint ids, each paired with the ADDRESS it answers
     /// at). The projection is re-published ONLY when this changes. The address half is
@@ -868,8 +872,10 @@ impl SimLoop {
         // DEMO-08: the host arrives with its timers already installed (`with_timers`
         // after seeding), so a Source the seed put on Timer is left out from the start.
         let route_fingerprint = route_ids(host.core(), host.timers());
-        let (routes_tx, _routes_rx) =
-            watch::channel(Arc::new(project_routes(host.core(), host.timers())));
+        let (routes_tx, _routes_rx) = watch::channel(Arc::new(RouteTable {
+            board: 0,
+            routes: project_routes(host.core(), host.timers()),
+        }));
 
         // The executor gate + wake primitives. BOTH are Send+Sync and NEITHER
         // references the `!Send` Host, so cloning them into the off-thread
@@ -989,6 +995,7 @@ impl SimLoop {
             drain_from_user_pause: false,
             drain_settles_on_effects: false,
             routes_tx,
+            board_generation: 0,
             route_fingerprint,
             loaded_scene: None,
             load_refusal_sink: None,
@@ -1039,7 +1046,7 @@ impl SimLoop {
     /// / dev entrypoint (18-04) calls this to wire the webhook server to the live
     /// route table.
     #[must_use]
-    pub fn routes_receiver(&self) -> watch::Receiver<Arc<BTreeMap<String, NodeId>>> {
+    pub fn routes_receiver(&self) -> RoutesRx {
         self.routes_tx.subscribe()
     }
 
@@ -1768,7 +1775,8 @@ impl SimLoop {
     /// THE ROUTE TABLE IS NEVER HALF-SEEDED. The whole scene is seeded on the fresh host
     /// before [`install_swapped_host`](Self::install_swapped_host) republishes the routes,
     /// so a POST that arrives during the swap reaches the old board's table or the new
-    /// one's, never a board part-way through its commands.
+    /// one's, never a board part-way through its commands. A POST that read the old table
+    /// is refused by its board stamp when it reaches `acquire_input`.
     fn load_scene_swap(&mut self, id: SceneId) {
         let scene = id.wire_id();
         let new_dir = match tempfile::tempdir() {
@@ -1801,8 +1809,8 @@ impl SimLoop {
         // 20-review CR-01 (HOST-06 parity): mirror the boot order - install a
         // persisted seen-set in the new work_dir BEFORE the swap. The webhook
         // listener stays bound across the swap and `install_swapped_host`
-        // force-republishes routes, so ingress actively flows into the swapped
-        // host; without a seen-set `record_delivery` returns `true` for every
+        // force-republishes routes, so a request that read the new table flows into
+        // the swapped host; without a seen-set `record_delivery` returns `true` for every
         // delivery id and a provider's at-least-once retry double-fires a Source.
         let seen = match SeenSet::open(new_dir.path().join("seen.redb")) {
             Ok(s) => s,
@@ -1923,7 +1931,12 @@ impl SimLoop {
         // every replay are unchanged, and a provider's retry of a dropped delivery logs once.
         //
         // This drain is not exact the way the gesture drain below it is. A handler that has read
-        // the route table and has not sent yet can still enqueue after this point.
+        // the route table and has not sent yet can still enqueue after this point. No order of
+        // drain and republish can close that: a handler can read the old table just before the
+        // publish and send just after the drain, and a drain below the publish would also refuse
+        // POSTs that correctly read the new table. The stamp check in `acquire_input` covers the
+        // late send. The drain still has to run here, so a caller is answered at the swap and
+        // not at the next `acquire_input`, which a held board doesn't reach.
         let mut refused = 0usize;
         if let Some(rx) = self.webhook_rx.as_mut() {
             while let Ok(ing) = rx.try_recv() {
@@ -1967,7 +1980,9 @@ impl SimLoop {
         // on), `load_scene_swap` and `new_swap`, through the immediate Load, LoadDemo,
         // LoadScene and New arms and the latched `PendingLoad` arm in `step()`.
         //
-        // WHY DRAINING THE CHANNEL HERE IS EXACT. Both transports enqueue a gesture inline,
+        // WHY DRAINING THE CHANNEL HERE IS EXACT. This covers `gesture_rx` only: a POST handler
+        // isn't ordered against control, which is why the HTTP queues above also carry a board
+        // stamp. Both transports enqueue a gesture inline,
         // before any control sent after it: Tauri `submit_input` is a blocking command
         // (pinned by `submit_input_is_a_blocking_command_so_the_enqueue_is_inline` in
         // `fabrico-app`) and the swap commands enqueue inline after it; the dev WebSocket
@@ -2028,6 +2043,9 @@ impl SimLoop {
         // IN-01: re-seed the loop tick from the loaded core at the swap.
         self.tick = self.host.core().tick;
         self.correlation_next = self.correlation_next.max(correlation_after_log(&self.host));
+        // Moved directly before the publish, so the first table with the new number is also the
+        // first table with the new routes.
+        self.board_generation += 1;
         // HOST-07: FORCE one route-projection re-publish from the loaded core's
         // Source set so the loaded scene's Sources are reachable over the webhook
         // immediately (the swap bypasses the per-tick gesture-fold recompute path).
@@ -2068,10 +2086,19 @@ impl SimLoop {
             while let Ok(ing) = rx.try_recv() {
                 let Ingress {
                     target,
+                    board,
                     delivery_id,
                     body,
                     ack,
                 } = ing;
+                // The route table this request read belongs to a replaced board, so `target`
+                // means nothing here. Checked ahead of `record_delivery`: a refused delivery
+                // recorded in this host's seen-set would swallow the provider's retry behind a
+                // 200, which loses the delivery. The dropped ack reads as a 503.
+                if board != self.board_generation {
+                    drop(ack);
+                    continue;
+                }
                 // Dedup ONLY when a delivery id is present. An absent id (`None`) is
                 // always unique (WR-01). A seen-set store error here is NON-FATAL
                 // (WR-03): drop just this one request, warn, ack it, keep ticking —
@@ -2114,9 +2141,17 @@ impl SimLoop {
             while let Ok(ing) = rx.try_recv() {
                 let EndpointIngress {
                     target,
+                    board,
                     envelope,
                     respond,
                 } = ing;
+                // The route table this request read belongs to a replaced board. Checked ahead
+                // of the mint, so the next real request's logged correlation matches a run
+                // with no straggler.
+                if board != self.board_generation {
+                    let _ = respond.send(HttpResponse::reloaded_503());
+                    continue;
+                }
                 let correlation = self.correlation_next;
                 self.correlation_next += 1;
                 let deadline_tick = self.tick + DEFAULT_ENDPOINT_DEADLINE_TICKS;
@@ -2501,7 +2536,7 @@ impl SimLoop {
     /// Re-publish the LIVE webhook route projection (HOST-07) IFF the Source-set
     /// membership changed since the last publish. Compares the cheap
     /// [`route_ids`] fingerprint (Sources AND Endpoints); on a change it stores the
-    /// new fingerprint and swaps a FRESH immutable `Arc<BTreeMap>` (a fold of
+    /// new fingerprint and swaps a FRESH immutable `Arc<RouteTable>` (a fold of
     /// `core.state`) over the `watch` — so every currently-connected webhook/endpoint
     /// handler sees the new label on its next request. An unchanged routable set is a
     /// no-op (no `Arc` allocation, no `watch` send), which is what keeps idle-grid
@@ -2515,8 +2550,10 @@ impl SimLoop {
             // `send` errors and DISCARDS the update when the receiver count is zero,
             // so a Source placed before the listener connects would be lost. A later
             // `routes_receiver()` then sees the up-to-date snapshot (HOST-07).
-            self.routes_tx
-                .send_replace(Arc::new(project_routes(self.host.core(), self.host.timers())));
+            self.routes_tx.send_replace(Arc::new(RouteTable {
+                board: self.board_generation,
+                routes: project_routes(self.host.core(), self.host.timers()),
+            }));
         }
     }
 
@@ -2531,8 +2568,10 @@ impl SimLoop {
         // handler has subscribed yet (see `maybe_republish_routes`). Every swap path
         // installs the new host's timers BEFORE it reaches here (DEMO-08), so a loaded
         // Source on Timer is published without a door from the first request.
-        self.routes_tx
-            .send_replace(Arc::new(project_routes(self.host.core(), self.host.timers())));
+        self.routes_tx.send_replace(Arc::new(RouteTable {
+            board: self.board_generation,
+            routes: project_routes(self.host.core(), self.host.timers()),
+        }));
     }
 
     /// The per-tick host-side deadline sweep (ENDP-03). Reads ONLY `now =
@@ -2594,9 +2633,9 @@ impl SimLoop {
     /// the tick boundary, then gates on the run model:
     ///
     /// - **Playing** → `acquire_input()` then `tick_body()` (input applied).
-    /// - **Draining** → `tick_body()` ONLY (SKIP `acquire_input()` so new
-    ///   upstream input is HELD — buffered webhooks/gestures stay FIFO); after the
-    ///   body, freeze once quiescent
+    /// - **Draining** → `tick_body()` ONLY (SKIP `acquire_input()` so gestures stay
+    ///   queued in order, while queued webhook and endpoint requests are refused with a
+    ///   503 at the top of each draining step); after the body, freeze once quiescent
     ///   (`in_flight_len()==0 && belt_items_in_flight()==0`) OR the bounded
     ///   max-settle-tick budget is exhausted (a hung effect can't spin forever).
     /// - **Frozen** → a no-op (no input, no tick).
@@ -5336,6 +5375,7 @@ mod tests {
     fn send_duplicate_deliveries(
         web_tx: &Sender<Ingress>,
         target: NodeId,
+        board: u64,
         body: &[u8],
     ) {
         for _ in 0..2 {
@@ -5343,6 +5383,7 @@ mod tests {
             web_tx
                 .try_send(Ingress {
                     target,
+                    board,
                     delivery_id: Some(b"dup-across-swap".to_vec()),
                     body: body.to_vec(),
                     ack,
@@ -5387,7 +5428,7 @@ mod tests {
         // The retry pair targets the DEMO scene's Source; the body distinguishes
         // these webhook injections from the demo timer's own injections.
         let body = b"cr01-demo-swap";
-        send_duplicate_deliveries(&web_tx, first_source(&sim), body);
+        send_duplicate_deliveries(&web_tx, first_source(&sim), sim.routes_receiver().borrow().board, body);
         sim.run(Some(4), Duration::ZERO).expect("post-swap ticks");
 
         assert_eq!(
@@ -5427,7 +5468,7 @@ mod tests {
         sim.step().expect("service load (immediate swap)");
 
         let body = b"cr01-user-swap";
-        send_duplicate_deliveries(&web_tx, first_source(&sim), body);
+        send_duplicate_deliveries(&web_tx, first_source(&sim), sim.routes_receiver().borrow().board, body);
         sim.run(Some(4), Duration::ZERO).expect("post-swap ticks");
 
         assert_eq!(
@@ -6371,7 +6412,7 @@ mod tests {
 
         struct Rig {
             sim: SimLoop,
-            _gtx: GestureTx,
+            gtx: GestureTx,
             ctx: UnboundedSender<ControlMsg>,
             web_tx: Sender<Ingress>,
             ep_tx: Sender<EndpointIngress>,
@@ -6396,7 +6437,7 @@ mod tests {
                 .with_endpoint(ep_rx);
             Rig {
                 sim,
-                _gtx: gtx,
+                gtx,
                 ctx,
                 web_tx,
                 ep_tx,
@@ -6405,11 +6446,23 @@ mod tests {
             }
         }
 
-        fn queue_delivery(r: &Rig, target: NodeId, id: Option<&[u8]>, body: &[u8]) -> oneshot::Receiver<()> {
+        /// The board number on the table the sim has published now.
+        fn board_now(r: &Rig) -> u64 {
+            r.sim.routes_receiver().borrow().board
+        }
+
+        fn queue_delivery(
+            r: &Rig,
+            target: NodeId,
+            board: u64,
+            id: Option<&[u8]>,
+            body: &[u8],
+        ) -> oneshot::Receiver<()> {
             let (ack, ack_rx) = oneshot::channel();
             r.web_tx
                 .try_send(Ingress {
                     target,
+                    board,
                     delivery_id: id.map(<[u8]>::to_vec),
                     body: body.to_vec(),
                     ack,
@@ -6419,14 +6472,15 @@ mod tests {
         }
 
         fn queue_webhook(r: &Rig, body: &[u8]) -> oneshot::Receiver<()> {
-            queue_delivery(r, r.source, None, body)
+            queue_delivery(r, r.source, board_now(r), None, body)
         }
 
-        fn queue_request(r: &Rig, target: NodeId, marker: &str) -> oneshot::Receiver<HttpResponse> {
+        fn queue_request(r: &Rig, target: NodeId, board: u64, marker: &str) -> oneshot::Receiver<HttpResponse> {
             let (respond, socket) = oneshot::channel();
             r.ep_tx
                 .try_send(EndpointIngress {
                     target,
+                    board,
                     envelope: format!("{{\"body\":\"{marker}\"}}").into_bytes(),
                     respond,
                 })
@@ -6435,7 +6489,7 @@ mod tests {
         }
 
         fn queue_endpoint(r: &Rig, marker: &str) -> oneshot::Receiver<HttpResponse> {
-            queue_request(r, r.route, marker)
+            queue_request(r, r.route, board_now(r), marker)
         }
 
         /// The logged `WireRequest`s whose payload holds `marker`.
@@ -6684,11 +6738,11 @@ mod tests {
             let rt = test_rt();
             let dir = tempfile::tempdir().expect("tempdir");
             let mut r = rig(dir.path(), &rt);
-            let _old = queue_delivery(&r, r.source, Some(b"delivery-d"), b"old");
+            let _old = queue_delivery(&r, r.source, board_now(&r), Some(b"delivery-d"), b"old");
 
             scene_load(&r);
             r.sim.step().expect("the swap step");
-            let _retry = queue_delivery(&r, first_source(&r.sim), Some(b"delivery-d"), b"new");
+            let _retry = queue_delivery(&r, first_source(&r.sim), board_now(&r), Some(b"delivery-d"), b"new");
             r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
 
             let (old, new) = (count_injects_with_body(&r.sim, b"old"), count_injects_with_body(&r.sim, b"new"));
@@ -6804,7 +6858,7 @@ mod tests {
 
             scene_load(&r);
             r.sim.step().expect("the swap step");
-            let mut ack = queue_delivery(&r, old_node, None, b"straggler");
+            let mut ack = queue_delivery(&r, old_node, table.board, None, b"straggler");
             r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
 
             let injects = count_injects_with_body(&r.sim, b"straggler");
@@ -6824,13 +6878,194 @@ mod tests {
 
             scene_load(&r);
             r.sim.step().expect("the swap step");
-            let mut socket = queue_request(&r, old_node, "straggler");
+            let mut socket = queue_request(&r, old_node, table.board, "straggler");
             r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
 
             let wires = wire_requests_with(&r.sim, "straggler");
             let answered = answer(&mut socket);
             eprintln!("MEASURE straggler-endpoint: wire_requests={wires} answer={answered:?}");
             assert_eq!((wires, answered), (0, reloaded()));
+        }
+
+        /// What a straggler's two callers saw after one swap path.
+        type StragglerSeen = (&'static str, usize, Result<(), TryRecvError>, usize, Option<(u16, String)>);
+
+        #[test]
+        fn straggler_requests_after_each_swap_are_refused() {
+            let rt = test_rt();
+            let (_save_dir, fab) = saved_two_node_board(&rt);
+            let swaps = [
+                ("LoadScene", ControlMsg::LoadScene(SceneId::OrderProcessing)),
+                ("New", ControlMsg::New),
+                ("Load", ControlMsg::Load(fab)),
+            ];
+            let mut seen: Vec<StragglerSeen> = Vec::new();
+            for (leg, msg) in swaps {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let mut r = rig(dir.path(), &rt);
+                let table = r.sim.routes_receiver().borrow().clone();
+                let source = *table
+                    .get(&format!("src-{}", r.source.data().as_ffi()))
+                    .expect("the old table has the Source");
+                let route = *table.get(&route_key(&r)).expect("the old table has the Route");
+
+                r.ctx.send(msg).expect("send the swap");
+                r.sim.step().expect("the swap step");
+                assert_eq!(table.board + 1, board_now(&r), "{leg} replaced the board");
+                let mut ack = queue_delivery(&r, source, table.board, None, b"straggler");
+                let mut socket = queue_request(&r, route, table.board, "straggler");
+                r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
+
+                seen.push((
+                    leg,
+                    count_injects_with_body(&r.sim, b"straggler"),
+                    ack.try_recv(),
+                    wire_requests_with(&r.sim, "straggler"),
+                    answer(&mut socket),
+                ));
+            }
+            let want = |leg| (leg, 0, Err(TryRecvError::Closed), 0, reloaded());
+            assert_eq!(seen, vec![want("LoadScene"), want("New"), want("Load")]);
+        }
+
+        #[test]
+        fn straggler_after_a_latched_load_is_refused() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let table = r.sim.routes_receiver().borrow().clone();
+            let source = *table
+                .get(&format!("src-{}", r.source.data().as_ffi()))
+                .expect("the old table has the Source");
+            r.sim.host.test_insert_in_flight((0u64, r.source, 0u32), 4);
+
+            scene_load(&r);
+            r.sim.step().expect("the first draining step");
+            assert_eq!(r.sim.run_state, RunState::Draining, "the load latched behind a drain");
+            let mut steps = 0;
+            while r.sim.pending_load.is_some() {
+                r.sim.step().expect("a draining step");
+                steps += 1;
+                assert!(steps <= MAX_SETTLE_TICKS, "the drain settles inside its budget");
+            }
+            assert_eq!(r.sim.run_state, RunState::Playing, "the swap-safety drain resumed");
+            assert_eq!(board_now(&r), table.board + 1, "the latched swap ran");
+
+            let mut ack = queue_delivery(&r, source, table.board, None, b"straggler");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
+            assert_eq!(
+                (count_injects_with_body(&r.sim, b"straggler"), ack.try_recv()),
+                (0, Err(TryRecvError::Closed))
+            );
+        }
+
+        #[test]
+        fn straggler_retry_is_logged_once_on_the_new_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let table = r.sim.routes_receiver().borrow().clone();
+            let source = *table
+                .get(&format!("src-{}", r.source.data().as_ffi()))
+                .expect("the old table has the Source");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            let _straggler = queue_delivery(&r, source, table.board, Some(b"delivery-d"), b"old");
+            r.sim.step().expect("the step that refuses it");
+            let new_source = first_source(&r.sim);
+            let mut retry = queue_delivery(&r, new_source, board_now(&r), Some(b"delivery-d"), b"new");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
+
+            assert_eq!(
+                (count_injects_with_body(&r.sim, b"old"), count_injects_with_body(&r.sim, b"new")),
+                (0, 1),
+                "a refused delivery must not reach the seen-set, or its retry is swallowed"
+            );
+            assert_eq!(retry.try_recv(), Ok(()));
+        }
+
+        #[test]
+        fn straggler_endpoint_mints_no_correlation() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let table = r.sim.routes_receiver().borrow().clone();
+            let route = *table.get(&route_key(&r)).expect("the old table has the Route");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            let before = r.sim.correlation_next;
+            let mut socket = queue_request(&r, route, table.board, "straggler");
+            r.sim.step().expect("the step that refuses it");
+
+            assert_eq!(answer(&mut socket), reloaded());
+            assert_eq!(r.sim.correlation_next, before, "the refusal mints nothing");
+            assert_eq!(r.sim.registry.len(), 0, "and parks nothing");
+
+            let _real = queue_request(&r, route, board_now(&r), "real");
+            r.sim.step().expect("the real request's step");
+            let minted: Vec<u64> = r
+                .sim
+                .host()
+                .logged_events()
+                .expect("read log")
+                .iter()
+                .filter_map(|e| match e.payload {
+                    EventPayload::WireRequest { correlation, .. } => Some(correlation),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(minted, vec![before], "the next real request gets the id it would have had");
+        }
+
+        #[test]
+        fn fresh_post_after_a_swap_lands_on_the_new_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            let table = r.sim.routes_receiver().borrow().clone();
+            let source = first_source(&r.sim);
+            let label = format!("src-{}", source.data().as_ffi());
+            assert_eq!(table.get(&label), Some(&source), "the new table has the new Source");
+            let mut ack = queue_delivery(&r, source, table.board, None, b"fresh");
+            r.sim.step().expect("the step that logs it");
+
+            assert_eq!(count_injects_with_body(&r.sim, b"fresh"), 1);
+            assert_eq!(ack.try_recv(), Ok(()));
+        }
+
+        /// A new route table on the same board keeps the number, so a POST that read the table
+        /// before a Source was placed is still good. Only a swap moves it.
+        #[test]
+        // Test-only IO: the refused file is written into the test's own temp dir.
+        #[allow(clippy::disallowed_methods)]
+        fn route_table_stamp_moves_only_on_a_swap() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let first = r.sim.routes_receiver().borrow().clone();
+
+            r.gtx
+                .send_gesture(GridCommand::Place { kind: machine_kind::SOURCE, cell_x: 3, cell_y: 3 })
+                .expect("send the placement");
+            r.sim.step().expect("fold the placement");
+            let placed = r.sim.routes_receiver().borrow().clone();
+            assert!(!Arc::ptr_eq(&first, &placed), "the placement published a new table");
+            assert_eq!(placed.board, first.board, "on the same board");
+
+            let bad = dir.path().join("not-a-board.fab");
+            std::fs::write(&bad, b"this is not a fabrico project file").expect("write garbage");
+            r.ctx.send(ControlMsg::Load(bad)).expect("send the load");
+            r.sim.step().expect("the refused load");
+            assert_eq!(board_now(&r), first.board, "a refused Load leaves the number");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            assert_eq!(board_now(&r), first.board + 1, "a swap adds 1");
         }
     }
 }
@@ -7656,6 +7891,7 @@ mod endpoint {
             let (tx, _socket) = oneshot::channel();
             etx.try_send(EndpointIngress {
                 target: ep,
+                board: 0,
                 envelope: br#"{"body":1}"#.to_vec(),
                 respond: tx,
             })
@@ -7696,6 +7932,7 @@ mod endpoint {
                 _keep.push(rx);
                 etx.try_send(EndpointIngress {
                     target: ep,
+                    board: 0,
                     envelope: Vec::new(),
                     respond: tx,
                 })
@@ -7731,6 +7968,7 @@ mod endpoint {
             let (tx, mut socket) = oneshot::channel();
             etx.try_send(EndpointIngress {
                 target: ep,
+                board: 0,
                 envelope: Vec::new(),
                 respond: tx,
             })

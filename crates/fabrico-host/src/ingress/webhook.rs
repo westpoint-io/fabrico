@@ -10,7 +10,8 @@
 //! oneshot ack)` — to the host loop over a channel. The host loop is the single
 //! redb writer: it runs the persisted seen-set dedup BEFORE logging, appends
 //! exactly one `ManualInject` event on a new delivery id (or nothing on a
-//! duplicate), and acks the oneshot either way (an idempotent `200`).
+//! duplicate), and acks the oneshot either way (an idempotent `200`). A DROPPED ack is
+//! how the host says it did not take a request, and the caller reads it as a `503`.
 //!
 //! Two untrusted inputs cross the boundary here and are bounded:
 //! - the **body** is capped by a `tower-http` [`RequestBodyLimitLayer`] (DoS
@@ -24,6 +25,7 @@
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -55,6 +57,34 @@ pub const WEBHOOK_INGRESS_CAPACITY: usize = crate::ingress::endpoint::ENDPOINT_I
 /// Draining/Frozen — mirroring the shipped endpoint door's [`EndpointTx`].
 pub type IngressTx = Sender<Ingress>;
 
+/// The published route map, plus the board it belongs to.
+///
+/// Each request takes its `NodeId` and its `board` from one snapshot of this table, and the
+/// sim loop refuses a request whose `board` is not the current one. A POST handler isn't
+/// ordered against the sim thread, so a handler that read this table before a board swap can
+/// enqueue after it, and the new board may give the same id to a different machine. One value
+/// on the watch means the number and the map can't come from two publishes.
+///
+/// `board` stays on the host side: it never enters an event, the fold, the log or a snapshot.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RouteTable {
+    /// The number of the board this table was published for. It moves only on a host swap.
+    pub board: u64,
+    /// The `{target}` label -> node map.
+    pub routes: BTreeMap<String, NodeId>,
+}
+
+impl Deref for RouteTable {
+    type Target = BTreeMap<String, NodeId>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.routes
+    }
+}
+
+/// The receiver onto the LIVE route table the sim thread publishes.
+pub type RoutesRx = watch::Receiver<Arc<RouteTable>>;
+
 /// The header carrying the provider's delivery id (the dedup key). Opaque bytes.
 const DELIVERY_ID_HEADER: &str = "x-delivery-id";
 
@@ -65,6 +95,8 @@ const DELIVERY_ID_HEADER: &str = "x-delivery-id";
 pub struct Ingress {
     /// The resolved source node this request injects into (from the route table).
     pub target: NodeId,
+    /// The board the table that gave `target` was published for ([`RouteTable::board`]).
+    pub board: u64,
     /// The provider delivery id — opaque, length-bounded bytes (the dedup key).
     ///
     /// `None` when the request carried no `x-delivery-id` header: such a request is
@@ -75,6 +107,8 @@ pub struct Ingress {
     /// The request body, carried verbatim as the injected item's bytes.
     pub body: Vec<u8>,
     /// Acked by the host loop once the request was logged OR deduped (idempotent).
+    /// Dropping it unsent is how the host says it did not take the request, which the
+    /// caller reads as a `503`.
     pub ack: oneshot::Sender<()>,
 }
 
@@ -94,7 +128,7 @@ pub struct Ingress {
 pub(crate) struct WebhookState {
     pub(crate) tx: IngressTx,
     pub(crate) endpoint_tx: EndpointTx,
-    pub(crate) routes_rx: watch::Receiver<Arc<BTreeMap<String, NodeId>>>,
+    pub(crate) routes_rx: RoutesRx,
     /// The not-Playing signal (ROBUST-01): `true` iff the sim is Playing, published
     /// by the sim loop at the end of every `step()` (mirrors the `paused` Arc). The
     /// handler reads it lock-free per request (Gate A) to fast-503 while the sim is
@@ -158,6 +192,8 @@ async fn hook(
         .tx
         .try_send(Ingress {
             target: node,
+            // From the same snapshot as `node`, so the two can't disagree about the board.
+            board: routes.board,
             delivery_id,
             body: body.to_vec(),
             ack: ack_tx,
@@ -180,7 +216,7 @@ async fn hook(
 /// swaps whole `Arc`s over it, never mutating a shared map. Exposed so tests can
 /// drive it over a bound loopback listener (and read back the bound port).
 pub fn webhook_router(
-    routes_rx: watch::Receiver<Arc<BTreeMap<String, NodeId>>>,
+    routes_rx: RoutesRx,
     tx: IngressTx,
     endpoint_tx: EndpointTx,
     body_limit: usize,
@@ -233,7 +269,7 @@ pub fn webhook_router(
 /// address cannot be read.
 pub async fn run_webhook_listener(
     addr: SocketAddr,
-    routes_rx: watch::Receiver<Arc<BTreeMap<String, NodeId>>>,
+    routes_rx: RoutesRx,
     tx: IngressTx,
     endpoint_tx: EndpointTx,
     body_limit: usize,
@@ -272,10 +308,10 @@ mod tests {
         alloc.insert(())
     }
 
-    fn route_to(label: &str, node: NodeId) -> BTreeMap<String, NodeId> {
+    fn route_to(label: &str, node: NodeId) -> RouteTable {
         let mut routes = BTreeMap::new();
         routes.insert(label.to_owned(), node);
-        routes
+        RouteTable { board: 0, routes }
     }
 
     /// A throwaway endpoint ingress sender for the webhook-only tests (they never
@@ -289,7 +325,7 @@ mod tests {
     /// receiver (the tests that never update the table). Dropping the sender is
     /// fine: a `watch::Receiver::borrow()` still returns the last-published value
     /// after all senders drop, and `hook` only ever borrows (never `changed()`).
-    fn watched(routes: BTreeMap<String, NodeId>) -> watch::Receiver<Arc<BTreeMap<String, NodeId>>> {
+    fn watched(routes: RouteTable) -> RoutesRx {
         let (_tx, rx) = watch::channel(Arc::new(routes));
         rx
     }
@@ -327,6 +363,30 @@ mod tests {
             "a present delivery id is Some(opaque header bytes)"
         );
         assert_eq!(body, b"payload-bytes", "the body is carried verbatim");
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_webhook_carries_the_stamp_of_the_table_it_read() {
+        // The sim loop refuses a request by this number, so it has to be the number of the
+        // table the node came from.
+        let node = a_node();
+        let (tx, mut rx) = channel::<Ingress>(WEBHOOK_INGRESS_CAPACITY);
+        let table = RouteTable { board: 7, ..route_to("src-1", node) };
+        let app = webhook_router(watched(table), tx, no_endpoint_tx(), 4096, playing());
+        let drained = tokio::spawn(async move {
+            let ing = rx.recv().await.expect("an ingress message");
+            let _ = ing.ack.send(());
+            ing.board
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/hook/src-1")
+            .body(Body::from("x"))
+            .expect("build request");
+        let resp = app.oneshot(req).await.expect("route the request");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(drained.await.expect("drain task"), 7);
     }
 
     #[tokio::test]
@@ -446,7 +506,7 @@ mod tests {
         // the whole point of the watch snapshot: no imperative map mutation, only a
         // whole-Arc swap that the handler picks up on its next `borrow()`.
         let node = a_node();
-        let (routes_tx, routes_rx) = watch::channel(Arc::new(BTreeMap::<String, NodeId>::new()));
+        let (routes_tx, routes_rx) = watch::channel(Arc::new(RouteTable::default()));
         let (tx, mut rx) = channel::<Ingress>(WEBHOOK_INGRESS_CAPACITY);
         let app = webhook_router(routes_rx, tx, no_endpoint_tx(), 4096, playing());
 
@@ -508,6 +568,7 @@ mod tests {
         let (fill_ack, _fill_ack_rx) = oneshot::channel();
         tx.try_send(Ingress {
             target: node,
+            board: 0,
             delivery_id: None,
             body: Vec::new(),
             ack: fill_ack,
