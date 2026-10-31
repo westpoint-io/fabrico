@@ -506,9 +506,14 @@ fn job_id(raw_line: &str) -> Option<&str> {
 
 /// Every job block after the top-level `jobs:` line, as (id, trimmed non-comment lines).
 fn job_blocks() -> Vec<(&'static str, Vec<&'static str>)> {
-    let mut blocks: Vec<(&'static str, Vec<&'static str>)> = Vec::new();
+    job_blocks_in(CI_YML)
+}
+
+/// `job_blocks` over any workflow text, so a test can read a copy with a break planted in it.
+fn job_blocks_in(yml: &str) -> Vec<(&str, Vec<&str>)> {
+    let mut blocks: Vec<(&str, Vec<&str>)> = Vec::new();
     let mut in_jobs = false;
-    for raw in CI_YML.lines() {
+    for raw in yml.lines() {
         if !in_jobs {
             if raw == "jobs:" {
                 in_jobs = true;
@@ -969,6 +974,253 @@ fn the_live_gate_verdict_is_the_red_set_check() {
             .collect::<Vec<_>>()
             .join("\n\n")
     );
+}
+
+/// The job that runs the lesson walk.
+const WALK_JOB: &str = "e2e-walk";
+/// The developer's walk command, as the whole of its `run:` line.
+const WALK_SUITE_RUN: &str = "run: npm run e2e:walk";
+/// The walk's report check, as the whole of its `run:` line.
+const WALK_CHECKER_RUN: &str =
+    "run: bash ../scripts/check-walk-report.sh test-results/walk-report.json";
+/// The report check's bite proof, as the whole of its `run:` line.
+const WALK_BITES_RUN: &str = "run: bash scripts/prove-walk-report-bites.sh";
+/// `frontend/package.json`, because `e2e:walk` can swallow an exit code there just as well.
+const FRONTEND_PACKAGE_JSON: &str = include_str!("../../../frontend/package.json");
+
+/// A workflow line with a step's leading `- ` taken off, so `- run: x` reads the same as `run: x`.
+fn step_key(line: &str) -> &str {
+    line.strip_prefix("- ").unwrap_or(line)
+}
+
+/// Everything wrong with how `yml` and `package_json` wire the walk's verdict. Empty means right.
+fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let runs = [
+        (WALK_BITES_RUN, "scripts/prove-walk-report-bites.sh"),
+        (WALK_SUITE_RUN, "npm run e2e:walk"),
+        (WALK_CHECKER_RUN, "scripts/check-walk-report.sh"),
+    ];
+
+    // Each one exactly once, in the walk's job, as the whole of its line. A whole-line match is what
+    // refuses `|| true`, `; true` and a pipe, each of which turns the step's failure into a pass.
+    for (expected, needle) in runs {
+        let found: Vec<(&str, &str)> = blocks
+            .iter()
+            .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
+            .filter(|(_, line)| line.starts_with("run:") && line.contains(needle))
+            .collect();
+        if found != [(WALK_JOB, expected)] {
+            wrong.push(format!(
+                "the `run:` lines invoking `{needle}` are {found:?}, expected exactly \
+                 [(\"{WALK_JOB}\", \"{expected}\")]. With anything else on that line, or the step \
+                 moved or gone, the walk's job can go green without the walk's verdict."
+            ));
+        }
+    }
+
+    match blocks.iter().find(|(id, _)| *id == WALK_JOB) {
+        None => wrong.push(format!("there is no job `{WALK_JOB}` under `jobs:`.")),
+        Some((_, lines)) => {
+            let walk_runs: Vec<&str> = lines
+                .iter()
+                .map(|line| step_key(line))
+                .filter(|line| line.starts_with("run:"))
+                .collect();
+            let at = |expected: &str| walk_runs.iter().position(|line| *line == expected);
+            if let (Some(b), Some(s), Some(c)) =
+                (at(WALK_BITES_RUN), at(WALK_SUITE_RUN), at(WALK_CHECKER_RUN))
+                && !(b < s && s + 1 == c)
+            {
+                wrong.push(format!(
+                    "the bite proof, the walk and the report check are `run:` lines {b}, {s} and \
+                     {c} of job `{WALK_JOB}`. The proof must come before the walk, and the check \
+                     must be the line straight after it."
+                ));
+            }
+            for line in lines
+                .iter()
+                .filter(|line| step_key(line).starts_with("continue-on-error"))
+            {
+                wrong.push(format!(
+                    "job `{WALK_JOB}` carries `{line}`, so a failed walk or a failed report check \
+                     would leave the job green."
+                ));
+            }
+            for (_, needle) in runs {
+                for line in step_of(lines, needle)
+                    .iter()
+                    .filter(|line| step_key(line).starts_with("if:"))
+                {
+                    wrong.push(format!(
+                        "the step that runs `{needle}` in job `{WALK_JOB}` carries `{line}`. A \
+                         condition can skip it while the job stays green."
+                    ));
+                }
+            }
+        }
+    }
+
+    // The npm script deletes the old report first, so a failed build leaves nothing to read, ends in
+    // the unfiltered walk, and can't swallow an exit code on the way.
+    let script = package_json
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("\"e2e:walk\": \""))
+        .and_then(|rest| rest.trim_end_matches(',').strip_suffix('"'));
+    match script {
+        None => wrong.push("frontend/package.json has no `e2e:walk` script.".to_string()),
+        Some(script) => {
+            if !script.starts_with("rm -f test-results/walk-report.json && ")
+                || !script.ends_with("&& playwright test --config=playwright.walk.config.ts")
+                || script.contains("||")
+                || script.contains(';')
+            {
+                wrong.push(format!(
+                    "the `e2e:walk` script is `{script}`. It must delete the old report first, end \
+                     in the unfiltered `playwright test --config=playwright.walk.config.ts`, and \
+                     hold no `||` or `;`, or the report check can read a stale or partial run."
+                ));
+            }
+        }
+    }
+    wrong
+}
+
+/// The walk's verdict is its exit code and its report, and nothing can switch either off.
+///
+/// `ci.yml` says so in a comment, and a comment can't fail. Changing the run line to
+/// `npm run e2e:walk || true`, adding `continue-on-error: true` or deleting a step would each leave
+/// the job green forever, so those facts are pinned here, where `cargo test` runs them.
+#[test]
+fn the_walk_gate_verdict_cannot_be_switched_off() {
+    let wrong = walk_gate_wrong(CI_YML, FRONTEND_PACKAGE_JSON);
+    assert!(
+        wrong.is_empty(),
+        "{} fact(s) about the walk's verdict are wrong:\n\n{}\n\n\
+         Update the WORKFLOW to match this test. Do NOT re-point this test at whatever the \
+         workflow currently says: these assertions are what keep the walk gate on.",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+}
+
+/// `walk_gate_wrong` can fail: each of these breaks is planted in a copy of the real files.
+#[test]
+fn the_walk_gate_check_names_each_way_of_switching_it_off() {
+    const SUITE_STEP: &str = "      - name: Run the lesson walk\n";
+    const CHECKER_STEP: &str = "      - name: Every walk test ran and passed\n";
+    let job_header = "    name: lesson walk (real headless host)\n";
+    let suite_line = format!("        {WALK_SUITE_RUN}\n");
+    let checker_line = format!("        {WALK_CHECKER_RUN}\n");
+    let bites_line = format!("        {WALK_BITES_RUN}\n");
+
+    let planted: Vec<(&str, String, &str)> = vec![
+        (
+            "the walk's exit code swallowed",
+            suite_line.replace("e2e:walk", "e2e:walk || true"),
+            "npm run e2e:walk",
+        ),
+        ("the walk step deleted", String::new(), "npm run e2e:walk"),
+        (
+            "the walk as a block",
+            "        run: |\n          npm run e2e:walk\n".to_string(),
+            "npm run e2e:walk",
+        ),
+    ];
+    for (what, replacement, must_name) in planted {
+        let yml = CI_YML.replace(&suite_line, &replacement);
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let wrong = walk_gate_wrong(&yml, FRONTEND_PACKAGE_JSON).join("\n");
+        assert!(
+            wrong.contains(must_name),
+            "{what}: named `{must_name}` in: {wrong}"
+        );
+    }
+
+    let by_replacing: Vec<(&str, String, String, &str)> = vec![
+        (
+            "the report check's exit code swallowed",
+            checker_line.clone(),
+            checker_line.replace(".json", ".json || true"),
+            "scripts/check-walk-report.sh",
+        ),
+        (
+            "the report check deleted",
+            checker_line.clone(),
+            String::new(),
+            "scripts/check-walk-report.sh",
+        ),
+        (
+            "the bite proof deleted",
+            bites_line.clone(),
+            String::new(),
+            "scripts/prove-walk-report-bites.sh",
+        ),
+        (
+            "continue-on-error on the job",
+            job_header.to_string(),
+            format!("{job_header}    continue-on-error: true\n"),
+            "continue-on-error",
+        ),
+        (
+            "continue-on-error as a step's first key",
+            SUITE_STEP.to_string(),
+            "      - continue-on-error: true\n        name: Run the lesson walk\n".to_string(),
+            "continue-on-error",
+        ),
+        (
+            "a condition on the report check",
+            CHECKER_STEP.to_string(),
+            format!("{CHECKER_STEP}        if: false\n"),
+            "carries `if: false`",
+        ),
+        (
+            "a step between the walk and the report check",
+            CHECKER_STEP.to_string(),
+            format!("      - run: echo between\n{CHECKER_STEP}"),
+            "the line straight after it",
+        ),
+    ];
+    for (what, from, to, must_name) in by_replacing {
+        let yml = CI_YML.replace(&from, &to);
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let wrong = walk_gate_wrong(&yml, FRONTEND_PACKAGE_JSON).join("\n");
+        assert!(
+            wrong.contains(must_name),
+            "{what}: named `{must_name}` in: {wrong}"
+        );
+    }
+
+    for (what, from, to) in [
+        (
+            "the script's exit code swallowed",
+            "walk.config.ts\"",
+            "walk.config.ts || true\"",
+        ),
+        (
+            "a filtered walk",
+            "walk.config.ts\"",
+            "walk.config.ts --grep lesson\"",
+        ),
+        (
+            "the old report kept",
+            "rm -f test-results/walk-report.json && cargo build -p fabrico-host --example dev_render_server --example replay_hash",
+            "cargo build -p fabrico-host --example dev_render_server --example replay_hash",
+        ),
+    ] {
+        let package_json = FRONTEND_PACKAGE_JSON.replace(from, to);
+        assert_ne!(
+            package_json, FRONTEND_PACKAGE_JSON,
+            "{what}: the plant landed"
+        );
+        let wrong = walk_gate_wrong(CI_YML, &package_json).join("\n");
+        assert!(
+            wrong.contains("the `e2e:walk` script is"),
+            "{what}: named the script in: {wrong}"
+        );
+    }
 }
 
 /// The trimmed lines of the step in `job_lines` whose `run:` line invokes `needle`: from the
