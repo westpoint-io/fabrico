@@ -122,6 +122,70 @@ describe('localStorageProgress', () => {
     expect(() => store.write({ version: 1, lessons: { [LESSON]: 'done' } })).not.toThrow();
   });
 
+  describe('when storage fails', () => {
+    const DONE: Progress = { version: 1, lessons: { [LESSON]: 'done' } };
+    const blocked = (): never => {
+      throw new Error('blocked');
+    };
+
+    it('reads back a write that could not be stored', () => {
+      const store = localStorageProgress({ getItem: () => null, setItem: blocked }, KNOWN);
+      store.write(DONE);
+      expect(store.read()).toEqual(DONE);
+    });
+
+    it('reads back a write when reading throws too', () => {
+      const store = localStorageProgress({ getItem: blocked, setItem: blocked }, KNOWN);
+      store.write(DONE);
+      expect(store.read()).toEqual(DONE);
+    });
+
+    it('reads back a write that was stored, when a later read throws', () => {
+      let reads = 0;
+      const store = localStorageProgress(
+        {
+          getItem: () => {
+            reads += 1;
+            throw new Error('blocked');
+          },
+          setItem: () => {},
+        },
+        KNOWN,
+      );
+      store.write(DONE);
+      expect(store.read()).toEqual(DONE);
+      expect(reads, 'it did try storage first').toBe(1);
+    });
+
+    it('reads back a write with no storage at all', () => {
+      const store = localStorageProgress(null, KNOWN);
+      store.write(DONE);
+      expect(store.read()).toEqual(DONE);
+    });
+
+    it('goes back to storage once a write gets through', () => {
+      const storage = fakeStorage();
+      let full = true;
+      const store = localStorageProgress(
+        {
+          getItem: storage.getItem,
+          setItem: (k, v) => {
+            if (full) throw new Error('full');
+            storage.setItem(k, v);
+          },
+        },
+        KNOWN,
+      );
+      store.write(DONE);
+      full = false;
+      const later: Progress = { version: 1, lessons: { [LESSON]: 'inProgress' } };
+      store.write(later);
+      expect(storage.data[PROGRESS_KEY], 'the later write reached storage').toBe(JSON.stringify(later));
+      storage.setItem(PROGRESS_KEY, JSON.stringify(DONE));
+      expect(store.read(), 'and reads come from storage again').toEqual(DONE);
+    });
+  });
+
   it('works with no storage at all', () => {
     const store = localStorageProgress(null, KNOWN);
     expect(store.read()).toEqual(EMPTY_PROGRESS);

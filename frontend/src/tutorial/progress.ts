@@ -54,21 +54,31 @@ export interface ProgressStore {
   write(p: Progress): void;
 }
 
-/** A store over `Storage`. A locked-down webview can throw on either call, and neither may reach the app. */
+/**
+ * A store over `Storage`. A locked-down webview can throw on either call, and neither may reach the app.
+ * The last write is also kept in memory, so a lesson the user finished still reads Done for the rest of
+ * this run when storage fails. It's gone after a relaunch, which costs a status word.
+ */
 export function localStorageProgress(storage: Pick<Storage, 'getItem' | 'setItem'> | null, knownIds: readonly string[]): ProgressStore {
+  let lastWritten: Progress | null = null;
+  let stored = storage !== null;
   return {
     read: () => {
+      if (!stored) return lastWritten ?? EMPTY_PROGRESS;
       try {
         return parseProgress(storage?.getItem(PROGRESS_KEY) ?? null, knownIds);
       } catch {
-        return EMPTY_PROGRESS;
+        return lastWritten ?? EMPTY_PROGRESS;
       }
     },
     write: (p) => {
+      lastWritten = p;
+      if (storage === null) return;
       try {
-        storage?.setItem(PROGRESS_KEY, JSON.stringify(p));
+        storage.setItem(PROGRESS_KEY, JSON.stringify(p));
+        stored = true;
       } catch {
-        // Progress is a convenience. Losing it costs a status word, so the lesson carries on.
+        stored = false;
       }
     },
   };

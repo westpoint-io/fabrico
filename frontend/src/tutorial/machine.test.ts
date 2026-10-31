@@ -13,7 +13,7 @@ import {
   type TutorialState,
 } from './machine.ts';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, auditLessonWords, phrasePlain } from './phrase.ts';
-import { EMPTY_PROGRESS, withLessonStarted, type Progress } from './progress.ts';
+import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 
 const SOURCE = 0;
@@ -857,6 +857,23 @@ describe('rowViews', () => {
   it('a run that has just finished reads done even if the store could not write', () => {
     const finished = { ...atStep(5), card: 'finished' as const };
     expect(rows({ state: finished })[0]?.status).toBe('done');
+  });
+
+  it('a run finished with a store that could not write still reads done after Back to lessons', () => {
+    const store = localStorageProgress(
+      {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('full');
+        },
+      },
+      [LESSON],
+    );
+    store.write(withLessonDone(store.read(), LESSON));
+    const afterBack = reduce({ ...atStep(5), card: 'finished' }, { type: 'cancelledRun' }, LESSONS);
+    const [row] = rows({ state: afterBack, progress: store.read() });
+    expect(row?.status).toBe('done');
+    expect(row?.actions).toEqual(['restart']);
   });
 
   it('a swapped card reads in progress with Restart', () => {
