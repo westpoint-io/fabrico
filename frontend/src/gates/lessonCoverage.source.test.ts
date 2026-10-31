@@ -11,7 +11,8 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DRIVABLE_GESTURES, LESSON_WALKS } from '../../e2e-live/support/lessonWalks.ts';
+import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCE } from '../../e2e-live/support/lessonWalks.ts';
+import { REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
 import { LESSONS } from '../tutorial/lessons/index.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
 import { stripComments } from './walkSpecSource';
@@ -124,6 +125,10 @@ describe('every lesson has a walk', () => {
 
   it('lets the runner drive the five gestures', () => {
     expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint key none pressHint watch');
+  });
+
+  it("holds the app's own sentence for the refusal the walk reads", () => {
+    expect(REFUSED_SENTENCE).toBe(REFUSAL_COPY.FootprintCollision);
   });
 
   it('finds nothing in the real tree', () => {

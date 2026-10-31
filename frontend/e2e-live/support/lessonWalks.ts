@@ -30,3 +30,10 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
 
 /** The gestures `walkStep` in `lessonRunner.ts` knows how to make. */
 export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'key', 'watch', 'none'];
+
+/**
+ * The app's sentence for a footprint collision, transcribed because `RefusalMessage.tsx` pulls in the
+ * render assets, which Playwright can't load. `lessonCoverage.source.test.ts` compares it with
+ * `REFUSAL_COPY`, so it can't drift from what the app says.
+ */
+export const REFUSED_SENTENCE = 'That space is taken. Clear it or try elsewhere.';

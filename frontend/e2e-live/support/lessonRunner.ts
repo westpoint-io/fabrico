@@ -6,17 +6,23 @@ import { SHORTCUTS } from '../../src/input/shortcuts';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk } from './canvasDots';
-import { LESSON_WALKS, type LessonWalk } from './lessonWalks';
+import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
 import {
+  DRAWN_STATE_FRAMES,
   HAND_MOVE_FRAMES,
   captureClip,
+  captureRefusalText,
   cameraOf,
   expectRenderLoopAlive,
   ghostPlottedOf,
   handDragBetween,
   handPath,
+  latchRejectFlashCells,
   readScene,
+  rejectFlashCell,
+  rejectFlashCellsSeen,
   screenCellCentre,
+  stopRejectFlashLatch,
 } from './oracle';
 import { decodePngRows } from './pngRows';
 
@@ -179,6 +185,8 @@ interface WalkState {
   walked: Set<number>;
   /** Where this lesson's hand lands, from the walk table. */
   walk: LessonWalk;
+  /** The refused gesture has been made and read. */
+  refusalDone: boolean;
 }
 
 /**
@@ -555,6 +563,84 @@ function hasLeftThisStep(record: readonly StepRecordEntry[], stepIndex: number):
   return record.some((e) => e.card === 'finished' || e.stepIndex > stepIndex);
 }
 
+function refusalLabel(lesson: Lesson, stepIndex: number): string {
+  return `${stepLabel(lesson, stepIndex)} refused gesture`;
+}
+
+/**
+ * A step that moved on after its first press would skip the refused gesture, and rule 2 alone would let
+ * it go by, because the walk did act on that first press.
+ */
+function checkRefusalReached(lesson: Lesson, state: WalkState, stepIndex: number, step: Step, left: boolean): void {
+  if (left && step.id === lesson.refused.atStep && !state.refusalDone) {
+    throw new Error(`${refusalLabel(lesson, stepIndex)}: never reached stage ${lesson.refused.atStage}`);
+  }
+}
+
+/**
+ * Make the lesson's refused gesture and read what the app did about it. False means a fresh probe read
+ * names another stage, so the record was a frame behind, the leg didn't press, and the walk goes back to
+ * waiting on the record.
+ *
+ * The press point comes from the model and not from a ring, and the press lands on the bound machine's
+ * own cell, so it collides with that machine and doesn't sit beside it. The reject flash lives 180 ms,
+ * the refusal comes back through the host and is polled at 100 to 500 ms, and a CI runner draws about 5
+ * frames a second, so a single read after the sentence could miss the flash. The latch reads every
+ * frame, and it stays on for a settle window so a second flash would fail the read too. The sentence is
+ * read first as a positive anchor, because a step read made before the host answered would pass with
+ * nothing refused. One probe read can't see a step that moved and came back, so the record's length is
+ * checked as well.
+ */
+async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepIndex: number): Promise<boolean> {
+  const { atStage, press } = lesson.refused;
+  const label = refusalLabel(lesson, stepIndex);
+  const probe = await probeAtStage(page, stepIndex, atStage);
+  if (probe === null) return false;
+  const lengthBefore = (await readRecord(page)).length;
+  const before = await readScene(page);
+  const boundId = probe.bound[press.of];
+  const anchor = before.nodes.find((n) => n.id === boundId)?.cells[0] as readonly [number, number] | undefined;
+  if (anchor === undefined) {
+    throw new Error(`${label}: the bound ${press.of} (${String(boundId)}) isn't on the board`);
+  }
+  const [cx, cy] = anchor;
+  const centre = await screenCellCentre(page, cx, cy);
+  const size = CELL * (await cameraOf(page)).scale;
+  const point = pointInRect(
+    { x: centre.x - size / 2, y: centre.y - size / 2, width: size, height: size, shape: 'square' },
+    fromOffset(state.walk.pressOffset),
+  );
+  await expectOnTheBoard(page, label, 'the press is', [point]);
+
+  expect(((await page.locator('#fab-refusal').textContent()) ?? '').trim(), `${label}: no refusal is showing before the press`).toBe('');
+  expect(await rejectFlashCell(page), `${label}: no reject flash is plotted before the press`).toBeNull();
+  await latchRejectFlashCells(page);
+  await pressPointByHand(page, point);
+
+  const sentence = await captureRefusalText(page, `${label}: the app says why it refused`);
+  expect(sentence, `${label}: the app says the space is taken`).toBe(REFUSED_SENTENCE);
+  console.log(`REFUSAL ${label}: "${sentence}"`);
+
+  await expect
+    .poll(async () => (await rejectFlashCellsSeen(page)).length, {
+      message: `${label}: the canvas plotted a reject flash at the press`,
+      timeout: addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES * 4), `${label}: the flash latch`),
+    })
+    .toBeGreaterThan(0);
+  // A few frames more, so a second flash, were there one, would be latched too.
+  await page.waitForTimeout(addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES * 2), `${label}: the second-flash window`));
+  const flashes = await rejectFlashCellsSeen(page);
+  await stopRejectFlashLatch(page);
+  expect(flashes, `${label}: one flash, on the cell of the bound ${press.of}`).toEqual([{ cx, cy }]);
+
+  const after = await readProbe(page);
+  expect(after.stepIndex, `${label}: the refusal moved the step on`).toBe(stepIndex);
+  expect(after.stageId, `${label}: the refusal moved the stage on`).toBe(atStage);
+  expect((await readRecord(page)).length, `${label}: the step record grew across the refusal, so the step moved and came back`).toBe(lengthBefore);
+  expect((await readScene(page)).nodes.length, `${label}: the refused press placed a machine`).toBe(before.nodes.length);
+  return true;
+}
+
 /** One step of a lesson, through its hints. */
 async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex: number, step: Step): Promise<void> {
   const { actedOn, walk } = state;
@@ -575,6 +661,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   for (let round = 0; round < rounds && !movedOn; round++) {
     const record = await readRecord(page);
     const left = hasLeftThisStep(record, stepIndex);
+    checkRefusalReached(lesson, state, stepIndex, step, left);
     checkRecord(lesson, record, state);
     const onThisStep = record.filter((e) => e.stepIndex === stepIndex);
     const entry = onThisStep[onThisStep.length - 1];
@@ -604,6 +691,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     // Kept from the same read as the entry: the record may have grown since.
     const length = record.length;
     const gesture = stage.gesture;
+    // Before the stage's own read of its ring, so the press below holds no rect from before the refusal.
+    // If the app has left this stage, each gesture's own read below finds that out and doesn't press.
+    if (step.id === lesson.refused.atStep && stage.id === lesson.refused.atStage && !state.refusalDone) {
+      state.refusalDone = await walkRefusal(page, lesson, state, stepIndex);
+    }
     if (gesture.do === 'pressHint') {
       const rects = await hintsForStage(page, lesson, stepIndex, stage);
       if (rects !== null) {
@@ -656,6 +748,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   }
   if (!movedOn) {
     const record = await readRecord(page);
+    checkRefusalReached(lesson, state, stepIndex, step, hasLeftThisStep(record, stepIndex));
     checkRecord(lesson, record, state);
     if (!hasLeftThisStep(record, stepIndex)) {
       throw new Error(`${stageLabel(lesson, stepIndex, lastStageId)}: still on this step after ${rounds} rounds`);
@@ -765,7 +858,7 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
   expect(first?.stepIndex, `${lesson.id}: the record starts on step 1`).toBe(0);
 
   const to = opts.until === undefined ? lesson.steps.length : indexOfStep(lesson, opts.until);
-  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk };
+  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk, refusalDone: false };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
   if (opts.until === undefined) await finishWalk(page, lesson, state);
