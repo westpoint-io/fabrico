@@ -985,9 +985,8 @@ async function lightStatusStrip(page: Page, h: Harness, tick: number): Promise<v
 }
 
 /**
- * The strip stops one gutter left of the list. This reads across only: the strip sits above the
- * list's top edge at most window sizes, so a read that also took "above" as clear would pass with
- * the strip over the list's column.
+ * The strip stops one gutter left of the list. This reads across only, because the two share rows:
+ * the strip with `Unsaved` in it runs from 100 to 126 px down, and the list starts at 116.
  */
 async function expectStripClearOfList(page: Page): Promise<void> {
   const strip = page.locator('[data-fab-status-strip]');
