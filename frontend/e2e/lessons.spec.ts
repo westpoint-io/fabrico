@@ -1070,6 +1070,66 @@ test.describe('the lesson list', () => {
     await expect(page.getByRole('button', { name: 'Help', exact: true }), 'and hands focus to Help').toBeFocused();
   });
 
+  test('closing the list during a lesson leaves the board keys working', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await ringAt(page, 'source-tool');
+    await page.keyboard.press(' ');
+    await expect.poll(() => h.controls, { message: 'Space paused the board' }).toContain('pause');
+    await expect(page.locator(CARD), 'the card asks for Space').toContainText(PAUSED_SENTENCE);
+
+    const focused = () => page.evaluate(() => document.activeElement?.tagName ?? null);
+    const resumes = (): number => h.controls.filter((c) => c === 'resume').length;
+    const pauses = (): number => h.controls.filter((c) => c === 'pause').length;
+
+    // Close, then the Space the paused card asks for.
+    await openLessons(page);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.locator(PANEL)).toHaveCount(0);
+    expect(await focused(), 'Close leaves focus on the page').toBe('BODY');
+    await page.keyboard.press(' ');
+    await expect.poll(resumes, { message: "the card's Space reached the board" }).toBe(1);
+    await expect(page.locator('#fab-help-panel'), 'and did not press Help').toHaveCount(0);
+
+    // Escape, the same way.
+    await openLessons(page);
+    await page.keyboard.press('Escape');
+    await expect(page.locator(PANEL)).toHaveCount(0);
+    expect(await focused(), 'Escape leaves focus on the page').toBe('BODY');
+    await page.keyboard.press(' ');
+    await expect.poll(pauses, { message: 'Space reached the board after Escape' }).toBe(2);
+
+    // And after Leave there is no card asking for a key, so focus goes back to Help.
+    await pressLeave(page);
+    await openLessons(page);
+    await page.locator(PANEL).getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Help', exact: true }), 'with no lesson on screen, Close hands focus to Help').toBeFocused();
+  });
+
+  test('Escape over a hidden inspector during a lesson leaves the board keys working', async ({ page }) => {
+    const h = await boot(page, configuredHost().opts);
+    await startLesson(page, h);
+    // The floor ring's cell, because an empty mock board boots at the zoom limit and a fixed cell can be off screen.
+    const { cell } = await armSourceForFloor(page);
+    h.inject(sourceOn(cell, 6));
+    await expect(page.locator(CARD)).toContainText(`Step 2 of ${STEP_COUNT}`);
+    await waitForBoard(page, { machines: 1 });
+    await page.keyboard.press('Escape');
+    const at = await screenCellCentre(page, cell[0], cell[1]);
+    await page.mouse.click(at.x, at.y);
+    const inspector = page.locator('aside[aria-labelledby="fab-config-heading"]');
+    await expect(inspector).toBeVisible();
+
+    await openLessons(page);
+    await expect(inspector, 'the list hides the inspector').toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(page.locator(PANEL)).toHaveCount(0);
+    await expect(inspector, 'Escape brings the inspector back').toBeVisible();
+    expect(await page.evaluate(() => document.activeElement?.tagName ?? null), 'and leaves focus on the page').toBe('BODY');
+    await page.keyboard.press(' ');
+    await expect.poll(() => h.controls, { message: 'Space reached the board' }).toContain('pause');
+  });
+
   test('declining the question leaves everything as it was', async ({ page }) => {
     const h = await boot(page);
     h.inject(buildPacket({ full: false, tick: 4, nodes: [{ id: 2, kind: 0, cell_x: 14, cell_y: 8 }] }));

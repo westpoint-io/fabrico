@@ -148,9 +148,17 @@ function browserProgress(): ProgressStore {
   return localStorageProgress(storage, LESSONS.map((l) => l.id));
 }
 
-/** Where focus goes when the list closes: the toolbar's Help button, which is the way back to the list. */
-export function focusHelpButton(): void {
-  document.querySelector<HTMLElement>('button[aria-label="Help"]')?.focus();
+/**
+ * Where focus goes when the list closes. With no lesson on screen it's the toolbar's Help button, the
+ * way back to the list. During a lesson it's the page, because the card asks for keys such as Space
+ * and the board stands down for a focused button, so Space would press Help and the board would stay paused.
+ */
+export function handFocusBackFromList(lessonOnScreen: boolean): void {
+  if (!lessonOnScreen) {
+    document.querySelector<HTMLElement>('button[aria-label="Help"]')?.focus();
+    return;
+  }
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 }
 
 /** How often the layer asks the host for the bound Source's trigger: slower than a person presses Apply. */
@@ -360,7 +368,7 @@ export function TutorialLayer({
 
   const closeList = useCallback((): void => {
     onLessonsOpenChange(false);
-    focusHelpButton();
+    handFocusBackFromList(stateRef.current.card !== 'none');
   }, [onLessonsOpenChange]);
 
   const onRowAction = useCallback(
