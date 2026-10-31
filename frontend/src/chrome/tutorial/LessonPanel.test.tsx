@@ -191,26 +191,51 @@ describe('LessonPanel', () => {
   });
 
   describe('focus', () => {
-    const refOf = (b: El | undefined): unknown => (b as unknown as { props: { ref?: unknown } }).props.ref;
+    const refOf = (el: El | undefined): unknown => (el as unknown as { props: { ref?: unknown } }).props.ref;
 
-    it('goes to the first action that can take a press', () => {
-      const buttons = rowButtons(render(FIVE));
-      expect(typeof refOf(buttons[0])).toBe('function');
-      expect(buttons.slice(1).every((b) => refOf(b) === undefined)).toBe(true);
+    /** A panel whose query answers for the two things the ref looks for. */
+    function fakePanel(enabledRowButton: boolean): { panel: unknown; focused: () => string | null } {
+      let focused: string | null = null;
+      const button = (name: string) => ({
+        focus: () => {
+          focused = name;
+        },
+      });
+      return {
+        panel: {
+          querySelector: (selector: string) => {
+            if (selector.includes('data-fab-lesson-row')) return enabledRowButton ? button('first action') : null;
+            return button('Close');
+          },
+        },
+        focused: () => focused,
+      };
+    }
+
+    it('sits on the panel and on no button, so a change in the rows can move no focus', () => {
+      const els = render(FIVE);
+      expect(buttonsOf(els).every((b) => refOf(b) === undefined)).toBe(true);
+      expect(typeof refOf(panelOf(els))).toBe('function');
     });
 
-    it('uses one function across renders, so a re-render never pulls focus back', () => {
-      expect(refOf(rowButtons(render(FIVE))[0])).toBe(refOf(rowButtons(render(FIVE))[0]));
+    it('uses one function across renders and across different rows, so a re-render never pulls focus back', () => {
+      expect(refOf(panelOf(render(FIVE)))).toBe(refOf(panelOf(render([NOT_STARTED]))));
+    });
+
+    it('goes to the first action that can take a press', () => {
+      const { panel, focused } = fakePanel(true);
+      (refOf(panelOf(render(FIVE))) as (el: unknown) => void)(panel);
+      expect(focused()).toBe('first action');
     });
 
     it('goes to Close when no row can take a press', () => {
-      const close = buttonsOf(render([{ ...NOT_STARTED, disabled: true }])).find((b) => textOf(b) === 'Close');
-      expect(typeof refOf(close)).toBe('function');
+      const { panel, focused } = fakePanel(false);
+      (refOf(panelOf(render([{ ...NOT_STARTED, disabled: true }]))) as (el: unknown) => void)(panel);
+      expect(focused()).toBe('Close');
     });
 
-    it('stays off Close when a row can take it', () => {
-      const close = buttonsOf(render([NOT_STARTED])).find((b) => textOf(b) === 'Close');
-      expect(refOf(close)).toBeUndefined();
+    it('does nothing as the panel unmounts', () => {
+      expect(() => (refOf(panelOf(render(FIVE))) as (el: unknown) => void)(null)).not.toThrow();
     });
   });
 });

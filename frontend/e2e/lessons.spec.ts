@@ -948,6 +948,23 @@ test.describe('the lesson list', () => {
     await expect(inspector, 'closing the list brings it back').toBeVisible();
   });
 
+  test('a board swap leaves focus where the user put it', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
+    await expect(page.getByRole('button', { name: RESUME, exact: true }), 'the list focuses its first action').toBeFocused();
+
+    // Restart stays mounted through the swap and becomes the row's first action. Focus stays on the toolbar.
+    const help = page.getByRole('button', { name: 'Help', exact: true });
+    await help.focus();
+    h.inject(swappedBoard(2, 6));
+    await expectRow(page, 'In progress', [RESTART], []);
+    await expect(help, 'the swap moved no focus').toBeFocused();
+    expect(newCount(h), 'and nothing was pressed').toBe(1);
+  });
+
   test('declining the question leaves everything as it was', async ({ page }) => {
     const h = await boot(page);
     h.inject(buildPacket({ full: false, tick: 4, nodes: [{ id: 2, kind: 0, cell_x: 14, cell_y: 8 }] }));

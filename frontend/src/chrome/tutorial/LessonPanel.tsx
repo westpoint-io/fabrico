@@ -28,11 +28,17 @@ const ACTION_WORD: Readonly<Record<RowAction, string>> = {
 };
 
 /**
- * Module-level on purpose: the chrome re-renders about 10 times a second, and an inline arrow would
- * detach and re-attach on each one and pull focus back from wherever Tab had taken it.
+ * Focus the first action that can take a press, or Close when none can, because focus can't land on
+ * a disabled button and Escape would then have nothing to reach this panel through.
+ *
+ * It sits on the panel, once, and not on a button. A row's first action changes while the list is open
+ * (a swap takes Resume away), and a ref moved onto a button that's already mounted runs at once, which
+ * pulls focus there from wherever the user had put it. Module-level on purpose: the chrome re-renders
+ * about 10 times a second, and an inline arrow would detach and re-attach on each one.
  */
-function focusOnMount(el: HTMLButtonElement | null): void {
-  el?.focus();
+function focusFirstAction(panel: HTMLElement | null): void {
+  const action = panel?.querySelector<HTMLElement>('[data-fab-lesson-row] button:not(:disabled)');
+  (action ?? panel?.querySelector<HTMLElement>('button'))?.focus();
 }
 
 const headRowStyle: CSSProperties = {
@@ -69,12 +75,9 @@ export interface LessonPanelProps {
 }
 
 export function LessonPanel({ rows, onAction, onClose }: LessonPanelProps): JSX.Element {
-  // The first action that can take a press, or Close when none can, because focus can't land on a
-  // disabled button and Escape would then have nothing to reach this panel through.
-  const firstRow = rows.find((row) => row.actions.some((action) => !isOff(row, action)));
-  const firstAction = firstRow?.actions.find((action) => !isOff(firstRow, action));
   return (
     <aside
+      ref={focusFirstAction}
       id={LESSONS_PANEL_ID}
       className="fab-panel"
       aria-labelledby={LESSONS_HEADING_ID}
@@ -109,7 +112,7 @@ export function LessonPanel({ rows, onAction, onClose }: LessonPanelProps): JSX.
         >
           Lessons
         </h2>
-        <button type="button" className="fab-tool-btn fab-tool-btn--labeled" ref={firstAction === undefined ? focusOnMount : undefined} onClick={onClose}>
+        <button type="button" className="fab-tool-btn fab-tool-btn--labeled" onClick={onClose}>
           Close
         </button>
       </div>
@@ -140,7 +143,6 @@ export function LessonPanel({ rows, onAction, onClose }: LessonPanelProps): JSX.
                       aria-label={`${ACTION_WORD[action]} ${row.title}`}
                       disabled={off}
                       {...(off ? { title: SIM_STOPPED_COPY.disabledTitle } : {})}
-                      ref={row === firstRow && action === firstAction ? focusOnMount : undefined}
                       onClick={() => onAction(row.id, action)}
                     >
                       {ACTION_WORD[action]}
