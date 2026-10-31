@@ -120,6 +120,11 @@ mod tests {
     /// A host with one Source placed through the gesture path and `ticks` ticks folded after
     /// it, plus the tempdir that owns its stores.
     fn host_with_a_source(ticks: u32) -> (tempfile::TempDir, Host) {
+        host_with_a_source_at(4, ticks)
+    }
+
+    /// The same host, with the Source on column `cell_x`.
+    fn host_with_a_source_at(cell_x: i32, ticks: u32) -> (tempfile::TempDir, Host) {
         let dir = tempfile::tempdir().expect("tempdir");
         let core = Core::genesis(LogHeader {
             schema_version: SCHEMA_VERSION,
@@ -133,7 +138,7 @@ mod tests {
             &mut host,
             GridCommand::Place {
                 kind: machine_kind::SOURCE,
-                cell_x: 4,
+                cell_x,
                 cell_y: 1,
             },
             |_h| None,
@@ -182,6 +187,27 @@ mod tests {
         let b = report_for_path(&path_b).expect("read b");
         assert_ne!(line_with(&a, "tick "), line_with(&b, "tick "));
         assert_ne!(line_with(&a, "hash "), line_with(&b, "hash "));
+    }
+
+    /// The snapshot bytes hold the tick, so a different tick moves the hash whatever the board
+    /// holds, and the test above says nothing about the board. This one holds the tick still, so
+    /// only the board can move the hash.
+    #[test]
+    fn two_boards_on_one_tick_print_the_same_tick_and_different_hashes() {
+        let (dir_a, host_a) = host_with_a_source_at(4, 3);
+        let (dir_b, host_b) = host_with_a_source_at(9, 3);
+        let path_a = dir_a.path().join("a.fab");
+        let path_b = dir_b.path().join("b.fab");
+        save_project(&host_a, &path_a).expect("save a");
+        save_project(&host_b, &path_b).expect("save b");
+        let a = report_for_path(&path_a).expect("read a");
+        let b = report_for_path(&path_b).expect("read b");
+        assert_eq!(line_with(&a, "tick "), line_with(&b, "tick "));
+        assert_ne!(
+            line_with(&a, "hash "),
+            line_with(&b, "hash "),
+            "two boards on one tick printed one hash"
+        );
     }
 
     #[test]

@@ -52,8 +52,10 @@ import {
 // wall clock. The belt must read items above 0 with its head slot empty, and the tick read before
 // the save must equal the tick printed from the file, which shows no drain ran.
 //
-// THE NEGATIVE CONTROL stays in the test: one more Step after the second save moves both the
-// printed tick and the hash, so the comparison is known to be able to differ.
+// THE NEGATIVE CONTROL stays in the test: one more Step after the second save moves the printed tick
+// and the hash, so the tool read a later file. It can't show the hash sees the board, because the
+// hashed snapshot holds the tick and a new tick moves the hash on its own. The `replay_hash` test
+// `two_boards_on_one_tick_print_the_same_tick_and_different_hashes` is the check that does.
 
 /**
  * Steps after the last gesture. The gestures take 5 ticks and the Timer's 60-tick interval puts
@@ -335,7 +337,8 @@ test('the same gestures with the tutorial on and off end on the same tick hash',
     expect(on.inputs, 'both sittings handed the host the same number of gestures').toBe(off.inputs);
     expect(on.controls, 'both sittings handed the host the same number of controls').toBe(off.controls);
 
-    // The negative control, on the tutorial's board: one more Step moves both what is printed.
+    // The negative control, on the tutorial's board: one more Step moves both what is printed. The
+    // hash half follows from the tick half, as the note at the top of this file says.
     await stepOnce(page, 'the negative control');
     const controlPath = testInfo.outputPath('tutorial-on-plus-one.fab');
     await saveTo(page, controlPath);
