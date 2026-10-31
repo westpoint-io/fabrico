@@ -6315,6 +6315,486 @@ mod tests {
         assert_eq!(b_frames.len(), 1, "B is answered once");
         assert_eq!(b_frames[0].minted(), Some(&[b][..]), "naming B's own handle");
     }
+
+    /// A webhook or endpoint request belongs to the board whose route table gave it its
+    /// `NodeId`. These cases hold a request across a host swap and read what reached the new
+    /// board's log and what the caller was told.
+    mod swap_ingress {
+        use super::*;
+        use crate::ingress::endpoint::{ENDPOINT_INGRESS_CAPACITY, EndpointIngress, HttpResponse};
+        use crate::ingress::webhook::webhook_router;
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use fabrico_scenario::tick_hash;
+        use tokio::sync::oneshot::error::TryRecvError;
+        use tower::ServiceExt;
+
+        const RELOADED: &str = r#"{"error":"scene reloaded"}"#;
+
+        struct Rig {
+            sim: SimLoop,
+            _gtx: GestureTx,
+            ctx: UnboundedSender<ControlMsg>,
+            web_tx: Sender<Ingress>,
+            ep_tx: Sender<EndpointIngress>,
+            source: NodeId,
+            route: NodeId,
+        }
+
+        /// One Source and one Route on a quiet, Playing board, with both front-door queues.
+        fn rig(dir: &std::path::Path, rt: &tokio::runtime::Runtime) -> Rig {
+            let (mut source, mut route) = (None, None);
+            let host = build_host(dir, |c| {
+                source = Some(c.state.add_source());
+                route = Some(c.state.add_endpoint());
+            });
+            let (gtx, grx) = gesture_channel();
+            let (ctx, crx) = unbounded_channel::<ControlMsg>();
+            let (web_tx, web_rx) = channel::<Ingress>(WEBHOOK_INGRESS_CAPACITY);
+            let (ep_tx, ep_rx) = channel::<EndpointIngress>(ENDPOINT_INGRESS_CAPACITY);
+            let sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
+                .with_control(crx)
+                .with_webhook(web_rx)
+                .with_endpoint(ep_rx);
+            Rig {
+                sim,
+                _gtx: gtx,
+                ctx,
+                web_tx,
+                ep_tx,
+                source: source.expect("the build closure ran"),
+                route: route.expect("the build closure ran"),
+            }
+        }
+
+        fn queue_delivery(r: &Rig, target: NodeId, id: Option<&[u8]>, body: &[u8]) -> oneshot::Receiver<()> {
+            let (ack, ack_rx) = oneshot::channel();
+            r.web_tx
+                .try_send(Ingress {
+                    target,
+                    delivery_id: id.map(<[u8]>::to_vec),
+                    body: body.to_vec(),
+                    ack,
+                })
+                .expect("queue the webhook");
+            ack_rx
+        }
+
+        fn queue_webhook(r: &Rig, body: &[u8]) -> oneshot::Receiver<()> {
+            queue_delivery(r, r.source, None, body)
+        }
+
+        fn queue_request(r: &Rig, target: NodeId, marker: &str) -> oneshot::Receiver<HttpResponse> {
+            let (respond, socket) = oneshot::channel();
+            r.ep_tx
+                .try_send(EndpointIngress {
+                    target,
+                    envelope: format!("{{\"body\":\"{marker}\"}}").into_bytes(),
+                    respond,
+                })
+                .expect("queue the endpoint request");
+            socket
+        }
+
+        fn queue_endpoint(r: &Rig, marker: &str) -> oneshot::Receiver<HttpResponse> {
+            queue_request(r, r.route, marker)
+        }
+
+        /// The logged `WireRequest`s whose payload holds `marker`.
+        fn wire_requests_with(sim: &SimLoop, marker: &str) -> usize {
+            sim.host()
+                .logged_events()
+                .expect("read log")
+                .iter()
+                .filter(|e| {
+                    matches!(&e.payload, EventPayload::WireRequest { payload, .. }
+                        if String::from_utf8_lossy(&payload.0).contains(marker))
+                })
+                .count()
+        }
+
+        /// Status and body of the answer on `socket`, or `None` while it has no answer.
+        fn answer(socket: &mut oneshot::Receiver<HttpResponse>) -> Option<(u16, String)> {
+            socket
+                .try_recv()
+                .ok()
+                .map(|a| (a.status().as_u16(), String::from_utf8_lossy(a.body_bytes()).into_owned()))
+        }
+
+        fn reloaded() -> Option<(u16, String)> {
+            Some((503, RELOADED.to_owned()))
+        }
+
+        fn scene_load(r: &Rig) {
+            r.ctx.send(ControlMsg::LoadScene(SceneId::OrderProcessing)).expect("send the load");
+        }
+
+        fn is_quiet(sim: &SimLoop) -> bool {
+            sim.host().in_flight_len() == 0 && sim.host().belt_items_in_flight() == 0
+        }
+
+        /// The route-map key the rig's Route answers at.
+        fn route_key(r: &Rig) -> String {
+            let state = &r.sim.host().core().state;
+            let Some(Node::Endpoint(ep)) = state.node(r.route) else {
+                panic!("the rig's Route is on the board");
+            };
+            endpoint_route_key(&ep.path)
+        }
+
+        #[test]
+        fn queued_webhook_is_refused_at_a_scene_load() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            assert!(is_quiet(&r.sim), "precondition: a quiet board swaps inside service_control");
+            let mut ack = queue_webhook(&r, b"old-board");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 more ticks");
+
+            assert!(
+                matches!(r.sim.host().core().state.node(r.source), Some(Node::Source(_))),
+                "precondition: the queued target is a live Source on the new board, so this \
+                 case cannot pass on an id the new board lacks"
+            );
+            let injects = count_injects_with_body(&r.sim, b"old-board");
+            let ack_state = ack.try_recv();
+            eprintln!("MEASURE webhook-scene-load: injects={injects} ack={ack_state:?}");
+            assert_eq!(
+                (injects, ack_state),
+                (0, Err(TryRecvError::Closed)),
+                "the old board's webhook stays off the new board, and its dropped ack reads as a 503"
+            );
+        }
+
+        #[test]
+        fn queued_endpoint_request_is_answered_at_a_scene_load() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            assert!(is_quiet(&r.sim), "precondition: a quiet board swaps inside service_control");
+            let before = r.sim.correlation_next;
+            let mut socket = queue_endpoint(&r, "old-board");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 more ticks");
+
+            let logged = wire_requests_with(&r.sim, "old-board");
+            let parked = r.sim.registry.len();
+            let answered = answer(&mut socket);
+            let correlation = r.sim.correlation_next;
+            eprintln!(
+                "MEASURE endpoint-scene-load: wire_requests={logged} registry={parked} \
+                 answer={answered:?} correlation_next={correlation}"
+            );
+            assert_eq!(
+                (logged, parked, answered, correlation),
+                (0, 0, reloaded(), before),
+                "the old board's request stays off the new board and its caller reads 503 at once"
+            );
+        }
+
+        /// Calls each swap function directly with no step after it, so only a drain inside the
+        /// swap can pass: nothing else has run by the time the caller is checked.
+        #[test]
+        fn queued_requests_are_answered_inside_each_swap() {
+            type Swap<'a> = (&'static str, Box<dyn Fn(&mut SimLoop) + 'a>);
+            let rt = test_rt();
+            let (_save_dir, fab) = saved_two_node_board(&rt);
+            let swaps: [Swap<'_>; 3] = [
+                ("load_scene_swap", Box::new(|s| s.load_scene_swap(SceneId::OrderProcessing))),
+                ("new_swap", Box::new(|s| s.new_swap())),
+                ("load_swap", Box::new(|s| assert!(s.load_swap(&fab), "the saved board loads"))),
+            ];
+            let mut seen = Vec::new();
+            for (leg, swap) in &swaps {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let mut r = rig(dir.path(), &rt);
+                let mut ack = queue_webhook(&r, b"old-board");
+                let mut socket = queue_endpoint(&r, "old-board");
+
+                swap(&mut r.sim);
+
+                let ack_state = ack.try_recv();
+                let answered = answer(&mut socket);
+                let web_empty = r.sim.webhook_rx.as_ref().expect("wired").is_empty();
+                let ep_empty = r.sim.endpoint_rx.as_ref().expect("wired").is_empty();
+                r.sim.run(Some(4), Duration::ZERO).expect("4 ticks on the new board");
+                let injects = count_injects_with_body(&r.sim, b"old-board");
+                let wires = wire_requests_with(&r.sim, "old-board");
+                eprintln!(
+                    "MEASURE {leg}: ack={ack_state:?} answer={answered:?} web_empty={web_empty} \
+                     ep_empty={ep_empty} injects={injects} wire_requests={wires}"
+                );
+                seen.push((*leg, ack_state, answered, web_empty, ep_empty, injects, wires));
+            }
+            let want = |leg| (leg, Err(TryRecvError::Closed), reloaded(), true, true, 0, 0);
+            assert_eq!(
+                seen,
+                vec![want("load_scene_swap"), want("new_swap"), want("load_swap")],
+                "each swap answers both callers and empties both queues before it returns"
+            );
+        }
+
+        #[test]
+        fn queued_endpoint_request_on_a_held_board_reads_scene_reloaded() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            pause_to_frozen(&mut r.sim, &r.ctx, 1);
+            let mut socket = queue_endpoint(&r, "old-board");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step on the held board");
+
+            let answered = answer(&mut socket);
+            eprintln!("MEASURE endpoint-held-board: answer={answered:?} paused={}", r.sim.is_paused());
+            assert_eq!(
+                answered,
+                reloaded(),
+                "the swap answers it, ahead of the Frozen arm's overloaded refusal"
+            );
+            assert!(r.sim.is_paused(), "the board stays paused across the swap");
+        }
+
+        #[test]
+        fn queued_real_webhook_post_gets_503_across_a_scene_load() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let app = webhook_router(
+                r.sim.routes_receiver(),
+                r.web_tx.clone(),
+                r.ep_tx.clone(),
+                4096,
+                r.sim.is_playing_flag(),
+            );
+            let uri = format!("/hook/src-{}", r.source.data().as_ffi());
+            let req = Request::builder().method("POST").uri(uri).body(Body::from("real-post")).expect("build");
+            let post = rt.spawn(app.oneshot(req));
+            for _ in 0..400 {
+                if !r.sim.webhook_rx.as_ref().expect("wired").is_empty() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!r.sim.webhook_rx.as_ref().expect("wired").is_empty(), "the POST reached the queue");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+
+            // The timeout is built inside `block_on`: built outside it, it has no reactor.
+            let resp = rt
+                .block_on(async { tokio::time::timeout(Duration::from_secs(5), post).await })
+                .expect("the caller is answered at once")
+                .expect("the handler task")
+                .expect("the router");
+            let injects = count_injects_with_body(&r.sim, b"real-post");
+            eprintln!("MEASURE real-webhook: status={} injects={injects}", resp.status());
+            assert_eq!((resp.status(), injects), (StatusCode::SERVICE_UNAVAILABLE, 0));
+        }
+
+        #[test]
+        fn queued_real_endpoint_post_gets_503_across_a_scene_load() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let app = webhook_router(
+                r.sim.routes_receiver(),
+                r.web_tx.clone(),
+                r.ep_tx.clone(),
+                4096,
+                r.sim.is_playing_flag(),
+            );
+            let uri = format!("/endpoint{}", route_key(&r));
+            let req = Request::builder().method("POST").uri(uri).body(Body::from("real-post")).expect("build");
+            let post = rt.spawn(app.oneshot(req));
+            for _ in 0..400 {
+                if !r.sim.endpoint_rx.as_ref().expect("wired").is_empty() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!r.sim.endpoint_rx.as_ref().expect("wired").is_empty(), "the POST reached the queue");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+
+            // A request that stayed on the new board has no answer until its 504 deadline, so a
+            // short timeout here is the failure, not a slow pass.
+            let read = rt.block_on(async {
+                let resp = tokio::time::timeout(Duration::from_secs(2), post).await.ok()?;
+                let resp = resp.expect("the handler task").expect("the router");
+                let status = resp.status();
+                let body = axum::body::to_bytes(resp.into_body(), 4096).await.expect("read the body");
+                Some((status, String::from_utf8_lossy(&body).into_owned()))
+            });
+            let wires = wire_requests_with(&r.sim, "real-post");
+            eprintln!("MEASURE real-endpoint: answer={read:?} wire_requests={wires}");
+            assert_eq!(
+                (read, wires),
+                (Some((StatusCode::SERVICE_UNAVAILABLE, RELOADED.to_owned())), 0),
+                "the real router hands the caller the same 503 a parked socket gets"
+            );
+        }
+
+        #[test]
+        fn queued_retry_after_a_swap_logs_once() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let _old = queue_delivery(&r, r.source, Some(b"delivery-d"), b"old");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            let _retry = queue_delivery(&r, first_source(&r.sim), Some(b"delivery-d"), b"new");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
+
+            let (old, new) = (count_injects_with_body(&r.sim, b"old"), count_injects_with_body(&r.sim, b"new"));
+            eprintln!("MEASURE retry: old={old} new={new}");
+            assert_eq!(
+                (old, new),
+                (0, 1),
+                "the drained delivery never touched a seen-set, so the provider's retry logs once"
+            );
+        }
+
+        #[test]
+        fn queued_drop_leaves_the_new_board_identical() {
+            let rt = test_rt();
+            let (dir_a, dir_b) = (tempfile::tempdir().expect("tempdir"), tempfile::tempdir().expect("tempdir"));
+            let mut with = rig(dir_a.path(), &rt);
+            let mut without = rig(dir_b.path(), &rt);
+            let _ack = queue_webhook(&with, b"old-board");
+            let _socket = queue_endpoint(&with, "old-board");
+
+            scene_load(&with);
+            scene_load(&without);
+            let mut first_difference = None;
+            for tick in 0..60 {
+                with.sim.step().expect("step with dropped requests");
+                without.sim.step().expect("step with none");
+                let (a, b) = (tick_hash(with.sim.host().core()), tick_hash(without.sim.host().core()));
+                if a != b && first_difference.is_none() {
+                    first_difference = Some(tick);
+                }
+            }
+            let (a, b) = (
+                with.sim.host().logged_events().expect("read log"),
+                without.sim.host().logged_events().expect("read log"),
+            );
+            eprintln!(
+                "MEASURE replay: first_differing_tick={first_difference:?} events_with={} events_without={}",
+                a.len(),
+                b.len()
+            );
+            assert_eq!(first_difference, None, "the same tick_hash at each of 60 ticks");
+            assert_eq!(a, b, "the same logged events");
+        }
+
+        /// CONTROL: a refused Load reaches no swap, so both requests stay on their own board.
+        #[test]
+        // Test-only IO: the refused file is written into the test's own temp dir.
+        #[allow(clippy::disallowed_methods)]
+        fn queued_refused_load_keeps_both_requests_on_their_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let bad = dir.path().join("not-a-board.fab");
+            std::fs::write(&bad, b"this is not a fabrico project file").expect("write garbage");
+            let mut r = rig(dir.path(), &rt);
+            let nodes_before = r.sim.host().core().state.node_count();
+            let mut ack = queue_webhook(&r, b"kept");
+            let mut socket = queue_endpoint(&r, "kept");
+
+            r.ctx.send(ControlMsg::Load(bad)).expect("send the load");
+            r.sim.step().expect("the refused load");
+
+            let injects = count_injects_with_body(&r.sim, b"kept");
+            let wires = wire_requests_with(&r.sim, "kept");
+            let parked = r.sim.registry.len();
+            let nodes = r.sim.host().core().state.node_count();
+            let ack_state = ack.try_recv();
+            eprintln!(
+                "MEASURE refused-load: injects={injects} ack={ack_state:?} wire_requests={wires} \
+                 registry={parked} nodes={nodes} (was {nodes_before})"
+            );
+            assert_eq!(
+                (injects, ack_state, wires, parked, nodes),
+                (1, Ok(()), 1, 1, nodes_before),
+                "a refused Load drains nothing"
+            );
+            assert_eq!(answer(&mut socket), None, "the request is parked, still waiting for its reply");
+        }
+
+        /// CONTROL: on a moving board the first draining step refuses a queued POST, while Gate
+        /// A is still open for that one step. A drain that takes longer shuts the door behind it.
+        #[test]
+        fn queued_webhook_on_a_moving_board_is_refused_by_the_first_drain_step() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            r.sim.host.test_insert_in_flight((0u64, r.source, 0u32), 4);
+            let mut ack = queue_webhook(&r, b"old-board");
+
+            scene_load(&r);
+            r.sim.step().expect("the first draining step");
+
+            let ack_state = ack.try_recv();
+            let playing = r.sim.is_playing.load(Ordering::Acquire);
+            eprintln!(
+                "MEASURE moving-board: state={:?} ack={ack_state:?} is_playing={playing}",
+                r.sim.run_state
+            );
+            assert_eq!(r.sim.run_state, RunState::Draining);
+            assert_eq!(ack_state, Err(TryRecvError::Closed));
+            assert!(!playing, "Gate A closes at the end of that step");
+        }
+
+        /// A handler that read the table before the swap and enqueues after it. The drain has
+        /// already run by then, so only the board stamp can refuse this one.
+        #[test]
+        fn straggler_webhook_that_read_the_old_table_stays_off_the_new_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let label = format!("src-{}", r.source.data().as_ffi());
+            let table = r.sim.routes_receiver().borrow().clone();
+            let old_node = *table.get(&label).expect("the old table has the door");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            let mut ack = queue_delivery(&r, old_node, None, b"straggler");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
+
+            let injects = count_injects_with_body(&r.sim, b"straggler");
+            let ack_state = ack.try_recv();
+            eprintln!("MEASURE straggler-webhook: injects={injects} ack={ack_state:?}");
+            assert_eq!((injects, ack_state), (0, Err(TryRecvError::Closed)));
+        }
+
+        #[test]
+        fn straggler_endpoint_that_read_the_old_table_stays_off_the_new_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut r = rig(dir.path(), &rt);
+            let label = route_key(&r);
+            let table = r.sim.routes_receiver().borrow().clone();
+            let old_node = *table.get(&label).expect("the old table has the door");
+
+            scene_load(&r);
+            r.sim.step().expect("the swap step");
+            let mut socket = queue_request(&r, old_node, "straggler");
+            r.sim.run(Some(4), Duration::ZERO).expect("4 ticks");
+
+            let wires = wire_requests_with(&r.sim, "straggler");
+            let answered = answer(&mut socket);
+            eprintln!("MEASURE straggler-endpoint: wire_requests={wires} answer={answered:?}");
+            assert_eq!((wires, answered), (0, reloaded()));
+        }
+    }
 }
 
 #[cfg(test)]
