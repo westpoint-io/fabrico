@@ -149,7 +149,7 @@ function browserProgress(): ProgressStore {
 }
 
 /** Where focus goes when the list closes: the toolbar's Help button, which is the way back to the list. */
-function focusHelpButton(): void {
+export function focusHelpButton(): void {
   document.querySelector<HTMLElement>('button[aria-label="Help"]')?.focus();
 }
 

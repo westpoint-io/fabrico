@@ -77,7 +77,7 @@ import { computeLegendBand, cornerLeftsReachingStrip, type LegendBand } from './
 import { createSelectionEpoch } from './selectionEpoch';
 import { HelpPanel, HELP_PANEL_ID, HELP_SCROLL_ATTR } from './HelpPanel';
 import { WelcomeCard } from './WelcomeCard';
-import { TutorialLayer, idleTutorialProbe, type TutorialProbe } from './tutorial/TutorialLayer';
+import { TutorialLayer, focusHelpButton, idleTutorialProbe, type TutorialProbe } from './tutorial/TutorialLayer';
 import {
   CLIENT_REFUSAL_COPY,
   type ClientRefusalTag,
@@ -2491,6 +2491,8 @@ export function App() {
       if (keysOwnedElsewhere(e)) return;
       if (matchesShortcut(e, SHORTCUTS.escape)) {
         swallow(e);
+        // The list's own Escape never ran, and its focused button is about to unmount.
+        if (lessonsOpen) focusHelpButton();
         return;
       }
       if (
@@ -2513,7 +2515,7 @@ export function App() {
       window.removeEventListener('keydown', onKeyCapture, true);
       window.removeEventListener('pointerdown', onPointerCapture, true);
     };
-  }, [inspectorHidden, inspectorDirty, restoreHiddenInspector]);
+  }, [inspectorHidden, inspectorDirty, lessonsOpen, restoreHiddenInspector]);
   // Phase 91, plan 91-09 (CHROME-07, D-06, UI-SPEC 2.4): THE SELECTED MACHINE STAYS VISIBLE.
   // Once per selection epoch, for a node selection (a machine or a label, never a belt), in the
   // layout pass the inspector first lays out in: when the column the panel can grow into (its

@@ -1054,6 +1054,22 @@ test.describe('the lesson list', () => {
     await expectApart('a refusal already showing moves when the list opens');
   });
 
+  test('Escape over a hidden inspector closes the list and hands focus to Help', async ({ page }) => {
+    await boot(page);
+    const at = await screenCellCentre(page, OLD_MACHINE.cell_x, OLD_MACHINE.cell_y);
+    await page.mouse.click(at.x, at.y);
+    const inspector = page.locator('aside[aria-labelledby="fab-config-heading"]');
+    await expect(inspector).toBeVisible();
+
+    await openLessons(page);
+    await expect(inspector, 'the list hides the inspector').toBeHidden();
+    await expect(page.getByRole('button', { name: START, exact: true }), 'the list took focus').toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator(PANEL), 'Escape closes the list').toHaveCount(0);
+    await expect(inspector, 'and brings the inspector back').toBeVisible();
+    await expect(page.getByRole('button', { name: 'Help', exact: true }), 'and hands focus to Help').toBeFocused();
+  });
+
   test('declining the question leaves everything as it was', async ({ page }) => {
     const h = await boot(page);
     h.inject(buildPacket({ full: false, tick: 4, nodes: [{ id: 2, kind: 0, cell_x: 14, cell_y: 8 }] }));
