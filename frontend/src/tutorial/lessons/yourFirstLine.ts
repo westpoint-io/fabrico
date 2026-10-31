@@ -120,6 +120,16 @@ export const YOUR_FIRST_LINE: Lesson = {
           gesture: { do: 'pressHint' },
           text: ['A ', { kind: BELT_KIND }, ' carries items between machines. Click ', { kind: BELT_KIND }, ' in the palette.'],
         },
+        // Ahead of the plain drag, because that drag starts on an output this belt already holds and the
+        // host refuses it. The app rings the belt's free end while the tool is armed, so this ring only
+        // marks where the drag finishes.
+        {
+          id: 'belt-carry-on',
+          when: { is: 'lineStopsShort', from: 'source' },
+          hint: { on: 'port', of: 'sink', role: 'in' },
+          gesture: { do: 'dragToHint' },
+          text: ['That ', { kind: BELT_KIND }, ' stops before the ', { kind: SINK_KIND }, '. Drag from the ring at its end to the ', { kind: SINK_KIND }, "'s input dot."],
+        },
         {
           id: 'belt-draw',
           when: { is: 'beltArmed' },

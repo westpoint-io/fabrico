@@ -2,7 +2,9 @@ import { expect, test, type Page } from '@playwright/test';
 import { frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import { CELL } from '../shared/geometry';
 import { machine_kind } from '../src/protocol/kinds';
+import { lineDoorstep } from '../src/tutorial/check';
 import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
+import { phrasePlain } from '../src/tutorial/phrase';
 import type { HintRect } from '../src/chrome/tutorial/TutorialLayer';
 import type { Stage } from '../src/tutorial/types';
 import {
@@ -173,18 +175,20 @@ test('a line drawn in two pieces finishes the same step', async ({ page }) => {
   const held = await readProbe(page);
   expect(held.stepIndex, 'a piece that stops short finishes nothing').toBe(DRAW_BELT);
 
-  // The second piece starts on the free cell past the first piece's end and runs into the Sink.
-  const nextCell = await screenCellCentre(page, shortCell[0] + 1, shortCell[1]);
-  const into = await ringsAt(page, DRAW_BELT, 'belt-draw');
-  if (into.hintTo === null) throw new Error('belt-draw reported no release ring');
-  await dragByHand(page, { x: nextCell.x + 2, y: nextCell.y + 3 }, pointInRect(into.hintTo, { x: -2, y: 3 }));
+  // The card stops asking for the drag the host refuses: one ring, on the Sink's input, and words that
+  // send the hand to the end of the belt already drawn.
+  await reachStage(page, DRAW_BELT, 'belt-carry-on');
+  const carryOn = stageNamed(DRAW_BELT, 'belt-carry-on');
+  await expect(page.locator('[data-fab-step-card]'), 'the card names the end of the belt').toContainText(phrasePlain(carryOn.text));
+  const into = await ringsAt(page, DRAW_BELT, 'belt-carry-on');
+  expect(into.hintTo, 'one ring: the belt end wears the app\'s own').toBeNull();
+  expect(into.hint.x + into.hint.width / 2, 'the ring is the one the plain drag let go on').toBeCloseTo(rings.hintTo.x + rings.hintTo.width / 2, 0);
+  expect(into.hint.y + into.hint.height / 2, 'on both axes').toBeCloseTo(rings.hintTo.y + rings.hintTo.height / 2, 0);
+  expect(lineDoorstep(await readScene(page), before.bound.source as number), 'the end the card names is the free cell past the short piece').toEqual([shortCell[0] + 1, shortCell[1]]);
 
-  await expect
-    .poll(async () => (await readProbe(page)).stepIndex, {
-      message: 'the second piece finished draw-belt',
-      timeout: frameBudgetMs(STAGE_FRAMES),
-    })
-    .toBeGreaterThan(DRAW_BELT);
+  // The runner drives this stage from its gesture, so a walk reaching it can finish the lesson.
+  await continueLesson(page, LESSON, { from: 'draw-belt' });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
 
   const probe = await readProbe(page);
   const scene = await readScene(page);
@@ -196,9 +200,6 @@ test('a line drawn in two pieces finishes the same step', async ({ page }) => {
   expect(last?.docks.find((d) => d.end === 'Tail')?.node, 'and follows the first piece').toBe(first?.id);
   expect(first?.docks.find((d) => d.end === 'Tail')?.node, 'which leaves the Source').toBe(probe.bound.source);
   expect(first?.docks.find((d) => d.end === 'Head')?.node, 'and runs into the second piece').toBe(last?.id);
-
-  await continueLesson(page, LESSON, { from: 'press-play' });
-  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
   await expectRenderLoopAlive(page, 'after the line in two pieces');
   errors.assertNone('during the line in two pieces');
 });

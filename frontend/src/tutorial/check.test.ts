@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCheck, nodeKey, type CheckContext } from './check.ts';
+import { evaluateCheck, lineDoorstep, nodeKey, type CheckContext } from './check.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
 
@@ -203,6 +203,63 @@ describe('beltJoins', () => {
   it('with no bound Sink, nothing joins', () => {
     const noSink = { source: BINDINGS.source! };
     expect(evaluateCheck(check, ctx({ board: { belts: [belt(9, [], INTO_THE_SINK)] }, bindings: noSink })).done).toBe(false);
+  });
+});
+
+describe('lineDoorstep', () => {
+  const FIRST = 20;
+  const SECOND = 21;
+  const tiles = (...cells: ReadonlyArray<readonly [number, number]>): BoardBelt['tiles'] =>
+    cells.map(([cell_x, cell_y]) => ({ cell_x, cell_y }));
+  const piece = (id: number, cells: BoardBelt['tiles'], docks: BoardBelt['docks']): BoardBelt => ({ ...belt(id, [], docks), tiles: cells });
+  const leavesSource: BoardBelt['docks'] = [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }];
+  const SHORT = piece(FIRST, tiles([3, 2], [4, 2]), leavesSource);
+  const on = (belts: readonly BoardBelt[], nodes: readonly BoardNode[] = [THE_SOURCE, THE_SINK]): BoardFacts => ({
+    tick: 10,
+    generation: 1,
+    swapFloor: 1,
+    nodes,
+    belts,
+  });
+
+  it('is the cell past the Head of a piece that stops short', () => {
+    expect(lineDoorstep(on([SHORT]), THE_SOURCE.id)).toEqual([5, 2]);
+  });
+
+  it('follows the direction of the last tile, so a turn counts', () => {
+    const turned = piece(FIRST, tiles([3, 2], [3, 3], [3, 4]), leavesSource);
+    expect(lineDoorstep(on([turned]), THE_SOURCE.id)).toEqual([3, 5]);
+  });
+
+  it('follows Head docks to the last piece', () => {
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [...leavesSource, { end: 'Head', node: SECOND, port: 0 }]);
+    const second = piece(SECOND, tiles([5, 2], [6, 2]), [{ end: 'Tail', node: FIRST, port: 0 }]);
+    expect(lineDoorstep(on([second, first]), THE_SOURCE.id)).toEqual([7, 2]);
+  });
+
+  it('is null with no belt leaving the machine', () => {
+    expect(lineDoorstep(on([]), THE_SOURCE.id)).toBeNull();
+    const stranger = piece(FIRST, tiles([3, 2], [4, 2]), [{ end: 'Tail', node: 123, port: 0 }]);
+    expect(lineDoorstep(on([stranger]), THE_SOURCE.id)).toBeNull();
+  });
+
+  it('is null when the line ends in a machine, because that end is not free', () => {
+    const docked = piece(FIRST, tiles([3, 2], [4, 2]), [...leavesSource, { end: 'Head', node: 123, port: 0 }]);
+    expect(lineDoorstep(on([docked]), THE_SOURCE.id)).toBeNull();
+  });
+
+  it('is null for a single tile, which has no direction and so no Head a press can find', () => {
+    expect(lineDoorstep(on([piece(FIRST, tiles([3, 2]), leavesSource)]), THE_SOURCE.id)).toBeNull();
+  });
+
+  it('still names the cell when the Sink is on it, for the packet before the last piece docks', () => {
+    expect(lineDoorstep(on([SHORT], [THE_SOURCE, node(6, SINK, 5, 2)]), THE_SOURCE.id)).toEqual([5, 2]);
+  });
+
+  it('survives a loop of belts', () => {
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [...leavesSource, { end: 'Head', node: SECOND, port: 0 }]);
+    const second = piece(SECOND, tiles([5, 2], [6, 2]), [{ end: 'Head', node: FIRST, port: 0 }]);
+    expect(lineDoorstep(on([first, second]), THE_SOURCE.id)).toBeNull();
   });
 });
 

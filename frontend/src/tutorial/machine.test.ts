@@ -89,7 +89,7 @@ describe('the lesson data', () => {
     const stages = (id: string): string[] =>
       LESSONS[0]?.steps.find((s) => s.id === id)?.stages.map((stage) => stage.id) ?? [];
     expect(stages('set-timer')).toEqual(['board-paused', 'tool-down', 'select-source', 'press-timer', 'apply-timer']);
-    expect(stages('draw-belt')).toEqual(['board-paused', 'belt-tool', 'belt-draw']);
+    expect(stages('draw-belt')).toEqual(['board-paused', 'belt-tool', 'belt-carry-on', 'belt-draw']);
     expect(stages('press-play')).toEqual(['board-paused', 'board-running']);
     expect(stages('watch-items')).toEqual(['board-paused', 'watch']);
   });
@@ -111,6 +111,13 @@ describe('the lesson data', () => {
     const stage = LESSONS[0]?.steps.find((s) => s.id === 'draw-belt')?.stages.find((x) => x.id === 'belt-draw');
     expect(stage?.hint).toEqual({ on: 'port', of: 'source', role: 'out', to: { of: 'sink', role: 'in' } });
     expect(stage?.gesture).toEqual({ do: 'dragHint' });
+  });
+
+  it('marks only the Sink in, once a belt has left the Source and stopped short', () => {
+    const stage = LESSONS[0]?.steps.find((s) => s.id === 'draw-belt')?.stages.find((x) => x.id === 'belt-carry-on');
+    expect(stage?.hint).toEqual({ on: 'port', of: 'sink', role: 'in' });
+    expect(stage?.gesture).toEqual({ do: 'dragToHint' });
+    expect(phrasePlain(stage?.text ?? [])).toBe("That Belt stops before the Sink. Drag from the ring at its end to the Sink's input dot.");
   });
 });
 
@@ -377,6 +384,63 @@ describe('currentStage', () => {
     expect(stageOf(s, { nodes: BOTH }, {})).toBe('belt-tool');
     expect(stageOf(s, { nodes: BOTH }, { armed: { kind: 'machine', machineKind: SINK } }), 'another tool').toBe('belt-tool');
     expect(stageOf(s, { nodes: BOTH }, { armed: { kind: 'belt' } })).toBe('belt-draw');
+  });
+
+  describe('a belt that left the Source and stopped short', () => {
+    const tilesOf = (...xs: number[]): BoardBelt['tiles'] => xs.map((cell_x) => ({ cell_x, cell_y: 2 }));
+    const SHORT: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4), docks: [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }] };
+    const ARMED = { armed: { kind: 'belt' } as const };
+
+    it('stops asking for a drag from the output that belt already holds', () => {
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [SHORT] }, ARMED)).toBe('belt-carry-on');
+    });
+
+    it('asks for the tool first, and for Play before that', () => {
+      const s = atStep(3);
+      expect(stageOf(s, { nodes: BOTH, belts: [SHORT] }, {})).toBe('belt-tool');
+      expect(stageOf(s, { nodes: BOTH, belts: [SHORT] }, { ...ARMED, playing: false })).toBe('board-paused');
+    });
+
+    it('holds through a second piece that also stops short', () => {
+      const first: BoardBelt = { ...SHORT, docks: [...SHORT.docks, { end: 'Head', node: 30, port: 0 }] };
+      const second: BoardBelt = { ...JOINED, id: 30, tiles: tilesOf(5, 6), docks: [{ end: 'Tail', node: first.id, port: 0 }] };
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [first, second] }, ARMED)).toBe('belt-carry-on');
+    });
+
+    it('holds for the packet where the last piece touches the Sink and has not docked', () => {
+      const first: BoardBelt = { ...SHORT, docks: [...SHORT.docks, { end: 'Head', node: 30, port: 0 }] };
+      const touching: BoardBelt = { ...JOINED, id: 30, tiles: tilesOf(5, 6, 7), docks: [{ end: 'Tail', node: first.id, port: 0 }] };
+      expect(THE_SINK.cells[0]?.[0], 'its next cell is the Sink').toBe(8);
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [first, touching] }, ARMED)).toBe('belt-carry-on');
+    });
+
+    it('stays on the plain drag when that belt has no end a press can carry on from', () => {
+      const s = atStep(3);
+      expect(stageOf(s, { nodes: BOTH, belts: [{ ...SHORT, tiles: tilesOf(3) }] }, ARMED), 'a single tile').toBe('belt-draw');
+      const intoAnother: BoardBelt = { ...SHORT, docks: [...SHORT.docks, { end: 'Head', node: 123, port: 0 }] };
+      expect(stageOf(s, { nodes: BOTH, belts: [intoAnother] }, ARMED), 'a line into another machine').toBe('belt-draw');
+    });
+
+    it('stays on the plain drag for a belt that left some other machine', () => {
+      const other: BoardBelt = { ...SHORT, docks: [{ end: 'Tail', node: 123, port: 0 }] };
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [other] }, ARMED)).toBe('belt-draw');
+    });
+
+    it('moves the lesson on once the line reaches the Sink', () => {
+      const first: BoardBelt = { ...SHORT, docks: [...SHORT.docks, { end: 'Head', node: 30, port: 0 }] };
+      const second: BoardBelt = {
+        ...JOINED,
+        id: 30,
+        tiles: tilesOf(5, 6, 7),
+        docks: [
+          { end: 'Tail', node: first.id, port: 0 },
+          { end: 'Head', node: THE_SINK.id, port: 0 },
+        ],
+      };
+      const held = frame(atStep(3), { nodes: BOTH, belts: [SHORT] }, { ...TIMER, ...ARMED });
+      expect(held.stepIndex, 'the short piece finishes nothing').toBe(3);
+      expect(frame(held, { nodes: BOTH, belts: [first, second] }, { ...TIMER, ...ARMED }).stepIndex).toBe(4);
+    });
   });
 
   it('puts the paused stage first in steps 3, 4, 5 and 6', () => {

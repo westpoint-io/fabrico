@@ -70,6 +70,9 @@ function auditStage(stepLabel: string, stage: Stage, drivable: readonly string[]
   if (stage.gesture.do === 'dragHint' && (stage.hint?.on !== 'port' || stage.hint.to === undefined)) {
     out.push(`${label}: this stage names a drag and has no pair of ports to drag between`);
   }
+  if (stage.gesture.do === 'dragToHint' && (stage.hint?.on !== 'port' || stage.hint.to !== undefined)) {
+    out.push(`${label}: this stage names a drag into one ring and doesn't mark exactly one port`);
+  }
   return out;
 }
 
@@ -155,8 +158,8 @@ describe('every lesson has a walk', () => {
     expect(Object.keys(LESSON_WALKS).length).toBe(LESSONS.length);
   });
 
-  it('lets the runner drive the five gestures', () => {
-    expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint key none pressHint watch');
+  it('lets the runner drive the six gestures', () => {
+    expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint dragToHint key none pressHint watch');
   });
 
   it("holds the app's own sentence for the refusal the walk reads", () => {
@@ -200,6 +203,16 @@ describe('every lesson has a walk', () => {
     it('a drag stage with no pair of ports', () => {
       const lesson = withStage((s) => ({ ...s, gesture: { do: 'dragHint' }, hint: { on: 'port', of: 'source', role: 'out' } }));
       expect(audit({ lessons: [lesson] })).toMatch(/stage board-paused: this stage names a drag and has no pair of ports/);
+    });
+
+    it('a drag into one ring that marks a pair of ports', () => {
+      const lesson = withStage((s) => ({ ...s, gesture: { do: 'dragToHint' }, hint: { on: 'port', of: 'source', role: 'out', to: { of: 'sink', role: 'in' } } }));
+      expect(audit({ lessons: [lesson] })).toMatch(/stage board-paused: this stage names a drag into one ring and doesn't mark exactly one port/);
+    });
+
+    it('a drag into one ring that marks no port', () => {
+      const lesson = withStage((s) => ({ ...s, gesture: { do: 'dragToHint' } }));
+      expect(audit({ lessons: [lesson] })).toMatch(/stage board-paused: this stage names a drag into one ring and doesn't mark exactly one port/);
     });
 
     it('a refused step that does not exist', () => {

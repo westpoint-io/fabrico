@@ -52,6 +52,31 @@ export function beltJoining(board: BoardFacts, a: number, b: number): BoardBelt 
   return undefined;
 }
 
+/**
+ * The cell a line leaving `a` carries on from: the one past the Head of its last piece, or null when
+ * there's no such end. That's no belt leaving `a`, a line that ends in a machine, or a single tile (no
+ * direction, so no Head a press can find). The app rings this cell while the Belt tool is armed, and a
+ * press there joins the new piece on.
+ *
+ * It doesn't ask whether the cell is free. A piece drawn into the Sink reaches the board a packet before
+ * its dock does, with this cell on the Sink, and the card shouldn't change for that one frame.
+ */
+export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number): readonly [number, number] | null {
+  const seen = new Set<number>();
+  let belt = board.belts.find((b) => b.docks.some((d) => d.end === 'Tail' && d.node === a));
+  while (belt !== undefined && !seen.has(belt.id)) {
+    seen.add(belt.id);
+    const head = belt.docks.find((d) => d.end === 'Head')?.node;
+    if (head === undefined) break;
+    belt = board.belts.find((other) => other.id === head);
+  }
+  if (belt === undefined || belt.docks.some((d) => d.end === 'Head')) return null;
+  const end = belt.tiles[belt.tiles.length - 1];
+  const inner = belt.tiles[belt.tiles.length - 2];
+  if (end === undefined || inner === undefined) return null;
+  return [2 * end.cell_x - inner.cell_x, 2 * end.cell_y - inner.cell_y];
+}
+
 /** The name a bound belt goes by. A belt holds no cell the lesson keeps, so it goes by the machines it joins. */
 export function beltKey(a: BoundNode, b: BoundNode): string {
   return `belt:${a.nodeKey}+${b.nodeKey}`;

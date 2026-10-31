@@ -5,7 +5,7 @@
 // changed, so the React layer can skip an update on all but the frames that matter.
 
 import { CELL } from '../../shared/geometry';
-import { beltJoining, evaluateCheck, lowestSlotInto, nodeKey } from './check';
+import { beltJoining, evaluateCheck, lineDoorstep, lowestSlotInto, nodeKey } from './check';
 import type { Progress } from './progress';
 import type {
   BindingName,
@@ -129,7 +129,7 @@ export function noteTokens(note: LessonNote): readonly PhraseToken[] {
   return [`The board was already running, so step ${note.a} is done. `, { key: 'playPause' }, ' pauses it.'];
 }
 
-function holds(when: StageWhen, chrome: ChromeFacts, bindings: TutorialState['bindings']): boolean {
+function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, bindings: TutorialState['bindings']): boolean {
   const { armed } = chrome;
   switch (when.is) {
     case 'always':
@@ -146,6 +146,10 @@ function holds(when: StageWhen, chrome: ChromeFacts, bindings: TutorialState['bi
       return armed?.kind === 'belt';
     case 'beltNotArmed':
       return armed?.kind !== 'belt';
+    case 'lineStopsShort': {
+      const from = bindings[when.from];
+      return armed?.kind === 'belt' && from !== undefined && lineDoorstep(board, from.id) !== null;
+    }
     case 'notSelected':
       return chrome.selectedNode === null || chrome.selectedNode !== bindings[when.of]?.id;
     case 'triggerNotPressed':
@@ -159,13 +163,13 @@ function holds(when: StageWhen, chrome: ChromeFacts, bindings: TutorialState['bi
 /** The first stage of the current step whose condition holds, or null when no step is running. */
 export function currentStage(
   s: TutorialState,
-  _board: BoardFacts,
+  board: BoardFacts,
   chrome: ChromeFacts,
   lessons: readonly Lesson[],
 ): Stage | null {
   if (s.card !== 'running') return null;
   const step = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex];
-  return step?.stages.find((stage) => holds(stage.when, chrome, s.bindings)) ?? null;
+  return step?.stages.find((stage) => holds(stage.when, board, chrome, s.bindings)) ?? null;
 }
 
 /** Cells east or west of the Source that the Sink's spot sits, leaving room for a belt. */

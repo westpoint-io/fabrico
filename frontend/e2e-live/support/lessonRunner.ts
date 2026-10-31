@@ -3,6 +3,7 @@ import { addFrameBudget, addWaitBudget, frameBudgetMs, tickBudgetMs } from '../.
 import { CELL } from '../../shared/geometry';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
 import { SHORTCUTS } from '../../src/input/shortcuts';
+import { lineDoorstep } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
@@ -804,6 +805,22 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
         beltClip = await middleTileClip(page, label);
         beltBefore = await captureWithGhostGone(page, beltClip.clip);
+        await dragByHand(page, start, end);
+        actedOn.add(stageKey(stepIndex, stage.id));
+      }
+    } else if (gesture.do === 'dragToHint') {
+      const rects = await hintsForStage(page, lesson, stepIndex, stage);
+      if (rects !== null) {
+        if (rects.hintTo !== null) throw new Error(`${label}: this stage marks one ring and reports a second`);
+        await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint]);
+        const { bound } = await readProbe(page);
+        const from = stage.when.is === 'lineStopsShort' ? bound[stage.when.from] : undefined;
+        const cell = from === undefined ? null : lineDoorstep(await readScene(page), from);
+        if (cell === null) throw new Error(`${label}: the board holds no line end to carry on from`);
+        const at = await screenCellCentre(page, cell[0], cell[1]);
+        const start = { x: at.x + walk.dragFrom.dx, y: at.y + walk.dragFrom.dy };
+        const end = pointInRect(rects.hint, fromOffset(walk.dragTo));
+        await expectOnTheBoard(page, label, 'both ends of the drag are', [start, end]);
         await dragByHand(page, start, end);
         actedOn.add(stageKey(stepIndex, stage.id));
       }

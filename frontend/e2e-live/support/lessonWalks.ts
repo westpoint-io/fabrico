@@ -29,7 +29,7 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
 };
 
 /** The gestures `walkStep` in `lessonRunner.ts` knows how to make. */
-export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'key', 'watch', 'none'];
+export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'dragToHint', 'key', 'watch', 'none'];
 
 /**
  * The app's sentence for a footprint collision, transcribed because `RefusalMessage.tsx` pulls in the

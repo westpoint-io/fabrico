@@ -70,6 +70,8 @@ export type StageWhen =
   | { is: 'anyToolArmed' }
   | { is: 'beltNotArmed' }
   | { is: 'beltArmed' }
+  /** The Belt tool is armed, and the line leaving this machine stops short with an end a press can carry on from. */
+  | { is: 'lineStopsShort'; from: BindingName }
   | { is: 'notSelected'; of: BindingName }
   | { is: 'triggerNotPressed'; trigger: 'Timer' }
   | { is: 'triggerNotApplied'; trigger: 'Timer' };
@@ -94,6 +96,8 @@ export type HintAnchor =
 export type Gesture =
   | { do: 'pressHint' }
   | { do: 'dragHint' }
+  /** A drag into the one ring, from the end of the line already on the board, which the app rings itself. */
+  | { do: 'dragToHint' }
   | { do: 'key'; shortcut: ShortcutId }
   | { do: 'watch' }
   | { do: 'none' };
