@@ -1,0 +1,260 @@
+// THE RULES THAT KEEP THE TUTORIAL A READER OF THE APP.
+//
+// The lesson engine under `src/tutorial/` has to run in a node test and in the walk, so it can't reach
+// for React, Pixi or the DOM. The tutorial's two folders also can't send anything to the host: the one
+// thing a lesson asks for is New, through a callback the app hands it, so a transport call or a network
+// call in either folder is a lesson finishing a step for the user. Lesson text must never be able to
+// become HTML. `src/render/` ships in the docs embed, which has no tutorial, so it can't import one.
+//
+// Read as source and never imported. Comments are stripped first, so a comment explaining a rule isn't
+// a breach of it. Names match on a word boundary, because `localStorageProgress` takes its storage as a
+// parameter, which is what the rule wants. A dotted global needs an identifier after the dot, because
+// a sentence in a lesson can end in "the window."
+//
+// NOT SEEN: a global reached through an alias or a bracket (`const w = window`, `globalThis['fetch']`),
+// and a forbidden word inside a string, which reads as a finding. The first case below is the tripwire
+// for the scan reading nothing, and the mutation cases are what stop it being a check that can't fail.
+
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { stripComments } from './walkSpecSource';
+
+const FRONTEND = fileURLToPath(new URL('../../', import.meta.url));
+
+interface SourceFile {
+  /** Relative to `frontend/`, with forward slashes. */
+  path: string;
+  source: string;
+}
+
+const PURE_DIR = 'src/tutorial/';
+const LAYER_DIR = 'src/chrome/tutorial/';
+const RENDER_DIR = 'src/render/';
+/** The one file allowed to read the camera, so a second reader can't drift from it. */
+const CAMERA_READER = 'src/chrome/tutorial/cameraRead.ts';
+
+const PURE_GLOBALS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['window.', /\bwindow\??\.[A-Za-z_$]/],
+  ['document.', /\bdocument\??\.[A-Za-z_$]/],
+  ['navigator.', /\bnavigator\??\.[A-Za-z_$]/],
+  ['localStorage', /\blocalStorage\b/],
+  ['requestAnimationFrame', /\brequestAnimationFrame\b/],
+];
+
+const NO_WRITE_NAMES: ReadonlyArray<readonly [string, RegExp]> = [
+  ['sendInput', /\bsendInput\b/],
+  ['sendControl', /\bsendControl\b/],
+  ['encodeGridCommand', /\bencodeGridCommand\b/],
+  ['makeTransport', /\bmakeTransport\b/],
+  ['transportRef', /\btransportRef\b/],
+  ['fetch(', /\bfetch\s*\(/],
+  ['XMLHttpRequest', /\bXMLHttpRequest\b/],
+  ['WebSocket', /\bWebSocket\b/],
+  ['innerHTML', /\binnerHTML\b/],
+  ['dangerouslySetInnerHTML', /\bdangerouslySetInnerHTML\b/],
+];
+
+const CAMERA_CALL = /\.camera\s*(?:\?\.)?\(\s*\)/;
+const IMPORT_FORMS: readonly RegExp[] = [
+  /^[ \t]*import\b[^'";]*['"]([^'"]+)['"]/gm,
+  /^[ \t]*export\b[^'";=]*\bfrom\s*['"]([^'"]+)['"]/gm,
+  /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]/g,
+];
+const UI_PACKAGE = /^(?:react|react-dom|pixi\.js)(?:\/|$)/;
+const THROUGH_UI_FOLDER = /(?:^|\/)(?:render|chrome)(?:\/|$)/;
+const THROUGH_TUTORIAL_FOLDER = /(?:^|\/)tutorial(?:\/|$)/;
+
+function importPaths(stripped: string): Array<{ path: string; line: number }> {
+  return IMPORT_FORMS.flatMap((form) =>
+    [...stripped.matchAll(form)].map((m) => ({
+      path: m[1] as string,
+      line: stripped.slice(0, m.index).split('\n').length,
+    })),
+  );
+}
+
+function namesFound(stripped: string, names: ReadonlyArray<readonly [string, RegExp]>): Array<{ name: string; line: number }> {
+  return names.flatMap(([name, pattern]) => {
+    const hit = pattern.exec(stripped);
+    return hit === null ? [] : [{ name, line: stripped.slice(0, hit.index).split('\n').length }];
+  });
+}
+
+/** One string per breach, so a failure names the file, the line and the rule. Empty means clean. */
+export function auditTutorialSources(files: readonly SourceFile[]): string[] {
+  const findings: string[] = [];
+  for (const { path, source } of files) {
+    const stripped = stripComments(source);
+    const pure = path.startsWith(PURE_DIR);
+    const layer = path.startsWith(LAYER_DIR);
+
+    if (pure && !/\.test\.tsx?$/.test(path)) {
+      for (const imported of importPaths(stripped)) {
+        if (UI_PACKAGE.test(imported.path)) {
+          findings.push(`${path}:${imported.line}: imports ${imported.path}, and the lesson engine has to run with no UI`);
+        }
+        if (THROUGH_UI_FOLDER.test(imported.path)) {
+          findings.push(`${path}:${imported.line}: imports ${imported.path}, through a UI folder`);
+        }
+      }
+      for (const hit of namesFound(stripped, PURE_GLOBALS)) {
+        findings.push(`${path}:${hit.line}: names the global ${hit.name}, and the lesson engine has to run with no browser`);
+      }
+    }
+    if (pure || layer) {
+      for (const hit of namesFound(stripped, NO_WRITE_NAMES)) {
+        findings.push(`${path}:${hit.line}: names ${hit.name}, and the tutorial sends nothing but a New through its callback`);
+      }
+    }
+    if (layer && path !== CAMERA_READER) {
+      const hit = CAMERA_CALL.exec(stripped);
+      if (hit !== null) {
+        const line = stripped.slice(0, hit.index).split('\n').length;
+        findings.push(`${path}:${line}: calls .camera(), and only ${CAMERA_READER} reads the camera`);
+      }
+    }
+    if (path.startsWith(RENDER_DIR)) {
+      for (const imported of importPaths(stripped)) {
+        if (THROUGH_TUTORIAL_FOLDER.test(imported.path)) {
+          findings.push(`${path}:${imported.line}: imports ${imported.path}, and the docs embed ships this folder with no tutorial`);
+        }
+      }
+    }
+  }
+  return findings;
+}
+
+function sourcesUnder(dir: string): SourceFile[] {
+  return readdirSync(join(FRONTEND, dir), { withFileTypes: true }).flatMap((entry) => {
+    const path = join(FRONTEND, dir, entry.name);
+    if (entry.isDirectory()) return sourcesUnder(`${dir}${entry.name}/`);
+    if (!/\.tsx?$/.test(entry.name)) return [];
+    return [{ path: relative(FRONTEND, path).split('\\').join('/'), source: readFileSync(path, 'utf8') }];
+  });
+}
+
+const REAL = [...sourcesUnder(PURE_DIR), ...sourcesUnder(LAYER_DIR), ...sourcesUnder(RENDER_DIR)];
+
+const pureFile = (source: string): SourceFile => ({ path: 'src/tutorial/fixture.ts', source });
+const layerFile = (source: string): SourceFile => ({ path: 'src/chrome/tutorial/TutorialLayer.tsx', source });
+
+describe('the tutorial stays a reader of the app', () => {
+  it('reads the real tree, so a clean result below is a real reading', () => {
+    const paths = REAL.map((f) => f.path);
+    for (const named of ['src/tutorial/machine.ts', 'src/tutorial/check.ts', 'src/chrome/tutorial/TutorialLayer.tsx', 'src/render/pixiApp.ts']) {
+      expect(paths, named).toContain(named);
+    }
+    expect(REAL.find((f) => f.path === 'src/tutorial/machine.ts')?.source).toContain('export function reduce');
+  });
+
+  it('finds nothing in the real tree', () => {
+    expect(auditTutorialSources(REAL)).toEqual([]);
+  });
+
+  describe('fails on', () => {
+    it('an import from react in a pure file', () => {
+      expect(auditTutorialSources([pureFile("import { useState } from 'react';\n")]).join('\n')).toMatch(/fixture\.ts:1: imports react/);
+    });
+
+    it('an import from react-dom in a pure file', () => {
+      expect(auditTutorialSources([pureFile("import { render } from 'react-dom/client';\n")]).join('\n')).toMatch(/imports react-dom\/client/);
+    });
+
+    it('an import from pixi.js in a pure file', () => {
+      expect(auditTutorialSources([pureFile("import { Graphics } from 'pixi.js';\n")]).join('\n')).toMatch(/imports pixi\.js/);
+    });
+
+    it('an import that spans lines', () => {
+      expect(auditTutorialSources([pureFile("import {\n  Graphics,\n} from 'pixi.js';\n")]).join('\n')).toMatch(/imports pixi\.js/);
+    });
+
+    it('a dynamic import in a pure file', () => {
+      expect(auditTutorialSources([pureFile("const p = import('pixi.js');\n")]).join('\n')).toMatch(/imports pixi\.js/);
+    });
+
+    it('an import through render or chrome in a pure file', () => {
+      expect(auditTutorialSources([pureFile("import { a } from '../render/pixiApp';\n")]).join('\n')).toMatch(/through a UI folder/);
+      expect(auditTutorialSources([pureFile("import { a } from '../chrome/App';\n")]).join('\n')).toMatch(/through a UI folder/);
+    });
+
+    it('each DOM global in a pure file', () => {
+      for (const [source, name] of [
+        ["document.querySelector('a');", 'document.'],
+        ['const w = window.innerWidth;', 'window.'],
+        ['const n = navigator.language;', 'navigator.'],
+        ["localStorage.getItem('x');", 'localStorage'],
+        ['requestAnimationFrame(tick);', 'requestAnimationFrame'],
+      ] as const) {
+        expect(auditTutorialSources([pureFile(source)]).join('\n'), source).toContain(`names the global ${name}`);
+      }
+    });
+
+    it('each transport and network name in either folder', () => {
+      for (const [source, name] of [
+        ['sendInput(frame);', 'sendInput'],
+        ['sendControl(frame);', 'sendControl'],
+        ['encodeGridCommand(c);', 'encodeGridCommand'],
+        ['makeTransport();', 'makeTransport'],
+        ['transportRef.current;', 'transportRef'],
+        ["fetch('/x');", 'fetch('],
+        ['new XMLHttpRequest();', 'XMLHttpRequest'],
+        ['new WebSocket(url);', 'WebSocket'],
+      ] as const) {
+        expect(auditTutorialSources([layerFile(source)]).join('\n'), `layer: ${source}`).toContain(`names ${name}`);
+        expect(auditTutorialSources([pureFile(source)]).join('\n'), `pure: ${source}`).toContain(`names ${name}`);
+      }
+    });
+
+    it('lesson text turned into HTML', () => {
+      expect(auditTutorialSources([layerFile('el.innerHTML = text;')]).join('\n')).toContain('names innerHTML');
+      expect(auditTutorialSources([layerFile('<p dangerouslySetInnerHTML={{ __html: text }} />')]).join('\n')).toContain('names dangerouslySetInnerHTML');
+    });
+
+    it('.camera() outside cameraRead.ts', () => {
+      expect(auditTutorialSources([layerFile('const c = hook.camera();')]).join('\n')).toContain('calls .camera()');
+      expect(auditTutorialSources([layerFile('const c = hook?.camera?.();')]).join('\n')).toContain('calls .camera()');
+    });
+
+    it('a tutorial import in a file under render/', () => {
+      const file = { path: 'src/render/fixture.ts', source: "import { reduce } from '../tutorial/machine';\n" };
+      expect(auditTutorialSources([file]).join('\n')).toMatch(/fixture\.ts:1: imports \.\.\/tutorial\/machine/);
+      const layer = { path: 'src/render/fixture.ts', source: "import { readCamera } from '../chrome/tutorial/cameraRead';\n" };
+      expect(auditTutorialSources([layer]).join('\n')).toMatch(/imports \.\.\/chrome\/tutorial\/cameraRead/);
+    });
+  });
+
+  describe('stays quiet on', () => {
+    it('a forbidden word inside a comment', () => {
+      const source = [
+        "// import { useState } from 'react';",
+        '/* sendInput(frame); document.querySelector("a"); */',
+        '// window.innerWidth and localStorage.getItem',
+      ].join('\n');
+      expect(auditTutorialSources([pureFile(source), layerFile(source)])).toEqual([]);
+    });
+
+    it('a name that only contains a forbidden word', () => {
+      expect(auditTutorialSources([pureFile('export function localStorageProgress(storage) { return storage; }')])).toEqual([]);
+      expect(auditTutorialSources([layerFile("import { devWebSocketThing } from '../../fixture';")])).toEqual([]);
+    });
+
+    it('a lesson sentence that ends in the window', () => {
+      expect(auditTutorialSources([pureFile("const text = 'Drag it across the window.';")])).toEqual([]);
+    });
+
+    it('a UI import in a test beside the engine, which needs one to render', () => {
+      expect(auditTutorialSources([{ path: 'src/tutorial/fixture.test.ts', source: "import { render } from 'react-dom/client';" }])).toEqual([]);
+    });
+
+    it('.camera() in cameraRead.ts, and DOM reads in the layer', () => {
+      expect(auditTutorialSources([{ path: CAMERA_READER, source: 'window.__fabrico?.camera();' }])).toEqual([]);
+      expect(auditTutorialSources([layerFile("import { useRef } from 'react'; document.querySelector('a');")])).toEqual([]);
+    });
+
+    it('a file in none of the three folders', () => {
+      expect(auditTutorialSources([{ path: 'src/chrome/App.tsx', source: "import { useState } from 'react'; sendInput(frame);" }])).toEqual([]);
+    });
+  });
+});
