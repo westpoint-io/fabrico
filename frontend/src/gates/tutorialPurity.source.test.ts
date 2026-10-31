@@ -16,10 +16,11 @@
 // a sentence in a lesson can end in "the window."
 //
 // NOT SEEN: a global reached through an alias or a bracket (`const w = window`, `globalThis['fetch']`),
-// a forbidden word inside a string, which reads as a finding, and a write made by a helper in some other
-// folder that wraps its own bridge, because the scan reads only what these folders name. The parity walk
-// counts sends on the paths it walks, under Vite. The first case below is the tripwire for the scan
-// reading nothing, and the mutation cases are what stop it being a check that can't fail.
+// a browser API or HTML sink these lists don't name, a forbidden word inside a string, which reads as a
+// finding, and a write made by a helper in some other folder that wraps its own bridge, because the
+// scan reads only what these folders name. The parity walk counts sends on the paths it walks, under
+// Vite. The first case below is the tripwire for the scan reading nothing, and the mutation cases are
+// what stop it being a check that can't fail.
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -49,6 +50,10 @@ const PURE_GLOBALS: ReadonlyArray<readonly [string, RegExp]> = [
   ['navigator.', /\bnavigator\??\.[A-Za-z_$]/],
   ['localStorage', /\blocalStorage\b/],
   ['requestAnimationFrame', /\brequestAnimationFrame\b/],
+  ['sessionStorage', /\bsessionStorage\b/],
+  ['location.', /(?<![.$\w])location\??\.[A-Za-z_$]/],
+  ['getComputedStyle', /\bgetComputedStyle\b/],
+  ['matchMedia', /\bmatchMedia\b/],
 ];
 
 const NO_WRITE_NAMES: ReadonlyArray<readonly [string, RegExp]> = [
@@ -60,14 +65,24 @@ const NO_WRITE_NAMES: ReadonlyArray<readonly [string, RegExp]> = [
   ['fetch(', /\bfetch\s*\(/],
   ['XMLHttpRequest', /\bXMLHttpRequest\b/],
   ['WebSocket', /\bWebSocket\b/],
+  ['sendBeacon', /\bsendBeacon\b/],
+  ['EventSource', /\bEventSource\b/],
   ['commitConfig', /\bcommitConfig\b/],
   ['.click(', /\.click\s*(?:\?\.)?\(/],
   ['.dispatchEvent(', /\.dispatchEvent\s*(?:\?\.)?\(/],
   ['invoke', /\binvoke\b/],
   ['@tauri-apps/', /@tauri-apps\//],
   ['__TAURI', /\b__TAURI/],
+];
+
+const HTML_SINKS: ReadonlyArray<readonly [string, RegExp]> = [
   ['innerHTML', /\binnerHTML\b/],
+  ['outerHTML', /\bouterHTML\b/],
   ['dangerouslySetInnerHTML', /\bdangerouslySetInnerHTML\b/],
+  ['insertAdjacentHTML', /\binsertAdjacentHTML\b/],
+  ['createContextualFragment', /\bcreateContextualFragment\b/],
+  ['document.write', /\bdocument\.write(?:ln)?\b/],
+  ['srcdoc', /\bsrcdoc\b/i],
 ];
 
 /** Each can send any command to the host, so only `HOST_READER` may name one. */
@@ -146,6 +161,9 @@ export function auditTutorialSources(files: readonly SourceFile[]): string[] {
     if (pure || layer) {
       for (const hit of namesFound(stripped, NO_WRITE_NAMES)) {
         findings.push(`${path}:${hit.line}: names ${hit.name}, and the tutorial sends nothing but a New through its callback`);
+      }
+      for (const hit of namesFound(stripped, HTML_SINKS)) {
+        findings.push(`${path}:${hit.line}: names ${hit.name}, and lesson text must never be able to become HTML`);
       }
       if (path === HOST_READER) {
         findings.push(...hostReaderBreaches(path, stripped));
@@ -238,6 +256,11 @@ describe('the tutorial stays a reader of the app', () => {
         ['const n = navigator.language;', 'navigator.'],
         ["localStorage.getItem('x');", 'localStorage'],
         ['requestAnimationFrame(tick);', 'requestAnimationFrame'],
+        ["sessionStorage.getItem('x');", 'sessionStorage'],
+        ['const here = location.href;', 'location.'],
+        ['const here = location?.href;', 'location.'],
+        ['getComputedStyle(el);', 'getComputedStyle'],
+        ["matchMedia('(prefers-reduced-motion)');", 'matchMedia'],
       ] as const) {
         expect(auditTutorialSources([pureFile(source)]).join('\n'), source).toContain(`names the global ${name}`);
       }
@@ -253,6 +276,8 @@ describe('the tutorial stays a reader of the app', () => {
         ["fetch('/x');", 'fetch('],
         ['new XMLHttpRequest();', 'XMLHttpRequest'],
         ['new WebSocket(url);', 'WebSocket'],
+        ["navigator.sendBeacon('/x', body);", 'sendBeacon'],
+        ["new EventSource('/x');", 'EventSource'],
         ['commitConfig(1, c, deps);', 'commitConfig'],
         ["document.querySelector('button').click();", '.click('],
         ['button?.click?.();', '.click('],
@@ -319,9 +344,22 @@ describe('the tutorial stays a reader of the app', () => {
       });
     });
 
-    it('lesson text turned into HTML', () => {
-      expect(auditTutorialSources([layerFile('el.innerHTML = text;')]).join('\n')).toContain('names innerHTML');
-      expect(auditTutorialSources([layerFile('<p dangerouslySetInnerHTML={{ __html: text }} />')]).join('\n')).toContain('names dangerouslySetInnerHTML');
+    it('lesson text turned into HTML, in either folder', () => {
+      for (const [source, name] of [
+        ['el.innerHTML = text;', 'innerHTML'],
+        ['el.outerHTML = text;', 'outerHTML'],
+        ['<p dangerouslySetInnerHTML={{ __html: text }} />', 'dangerouslySetInnerHTML'],
+        ["el.insertAdjacentHTML('beforeend', text);", 'insertAdjacentHTML'],
+        ['range.createContextualFragment(text);', 'createContextualFragment'],
+        ['document.write(text);', 'document.write'],
+        ['document.writeln(text);', 'document.write'],
+        ['frame.srcdoc = text;', 'srcdoc'],
+        ['<iframe srcDoc={text} />', 'srcdoc'],
+      ] as const) {
+        const want = `names ${name}, and lesson text must never be able to become HTML`;
+        expect(auditTutorialSources([layerFile(source)]).join('\n'), `layer: ${source}`).toContain(want);
+        expect(auditTutorialSources([pureFile(source)]).join('\n'), `pure: ${source}`).toContain(want);
+      }
     });
 
     it('.camera() outside cameraRead.ts', () => {
@@ -372,6 +410,11 @@ describe('the tutorial stays a reader of the app', () => {
       expect(auditTutorialSources([pureFile("const text = 'Drag it across the window.';")])).toEqual([]);
     });
 
+    it('a sentence or a name that uses location as an ordinary word', () => {
+      expect(auditTutorialSources([pureFile("const text = 'Pick a free location. Any will do.'; const location = 1;")])).toEqual([]);
+      expect(auditTutorialSources([pureFile('const a = cell.location; const b = cell.location.x; const spotLocation = 2;')])).toEqual([]);
+    });
+
     it('a UI import in a test beside the engine, which needs one to render', () => {
       expect(auditTutorialSources([{ path: 'src/tutorial/fixture.test.ts', source: "import { render } from 'react-dom/client';" }])).toEqual([]);
     });
@@ -379,6 +422,7 @@ describe('the tutorial stays a reader of the app', () => {
     it('.camera() in cameraRead.ts, and DOM reads in the layer', () => {
       expect(auditTutorialSources([{ path: CAMERA_READER, source: 'window.__fabrico?.camera();' }])).toEqual([]);
       expect(auditTutorialSources([layerFile("import { useRef } from 'react'; document.querySelector('a');")])).toEqual([]);
+      expect(auditTutorialSources([layerFile("getComputedStyle(el); matchMedia('(min-width: 1px)'); location.href;")])).toEqual([]);
     });
 
     it('a file in none of the three folders', () => {
