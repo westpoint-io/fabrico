@@ -4,7 +4,9 @@
 // A rename in `KIND_NAMES` or `SHORTCUTS` has to reach the lesson text with no edit to a lesson.
 
 import { describe, expect, it } from 'vitest';
+import { SHORTCUTS } from '../input/shortcuts.ts';
 import { LESSONS } from './lessons/index.ts';
+import { noteTokens, type LessonNote } from './machine.ts';
 import { YOUR_FIRST_LINE } from './lessons/yourFirstLine.ts';
 import {
   MAX_INSTRUCTION_CHARS,
@@ -212,8 +214,31 @@ describe('the step text budget, counted on the resolved plain string', () => {
     expect(phrasePlain(tokens).length).toBe(26);
   });
 
-  it('leaves room for the longest key label in the longest note the copy table holds', () => {
-    const note: PhraseToken[] = ['The board was already running, so step 5 is done. ', { key: 'delete' }, ' pauses it.'];
-    expect(phrasePlain(note).length).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+  describe('every note, with the longest key label the shortcut table holds', () => {
+    const longest = Object.values(SHORTCUTS)
+      .map((shortcut) => shortcut.label)
+      .reduce((a, b) => (b.length > a.length ? b : a));
+    const tables = withLabel('playPause', longest);
+    // A Record, so a new kind of note doesn't compile until it has a row here. The step numbers are the
+    // widest a lesson could print.
+    const NOTES: Readonly<Record<LessonNote['kind'], LessonNote>> = {
+      skippedOne: { kind: 'skippedOne', a: 99, b: 99 },
+      skippedMany: { kind: 'skippedMany', a: 99, b: 99 },
+      wentBack: { kind: 'wentBack', a: 99, b: 99 },
+      alreadyRunning: { kind: 'alreadyRunning', a: 99, b: 99 },
+    };
+
+    it('reads a label longer than the one the note ships with', () => {
+      expect(longest.length).toBeGreaterThan(SHORTCUTS.playPause.label.length);
+      expect(phrasePlain(noteTokens(NOTES.alreadyRunning), tables), 'the label reaches the sentence').toContain(longest);
+    });
+
+    for (const note of Object.values(NOTES)) {
+      it(`holds the ${note.kind} note inside the note budget, in printable ASCII`, () => {
+        const plain = phrasePlain(noteTokens(note), tables);
+        expect(plain.length, `"${plain}"`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        expect(plain, 'printable ASCII').toMatch(PRINTABLE_ASCII);
+      });
+    }
   });
 });
