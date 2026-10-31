@@ -406,21 +406,19 @@ test("Undo takes back only the user's own gestures", async ({ page }) => {
     })
     .toBe('set-timer');
 
-  for (const press of ['first', 'second'] as const) {
-    const before = (await readScene(page)).nodes.length;
-    await page.keyboard.press('Control+z');
-    await pollScene(page, (s) => s.nodes.length, { message: `the ${press} Undo took one machine away` }).toBe(before - 1);
-  }
-
-  // Read as one value, so a machine the tutorial placed shows the board, the button and the count at once.
+  // Read as one value, so a gesture the tutorial sent shows in the count whichever read first sees
+  // it: its machine could still be on its way when the Undo goes out.
+  const undoFacts = async (): Promise<{ machines: number; canUndo: boolean; inputs: number }> => {
+    const scene = await readScene(page);
+    return { machines: scene.nodes.length, canUndo: scene.canUndo, inputs: (await inputsSent(page)) - inputsAtStart };
+  };
+  await page.keyboard.press('Control+z');
   await expect
-    .poll(
-      async () => {
-        const scene = await readScene(page);
-        return { machines: scene.nodes.length, canUndo: scene.canUndo, inputs: (await inputsSent(page)) - inputsAtStart };
-      },
-      { message: "two Undos emptied the board, and every gesture sent was the user's own" },
-    )
+    .poll(undoFacts, { message: "the first Undo took the Sink away, and every gesture sent was the user's own" })
+    .toEqual({ machines: 1, canUndo: true, inputs: UNDO_TEST_INPUTS - 1 });
+  await page.keyboard.press('Control+z');
+  await expect
+    .poll(undoFacts, { message: "the second Undo emptied the board, and every gesture sent was the user's own" })
     .toEqual({ machines: 0, canUndo: false, inputs: UNDO_TEST_INPUTS });
 
   await expect
