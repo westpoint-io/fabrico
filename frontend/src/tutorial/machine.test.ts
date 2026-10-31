@@ -602,6 +602,25 @@ describe('reduce: leave and resume', () => {
     expect(resumed(running)).toBe(running);
   });
 
+  describe('the floor spot across a leave', () => {
+    const SINK_ARMED = { armed: { kind: 'machine', machineKind: SINK } } as const;
+    /** Left at the Sink's floor stage, with the ring on its spot. */
+    const leftAtSinkFloor = (): TutorialState => left(frame(atStep(1), { nodes: [THE_SOURCE] }, SINK_ARMED));
+
+    it('is worked out again from the board as it stands', () => {
+      const before = leftAtSinkFloor();
+      expect(before.spot?.cell, 'the spot before the leave').toEqual([8, 2]);
+      const inTheWay = node(6, 3, 8, 2);
+      const s = frame(resumed(before), { nodes: [THE_SOURCE, inTheWay] }, SINK_ARMED);
+      expect(s.spot?.cell, 'a machine now holds the old spot').toEqual([8, 3]);
+    });
+
+    it('is the same cell when nothing took it', () => {
+      const s = frame(resumed(leftAtSinkFloor()), { nodes: [THE_SOURCE] }, SINK_ARMED);
+      expect(s.spot?.cell).toEqual([8, 2]);
+    });
+  });
+
   it('a result removed while left sends the lesson back on Resume', () => {
     const s = frame(resumed(left(atStep(2))), { nodes: [THE_SINK] });
     expect(s.stepIndex).toBe(0);

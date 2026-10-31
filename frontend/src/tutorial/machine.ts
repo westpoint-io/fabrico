@@ -396,7 +396,8 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
   }
   if (e.type === 'resumed') {
     if (s.card !== 'none' || s.leftFloor === null) return s;
-    return { ...s, card: 'running', leftFloor: null, note: null, rechecking: true };
+    // The spot goes too: the user may have built on it, and the first frame works it out from the board as it stands.
+    return { ...s, card: 'running', leftFloor: null, spot: null, note: null, rechecking: true };
   }
   if (e.type === 'cancelledRun') {
     return IDLE;
