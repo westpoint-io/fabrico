@@ -827,6 +827,9 @@ const STOPPED_TITLE = 'Unavailable: the simulation stopped';
 const SWAPPED_SENTENCE = 'The board changed, so this lesson stopped. Restart it, or leave it.';
 /** The gap App leaves between the status strip and a panel docked top right: `--fab-space-sm`. */
 const STRIP_GUTTER = 8;
+/** The longest title the list allows for: a later lesson's, longer than the one that ships. */
+const LONGEST_TITLE = 'A Factory with two outputs';
+const OVERLONG_TITLE = 'A Factory with two outputs and a much longer name';
 
 const lessonRow = (page: Page): Locator => page.locator(`${PANEL} [data-fab-lesson-row="${YOUR_FIRST_LINE.id}"]`);
 const guardButton = (page: Page, name: 'Cancel' | 'Discard' | 'Save'): Locator => page.locator('.fab-dialog-panel').getByRole('button', { name });
@@ -1030,6 +1033,63 @@ test.describe('the lesson list', () => {
     await expect(inspector, 'the list hides the inspector').toBeHidden();
     await lessons.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(inspector, 'closing the list brings it back').toBeVisible();
+  });
+
+  test('five rows fit the list: the longest title on one line, and the buttons inside the box', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
+
+    // One short-titled lesson ships, and this reads layout, so it gives the page's own row the longest
+    // title and copies it. The real stylesheet and font do the rest.
+    const rows = await lessonRow(page).evaluate((row, title) => {
+      (row.firstElementChild!.firstElementChild as HTMLElement).textContent = title;
+      for (let i = 0; i < 4; i++) row.parentElement!.append(row.cloneNode(true));
+      return row.parentElement!.children.length;
+    }, LONGEST_TITLE);
+    expect(rows, 'five rows to read').toBe(5);
+
+    const read = () =>
+      page.locator(`${PANEL} [data-fab-help-scroll]`).evaluate((box) => {
+        const client = box.getBoundingClientRect();
+        const inner = client.left + box.clientWidth;
+        return {
+          scrolls: box.scrollHeight > box.clientHeight,
+          rows: [...box.querySelectorAll('li')].map((li) => {
+            const range = document.createRange();
+            range.selectNodeContents(li.firstElementChild!.firstElementChild!);
+            const buttons = [...li.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+            return {
+              lines: new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size,
+              titleRight: range.getBoundingClientRect().right,
+              buttonsLeft: buttons[0]!.left,
+              buttonsRight: buttons[buttons.length - 1]!.right,
+              inner,
+              count: buttons.length,
+            };
+          }),
+        };
+      });
+
+    const atLongest = await read();
+    for (const [i, row] of atLongest.rows.entries()) {
+      expect(row.count, `row ${i}: Resume and Restart`).toBe(2);
+      expect(row.lines, `row ${i}: the longest title sits on one line`).toBe(1);
+      expect(row.titleRight, `row ${i}: the title stops short of the buttons`).toBeLessThanOrEqual(row.buttonsLeft + TOLERANCE);
+      expect(row.buttonsRight, `row ${i}: the buttons stay inside the box`).toBeLessThanOrEqual(row.inner + TOLERANCE);
+    }
+    expect(atLongest.scrolls, 'five rows need no scroll at this height').toBe(false);
+
+    // A title past that wraps, and the buttons stay where they were.
+    await lessonRow(page).first().evaluate((row, title) => {
+      (row.firstElementChild!.firstElementChild as HTMLElement).textContent = title;
+    }, OVERLONG_TITLE);
+    const [wrapped] = (await read()).rows;
+    expect(wrapped!.lines, 'a longer title wraps').toBeGreaterThan(1);
+    expect(wrapped!.titleRight, 'a wrapped title stops short of the buttons').toBeLessThanOrEqual(wrapped!.buttonsLeft + TOLERANCE);
+    expect(wrapped!.buttonsRight, 'a wrapped title leaves the buttons inside the box').toBeLessThanOrEqual(wrapped!.inner + TOLERANCE);
   });
 
   test('a board swap leaves focus where the user put it', async ({ page }) => {

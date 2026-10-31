@@ -127,11 +127,8 @@ describe('LessonPanel', () => {
     }
   });
 
-  it('five rows still fit the width: the longest title and two buttons take 424 px of the 432', () => {
-    // Martian Mono advances 8 px per character at this size. The grid's left column may shrink, so a
-    // longer title wraps rather than pushing the buttons out.
-    const titlePx = 8 * 'A Factory with two outputs'.length;
-    expect(titlePx + 16 + 200).toBeLessThanOrEqual(432);
+  it("lets a row's left column shrink, so a longer title wraps rather than pushing the buttons out", () => {
+    // Whether five rows fit takes a real layout, so the mock spec `lessons.spec.ts` reads that.
     const left = render(FIVE).find((el) => el.props['data-fab-lesson-row'] === 'b')?.props.children as unknown[];
     expect(styleOf(left[0] as El).minWidth).toBe(0);
   });
