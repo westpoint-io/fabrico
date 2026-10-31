@@ -15,7 +15,7 @@ import type { BindingName, BoardFacts, ChromeFacts, LessonId, Stage } from '../.
 import type { ArmedTool } from '../Palette';
 import { readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
-import { LessonPanel } from './LessonPanel';
+import { LESSONS_PANEL_ID, LessonPanel, focusListClose } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
 import { readAppliedTrigger } from './triggerRead';
 
@@ -385,6 +385,18 @@ export function TutorialLayer({
       })
     : [];
   const lessonId = state.lessonId;
+
+  // A swap can take away the action that holds focus, and focus then falls to the page, where Escape
+  // can't reach the list. Read during render, because this is the last moment that button is mounted.
+  const focusInList = useRef<Element | null>(null);
+  const focused = document.activeElement;
+  focusInList.current = focused !== null && document.getElementById(LESSONS_PANEL_ID)?.contains(focused) === true ? focused : null;
+  // Keyed on what the rows offer, so a press on the board later on can't pull focus back here.
+  const offered = rows.map((row) => `${row.id}:${row.actions.join(',')}`).join('|');
+  useLayoutEffect(() => {
+    const held = focusInList.current;
+    if (held !== null && !held.isConnected && document.activeElement === document.body) focusListClose();
+  }, [offered]);
 
   return (
     <>

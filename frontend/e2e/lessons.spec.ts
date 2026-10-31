@@ -1218,6 +1218,42 @@ test.describe('the lesson list', () => {
     expect(newCount(h), 'and nothing was pressed').toBe(1);
   });
 
+  test('a swap that takes the focused Resume away moves focus to Close, so Escape still closes the list', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
+    const resume = page.getByRole('button', { name: RESUME, exact: true });
+    await expect(resume, 'the list focuses its first action').toBeFocused();
+
+    // The way a user gets here: Ctrl+N passes a focused button, and New doesn't close the list.
+    await page.keyboard.press('Control+n');
+    await expect.poll(() => newCount(h), { message: 'Ctrl+N sent New with the list open' }).toBe(2);
+    h.inject(swappedBoard(2, 6));
+    await expectRow(page, 'In progress', [RESTART], []);
+
+    const close = page.locator(PANEL).getByRole('button', { name: 'Close', exact: true });
+    await expect(close, 'focus lands on Close, which cannot replace the board').toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator(PANEL), 'Escape still reaches the list').toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Help', exact: true }), 'and hands focus to Help').toBeFocused();
+    expect(newCount(h), 'and nothing else was pressed').toBe(2);
+  });
+
+  test('a swap leaves focus on Restart, which stays mounted', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await pressLeave(page);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
+    const restart = page.getByRole('button', { name: RESTART, exact: true });
+    await restart.focus();
+    h.inject(swappedBoard(2, 6));
+    await expectRow(page, 'In progress', [RESTART], []);
+    await expect(restart, 'the swap moved no focus').toBeFocused();
+  });
+
   test('a refusal moves clear of the list', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await boot(page, { answerGesture: () => 'FootprintCollision' });

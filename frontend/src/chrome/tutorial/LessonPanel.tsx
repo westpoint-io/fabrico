@@ -41,6 +41,15 @@ function focusFirstAction(panel: HTMLElement | null): void {
   (action ?? panel?.querySelector<HTMLElement>('button'))?.focus();
 }
 
+/**
+ * Focus Close, when the list is open. It's the head row's button, the first in the panel, and it's
+ * always mounted and can't replace the board. A swap that takes away the focused Resume lands here,
+ * because focus on the page can't reach this panel's Escape.
+ */
+export function focusListClose(): void {
+  document.getElementById(LESSONS_PANEL_ID)?.querySelector<HTMLElement>('button')?.focus();
+}
+
 const headRowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
