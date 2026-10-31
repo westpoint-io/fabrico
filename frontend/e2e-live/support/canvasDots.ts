@@ -850,3 +850,8 @@ export function ringOnCanvas(img: DecodedImage, shape: RingShape, colour: number
   const floor = RING_FLOOR_PER_PX * length * dpr;
   return { ink, floor, seen: ink >= floor };
 }
+
+/** Pixels in the clip that read as belt ink: `ramp[4]`, the rails' and the marching dash's colour. A dot is warm, so it adds none. */
+export function railInk(img: DecodedImage): number {
+  return inkIn(img, { x0: 0, y0: 0, x1: img.width, y1: img.height }, COLLAR_RING_RGB, COLLAR_INK_TOLERANCE);
+}

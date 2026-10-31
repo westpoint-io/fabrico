@@ -50,6 +50,7 @@ import {
   GAUGE_THICK_PX,
   GAUGE_TICK_PX,
   type CableToRead,
+  railInk,
   ringOnCanvas,
   type DecodedImage,
   type ImageFrame,
@@ -784,5 +785,42 @@ describe('ringOnCanvas: the hint ring, read off a capture of its rect', () => {
     const target = (x: number, y: number): boolean => Math.min(x, y, 59 - x, 59 - y) >= 5;
     const read = ringOnCanvas(capture(60, target), 'square', FOCUS, 1);
     expect(read.ink).toBe(0);
+  });
+});
+
+describe('railInk: belt ink in a clip, read off the live run strip', () => {
+  /** One 32 px tile of the 192 by 32 px strip, with the same 2 px inset the walk's clip takes. */
+  function tile(img: DecodedImage, index: number): DecodedImage {
+    const size = 28;
+    const data = new Uint8Array(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const from = ((y + 2) * img.width + index * 32 + x + 2) * 4;
+        data.set(img.data.subarray(from, from + 4), (y * size + x) * 4);
+      }
+    }
+    return { width: size, height: size, data };
+  }
+
+  /** The same capture with the belt gone: every pixel that isn't dot ink painted over in the ground colour. */
+  function dotsAlone(img: DecodedImage): DecodedImage {
+    const data = Uint8Array.from(img.data);
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! - data[i + 2]! <= 40) data.set([0x1b, 0x1f, 0x27], i);
+    }
+    return { ...img, data };
+  }
+
+  it('reads at least a clip width of ink on a real belt tile, on every tile of the strip', () => {
+    const strip = fixture('77-run-strip-empty.png');
+    for (let i = 0; i < RUN.length; i++) {
+      expect(railInk(tile(strip, i)), `tile ${RUN[i]}`).toBeGreaterThanOrEqual(28);
+    }
+  });
+
+  it('reads none from real dots with no belt under them, which is the case a plain pixel change passes', () => {
+    const packed = dotsAlone(fixture('77-run-strip-packed.png'));
+    expect(dotsOf(packed), 'the dots are all still there').toEqual(each(4));
+    expect(railInk(packed)).toBe(0);
   });
 });

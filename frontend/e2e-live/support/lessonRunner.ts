@@ -5,7 +5,7 @@ import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/Tutorial
 import { SHORTCUTS } from '../../src/input/shortcuts';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
-import { DOT_INK_MIN, isDotInk, ringOnCanvas } from './canvasDots';
+import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
 import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
 import {
   DRAWN_STATE_FRAMES,
@@ -832,7 +832,14 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     const onTheBelt = scene.belts.some((b) => b.tiles.some((t) => t.cell_x === cell[0] && t.cell_y === cell[1]));
     expect(onTheBelt, `${label}: the cell the read compares is a tile of the new belt`).toBe(true);
     const afterPixels = await captureWithGhostGone(page, clip);
-    expect(afterPixels.equals(beltBefore), `${label}: the pixels inside a middle tile did not change, so the belt did not draw`).toBe(false);
+    // Belt ink, and not just a change. The Timer has been running since step 3, so a dot crossing this
+    // tile would change the pixels with no belt drawn at all. A dot is warm, so it adds no belt ink.
+    const before = decodePngRows(beltBefore, 0, Number.MAX_SAFE_INTEGER);
+    const after = decodePngRows(afterPixels, 0, Number.MAX_SAFE_INTEGER);
+    const floor = after.width;
+    console.log(`MEASURE rail before=${railInk(before)} after=${railInk(after)} floor=${floor}`);
+    expect(railInk(before), `${label}: the middle tile holds no belt ink before the drag, so the read below can tell`).toBeLessThan(floor);
+    expect(railInk(after), `${label}: the middle tile holds belt ink along its length, so the belt drew`).toBeGreaterThanOrEqual(floor);
   }
   // Steps 3 and 5 change no board cell, so no byte compare can grade them. What a person sees is the
   // pressed segment and the clock still moving, so that's what these read.
