@@ -121,6 +121,10 @@ fn main() {
     // THIS binary is the seam's only caller: the Tauri shell never builds it (the same rule
     // as `with_pre_tick`), so the shipped app has no path to it.
     let dev_fault = Arc::new(AtomicBool::new(false));
+    // The dev hold switch: ONE flag shared the same way, set by a `dev_hold` TEXT frame. It lets
+    // a live check put a POST and a control message in front of the sim at once. This binary is
+    // its only caller too.
+    let dev_hold = Arc::new(AtomicBool::new(false));
     // The held fatal reason (phase 90, FAIL-01, D-11): `None` while the sim runs, the reason
     // once its loop ends. Every render socket is sent it after its opening keyframe and on
     // change, so a page that connects or reloads after the fatal still learns of it.
@@ -138,6 +142,7 @@ fn main() {
         .with_webhook(webhook_rx)
         .with_endpoint(endpoint_rx)
         .with_dev_fault(Arc::clone(&dev_fault))
+        .with_dev_hold(Arc::clone(&dev_hold))
         // UNDO-09: a refused `.fab` load now reaches the browser instead of dying at
         // the `eprintln!` on the sim thread. The sink hands the host's own sentence to
         // the fan-out below; every live WebSocket connection relays it as a TEXT frame.
@@ -201,6 +206,7 @@ fn main() {
     let ws_control_tx = control_tx.clone();
     let ws_load_refusals = load_refusals.clone();
     let ws_dev_fault = Some(Arc::clone(&dev_fault));
+    let ws_dev_hold = Some(Arc::clone(&dev_hold));
     let ws_sim_fatal = sim_fatal_rx.clone();
     rt.spawn(async move {
         if let Err(e) = run_render_listener(
@@ -212,6 +218,7 @@ fn main() {
             MAX_GESTURE_FRAME,
             ws_load_refusals,
             ws_dev_fault,
+            ws_dev_hold,
             ws_sim_fatal,
         )
         .await

@@ -215,6 +215,12 @@ const NEW_GENESIS_SEED: u64 = 0;
 /// `in_flight_len() != 0` refusal is the persistence-side backstop.
 pub const MAX_SETTLE_TICKS: u64 = 512;
 
+/// The longest a dev hold lasts ([`SimLoop::with_dev_hold`]): about 10 seconds at
+/// [`TICK_PAUSE`]. A live check that fails while holding can't wedge the shared host for the
+/// checks after it, because this ends the hold inside the 15 seconds the suite's restore waits.
+#[cfg(feature = "dev-seams")]
+const DEV_HOLD_MAX_STEPS: u32 = 625;
+
 /// The reason the dev fault seam ([`SimLoop::with_dev_fault`]) returns, inside
 /// `StoreError::Backend`. The fatal sentence a page shows for it is therefore
 /// `sim loop terminated with a fatal store error: persistence backend error:
@@ -727,6 +733,13 @@ pub struct SimLoop {
     /// with the `dev-seams` feature (phase 90 review IN-A-04), which the shipped build lacks.
     #[cfg(feature = "dev-seams")]
     dev_fault: Option<Arc<AtomicBool>>,
+    /// The DEV-ONLY hold seam, wired ONLY by `dev_render_server` through
+    /// [`SimLoop::with_dev_hold`]. See there.
+    #[cfg(feature = "dev-seams")]
+    dev_hold: Option<Arc<AtomicBool>>,
+    /// The steps the current hold has lasted, against [`DEV_HOLD_MAX_STEPS`].
+    #[cfg(feature = "dev-seams")]
+    dev_hold_steps: u32,
     /// Count of commands the executor consumer has picked up for dispatch
     /// (incremented AFTER the pause gate). The executor-gate test reads it to
     /// prove dispatch is held while frozen and resumes on wake. Only read behind
@@ -987,6 +1000,10 @@ impl SimLoop {
             fail_next_load_timers: false,
             #[cfg(feature = "dev-seams")]
             dev_fault: None,
+            #[cfg(feature = "dev-seams")]
+            dev_hold: None,
+            #[cfg(feature = "dev-seams")]
+            dev_hold_steps: 0,
             dispatched,
             _work_dir: None,
             snapshot_every: None,
@@ -1111,6 +1128,46 @@ impl SimLoop {
     pub fn with_dev_fault(mut self, flag: Arc<AtomicBool>) -> Self {
         self.dev_fault = Some(flag);
         self
+    }
+
+    /// Wire the dev-only hold seam (the shell never wires it, the `with_pre_tick` rule). While
+    /// `flag` is set, [`SimLoop::step`] services nothing and doesn't tick, until a request is
+    /// waiting on a front-door queue and a message is waiting on the control channel, or the
+    /// hold has lasted [`DEV_HOLD_MAX_STEPS`] steps. Then it clears the flag and carries on
+    /// with a normal step.
+    ///
+    /// A POST and a control message reach the sim from two tasks with no ordering between them,
+    /// and the window between a swap being asked for and a request reaching the old queue is
+    /// about 20 ms. This lets a live check put both in front of the sim at once. It produces a
+    /// state the shipped loop already passes through while [`boot_scene`] runs: the old route
+    /// table is up, the door is open (`is_playing` isn't touched) and nothing is being drained.
+    /// It adds no ordering the shipped app can't see. Only with the `dev-seams` feature.
+    #[cfg(feature = "dev-seams")]
+    #[must_use]
+    pub fn with_dev_hold(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.dev_hold = Some(flag);
+        self
+    }
+
+    /// Whether the dev hold keeps this step from running (see [`SimLoop::with_dev_hold`]).
+    #[cfg(feature = "dev-seams")]
+    fn dev_hold_holds_this_step(&mut self) -> bool {
+        let Some(flag) = &self.dev_hold else {
+            return false;
+        };
+        if !flag.load(Ordering::Acquire) {
+            return false;
+        }
+        let request_waiting = self.webhook_rx.as_ref().is_some_and(|rx| !rx.is_empty())
+            || self.endpoint_rx.as_ref().is_some_and(|rx| !rx.is_empty());
+        let control_waiting = self.control_rx.as_ref().is_some_and(|rx| !rx.is_empty());
+        self.dev_hold_steps += 1;
+        if !(request_waiting && control_waiting) && self.dev_hold_steps < DEV_HOLD_MAX_STEPS {
+            return true;
+        }
+        flag.store(false, Ordering::Release);
+        self.dev_hold_steps = 0;
+        false
     }
 
     /// Publish render handles BEFORE running (callers hand these to their transport
@@ -2657,6 +2714,10 @@ impl SimLoop {
             && flag.swap(false, Ordering::AcqRel)
         {
             return Err(StoreError::Backend(DEV_FAULT_REASON.to_owned()));
+        }
+        #[cfg(feature = "dev-seams")]
+        if self.dev_hold_holds_this_step() {
+            return Ok(());
         }
         self.service_control()?;
         match self.run_state {
@@ -7066,6 +7127,64 @@ mod tests {
             scene_load(&r);
             r.sim.step().expect("the swap step");
             assert_eq!(board_now(&r), first.board + 1, "a swap adds 1");
+        }
+
+        #[cfg(feature = "dev-seams")]
+        fn held_rig(dir: &std::path::Path, rt: &tokio::runtime::Runtime) -> (Rig, Arc<AtomicBool>) {
+            let mut r = rig(dir, rt);
+            let flag = Arc::new(AtomicBool::new(true));
+            r.sim.dev_hold = Some(Arc::clone(&flag));
+            (r, flag)
+        }
+
+        #[cfg(feature = "dev-seams")]
+        #[test]
+        fn a_dev_hold_stops_the_loop_until_a_request_and_a_control_wait() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut r, flag) = held_rig(dir.path(), &rt);
+            let tick = r.sim.host().core().tick;
+
+            r.sim.step().expect("a held step");
+            assert_eq!(r.sim.host().core().tick, tick, "a held step doesn't tick");
+            assert!(r.sim.is_playing.load(Ordering::Acquire), "and the door stays open");
+
+            let _ack = queue_webhook(&r, b"held");
+            r.sim.step().expect("a request alone");
+            assert_eq!(r.sim.host().core().tick, tick, "a request alone doesn't release it");
+            assert!(flag.load(Ordering::Acquire));
+
+            scene_load(&r);
+            r.sim.step().expect("both waiting");
+            assert!(!flag.load(Ordering::Acquire), "a request and a control together release it");
+            assert_eq!(board_now(&r), 1, "and the same step serviced the control");
+
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut r, flag) = held_rig(dir.path(), &rt);
+            let tick = r.sim.host().core().tick;
+            scene_load(&r);
+            r.sim.step().expect("a control alone");
+            assert_eq!(r.sim.host().core().tick, tick, "a control alone doesn't release it");
+            assert_eq!(board_now(&r), 0, "and isn't serviced");
+            assert!(flag.load(Ordering::Acquire));
+        }
+
+        #[cfg(feature = "dev-seams")]
+        #[test]
+        fn a_dev_hold_lets_go_by_itself_at_its_step_cap() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut r, flag) = held_rig(dir.path(), &rt);
+            let tick = r.sim.host().core().tick;
+            for _ in 1..DEV_HOLD_MAX_STEPS {
+                r.sim.step().expect("a held step");
+            }
+            assert_eq!(r.sim.host().core().tick, tick, "still held one step short of the cap");
+            assert!(flag.load(Ordering::Acquire));
+
+            r.sim.step().expect("the step at the cap");
+            assert!(!flag.load(Ordering::Acquire), "the cap clears the flag");
+            assert!(r.sim.host().core().tick > tick, "and the loop runs again");
         }
     }
 }

@@ -9,6 +9,7 @@ import {
   expectRenderLoopAlive,
   loadDemoViaExamples,
   loadExample,
+  openExamples,
   pollScene,
   readScene,
   resetToDemo,
@@ -40,8 +41,26 @@ import {
 // The node count is read from the board file itself, which shows that the board on screen is that
 // file. Every test installs `watchPageErrors` before `page.goto` and ends with
 // `expectRenderLoopAlive` and the watcher's `assertNone`.
+//
+// THE HOLD. The one test that sends `dev_hold` checks a POST that crosses a scene load. The window
+// is about 20 ms: one tick plus building the new board. From outside, a leaked POST looks the same
+// as a legal one, because reloading the order board keeps its URL, so an item on the new board is
+// also the right result for a POST that arrives just after the swap. The hold stops the dev host's
+// sim loop until the POST and the load are both waiting, with the old route table up and the door
+// open, which is the state the shipped loop is already in while it builds a board. This covers the
+// webhook door only: the order board has no Route, and the host tests cover the endpoint door
+// through the real router.
 
 const KIND_SOURCE = 0;
+
+/** The dev host's render socket, and the frame that holds its sim loop. */
+const DEV_WS_URL = 'ws://127.0.0.1:8787/render';
+const DEV_HOLD_FRAME = 'dev_hold';
+const HOLD_OPEN_MS = 5_000;
+/** The gap between the two tick reads that show the loop has stopped. */
+const HOLD_SETTLE_MS = 100;
+/** Past the load, the board has to be this much older before it counts as settled. */
+const QUIET_TICKS = 60;
 
 /** A real order. The order board has no timer, so nothing moves on it until one of these arrives. */
 const ORDER_BODY = '{"id":"ord-1","items":[{"sku":"widget","qty":2,"price":5}]}';
@@ -290,6 +309,48 @@ async function postOrder(page: Page): Promise<void> {
   expect(resp.ok(), `the webhook accepted the order, status ${resp.status()}`).toBe(true);
 }
 
+/**
+ * Holds the dev host's sim loop: a second WebSocket from the test process sends `DEV_HOLD_FRAME`,
+ * then this polls until two tick reads about `HOLD_SETTLE_MS` apart match. The loop lets go by
+ * itself once a request and a control message are both waiting.
+ */
+async function holdHost(page: Page): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(DEV_WS_URL);
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new Error(`holdHost: ${DEV_WS_URL} did not open within ${HOLD_OPEN_MS} ms`));
+    }, HOLD_OPEN_MS);
+    ws.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`holdHost: the socket to ${DEV_WS_URL} failed`));
+    });
+    ws.addEventListener('open', () => {
+      ws.send(DEV_HOLD_FRAME);
+      const drained = (): void => {
+        if (ws.bufferedAmount > 0) {
+          setTimeout(drained, 10);
+          return;
+        }
+        clearTimeout(timer);
+        ws.close();
+        resolve();
+      };
+      drained();
+    });
+  });
+  await expect
+    .poll(
+      async () => {
+        const first = (await readScene(page)).tick;
+        await page.waitForTimeout(HOLD_SETTLE_MS);
+        return (await readScene(page)).tick === first;
+      },
+      { message: 'the dev host stopped ticking under the hold', timeout: 5_000, intervals: [0] },
+    )
+    .toBe(true);
+}
+
 test.afterEach(async ({ page }, testInfo) => {
   await restoreHostAfterFailedTest(page, testInfo);
 });
@@ -328,6 +389,67 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     await expectItemDrawnOnFirstBelt(page, 'advanced', async () => {});
     await expectRenderLoopAlive(page, 'after the advanced board moved');
     errs.assertNone('on the advanced board');
+  });
+
+  test('a POST held across a scene load is refused and shows no item on the new board', async ({ page }) => {
+    const errs = watchPageErrors(page);
+    await page.goto('/');
+    await waitForAppReady(page);
+    await openBoard(page, 'order_processing');
+    await expectFreshBoard(page, 'order_processing');
+
+    // A quiet board, so the load swaps at once, and old enough for `loadExample`'s check that the
+    // tick dropped.
+    const url = await webhookUrl(page, 0);
+    expect(url, 'Source handle 0 resolves to a loopback webhook URL').toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\/hook\/src-\d+$/,
+    );
+    const tickAfterLoad = (await readScene(page)).tick;
+    await pollScene(
+      page,
+      (s) => s.tick >= tickAfterLoad + QUIET_TICKS && s.belts.every((b) => b.items === 0),
+      { message: 'the order board is quiet and past its first ticks' },
+    ).toBe(true);
+
+    // The popover opens first, so the hold covers only the click and stays well under the page's
+    // stall watchdog.
+    await openExamples(page);
+    await holdHost(page);
+    const held = page.request.post(url as string, {
+      data: '{"id":"held-across-the-load","items":[{"sku":"widget","qty":1,"price":1}]}',
+      headers: { 'content-type': 'application/json' },
+    });
+    await loadExample(page, 'order_processing', placesInBoard('order_processing'));
+    const status = (await held).status();
+    expect.soft(status, 'the caller of a POST held across the load reads 503').toBe(503);
+
+    // From just after the swap, for as long as an item would need to cross the first belt.
+    const swapTick = (await readScene(page)).tick;
+    const belt = firstBelt(await readScene(page));
+    const clip = await clipAround(page, belt);
+    await pinTreads(page, 0);
+    const reference = await captureClip(page, clip);
+    let samples = 0;
+    let itemsSeen = 0;
+    let clipChanges = 0;
+    for (;;) {
+      const scene = await readScene(page);
+      if (scene.tick >= swapTick + FIRST_BELT_TICKS) break;
+      itemsSeen += scene.belts.reduce((sum, b) => sum + b.items, 0);
+      if (!(await captureClip(page, clip)).equals(reference)) clipChanges += 1;
+      samples += 1;
+      await page.waitForTimeout(SAMPLE_GAP_MS);
+    }
+    expect(samples, 'enough samples were taken to mean something').toBeGreaterThanOrEqual(CONTROL_SAMPLES);
+    expect.soft(itemsSeen, `the model reports no item on the new board across ${samples} samples`).toBe(0);
+    expect.soft(clipChanges, `the first belt's clip stays the same across ${samples} samples`).toBe(0);
+    await pinTreads(page, null);
+
+    // The door is open again and the same check can see an item.
+    await expectItemDrawnOnFirstBelt(page, 'order_processing', () => postOrder(page));
+    await expectRenderLoopAlive(page, 'after a POST was refused across a scene load');
+    errs.assertNone('across the held scene load');
+    await resetToDemo(page);
   });
 
   for (const id of ['demo_scene', 'order_processing', 'advanced'] as const) {

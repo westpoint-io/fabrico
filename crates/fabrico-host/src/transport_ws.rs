@@ -198,6 +198,32 @@ fn service_dev_fault(text: &str, dev_fault: Option<&Arc<AtomicBool>>) -> Option<
     }
 }
 
+/// The dev host's hold switch: an inbound TEXT frame whose whole text is this word sets the
+/// flag `SimLoop::with_dev_hold` reads at the top of `step()`, so a live check can put a POST
+/// and a control message in front of the sim at once. Honoured ONLY when the router was built
+/// with a flag ([`render_ws_router`]'s `dev_hold`), which only `dev_render_server` does;
+/// otherwise the frame is dropped like a malformed control frame. It never reaches
+/// [`decode_control`], so `ControlMsg` and the frontend's control kinds are unchanged and the
+/// Tauri shell has no path to it.
+pub const DEV_HOLD_FRAME: &str = "dev_hold";
+
+/// Decide ONE inbound TEXT frame against the dev hold switch: `None` when the frame is not
+/// [`DEV_HOLD_FRAME`] (the caller goes on to the query and control grammars), `Some(true)` when
+/// it is and the flag was set, `Some(false)` when it is and this router holds no switch (the
+/// frame is dropped).
+fn service_dev_hold(text: &str, dev_hold: Option<&Arc<AtomicBool>>) -> Option<bool> {
+    if text != DEV_HOLD_FRAME {
+        return None;
+    }
+    match dev_hold {
+        Some(flag) => {
+            flag.store(true, Ordering::Release);
+            Some(true)
+        }
+        None => Some(false),
+    }
+}
+
 /// The bounded capacity of the per-socket outbound config-query REPLY channel
 /// (threat T-40-05-UNBOUNDED). A frozen sim behind an UNbounded reply channel is a
 /// DoS (the 38-review F2 lesson); this caps queued replies so a flood of query
@@ -682,6 +708,9 @@ struct RenderWsState {
     /// The dev fault switch (phase 90, D-13): `Some` only in `dev_render_server`, which
     /// shares this flag with `SimLoop::with_dev_fault`. `None` drops [`DEV_FAULT_FRAME`].
     dev_fault: Option<Arc<AtomicBool>>,
+    /// The dev hold switch: `Some` only in `dev_render_server`, which shares this flag with
+    /// `SimLoop::with_dev_hold`. `None` drops [`DEV_HOLD_FRAME`].
+    dev_hold: Option<Arc<AtomicBool>>,
     /// The held fatal reason (phase 90, D-11): `None` while the sim runs, `Some(reason)` once
     /// its loop has ended. Each connection clones it, sends the held reason after its opening
     /// keyframe and again on every change.
@@ -1072,6 +1101,8 @@ async fn handle_socket(mut socket: WebSocket, state: RenderWsState) {
                     if service_dev_fault(&text, state.dev_fault.as_ref()).is_some() {
                         // The dev fault switch (D-13): set when this router holds one,
                         // dropped otherwise; never decoded as a control frame.
+                    } else if service_dev_hold(&text, state.dev_hold.as_ref()).is_some() {
+                        // The dev hold switch: the same rule as the fault switch above.
                     } else if text.starts_with(QUERY_FRAME_PREFIX) {
                         // A config-query: re-frame onto the SAME ControlMsg::Query*
                         // tick-boundary oneshot seam the Tauri path uses (39-06),
@@ -1120,6 +1151,7 @@ pub fn render_ws_router(
     body_limit: usize,
     load_refusals: LoadRefusalTx,
     dev_fault: Option<Arc<AtomicBool>>,
+    dev_hold: Option<Arc<AtomicBool>>,
     sim_fatal: watch::Receiver<Option<String>>,
 ) -> Router {
     Router::new()
@@ -1134,6 +1166,7 @@ pub fn render_ws_router(
             webhook_addr,
             load_refusals,
             dev_fault,
+            dev_hold,
             sim_fatal,
         })
 }
@@ -1160,6 +1193,7 @@ pub async fn run_render_listener(
     body_limit: usize,
     load_refusals: LoadRefusalTx,
     dev_fault: Option<Arc<AtomicBool>>,
+    dev_hold: Option<Arc<AtomicBool>>,
     sim_fatal: watch::Receiver<Option<String>>,
 ) -> std::io::Result<()> {
     // The dev WS binds a loopback address ONLY (threat T-07-EXPOSE); never a public
@@ -1176,6 +1210,7 @@ pub async fn run_render_listener(
         body_limit,
         load_refusals,
         dev_fault,
+        dev_hold,
         sim_fatal,
     );
     let listener = TcpListener::bind(addr).await?;
@@ -1255,6 +1290,27 @@ mod tests {
         assert!(flag.load(Ordering::Acquire), "the dev fault frame sets the shared flag");
     }
 
+    /// A router built without the dev hold switch drops the frame (the shipped shape), and the
+    /// word is not a control frame either, so it can't reach the sim by the control path.
+    #[test]
+    fn an_unwired_router_drops_the_dev_hold_frame() {
+        assert_eq!(service_dev_hold(DEV_HOLD_FRAME, None), Some(false));
+        assert_eq!(decode_control(DEV_HOLD_FRAME).err(), Some(CommandError::Malformed));
+    }
+
+    /// A wired router sets the shared flag on the frame, and other TEXT frames are left to the
+    /// query and control grammars with the flag unset.
+    #[test]
+    fn a_wired_router_sets_the_dev_hold_flag_and_nothing_else_does() {
+        let flag = Arc::new(AtomicBool::new(false));
+        for other in ["pause", "resume", "dev_hold\n", " dev_hold", "dev_fault", "query\n{}", ""] {
+            assert_eq!(service_dev_hold(other, Some(&flag)), None, "{other:?} is not the hold frame");
+            assert!(!flag.load(Ordering::Acquire), "{other:?} must not set the flag");
+        }
+        assert_eq!(service_dev_hold(DEV_HOLD_FRAME, Some(&flag)), Some(true));
+        assert!(flag.load(Ordering::Acquire), "the hold frame sets the shared flag");
+    }
+
     /// FAIL-01 (D-11): the sim-fatal frame is `{"kind":"simFatal","reason":...}`, the reason
     /// verbatim, an empty one included.
     #[test]
@@ -1312,6 +1368,7 @@ mod tests {
             None,
             MAX_GESTURE_FRAME,
             load_refusal_channel(),
+            None,
             None,
             fatal_rx,
         )

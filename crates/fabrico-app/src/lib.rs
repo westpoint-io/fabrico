@@ -2120,6 +2120,28 @@ mod tests {
         assert!(!code.contains(&word), "the Tauri shell names the dev fault builder at all");
     }
 
+    /// The shell never wires the dev hold seam either, checked the same way as the fault seam
+    /// above: the needle is assembled at run time, so this test's own text can't defeat it.
+    #[test]
+    fn the_shell_never_wires_the_dev_hold_seam() {
+        const LIB_RS: &str = include_str!("lib.rs");
+        let tests_at = LIB_RS
+            .find(concat!("#[cfg(test)]\n", "mod tests {"))
+            .expect("the test module's opening must be findable");
+        let code = &LIB_RS[..tests_at];
+        assert!(
+            code.contains("SimLoop::new("),
+            "parser control: the code part holds the sim loop's construction",
+        );
+        let needle = [".with_dev", "_hold("].concat();
+        assert!(
+            !code.contains(&needle),
+            "the Tauri shell calls the dev hold builder ({needle}); only dev_render_server may",
+        );
+        let word = ["with_dev", "_hold"].concat();
+        assert!(!code.contains(&word), "the Tauri shell names the dev hold builder at all");
+    }
+
     // ---- QA-01: the clipboard capability grant is ASSERTED, not assumed -------
     //
     // Why this is not redundant with `cargo build`: `tauri-build` regenerates the
