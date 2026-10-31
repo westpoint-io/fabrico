@@ -315,8 +315,10 @@ fn only_tick_once_sends_on_a_command_sender_in_src_and_examples() {
     assert_eq!(
         lines_mentioning(sim_loop, "cmd_tx"),
         SIM_LOOP_CMD_TX_LINES,
-        "sim_loop.rs uses the production sender in a new way. Its only production use is passing \
-         it to tick_once, and a copy of it can send outside tick_once"
+        "sim_loop.rs uses the production sender in a new way. It may only be made by spawn_executor \
+         and returned in a BoardExecutor, moved into the field by new and by the swap, sent on by \
+         the test-only test_send_command, and passed to tick_once. A clone or a copy of it can send \
+         outside tick_once"
     );
     let squeezed: String = sim_loop.chars().filter(|c| !c.is_whitespace()).collect();
     assert!(
