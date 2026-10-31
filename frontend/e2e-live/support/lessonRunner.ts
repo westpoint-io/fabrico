@@ -382,13 +382,33 @@ function fromOffset(offset: { dx: number; dy: number }): { x: number; y: number 
   return { x: offset.dx, y: offset.dy };
 }
 
-/** Press inside the hint's rect, away from its exact centre, after a hand-like move there. */
-async function pressHintRect(page: Page, label: string, rect: HintRect, offset: { x: number; y: number }): Promise<void> {
+/**
+ * Press inside the hint's rect, away from its exact centre, after a hand-like move there. The ring is
+ * read again once the hand has arrived, because a ring can move while the hand travels, and the point
+ * was worked out from the rect read before it set off. False means the app left this stage on the way
+ * and nothing was pressed.
+ */
+async function pressHintRect(
+  page: Page,
+  lesson: Lesson,
+  stepIndex: number,
+  stage: Stage,
+  rect: HintRect,
+  offset: { x: number; y: number },
+): Promise<boolean> {
   const point = pointInRect(rect, offset);
-  const inside =
-    point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
-  expect(inside, `${label}: the press lands inside the hint's rectangle`).toBe(true);
-  await pressPointByHand(page, point);
+  await moveHand(page, point);
+  const arrived = await hintsForStage(page, lesson, stepIndex, stage);
+  if (arrived === null) return false;
+  const now = arrived.hint;
+  const inside = point.x >= now.x && point.x <= now.x + now.width && point.y >= now.y && point.y <= now.y + now.height;
+  expect(
+    inside,
+    `${stageLabel(lesson, stepIndex, stage.id)}: the press at (${point.x},${point.y}) lands inside the ring as it stands when the hand arrives (${now.x},${now.y} ${now.width}x${now.height})`,
+  ).toBe(true);
+  await page.mouse.down();
+  await page.mouse.up();
+  return true;
 }
 
 /**
@@ -769,8 +789,9 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         if (stage.hint?.on === 'floor' || stage.hint?.on === 'machine') {
           await expectOnTheBoard(page, label, 'the ring is', [pointInRect(rects.hint, offset)]);
         }
-        await pressHintRect(page, label, rects.hint, offset);
-        actedOn.add(stageKey(stepIndex, stage.id));
+        if (await pressHintRect(page, lesson, stepIndex, stage, rects.hint, offset)) {
+          actedOn.add(stageKey(stepIndex, stage.id));
+        }
       }
     } else if (gesture.do === 'dragHint') {
       // Both rects from one return: a drag can't start from the last stage's ring.
