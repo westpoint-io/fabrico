@@ -282,6 +282,123 @@ test('by reference', async ({ page }) => {
     const row = rowAt(scan(src), lineWith(src, 'Date.now() - started > 3_000'));
     expect(row).toMatchObject({ kind: 'deadline', value: 'literal', ms: 3000, region: 'SAMPLER', frameBound: true, verdict: 'RED' });
   });
+
+  describe('a poll callback passed by name', () => {
+    const TUTORIAL_READ = "page.evaluate(() => (window as unknown as { __fabrico: { tutorial(): unknown } }).__fabrico.tutorial())";
+
+    it('FLAGS a literal cap when the callback is a local arrow over a drawn read', () => {
+      const src = `${HEAD}
+test('named', async ({ page }) => {
+  const read = async () => ${TUTORIAL_READ};
+  await expect.poll(read, { timeout: 5_000, message: 'the lesson moved on' }).toBeTruthy();
+});
+`;
+      expect(rowAt(scan(src), lineWith(src, 'timeout: 5_000'))).toMatchObject({ kind: 'poll', value: 'literal', ms: 5000, region: 'DRAWN', frameBound: true, verdict: 'RED' });
+    });
+
+    it('classes it the same as the same read written inline', () => {
+      const inline = `${HEAD}
+test('inline', async ({ page }) => {
+  await expect.poll(async () => ${TUTORIAL_READ}, { timeout: 5_000 }).toBeTruthy();
+});
+`;
+      const named = `${HEAD}
+test('named', async ({ page }) => {
+  const read = async () => ${TUTORIAL_READ};
+  await expect.poll(read, { timeout: 5_000 }).toBeTruthy();
+});
+`;
+      const { line: _inlineLine, ...inlineRow } = rowAt(scan(inline), lineWith(inline, 'timeout: 5_000'))!;
+      const { line: _namedLine, ...namedRow } = rowAt(scan(named), lineWith(named, 'timeout: 5_000'))!;
+      expect(namedRow).toEqual(inlineRow);
+    });
+
+    it('FLAGS a function declaration, and a function expression', () => {
+      const src = `${HEAD}
+test('declared', async ({ page }) => {
+  async function read() { return ${TUTORIAL_READ}; }
+  await expect.poll(read, { timeout: 5_001 }).toBeTruthy();
+  const other = async function () { return ${TUTORIAL_READ}; };
+  await expect.poll(other, { timeout: 5_002 }).toBeTruthy();
+});
+`;
+      const r = scan(src);
+      expect(rowAt(r, lineWith(src, 'timeout: 5_001'))).toMatchObject({ region: 'DRAWN', verdict: 'RED' });
+      expect(rowAt(r, lineWith(src, 'timeout: 5_002'))).toMatchObject({ region: 'DRAWN', verdict: 'RED' });
+    });
+
+    it('FOLLOWS a name to a name, a helper the arrow calls, and a closure a helper builds', () => {
+      const src = `${HEAD}
+async function inkAt(page: import('@playwright/test').Page): Promise<number> {
+  return (await grab(page)).length;
+}
+function reader(page: import('@playwright/test').Page) {
+  return async () => (await grab(page)).length;
+}
+test('followed', async ({ page }) => {
+  const first = async () => ${TUTORIAL_READ};
+  const second = first;
+  await expect.poll(second, { timeout: 5_001 }).toBeTruthy();
+  const ink = async () => inkAt(page);
+  await expect.poll(ink, { timeout: 5_002 }).toBeGreaterThan(0);
+  const built = reader(page);
+  await expect.poll(built, { timeout: 5_003 }).toBeGreaterThan(0);
+});
+`;
+      const r = scan(src);
+      expect(rowAt(r, lineWith(src, 'timeout: 5_001'))).toMatchObject({ region: 'DRAWN', verdict: 'RED' });
+      expect(rowAt(r, lineWith(src, 'timeout: 5_002'))).toMatchObject({ region: 'CAPTURE', verdict: 'RED' });
+      expect(rowAt(r, lineWith(src, 'timeout: 5_003'))).toMatchObject({ region: 'CAPTURE', verdict: 'RED' });
+    });
+
+    it('FLAGS a helper imported from a support module', () => {
+      const src = `${HEAD}
+test('imported', async ({ page }) => {
+  await expect.poll(grab, { timeout: 5_000 }).toBeTruthy();
+});
+`;
+      expect(rowAt(scan(src), lineWith(src, 'timeout: 5_000'))).toMatchObject({ region: 'CAPTURE', verdict: 'RED' });
+    });
+
+    it('reads the binding in its own scope when two tests use one name', () => {
+      const src = `${HEAD}
+test('a model read first', async ({ page }) => {
+  const read = async () => readScene(page);
+  await expect.poll(read, { timeout: 5_001 }).toBeTruthy();
+});
+test('a drawn read second', async ({ page }) => {
+  const read = async () => ${TUTORIAL_READ};
+  await expect.poll(read, { timeout: 5_002 }).toBeTruthy();
+});
+`;
+      const r = scan(src);
+      expect(rowAt(r, lineWith(src, 'timeout: 5_001'))).toMatchObject({ region: 'MODEL', frameBound: false, verdict: 'ok' });
+      expect(rowAt(r, lineWith(src, 'timeout: 5_002'))).toMatchObject({ region: 'DRAWN', frameBound: true, verdict: 'RED' });
+    });
+
+    it('classes a parameter NONE, as the header says, and borrows nothing from a same-named function', () => {
+      const src = `${HEAD}
+async function read() { return (await grab(null as never)).length; }
+async function waitOn(read: () => Promise<number>) {
+  await expect.poll(read, { timeout: 5_000 }).toBeGreaterThan(0);
+}
+test('passed in', async () => {
+  await waitOn(read);
+});
+`;
+      expect(rowAt(scan(src), lineWith(src, 'timeout: 5_000'))).toMatchObject({ region: 'NONE', frameBound: false, verdict: 'ok' });
+    });
+
+    it('passes a default cap on a drawn read, which the verdict only refuses around a capture', () => {
+      const src = `${HEAD}
+test('default', async ({ page }) => {
+  const read = async () => ${TUTORIAL_READ};
+  await expect.poll(read).toBeTruthy();
+});
+`;
+      expect(rowAt(scan(src), lineWith(src, 'expect.poll(read)'))).toMatchObject({ value: 'default', region: 'DRAWN', frameBound: true, verdict: 'ok' });
+    });
+  });
 });
 
 // ---- The real tree, and four plants on in-memory copies of real files (plan 84-18 Task 3) ----
@@ -369,5 +486,17 @@ describe('the live suite itself, and the gate seen red on planted literals (plan
     const found = findings(scanLiveWaitCaps(sources));
     expect(found.length, 'the plant names the unclassed hook').toBeGreaterThan(0);
     expect(found.every((f) => f === `${path}:${line} UNKNOWN_HOOK plantFourHook`), found.join('\n')).toBe(true);
+  });
+
+  it('PLANT 5 GOES RED: a literal cap on a poll whose callback is a local arrow over the tutorial probe', () => {
+    const path = 'e2e-live/parity.walk.ts';
+    const anchor = '  const undoFacts = async ()';
+    const planted =
+      '  const stepNow = async () => (await readProbe(page)).stepId;\n' +
+      "  await expect.poll(stepNow, { timeout: 5_000, message: 'PLANT 5' }).toBe('set-timer');\n";
+    const { sources, line } = plant(path, anchor, (t) => t.replace(anchor, planted + anchor), 'PLANT 5');
+    expect(findings(scanLiveWaitCaps(sources))).toEqual([
+      expect.stringMatching(new RegExp(`^${path.replace(/\./g, '\\.')}:${line} RED poll DRAWN `)),
+    ]);
   });
 });

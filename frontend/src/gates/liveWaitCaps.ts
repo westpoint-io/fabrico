@@ -35,6 +35,8 @@
 // IO > NONE found in the poll callback, the page function, the test body, the loop body or the
 // helper body, following calls by name (same file first, then the support modules imported) and
 // the in-page functions handed to the page by name (`page.evaluate(captureFrameInPage, args)`).
+// A poll callback passed by name (`expect.poll(read, ...)`) is read from the nearest declaration
+// in scope, then from the imports.
 // A wait is FRAME-BOUND when its region is CAPTURE, SAMPLER, INPUT or DRAWN. A test limit is
 // frame-bound only when its test reaches a capture or a pointer move outside a BUDGETING
 // function (one whose body calls `addFrameBudget`).
@@ -48,8 +50,11 @@
 // capture reached through an alias or a dynamic call is missed. A single click, key press,
 // button press or release is not counted as INPUT (each is one event the base limit carries). A
 // cap passed positionally to a helper (`waitForCameraSettle(page, 10_000)`) is read only through
-// the helper's own parameter default. A wait that reads a window property which an in-page
-// animation-frame loop, started by an EARLIER `page.evaluate`, writes (`__flashSeen`, `__seam`,
+// the helper's own parameter default. A poll callback that arrives as a parameter
+// (`function waitOn(read) { return expect.poll(read, ...); }`) or as a property (`expect.poll(o.read)`)
+// is classed NONE, because the wait's region is in whatever the caller passes. A wait that reads a
+// window property which an in-page animation-frame loop, started by an EARLIER `page.evaluate`,
+// writes (`__flashSeen`, `__seam`,
 // `__swapFrames`, `__newBoardSwapSeen`) is classed by the read alone, NONE, though the loop that
 // fills it is frame-driven (plan 84-18 names the five such waits it left).
 //
@@ -623,6 +628,42 @@ export function scanLiveWaitCaps(sources: Readonly<Record<string, string>>, opti
     return r;
   };
 
+  /**
+   * What `name` is bound to where `at` sits: the nearest enclosing block's function body or const
+   * initializer. Null at a parameter of that name, or when nothing in the file's scopes declares it.
+   * `FileInfo.fns` holds only the first of each name in a file, and two tests can each have their own
+   * `read`, so this walks the scopes.
+   */
+  const bindingInScope = (at: ts.Node, name: string): ts.Node | 'parameter' | null => {
+    for (let p: ts.Node | undefined = at.parent; p; p = p.parent) {
+      if (ts.isBlock(p) || ts.isSourceFile(p) || ts.isModuleBlock(p)) {
+        for (const statement of p.statements) {
+          if (ts.isFunctionDeclaration(statement) && statement.name?.text === name && statement.body) return statement.body;
+          if (!ts.isVariableStatement(statement)) continue;
+          for (const d of statement.declarationList.declarations) {
+            if (ts.isIdentifier(d.name) && d.name.text === name && d.initializer) return d.initializer;
+          }
+        }
+      }
+      if (ts.isFunctionLike(p) && p.parameters.some((q) => ts.isIdentifier(q.name) && q.name.text === name)) return 'parameter';
+    }
+    return null;
+  };
+
+  /** The region of an `expect.poll` callback, following one passed by name. */
+  const pollCallbackRegion = (file: FileInfo, callback: ts.Expression, depth = 0): Region => {
+    const f = unwrap(callback);
+    if (!ts.isIdentifier(f)) return regionOf(file, f);
+    if (depth > 8) return 'NONE';
+    const bound = bindingInScope(f, f.text);
+    if (bound === 'parameter') return 'NONE';
+    if (bound !== null) return ts.isExpression(bound) ? pollCallbackRegion(file, bound, depth + 1) : regionOf(file, bound);
+    const imported = resolveFn(file, f.text);
+    if (imported?.body !== undefined) return regionOf(files.get(imported.file)!, imported.body);
+    const constant = resolveConst(file, f.text);
+    return constant === null ? 'NONE' : pollCallbackRegion(constant[0], constant[1], depth + 1);
+  };
+
   const budgeting = (fn: FnInfo): boolean => calls(fn.body!).some((c) => calleeName(c) === 'addFrameBudget');
 
   /** Whether `node` reaches a capture or a pointer move outside a budgeting function. */
@@ -746,7 +787,7 @@ export function scanLiveWaitCaps(sources: Readonly<Record<string, string>>, opti
         void optArg;
         if (isPoll) {
           const cb = n.arguments[0];
-          const region = cb ? regionOf(file, cb) : 'NONE';
+          const region = cb ? pollCallbackRegion(file, cb) : 'NONE';
           if (timeoutProp) push(file, timeoutProp, 'poll', classify(file, timeoutProp.initializer), region, FRAME_BOUND.has(region));
           else push(file, n, 'poll', classify(file, undefined), region, FRAME_BOUND.has(region));
         } else if (timeoutProp && name !== null) {
