@@ -757,8 +757,13 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
     // An item at the head has not been taken, however long it sits there.
     h.inject(at(tick + 3, [0]));
     h.inject(at(tick + 4, [0]));
-    await expect.poll(async () => (await readProbe(page)).stepId).toBe('watch-items');
+    // The last step keeps its index when it finishes, so a read of the step can't tell running from
+    // finished. Wait for the model to hold the last packet, then for a frame of the layer's loop to
+    // have read it, or this read lands before the lesson has seen either packet.
+    await waitForBoard(page, { machines: 2, tick: tick + 4 });
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
     probe = await readProbe(page);
+    expect(probe.stepId).toBe('watch-items');
     expect(probe.card, 'a held item finishes nothing').toBe('running');
 
     h.inject(at(tick + 5, []));
