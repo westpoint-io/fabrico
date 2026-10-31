@@ -1283,11 +1283,15 @@ jobs:
   # overrun. The walk's files are named *.walk.ts, which neither live config matches, so they stay
   # out of the live suite's test count too.
   #
-  # ITS EXIT CODE IS ITS VERDICT. The live job swallows its suite's exit code because that suite
-  # carries a declared red. The walk has none, so nothing follows the run step here.
+  # ITS VERDICT IS ITS EXIT CODE AND ITS REPORT. The live job swallows its suite's exit code because
+  # that suite carries a declared red. The walk has none, so a failed test stops the job at the run
+  # step. Playwright also exits 0 on a skipped test or a deleted walk file, so
+  # `scripts/check-walk-report.sh` reads the report on the next run line and fails on a test that
+  # didn't run and pass, or on fewer than its floor of tests. Its bite proof runs before the walk, and
+  # `ci_wiring_parity.rs` pins all three steps.
   #
-  # THE LIMIT. All 12 walk tests took 4 minutes unthrottled and 22 minutes on two CPUs at a 100%
-  # quota, both read from a local run and rounded up. The slowest figure plus about 10 minutes of
+  # THE LIMIT. When the walk held 12 tests they took 4 minutes unthrottled and 22 minutes on two CPUs
+  # at a 100% quota, both read from a local run and rounded up. The slowest figure plus about 10 minutes of
   # build before the suite is 32, and twice that is 64. The `globalTimeout` in
   # frontend/playwright.walk.config.ts is 54, the limit less those 10 minutes, so an overrun writes a
   # report before the runner is killed. These are local numbers: a recorded CI run replaces them.
@@ -1327,9 +1331,17 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # The checker must be seen to bite before it is trusted with the report.
+      - name: Walk report checker bites
+        run: bash scripts/prove-walk-report-bites.sh
+
       - name: Run the lesson walk
         working-directory: frontend
         run: npm run e2e:walk
+
+      - name: Every walk test ran and passed
+        working-directory: frontend
+        run: bash ../scripts/check-walk-report.sh test-results/walk-report.json
 
   # Frontend unit gate (Phase 56, plan 56-02, decision D-26) - the frontend's own
   # vitest suite and its typecheck, neither of which any CI job ran until now.

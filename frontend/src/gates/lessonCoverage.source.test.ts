@@ -6,8 +6,13 @@
 // in the table, an entry with no lesson, a lesson file `lessons/index.ts` doesn't list, a stage whose
 // gesture the runner can't drive, or a refused gesture pointing at a step or stage that isn't there.
 //
-// It imports the lesson data and the table, and reads the walk file and the index as text. The walk
-// file imports Playwright, and a vitest gate can't load that.
+// It also scans all the `*.walk.ts` files and the runner they share for a test taken out of the run,
+// and fails when one of the files the walk is known to need has gone. Playwright exits 0 on a skipped
+// test, so this catches it on every `npm test`, and `scripts/check-walk-report.sh` catches what a
+// source scan can't, such as a skip reached through an alias, in the walk's CI job.
+//
+// It imports the lesson data and the table, and reads the walk files and the index as text. The walk
+// files import Playwright, and a vitest gate can't load that.
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -18,7 +23,11 @@ import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
 import { stripComments } from './walkSpecSource';
 
 const LESSONS_DIR = new URL('../tutorial/lessons/', import.meta.url);
-const WALK_FILE = new URL('../../e2e-live/lessons.walk.ts', import.meta.url);
+const E2E_LIVE_DIR = new URL('../../e2e-live/', import.meta.url);
+const LESSON_WALK_FILE = 'e2e-live/lessons.walk.ts';
+const WALK_RUNNER = 'e2e-live/support/lessonRunner.ts';
+/** Each holds walk tests or the runner they share. A test count can't say which of these went missing. */
+const NEEDED_WALK_FILES = ['e2e-live/lesson-entry.walk.ts', 'e2e-live/lesson-variants.walk.ts', LESSON_WALK_FILE, 'e2e-live/parity.walk.ts', WALK_RUNNER];
 
 export interface CoverageArgs {
   lessons: readonly Lesson[];
@@ -27,11 +36,12 @@ export interface CoverageArgs {
   /** The names in the `lessons/` directory. */
   lessonFiles: readonly string[];
   indexSource: string;
-  walkSource: string;
+  /** Every `*.walk.ts` file and the shared runner, by path from `frontend/`. */
+  walkFiles: Readonly<Record<string, string>>;
 }
 
 const LOOPS_OVER_TABLE = /\bfor\s*\(\s*const\s+\w+\s+of\s+Object\.keys\(\s*LESSON_WALKS\s*\)\s*\)/;
-const SILENCED = /\btest(?:\.describe)?\.(?:skip|only|fixme|fail)\b/g;
+const SILENCED = /\b(?:test(?:\.describe|\.step)?|test\.info\(\)|testInfo)\.(?:skip|only|fixme|fail)\b/g;
 
 function escapeForRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -87,10 +97,26 @@ export function auditLessonCoverage(args: CoverageArgs): string[] {
     if (!ids.has(id)) findings.push(`${id}: LESSON_WALKS has an entry for this id, and LESSONS holds no such lesson`);
   }
   findings.push(...auditFiles(args));
-  const walk = stripComments(args.walkSource);
+  const walk = stripComments(args.walkFiles[LESSON_WALK_FILE] ?? '');
   if (!LOOPS_OVER_TABLE.test(walk)) findings.push('lessons.walk.ts: the file no longer loops over LESSON_WALKS, so a lesson may get no test');
-  for (const m of walk.matchAll(SILENCED)) findings.push(`lessons.walk.ts: holds ${m[0]}, which takes a lesson's walk out of the run`);
+  for (const needed of NEEDED_WALK_FILES) {
+    if (!(needed in args.walkFiles)) findings.push(`${needed}: this file is gone, and the walk's tests or its runner went with it`);
+  }
+  for (const [path, source] of Object.entries(args.walkFiles)) {
+    const stripped = stripComments(source);
+    for (const m of stripped.matchAll(SILENCED)) {
+      const line = stripped.slice(0, m.index).split('\n').length;
+      findings.push(`${path}:${line}: holds ${m[0]}, which takes a test out of the walk's run`);
+    }
+  }
   return findings;
+}
+
+/** The same files Playwright's `testMatch` finds under `e2e-live/`, at any depth, plus the runner. */
+function readWalkFiles(): Record<string, string> {
+  const names = readdirSync(E2E_LIVE_DIR, { recursive: true, encoding: 'utf8' }).map((name) => name.split('\\').join('/'));
+  const paths = names.map((name) => `e2e-live/${name}`).filter((path) => /\.walk\.ts$/.test(path) || path === WALK_RUNNER);
+  return Object.fromEntries(paths.map((path) => [path, readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')]));
 }
 
 const REAL: CoverageArgs = {
@@ -99,7 +125,7 @@ const REAL: CoverageArgs = {
   drivable: DRIVABLE_GESTURES,
   lessonFiles: readdirSync(LESSONS_DIR),
   indexSource: readFileSync(new URL('index.ts', LESSONS_DIR), 'utf8'),
-  walkSource: readFileSync(WALK_FILE, 'utf8'),
+  walkFiles: readWalkFiles(),
 };
 const FIRST = LESSONS[0] as Lesson;
 
@@ -110,13 +136,19 @@ function withStage(change: (stage: Stage) => Stage): Lesson {
 }
 
 const audit = (change: Partial<CoverageArgs>): string => auditLessonCoverage({ ...REAL, ...change }).join('\n');
+/** The real walk files with `text` added to the end of one. */
+const withAdded = (path: string, text: string): CoverageArgs['walkFiles'] => ({ ...REAL.walkFiles, [path]: `${REAL.walkFiles[path] ?? ''}\n${text}` });
+const withLessonWalk = (source: string): CoverageArgs['walkFiles'] => ({ ...REAL.walkFiles, [LESSON_WALK_FILE]: source });
 
 describe('every lesson has a walk', () => {
   it('reads the real lessons, the real table and the real walk file', () => {
     expect(LESSONS.length).toBeGreaterThan(0);
     expect(REAL.lessonFiles).toContain('yourFirstLine.ts');
     expect(REAL.indexSource).toContain('YOUR_FIRST_LINE');
-    expect(REAL.walkSource).toContain('walkLesson');
+    expect(REAL.walkFiles[LESSON_WALK_FILE]).toContain('walkLesson');
+    expect(REAL.walkFiles['e2e-live/parity.walk.ts']).toContain('test(');
+    expect(REAL.walkFiles[WALK_RUNNER]).toContain('export async function walkLesson');
+    expect(Object.keys(REAL.walkFiles).filter((path) => path.endsWith('.spec.ts')), 'the scan stays on the walk').toEqual([]);
   });
 
   it('holds one walk table entry per lesson', () => {
@@ -181,21 +213,38 @@ describe('every lesson has a walk', () => {
     });
 
     it('a walk file that does not loop over LESSON_WALKS', () => {
-      expect(audit({ walkSource: "for (const lesson of LESSONS) { test(lesson.id, () => {}); }" })).toMatch(/no longer loops over LESSON_WALKS/);
+      expect(audit({ walkFiles: withLessonWalk('for (const lesson of LESSONS) { test(lesson.id, () => {}); }') })).toMatch(/no longer loops over LESSON_WALKS/);
     });
 
     it('a walk file whose loop sits in a comment', () => {
-      expect(audit({ walkSource: '// for (const id of Object.keys(LESSON_WALKS)) {}' })).toMatch(/no longer loops over LESSON_WALKS/);
+      expect(audit({ walkFiles: withLessonWalk('// for (const id of Object.keys(LESSON_WALKS)) {}') })).toMatch(/no longer loops over LESSON_WALKS/);
     });
 
-    it('a walk file holding test.skip, test.only or test.fixme', () => {
-      for (const form of ['test.skip', 'test.only', 'test.fixme']) {
-        expect(audit({ walkSource: `${REAL.walkSource}\n${form}('x', () => {});` }), form).toContain(`holds ${form}`);
+    it('each way of taking a test out of the run, in each walk file and the runner', () => {
+      for (const path of NEEDED_WALK_FILES) {
+        for (const form of ['test.skip', 'test.only', 'test.fixme', 'test.fail', 'test.describe.skip', 'test.describe.only', 'test.describe.fixme', 'test.step.skip', 'testInfo.skip', 'testInfo.fixme', 'test.info().skip', 'test.info().fail']) {
+          const found = audit({ walkFiles: withAdded(path, `${form}('x', () => {});`) });
+          expect(found, `${path}: ${form}`).toMatch(new RegExp(`^${path.replace(/\./g, '\\.')}:\\d+: holds ${form.replace(/[.()]/g, '\\$&')},`, 'm'));
+        }
+      }
+    });
+
+    it('a walk file nobody has listed yet', () => {
+      const path = 'e2e-live/a-new-one.walk.ts';
+      expect(audit({ walkFiles: withAdded(path, "test.skip('x', () => {});") })).toContain(`${path}:2: holds test.skip`);
+    });
+
+    it('each needed walk file going missing', () => {
+      for (const path of NEEDED_WALK_FILES) {
+        const walkFiles = Object.fromEntries(Object.entries(REAL.walkFiles).filter(([name]) => name !== path));
+        expect(audit({ walkFiles }), path).toContain(`${path}: this file is gone`);
       }
     });
   });
 
-  it('stays quiet on test.skip in a comment in the walk file', () => {
-    expect(audit({ walkSource: `${REAL.walkSource}\n// test.skip('x', () => {});` })).toBe('');
+  it('stays quiet on test.skip in a comment in a walk file', () => {
+    for (const path of NEEDED_WALK_FILES) {
+      expect(audit({ walkFiles: withAdded(path, "// test.skip('x', () => {});") }), path).toBe('');
+    }
   });
 });

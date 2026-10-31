@@ -24,6 +24,7 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
+  // The JSON report is what scripts/check-walk-report.sh reads, because this run exits 0 on a skipped test.
   reporter: [['list'], ['json', { outputFile: 'test-results/walk-report.json' }]],
   use: {
     baseURL: 'http://127.0.0.1:5173',
