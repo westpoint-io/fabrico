@@ -120,4 +120,9 @@ export interface Lesson {
   steps: readonly Step[];
   /** What the card says once the last step is done. */
   closing: readonly PhraseToken[];
+  /**
+   * The one gesture this lesson's walk makes that the app should refuse. It's required, so a lesson
+   * can't compile without saying where its walk checks that a refusal leaves the step alone.
+   */
+  refused: { atStep: string; atStage: string; press: { on: 'machine'; of: BindingName } };
 }

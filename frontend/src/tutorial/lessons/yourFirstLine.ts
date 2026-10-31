@@ -176,4 +176,6 @@ export const YOUR_FIRST_LINE: Lesson = {
     { kind: SINK_KIND },
     ' takes them in. The board is yours, so keep building.',
   ],
+  // A Sink pressed on the Source's own cell, which the host refuses as a collision.
+  refused: { atStep: 'place-sink', atStage: 'sink-floor', press: { on: 'machine', of: 'source' } },
 };

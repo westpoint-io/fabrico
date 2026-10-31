@@ -10,7 +10,6 @@
 // file imports Playwright, and a vitest gate can't load that.
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DRIVABLE_GESTURES, LESSON_WALKS } from '../../e2e-live/support/lessonWalks.ts';
 import { LESSONS } from '../tutorial/lessons/index.ts';
@@ -52,7 +51,7 @@ function auditFiles(args: CoverageArgs): string[] {
     });
 }
 
-function auditStage(lesson: Lesson, stepLabel: string, stage: Stage, drivable: readonly string[]): string[] {
+function auditStage(stepLabel: string, stage: Stage, drivable: readonly string[]): string[] {
   const label = `${stepLabel} stage ${stage.id}`;
   const out: string[] = [];
   if (!drivable.includes(stage.gesture.do)) out.push(`${label}: the runner can't drive the gesture ${stage.gesture.do}`);
@@ -78,7 +77,7 @@ export function auditLessonCoverage(args: CoverageArgs): string[] {
     if (!(lesson.id in args.walks)) findings.push(`${lesson.id}: this lesson has no entry in LESSON_WALKS, so it gets no walk test`);
     lesson.steps.forEach((step, i) => {
       for (const stage of step.stages) {
-        findings.push(...auditStage(lesson, `${lesson.id} step ${i + 1} (${step.id})`, stage, args.drivable));
+        findings.push(...auditStage(`${lesson.id} step ${i + 1} (${step.id})`, stage, args.drivable));
       }
     });
     findings.push(...auditRefused(lesson));

@@ -6,6 +6,7 @@ import { SHORTCUTS } from '../../src/input/shortcuts';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk } from './canvasDots';
+import { LESSON_WALKS, type LessonWalk } from './lessonWalks';
 import {
   HAND_MOVE_FRAMES,
   captureClip,
@@ -41,11 +42,6 @@ const RECORD_FRAMES = 8;
 const GHOST_FRAMES = 8;
 /** How far inside the ring's rect the pixel read stays, which also clears the ring's own paint. */
 const CELL_INTERIOR_INSET_PX = 6;
-/** The press lands off centre, because a hand never lands on an exact centre. */
-const PRESS_OFFSET = { x: 5, y: -4 };
-/** Off centre at both ends of a drag, inside a 32 px ring. */
-const DRAG_START_OFFSET = { x: 3, y: -2 };
-const DRAG_END_OFFSET = { x: -2, y: 3 };
 /** Sim ticks an item may need to reach the Sink's tile: a Timer's wait and the belt's whole length, twice over. */
 const DOT_READ_TICKS = 400;
 /** Drawn frames the dots read allows: it needs three drawn ticks, and the frames to see a dot on the last tile. */
@@ -181,6 +177,8 @@ interface WalkState {
   actedOn: Set<string>;
   /** The steps the runner walks. A test did the others by hand, so rule 2 has nothing to say about them. */
   walked: Set<number>;
+  /** Where this lesson's hand lands, from the walk table. */
+  walk: LessonWalk;
 }
 
 /**
@@ -318,9 +316,13 @@ export function pointInRect(rect: HintRect, offset: { x: number; y: number }): {
   };
 }
 
+function fromOffset(offset: { dx: number; dy: number }): { x: number; y: number } {
+  return { x: offset.dx, y: offset.dy };
+}
+
 /** Press inside the hint's rect, away from its exact centre, after a hand-like move there. */
-async function pressHintRect(page: Page, label: string, rect: HintRect): Promise<void> {
-  const point = pointInRect(rect, PRESS_OFFSET);
+async function pressHintRect(page: Page, label: string, rect: HintRect, offset: { x: number; y: number }): Promise<void> {
+  const point = pointInRect(rect, offset);
   const inside =
     point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
   expect(inside, `${label}: the press lands inside the hint's rectangle`).toBe(true);
@@ -555,7 +557,7 @@ function hasLeftThisStep(record: readonly StepRecordEntry[], stepIndex: number):
 
 /** One step of a lesson, through its hints. */
 async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex: number, step: Step): Promise<void> {
-  const { actedOn } = state;
+  const { actedOn, walk } = state;
   // The floor stage's rect and the capture taken on arriving there. Remembered from
   // `hintsForStage`, which is how this read avoids remembering the palette row.
   let cellClip: { x: number; y: number; width: number; height: number } | null = null;
@@ -572,8 +574,8 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   let lastStageId: string | null = null;
   for (let round = 0; round < rounds && !movedOn; round++) {
     const record = await readRecord(page);
-    checkRecord(lesson, record, state);
     const left = hasLeftThisStep(record, stepIndex);
+    checkRecord(lesson, record, state);
     const onThisStep = record.filter((e) => e.stepIndex === stepIndex);
     const entry = onThisStep[onThisStep.length - 1];
     if (entry === undefined && !left) {
@@ -616,10 +618,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
           // The pointer still sits on the palette row.
           beforePixels = await captureWithGhostGone(page, cellClip);
         }
+        const offset = fromOffset(stage.hint?.on === 'floor' ? walk.floorOffset : walk.pressOffset);
         if (stage.hint?.on === 'floor' || stage.hint?.on === 'machine') {
-          await expectOnTheBoard(page, label, 'the ring is', [pointInRect(rects.hint, PRESS_OFFSET)]);
+          await expectOnTheBoard(page, label, 'the ring is', [pointInRect(rects.hint, offset)]);
         }
-        await pressHintRect(page, label, rects.hint);
+        await pressHintRect(page, label, rects.hint, offset);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
     } else if (gesture.do === 'dragHint') {
@@ -627,8 +630,8 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       const rects = await hintsForStage(page, lesson, stepIndex, stage);
       if (rects !== null) {
         if (rects.hintTo === null) throw new Error(`${label}: this stage names a drag and reports no release ring`);
-        const start = pointInRect(rects.hint, DRAG_START_OFFSET);
-        const end = pointInRect(rects.hintTo, DRAG_END_OFFSET);
+        const start = pointInRect(rects.hint, fromOffset(walk.dragFrom));
+        const end = pointInRect(rects.hintTo, fromOffset(walk.dragTo));
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
         beltClip = await middleTileClip(page, label);
         beltBefore = await captureWithGhostGone(page, beltClip.clip);
@@ -749,6 +752,8 @@ async function finishWalk(page: Page, lesson: Lesson, state: WalkState): Promise
  * before that step, so a test can do it by hand and carry on with `continueLesson`.
  */
 export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: string } = {}): Promise<void> {
+  const walk: LessonWalk | undefined = LESSON_WALKS[lesson.id];
+  if (walk === undefined) throw new Error(`${lesson.id}: LESSON_WALKS has no entry for this lesson, so the walk has no offsets to press with`);
   await latchStepRecord(page);
   await expect
     .poll(async () => (await readRecord(page)).length, {
@@ -760,7 +765,7 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
   expect(first?.stepIndex, `${lesson.id}: the record starts on step 1`).toBe(0);
 
   const to = opts.until === undefined ? lesson.steps.length : indexOfStep(lesson, opts.until);
-  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)) };
+  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
   if (opts.until === undefined) await finishWalk(page, lesson, state);
