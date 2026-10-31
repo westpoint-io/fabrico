@@ -444,5 +444,12 @@ test("Undo takes back only the user's own gestures", async ({ page }) => {
   ).toEqual([0, 1, 2, 1, 0]);
 
   await expectRenderLoopAlive(page, 'after the Undos');
+  // The polls above can pass before the frame that goes back to step 1, so they can't speak to a send
+  // made on it. This read comes after the lesson has gone back and frames have been drawn since.
+  expect(await undoFacts(), 'going back to step 1 sent nothing, and the board stayed empty').toEqual({
+    machines: 0,
+    canUndo: false,
+    inputs: UNDO_TEST_INPUTS,
+  });
   watcher.assertNone('during the Undos');
 });
