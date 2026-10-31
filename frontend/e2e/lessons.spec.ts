@@ -820,6 +820,8 @@ const RESTART = `Restart ${YOUR_FIRST_LINE.title}`;
 const GUARD_HEADING = 'Start a new board?';
 const STOPPED_TITLE = 'Unavailable: the simulation stopped';
 const SWAPPED_SENTENCE = 'The board changed, so this lesson stopped. Restart it, or leave it.';
+/** The gap App leaves between the status strip and a panel docked top right: `--fab-space-sm`. */
+const STRIP_GUTTER = 8;
 
 const lessonRow = (page: Page): Locator => page.locator(`${PANEL} [data-fab-lesson-row="${YOUR_FIRST_LINE.id}"]`);
 const guardButton = (page: Page, name: 'Cancel' | 'Discard' | 'Save'): Locator => page.locator('.fab-dialog-panel').getByRole('button', { name });
@@ -853,6 +855,34 @@ const modelNodes = (page: Page): Promise<Array<{ id: number; kind: number }>> =>
 /** A second board from the host, as a Load, an example or a New would bring. */
 function swappedBoard(floor: number, tick: number): Buffer {
   return buildPacket({ full: true, tick, generation: floor, swapFloor: floor });
+}
+
+/** A machine far from every case's cells, for a diff to add so the board reads Unsaved. */
+const DIRTY_MACHINE: InjectNode = { id: 90, kind: 0, cell_x: 2, cell_y: 14 };
+
+/** Give the status strip something to show. Empty, it measures zero and has nothing to dodge with. */
+async function lightStatusStrip(page: Page, h: Harness, tick: number): Promise<void> {
+  h.inject(buildPacket({ full: false, tick, nodes: [OLD_MACHINE, DIRTY_MACHINE] }));
+  await expect(page.locator('[data-fab-status-strip]').getByText('Unsaved', { exact: true }), 'the strip holds something to measure').toBeVisible();
+}
+
+/**
+ * The strip stops one gutter left of the list. This reads across only: the strip sits above the
+ * list's top edge at most window sizes, so a read that also took "above" as clear would pass with
+ * the strip over the list's column.
+ */
+async function expectStripClearOfList(page: Page): Promise<void> {
+  const strip = page.locator('[data-fab-status-strip]');
+  const stripBox = await boxOf(strip, 'the status strip');
+  expect(stripBox.width, 'the strip holds something, so it has a width to read').toBeGreaterThan(0);
+  expect(stripBox.height, 'the strip holds something, so it has a height to read').toBeGreaterThan(0);
+  const list = await boxOf(page.locator(PANEL), 'the list');
+  await expect
+    .poll(async () => {
+      const box = await boxOf(strip, 'the status strip');
+      return box.x + box.width;
+    }, { message: 'the status strip ends left of the list, with one gutter between them' })
+    .toBeLessThanOrEqual(list.x - STRIP_GUTTER + TOLERANCE);
 }
 
 test.describe('the lesson list', () => {
@@ -947,9 +977,10 @@ test.describe('the lesson list', () => {
   });
 
   test('Help and Lessons share one slot', async ({ page }) => {
-    await boot(page);
+    const h = await boot(page);
     const help = page.locator('#fab-help-panel');
     const lessons = page.locator(PANEL);
+    await lightStatusStrip(page, h, 4);
 
     await page.getByRole('button', { name: 'Help', exact: true }).click();
     await expect(help).toBeVisible();
@@ -962,11 +993,7 @@ test.describe('the lesson list', () => {
     expect(Math.abs(box.y - 116), "the list's top is the shared dock").toBeLessThanOrEqual(TOLERANCE);
     expect(Math.abs(1280 - (box.x + box.width) - 24), "the list's right edge").toBeLessThanOrEqual(TOLERANCE);
     expect(Math.abs(box.width - (432 + 28)), 'the list is 432 px of content inside its padding').toBeLessThanOrEqual(TOLERANCE);
-    const strip = await page.locator('[data-fab-status-strip]').boundingBox();
-    if (strip !== null && strip.width > 0 && strip.height > 0) {
-      const apart = strip.y + strip.height <= box.y + TOLERANCE || strip.x + strip.width <= box.x + TOLERANCE;
-      expect(apart, 'the status strip dodges the list').toBe(true);
-    }
+    await expectStripClearOfList(page);
 
     await page.getByRole('button', { name: 'Help', exact: true }).click();
     await expect(lessons, "the toolbar's Help closes the list").toHaveCount(0);
@@ -1408,6 +1435,7 @@ test.describe('the welcome card opens the list', () => {
     await h.connected;
     h.inject(buildPacket({ full: true, tick: 3, nodes: [OLD_MACHINE] }));
     await waitForBoard(page, { machines: 1, tick: 3 });
+    await lightStatusStrip(page, h, 4);
 
     const heading = page.getByRole('heading', { name: 'Welcome to Fabrico' });
     await expect(heading, 'the first-run card shows').toBeVisible();
@@ -1423,6 +1451,8 @@ test.describe('the welcome card opens the list', () => {
     await page.getByRole('button', { name: 'Start a lesson', exact: true }).click();
 
     await expect(page.locator(PANEL), 'the list opens').toBeVisible();
+    // Help never opened on this path, so only the list's own open flag can re-measure the strip.
+    await expectStripClearOfList(page);
     await expect(heading, 'the card goes').toHaveCount(0);
     expect(await page.evaluate(() => localStorage.getItem('fab.onboarding.seen.v1')), 'and it stays gone').toBe('1');
     await expectRow(page, 'Not started', [START], [START]);
