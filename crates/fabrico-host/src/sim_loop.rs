@@ -7355,6 +7355,19 @@ mod tests {
             false
         }
 
+        /// Wait with no tick running until the consumers have picked up `count` commands. Read the
+        /// counter rather than the result channel when a tick has run since the command was
+        /// released, because that tick can have consumed the result already.
+        fn wait_for_dispatches(sim: &SimLoop, count: usize, naps: u32) -> bool {
+            for _ in 0..naps {
+                if sim.dispatched_count() >= count {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        }
+
         /// The outcome of each `CommandResult` in the log, in order.
         fn logged_results(sim: &SimLoop) -> Vec<(CommandId, Outcome)> {
             sim.host()
@@ -7489,7 +7502,7 @@ mod tests {
 
             ctx.send(ControlMsg::Resume).expect("resume");
             sim.step().expect("resume");
-            assert!(wait_for_a_result(&sim, LONG_WAIT), "resume lets it through");
+            assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "resume lets it through");
             assert_eq!(sim.dispatched_count(), 1, "the counter carries across the swap");
         }
 
