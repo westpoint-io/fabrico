@@ -1,7 +1,11 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
 import { EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
+import { SHORTCUTS } from '../src/input/shortcuts';
+import { LESSONS } from '../src/tutorial/lessons/index';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
+import { noteTokens } from '../src/tutorial/machine';
+import { REAL_TABLES, phrasePlain } from '../src/tutorial/phrase';
 import { nubAnchor } from '../shared/geometry';
 import {
   CELL,
@@ -191,6 +195,85 @@ function sourceOn(cell: readonly [number, number], tick: number): Buffer {
     generation: 1,
     swapFloor: 1,
     nodes: [{ id: 2, kind: 0, cell_x: cell[0], cell_y: cell[1], ports: [{ index: 0, cell_x: cell[0], cell_y: cell[1], side: 1, role: 1 }] }],
+  });
+}
+
+/** The narrowest window the app supports. */
+const NARROWEST = { width: 1024, height: 768 };
+
+/** The longest key label the shortcut table holds: a later lesson's note can name it. */
+const LONGEST_LABEL = Object.values(SHORTCUTS)
+  .map((shortcut) => shortcut.label)
+  .reduce((a, b) => (b.length > a.length ? b : a));
+const LONGEST_NOTE = (['skippedOne', 'skippedMany', 'wentBack', 'alreadyRunning'] as const)
+  .map((kind) =>
+    phrasePlain(noteTokens({ kind, a: STEP_COUNT, b: STEP_COUNT }), {
+      ...REAL_TABLES,
+      shortcuts: { ...REAL_TABLES.shortcuts, playPause: { label: LONGEST_LABEL } },
+    }),
+  )
+  .reduce((a, b) => (b.length > a.length ? b : a));
+const LONGEST_INSTRUCTION = LESSONS.flatMap((lesson) => lesson.steps.flatMap((step) => step.stages))
+  .map((stage) => phrasePlain(stage.text))
+  .reduce((a, b) => (b.length > a.length ? b : a));
+
+/** The card's box, with the lines each paragraph takes. */
+async function readCard(page: Page): Promise<{ top: number; bottom: number; height: number; lines: number[] }> {
+  return page.locator(CARD).evaluate((card) => {
+    const box = card.getBoundingClientRect();
+    const column = card.querySelector('[aria-live]') as HTMLElement;
+    const lines = [...column.children]
+      .filter((el) => getComputedStyle(el).display !== 'none')
+      .map((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+      });
+    return { top: box.top, bottom: box.bottom, height: box.height, lines };
+  });
+}
+
+/**
+ * The tallest each card state may be, in px: 44 of padding, 16.8 a line of text and 8 between
+ * paragraphs. Starting is one button tall, 44 + 44. Running is the text budget, 2 lines of note, the
+ * step line and 3 of instruction: 44 + 6 x 16.8 + 2 x 8. Swapped is 44 + 3 x 16.8 + 8. Finished is
+ * the heading, 2 lines of closing sentence and the buttons under them, as measured at 163.6.
+ */
+const CARD_MAX_HEIGHT = { starting: 88, running: 161, swapped: 103, finished: 164 } as const;
+
+/** A sentence too long for the card makes it taller, up over the board, and only its box shows that. */
+async function expectCardFits(page: Page, state: keyof typeof CARD_MAX_HEIGHT): Promise<void> {
+  const card = await readCard(page);
+  const bottom = NARROWEST.height - 24;
+  expect(Math.abs(card.bottom - bottom), `${state}: the card ends 24 px above the window's bottom`).toBeLessThanOrEqual(TOLERANCE);
+  expect(card.height, `${state}: the card's height, read ${JSON.stringify(card.lines)} lines`).toBeLessThanOrEqual(CARD_MAX_HEIGHT[state] + TOLERANCE);
+  expect(card.top, `${state}: the card's top edge`).toBeGreaterThanOrEqual(bottom - CARD_MAX_HEIGHT[state] - TOLERANCE);
+}
+
+/** Show the longest note and instruction on a running card, in the page's own column and stylesheet. */
+async function fillCard(page: Page): Promise<void> {
+  await page.locator(`${CARD} [aria-live]`).evaluate(
+    (column, words) => {
+      const instruction = column.lastElementChild as HTMLElement;
+      const paragraph = (text: string): HTMLElement => {
+        const el = instruction.cloneNode(false) as HTMLElement;
+        el.textContent = text;
+        el.setAttribute('data-test-fill', '');
+        return el;
+      };
+      column.prepend(paragraph(words.note));
+      column.append(paragraph(words.instruction));
+      instruction.style.display = 'none';
+    },
+    { note: LONGEST_NOTE, instruction: LONGEST_INSTRUCTION },
+  );
+}
+
+/** Put the card back, so React finds the children it left there. */
+async function clearFilledCard(page: Page): Promise<void> {
+  await page.locator(`${CARD} [aria-live]`).evaluate((column) => {
+    column.querySelectorAll('[data-test-fill]').forEach((el) => el.remove());
+    (column.lastElementChild as HTMLElement).style.display = '';
   });
 }
 
@@ -409,6 +492,31 @@ test.describe('the step card and the hint ring', () => {
     const text = await page.locator(`${CARD} [aria-live]`).evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
     expect(text.clientWidth, 'the text box has width').toBeGreaterThan(0);
     expect(text.scrollWidth, 'the text stays inside its box').toBeLessThanOrEqual(text.clientWidth);
+  });
+
+  test('the card keeps its size at the narrowest window, with the longest text', async ({ page }) => {
+    await page.setViewportSize(NARROWEST);
+    const h = await boot(page);
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
+    await page.getByRole('button', { name: `Start ${YOUR_FIRST_LINE.title}`, exact: true }).click();
+    await expect.poll(async () => (await readProbe(page)).card, { message: 'the card reads Starting' }).toBe('starting');
+    await expectCardFits(page, 'starting');
+
+    h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1 }));
+    await expect.poll(async () => (await readProbe(page)).card, { message: 'the lesson is running' }).toBe('running');
+    await fillCard(page);
+    await expectCardFits(page, 'running');
+    const { lines } = await readCard(page);
+    expect(lines.length, 'a note, the step line and an instruction').toBe(3);
+    expect(lines[0], 'the longest note takes at most 2 lines').toBeLessThanOrEqual(2);
+    expect(lines[1], 'the step line takes 1').toBe(1);
+    expect(lines[2], 'the longest instruction takes at most 3 lines').toBeLessThanOrEqual(3);
+    await clearFilledCard(page);
+
+    h.inject(buildPacket({ full: true, tick: 6, generation: 2, swapFloor: 2 }));
+    await expect.poll(async () => (await readProbe(page)).card, { message: 'the card reads Lesson paused' }).toBe('swapped');
+    await expectCardFits(page, 'swapped');
   });
 
   test('the card takes no focus', async ({ page }) => {
@@ -781,6 +889,8 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
     await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
     const text = await card.locator('[aria-live]').evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
     expect(text.scrollWidth, 'the closing sentence stays inside its box').toBeLessThanOrEqual(text.clientWidth);
+    await page.setViewportSize(NARROWEST);
+    await expectCardFits(page, 'finished');
 
     await card.getByRole('button', { name: 'Back to lessons', exact: true }).click();
     await expect(card, 'the card goes').toHaveCount(0);
