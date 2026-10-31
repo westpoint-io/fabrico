@@ -165,12 +165,14 @@ jobs:
   # the workflow records which base it chose. `ci_wiring_parity.rs` asserts exactly two
   # lines beginning `DECLARED_MOVES_BASE:`, one per job below, and that both name the tag.
   #
-  # MOVING THE BASE is a reviewed change of its own: cut and PUSH the new annotated tag
-  # first, then land the commit that names it here, in the parity test and in the gate's
-  # DEFAULT_BASE, with docs/DECLARED-MOVES.txt reset to NONE. The reverse order commits a
-  # workflow that cannot resolve its own base. Deleting this job, adding
-  # `continue-on-error`, or narrowing the gate's covered path set are the gate-weakening
-  # moves the gate's own header forbids.
+  # MOVING THE BASE is a reviewed change of its own. Follow BASE MOVES in the header of
+  # scripts/check-core-declared.sh: cut the tag at the new commit, have the commit that relies
+  # on it reset docs/DECLARED-MOVES.txt to NONE, and send the branch and the moved tag to origin
+  # together with the one `git push --atomic` command written there. Pushed separately, CI
+  # compares against the old tag or fetches a tag whose commit isn't on origin's branch yet. A
+  # new tag name also has to change here, in the parity test and in the gate's DEFAULT_BASE, in
+  # that same push. Deleting this job, adding `continue-on-error`, or narrowing the gate's
+  # covered path set are the gate-weakening moves the gate's own header forbids.
   #
   # ALWAYS RUN: a git-level check over files a docs-only change cannot touch, about a
   # minute, and the one place a covered move is caught before merge.
