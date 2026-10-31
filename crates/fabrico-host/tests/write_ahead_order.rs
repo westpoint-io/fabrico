@@ -73,11 +73,19 @@ const BARE_SENDER_TYPES: &[(&str, usize)] = &[("examples/read_project.rs", 1), (
 
 /// Every line in `sim_loop.rs` that mentions the production sender. Listing them whole catches an
 /// alias or a clone taken from the field, and a renamed field, which the send count can't see.
+/// `spawn_executor` makes one sender per board and returns it in a `BoardExecutor`. `new` and the
+/// swap each move that sender into the field, and the swap's assignment drops the old one, so the
+/// field is still the only sender with an executor on the other end.
 const SIM_LOOP_CMD_TX_LINES: &[&str] = &[
     "cmd_tx: UnboundedSender<Command>,",
     "let (cmd_tx, mut cmd_rx) = unbounded_channel::<Command>();",
+    "BoardExecutor { cmd_tx, results_rx }",
+    "cmd_tx: UnboundedSender<Command>,",
+    "let BoardExecutor { cmd_tx, results_rx } = spawn_executor(",
     "cmd_tx,",
     "let _ = self.cmd_tx.send(cmd);",
+    "let BoardExecutor { cmd_tx, results_rx } = spawn_executor(",
+    "self.cmd_tx = cmd_tx;",
     "self.host.tick_once(&mut self.ingress_rx, &mut self.results_rx, &self.cmd_tx)?;",
 ];
 

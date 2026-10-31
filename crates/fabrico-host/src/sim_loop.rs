@@ -647,6 +647,97 @@ fn correlation_after_log(host: &Host) -> u64 {
         .unwrap_or(0)
 }
 
+/// One board's half of its executor channels: the sender `tick_once` hands commands to and the
+/// receiver their results come back on.
+struct BoardExecutor {
+    cmd_tx: UnboundedSender<Command>,
+    results_rx: UnboundedReceiver<ResultEvent>,
+}
+
+/// Start one board's executor consumer on `rt` and return that board's half of its channels.
+///
+/// Each board gets its own pair, because a call can outlive the board that made it. The board
+/// logs a Timeout at the command's deadline and then counts nothing in flight, so a swap can run
+/// while the HTTP request is still waiting for its answer. A `CommandId` is `(tick, node, seq)`,
+/// and a reloaded board mints the same id at the same tick, so a shared result channel would let
+/// the old call's answer resolve the new board's command. With a pair per board, that late send
+/// fails because the old receiver is gone.
+///
+/// The consumer ends once the board's sender is dropped and its queue is empty. A command
+/// already on that queue still fires, because a board swap doesn't recall an effect it has asked
+/// for. The pause gate, the wake, the dispatch counter and the correlation registry are shared
+/// across boards, and that registry resolves a stale Reply to nothing, because a swap drains it
+/// and correlations aren't reused.
+fn spawn_executor(
+    rt: &tokio::runtime::Handle,
+    cfg: HostConfig,
+    registry_c: Registry,
+    paused_c: Arc<AtomicBool>,
+    notify_c: Arc<Notify>,
+    dispatched_c: Arc<AtomicUsize>,
+) -> BoardExecutor {
+    let (cmd_tx, mut cmd_rx) = unbounded_channel::<Command>();
+    let (res_tx, results_rx) = unbounded_channel::<ResultEvent>();
+
+    // The executor consumer, off the sim thread (tokio workers): dispatch each
+    // Command's real effect and fold the Outcome back as a ResultEvent. The host
+    // stamps the admit tick on log-append; the executor sends 0.
+    rt.spawn(async move {
+        while let Some(cmd) = cmd_rx.recv().await {
+            // PAUSE GATE: hold NEW dispatch while the sim is Frozen. Park on
+            // `resume_notify` until Resume clears `paused`. A command already
+            // handed to `dispatch()` still completes (you cannot un-send an
+            // HTTP/email); only NEW pickups are held. The `enable()`-before-
+            // check pattern makes this race-free against a `notify_waiters()`
+            // that fires between the load and the await.
+            loop {
+                let notified = notify_c.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if !paused_c.load(Ordering::Acquire) {
+                    break;
+                }
+                notified.await;
+            }
+            // ENDP-01/04: intercept a Reply to a parked endpoint request BEFORE
+            // `dispatch`. Resolve the caller's socket off-thread via the shared
+            // registry (the `remove` inside `resolve` is the single-writer gate),
+            // then STILL send an `Outcome::Success` ResultEvent so the command
+            // clears in-flight — `dispatch` would only return Success anyway, so
+            // it stays registry-free (RESEARCH Open Q2/Q3). The socket write NEVER
+            // re-enters the sim fold (the determinism boundary).
+            // `return_addr` / `budget` (Phase 72 plan 04) are IN-SIM routing facts:
+            // they pick the return cable inside the fold. The parked socket is resolved
+            // by CORRELATION off the command stream and reads nothing from the grid
+            // (D-08), so this arm deliberately ignores both rather than starting to
+            // depend on a cable existing.
+            if let Effect::Reply { correlation, payload, .. } = &cmd.effect {
+                registry_c.resolve(*correlation, descriptor_to_response(payload));
+                let _ = res_tx.send(ResultEvent {
+                    command_id: cmd.id,
+                    tick: 0,
+                    outcome: Outcome::Success,
+                });
+                continue;
+            }
+            // Past the gate: count this dispatch pickup, then fire the effect.
+            dispatched_c.fetch_add(1, Ordering::Relaxed);
+            let res_tx = res_tx.clone();
+            let cfg = cfg.clone();
+            tokio::spawn(async move {
+                let outcome = dispatch(&cfg, &cmd).await;
+                let _ = res_tx.send(ResultEvent {
+                    command_id: cmd.id,
+                    tick: 0,
+                    outcome,
+                });
+            });
+        }
+    });
+
+    BoardExecutor { cmd_tx, results_rx }
+}
+
 /// The single owning struct for the canonical sim loop: the `!Send` [`Host`] +
 /// [`RenderProducer`] + every internal channel live here, on one thread.
 pub struct SimLoop {
@@ -658,8 +749,13 @@ pub struct SimLoop {
     // `_ingress_tx` open anymore — CLEAN-07).
     ingress_tx: UnboundedSender<EventPayload>,
     ingress_rx: UnboundedReceiver<EventPayload>,
+    /// The current board's half of its executor channels. A host swap replaces both, see
+    /// [`spawn_executor`].
     cmd_tx: UnboundedSender<Command>,
     results_rx: UnboundedReceiver<ResultEvent>,
+    /// What a host swap needs to start the new board's executor consumer.
+    executor_rt: tokio::runtime::Handle,
+    executor_cfg: HostConfig,
     // ── SEAMS (present, inert in the shell this phase) ──
     webhook_rx: Option<Receiver<Ingress>>,
     control_rx: Option<UnboundedReceiver<ControlMsg>>,
@@ -859,8 +955,8 @@ impl SimLoop {
     /// Build the loop and spawn the OFF-thread executor consumer on the caller's
     /// runtime `Handle` (the runtime MUST outlive the loop — Pitfall 4). The
     /// [`Host`] + [`RenderProducer`] stay here on the constructing thread (Core is
-    /// `!Send`). The spawned consumer block is lifted VERBATIM from the three
-    /// existing loops.
+    /// `!Send`). The consumer is [`spawn_executor`], which a host swap calls again for the
+    /// new board.
     pub fn new(
         host: Host,
         producer: RenderProducer,
@@ -868,8 +964,6 @@ impl SimLoop {
         cfg: HostConfig,
         gesture_rx: GestureRx,
     ) -> Self {
-        let (cmd_tx, mut cmd_rx) = unbounded_channel::<Command>();
-        let (res_tx, results_rx) = unbounded_channel::<ResultEvent>();
         let (ingress_tx, ingress_rx) = unbounded_channel::<EventPayload>();
 
         // IN-01: seed the loop tick from core, not an independent 0 counter, so a
@@ -901,74 +995,21 @@ impl SimLoop {
         let dispatched = Arc::new(AtomicUsize::new(0));
 
         // ENDP-04: the correlation registry. Built BEFORE the executor spawn so a
-        // clone can be MOVED into the consumer closure (exactly as `cfg`/`res_tx`
-        // are) — the reply arm resolves parked sockets off-thread through the same
-        // registry the sim thread parks into and sweeps. The original stays on the
-        // SimLoop for `acquire_input` (mint/park) + `sweep_endpoint_deadlines`.
+        // clone can be MOVED into the consumer closure (exactly as `cfg` is): the
+        // reply arm resolves parked sockets off-thread through the same registry the
+        // sim thread parks into and sweeps. The original stays on the SimLoop for
+        // `acquire_input` (mint/park) + `sweep_endpoint_deadlines`.
         let registry = Registry::default();
-        let registry_c = registry.clone();
 
-        // Clones handed to the consumer closure BEFORE the spawn (the originals
-        // stay on the SimLoop for service_control to flip).
-        let paused_c = Arc::clone(&paused);
-        let notify_c = Arc::clone(&resume_notify);
-        let dispatched_c = Arc::clone(&dispatched);
-
-        // The executor consumer, off the sim thread (tokio workers): dispatch each
-        // Command's real effect and fold the Outcome back as a ResultEvent. The host
-        // stamps the admit tick on log-append; the executor sends 0.
-        rt.spawn(async move {
-            while let Some(cmd) = cmd_rx.recv().await {
-                // PAUSE GATE: hold NEW dispatch while the sim is Frozen. Park on
-                // `resume_notify` until Resume clears `paused`. A command already
-                // handed to `dispatch()` still completes (you cannot un-send an
-                // HTTP/email); only NEW pickups are held. The `enable()`-before-
-                // check pattern makes this race-free against a `notify_waiters()`
-                // that fires between the load and the await.
-                loop {
-                    let notified = notify_c.notified();
-                    tokio::pin!(notified);
-                    notified.as_mut().enable();
-                    if !paused_c.load(Ordering::Acquire) {
-                        break;
-                    }
-                    notified.await;
-                }
-                // ENDP-01/04: intercept a Reply to a parked endpoint request BEFORE
-                // `dispatch`. Resolve the caller's socket off-thread via the shared
-                // registry (the `remove` inside `resolve` is the single-writer gate),
-                // then STILL send an `Outcome::Success` ResultEvent so the command
-                // clears in-flight — `dispatch` would only return Success anyway, so
-                // it stays registry-free (RESEARCH Open Q2/Q3). The socket write NEVER
-                // re-enters the sim fold (the determinism boundary).
-                // `return_addr` / `budget` (Phase 72 plan 04) are IN-SIM routing facts:
-                // they pick the return cable inside the fold. The parked socket is resolved
-                // by CORRELATION off the command stream and reads nothing from the grid
-                // (D-08), so this arm deliberately ignores both rather than starting to
-                // depend on a cable existing.
-                if let Effect::Reply { correlation, payload, .. } = &cmd.effect {
-                    registry_c.resolve(*correlation, descriptor_to_response(payload));
-                    let _ = res_tx.send(ResultEvent {
-                        command_id: cmd.id,
-                        tick: 0,
-                        outcome: Outcome::Success,
-                    });
-                    continue;
-                }
-                // Past the gate: count this dispatch pickup, then fire the effect.
-                dispatched_c.fetch_add(1, Ordering::Relaxed);
-                let res_tx = res_tx.clone();
-                let cfg = cfg.clone();
-                tokio::spawn(async move {
-                    let outcome = dispatch(&cfg, &cmd).await;
-                    let _ = res_tx.send(ResultEvent {
-                        command_id: cmd.id,
-                        tick: 0,
-                        outcome,
-                    });
-                });
-            }
-        });
+        let executor_rt = rt.clone();
+        let BoardExecutor { cmd_tx, results_rx } = spawn_executor(
+            &executor_rt,
+            cfg.clone(),
+            registry.clone(),
+            Arc::clone(&paused),
+            Arc::clone(&resume_notify),
+            Arc::clone(&dispatched),
+        );
 
         Self {
             host,
@@ -978,6 +1019,8 @@ impl SimLoop {
             ingress_rx,
             cmd_tx,
             results_rx,
+            executor_rt,
+            executor_cfg: cfg,
             webhook_rx: None,
             control_rx: None,
             pre_tick: None,
@@ -2090,6 +2133,20 @@ impl SimLoop {
         // Installing the new Host DROPS the old one first (releasing the old
         // store's file handles) BEFORE the old work_dir is freed below.
         self.host = new_host;
+        // The new board gets its own executor channels, so a result from a call the old board
+        // made can't reach it (see `spawn_executor`). Dropping the old receiver also drops any
+        // result still queued on it. Nothing here touches the fold or the log: the dropped
+        // results were never logged, and the old host that dispatched those calls is gone.
+        let BoardExecutor { cmd_tx, results_rx } = spawn_executor(
+            &self.executor_rt,
+            self.executor_cfg.clone(),
+            self.registry.clone(),
+            Arc::clone(&self.paused),
+            Arc::clone(&self.resume_notify),
+            Arc::clone(&self.dispatched),
+        );
+        self.cmd_tx = cmd_tx;
+        self.results_rx = results_rx;
         // Phase 88 (D-05, Pitfall 1): a swap clears the kept handle tables and sets the swap
         // floor, so a gesture stamped on the replaced board (including an automatic
         // follow-up an old-board echo fires after this point) is answered discarded in
@@ -7185,6 +7242,276 @@ mod tests {
             r.sim.step().expect("the step at the cap");
             assert!(!flag.load(Ordering::Acquire), "the cap clears the flag");
             assert!(r.sim.host().core().tick > tick, "and the loop runs again");
+        }
+    }
+
+    /// A call the old board dispatched can outlive the old board, and its `CommandId` can match a
+    /// command on the new one.
+    mod swap_results {
+        use super::*;
+        use crate::demo_scene::{load_board_commands, seed_scene};
+        use axum::Router;
+        use axum::extract::State;
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::routing::any;
+        use fabrico_core::command::EVENT_VERSION;
+        use fabrico_core::ids::CommandId;
+
+        /// Later than a Sink's default 600-tick deadline, so the old board's call has timed out
+        /// before its timer fires a second time.
+        const TIMER_INTERVAL: u64 = 700;
+        /// Far enough ahead of the timer that the saved file has nothing in flight.
+        const TICKS_BEFORE_THE_TIMER: u64 = 5;
+        /// The 5 ms naps a call's answer gets to reach the sim's result channel when the test
+        /// expects it not to, about a second.
+        const SHORT_WAIT: u32 = 200;
+        /// The same when the test expects it to, about ten seconds.
+        const LONG_WAIT: u32 = 2000;
+        /// More ticks than any step of these tests needs, so a broken board fails an assert.
+        const MAX_STEPS: u64 = 2 * TIMER_INTERVAL;
+
+        /// A request the test server is holding: its `Idempotency-Key`, and the way to answer it.
+        struct HeldCall {
+            key: String,
+            answer: oneshot::Sender<StatusCode>,
+        }
+
+        async fn hold_the_call(
+            State(held): State<UnboundedSender<HeldCall>>,
+            headers: HeaderMap,
+        ) -> StatusCode {
+            let key = headers
+                .get("idempotency-key")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            let (answer, answered) = oneshot::channel();
+            let _ = held.send(HeldCall { key, answer });
+            answered.await.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+
+        /// A loopback server that answers each request only when the test says so.
+        fn holding_server(rt: &tokio::runtime::Runtime) -> (String, UnboundedReceiver<HeldCall>) {
+            let (held_tx, held_rx) = unbounded_channel::<HeldCall>();
+            let listener = rt
+                .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+                .expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let app = Router::new().route("/call", any(hold_the_call)).with_state(held_tx);
+            rt.spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+            (format!("http://{addr}/call"), held_rx)
+        }
+
+        fn next_held_call(rt: &tokio::runtime::Runtime, held: &mut UnboundedReceiver<HeldCall>) -> HeldCall {
+            rt.block_on(async { tokio::time::timeout(Duration::from_secs(10), held.recv()).await })
+                .expect("the sink's call reaches the server")
+                .expect("the server is running")
+        }
+
+        /// Source on a timer, one belt, HTTP Sink, built through the path a real board takes.
+        fn timer_board_with_http_sink(dir: &std::path::Path, url: &str) -> Host {
+            let board = format!(
+                r#"Board(format: 1, seed: 1, commands: [
+                    Place(kind: 0, cell_x: 1, cell_y: 6),
+                    Place(kind: 7, cell_x: 5, cell_y: 6),
+                    DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),
+                    Dock(belt: 2, endpoint: Tail, node: 0, port: 0),
+                    Dock(belt: 2, endpoint: Head, node: 1, port: 0),
+                    Configure(node: 0, config: Source(trigger: Timer(interval_ticks: {TIMER_INTERVAL}))),
+                    Configure(node: 1, config: Sink(target: Http(url: "{url}", method: Post))),
+                ],
+                script: [],
+                executor: Executor(default: Reply(after_ticks: 1), rules: []),
+                view: View(fit: Board),
+                end_tick: 1200)"#
+            );
+            let commands = load_board_commands(&board).expect("the test board parses");
+            let mut host = build_host(dir, |_| {});
+            seed_scene(&mut host, &commands).expect("the test board seeds");
+            let timers = timers_from_log(&host).expect("read the edit log");
+            host.with_timers(timers)
+        }
+
+        fn step_until(sim: &mut SimLoop, what: &str, done: impl Fn(&SimLoop) -> bool) {
+            for _ in 0..MAX_STEPS {
+                if done(sim) {
+                    return;
+                }
+                sim.step().expect("a step");
+            }
+            panic!("{what}: not reached in {MAX_STEPS} steps, tick {}", sim.host().core().tick);
+        }
+
+        /// Wait with no tick running, so a slow machine can't push a command past its deadline.
+        fn wait_for_a_result(sim: &SimLoop, naps: u32) -> bool {
+            for _ in 0..naps {
+                if !sim.results_rx.is_empty() {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        }
+
+        /// The outcome of each `CommandResult` in the log, in order.
+        fn logged_results(sim: &SimLoop) -> Vec<(CommandId, Outcome)> {
+            sim.host()
+                .logged_events()
+                .expect("read log")
+                .into_iter()
+                .filter_map(|e| match e.payload {
+                    EventPayload::CommandResult(re) => Some((re.command_id, re.outcome)),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn noop(id: CommandId) -> Command {
+            Command {
+                event_version: EVENT_VERSION,
+                id,
+                partition: 0,
+                effect: Effect::Noop,
+                deadline: u64::MAX,
+            }
+        }
+
+        /// A call outlives its deadline, the same file is loaded, the new board re-mints the same
+        /// `CommandId`, and only then does the old call answer.
+        #[test]
+        fn an_old_call_answering_after_a_load_stays_off_the_new_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, mut held) = holding_server(&rt);
+            let host = timer_board_with_http_sink(dir.path(), &url);
+            let (_gtx, grx) = gesture_channel();
+            let (ctx, crx) = unbounded_channel::<ControlMsg>();
+            let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
+                .with_control(crx);
+
+            let save_at = TIMER_INTERVAL - TICKS_BEFORE_THE_TIMER;
+            step_until(&mut sim, "the tick to save at", |s| s.host().core().tick == save_at);
+            let fab = dir.path().join("timer.fab");
+            save_project(sim.host(), &fab).expect("save the quiet board");
+
+            step_until(&mut sim, "the old board's call", |s| s.host().in_flight_len() == 1);
+            let old_call = next_held_call(&rt, &mut held);
+            step_until(&mut sim, "the old board's timeout", |s| s.host().in_flight_len() == 0);
+            assert_eq!(sim.host().belt_items_in_flight(), 0, "a quiet board, so the load swaps at once");
+            assert!(
+                sim.host().core().tick < 2 * TIMER_INTERVAL,
+                "the old board's timer hasn't fired again"
+            );
+
+            ctx.send(ControlMsg::Load(fab)).expect("send the load");
+            sim.step().expect("service the load");
+            assert!(sim.host().core().tick <= save_at + 1, "the file swapped in at once");
+            assert_eq!(logged_results(&sim), vec![], "the loaded board starts with no results");
+
+            step_until(&mut sim, "the new board's call", |s| s.host().in_flight_len() == 1);
+            let new_call = next_held_call(&rt, &mut held);
+            assert!(!new_call.key.is_empty(), "the sink sends an idempotency key");
+            assert_eq!(new_call.key, old_call.key, "the two boards minted the same CommandId");
+
+            old_call.answer.send(StatusCode::INTERNAL_SERVER_ERROR).expect("answer the old call");
+            let reached_the_sim = wait_for_a_result(&sim, SHORT_WAIT);
+            for _ in 0..5 {
+                sim.step().expect("a step after the old answer");
+            }
+            assert_eq!(logged_results(&sim), vec![], "the old call's outcome isn't logged");
+            assert_eq!(sim.host().in_flight_len(), 1, "the new board's command is still in flight");
+            assert!(!reached_the_sim, "the old call's answer reached the new board's result channel");
+
+            new_call.answer.send(StatusCode::OK).expect("answer the new call");
+            assert!(wait_for_a_result(&sim, LONG_WAIT), "the new call's answer arrives");
+            sim.step().expect("fold the new call's result");
+            let results = logged_results(&sim);
+            assert_eq!(results.len(), 1, "one result on the new board: {results:?}");
+            assert_eq!(results[0].1, Outcome::Success, "and it is the new call's own");
+            assert_eq!(sim.host().in_flight_len(), 0);
+        }
+
+        /// A result already waiting on the channel when the swap runs.
+        #[test]
+        fn a_result_waiting_at_a_swap_stays_off_the_new_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, _ctx) = swap_rig(dir.path(), &rt);
+            let id: CommandId = (3, NodeId::null(), 0);
+            sim.test_send_command(noop(id));
+            assert!(wait_for_a_result(&sim, LONG_WAIT), "the result is waiting");
+
+            sim.new_swap();
+            sim.host.test_insert_in_flight(id, u64::MAX);
+            sim.step().expect("a step on the new board");
+            assert_eq!(logged_results(&sim), vec![], "the waiting result isn't logged");
+            assert_eq!(sim.host().in_flight_len(), 1, "the same id on the new board stays in flight");
+        }
+
+        /// A refused Load keeps the board, so it keeps the board's results too.
+        #[allow(clippy::disallowed_methods)]
+        #[test]
+        fn a_result_waiting_at_a_refused_load_folds_on_the_kept_board() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, _ctx) = swap_rig(dir.path(), &rt);
+            let id: CommandId = (3, NodeId::null(), 0);
+            sim.host.test_insert_in_flight(id, u64::MAX);
+            sim.test_send_command(noop(id));
+            assert!(wait_for_a_result(&sim, LONG_WAIT), "the result is waiting");
+
+            let bad = dir.path().join("not-a-board.fab");
+            std::fs::write(&bad, b"this is not a fabrico project file").expect("write garbage");
+            assert!(!sim.load_swap(&bad), "the load is refused");
+
+            sim.step().expect("a step on the kept board");
+            assert_eq!(logged_results(&sim), vec![(id, Outcome::Success)]);
+            assert_eq!(sim.host().in_flight_len(), 0);
+        }
+
+        /// The new board's executor is held by the same Pause and counted by the same counter.
+        #[test]
+        fn the_executor_after_a_swap_obeys_the_pause_gate() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, ctx) = swap_rig(dir.path(), &rt);
+            ctx.send(ControlMsg::Pause).expect("pause");
+            sim.step().expect("freeze");
+            assert!(sim.is_paused(), "frozen before the swap");
+            sim.new_swap();
+            assert!(sim.is_paused(), "the swap keeps the user's hold");
+
+            sim.test_send_command(noop((3, NodeId::null(), 0)));
+            assert!(!wait_for_a_result(&sim, SHORT_WAIT), "the hold stops the command");
+            assert_eq!(sim.dispatched_count(), 0, "and it hasn't been dispatched");
+
+            ctx.send(ControlMsg::Resume).expect("resume");
+            sim.step().expect("resume");
+            assert!(wait_for_a_result(&sim, LONG_WAIT), "resume lets it through");
+            assert_eq!(sim.dispatched_count(), 1, "the counter carries across the swap");
+        }
+
+        /// A long session of swaps leaves one consumer running: each old one ends with its board.
+        #[test]
+        fn old_executors_end_after_their_swaps() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, _ctx) = swap_rig(dir.path(), &rt);
+            for _ in 0..3 {
+                sim.new_swap();
+            }
+            // The loop's own handle plus the one running consumer's.
+            let mut count = Arc::strong_count(&sim.dispatched);
+            for _ in 0..1000 {
+                if count == 2 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                count = Arc::strong_count(&sim.dispatched);
+            }
+            assert_eq!(count, 2, "the three old consumers have ended");
         }
     }
 }
