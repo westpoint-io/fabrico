@@ -2,9 +2,13 @@
 //
 // The lesson engine under `src/tutorial/` has to run in a node test and in the walk, so it can't reach
 // for React, Pixi or the DOM. The tutorial's two folders also can't send anything to the host: the one
-// thing a lesson asks for is New, through a callback the app hands it, so a transport call or a network
-// call in either folder is a lesson finishing a step for the user. Lesson text must never be able to
-// become HTML. `src/render/` ships in the docs embed, which has no tutorial, so it can't import one.
+// thing a lesson asks for is New, through a callback the app hands it, so a transport call, a network
+// call or a press on the app's own controls in either folder is a lesson finishing a step for the user.
+// The one thing a lesson reads from the host is the bound Source's trigger, and `triggerRead.ts` is the
+// only file holding a host bridge. It hands the bridge to `loadConfig` and to nothing else, and exports
+// the answer, so no other file can get hold of a value that can send any command. Lesson text must never
+// be able to become HTML. `src/render/` ships in the docs embed, which has no tutorial, so it can't
+// import one.
 //
 // Read as source and never imported. Comments are stripped first, so a comment explaining a rule isn't
 // a breach of it. Names match on a word boundary, because `localStorageProgress` takes its storage as a
@@ -12,8 +16,10 @@
 // a sentence in a lesson can end in "the window."
 //
 // NOT SEEN: a global reached through an alias or a bracket (`const w = window`, `globalThis['fetch']`),
-// and a forbidden word inside a string, which reads as a finding. The first case below is the tripwire
-// for the scan reading nothing, and the mutation cases are what stop it being a check that can't fail.
+// a forbidden word inside a string, which reads as a finding, and a write made by a helper in some other
+// folder that wraps its own bridge, because the scan reads only what these folders name. The parity walk
+// counts sends on the paths it walks, under Vite. The first case below is the tripwire for the scan
+// reading nothing, and the mutation cases are what stop it being a check that can't fail.
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -34,6 +40,8 @@ const LAYER_DIR = 'src/chrome/tutorial/';
 const RENDER_DIR = 'src/render/';
 /** The one file allowed to read the camera, so a second reader can't drift from it. */
 const CAMERA_READER = 'src/chrome/tutorial/cameraRead.ts';
+/** The one file allowed to hold a host bridge, for the one read a lesson needs. */
+const HOST_READER = 'src/chrome/tutorial/triggerRead.ts';
 
 const PURE_GLOBALS: ReadonlyArray<readonly [string, RegExp]> = [
   ['window.', /\bwindow\??\.[A-Za-z_$]/],
@@ -52,9 +60,20 @@ const NO_WRITE_NAMES: ReadonlyArray<readonly [string, RegExp]> = [
   ['fetch(', /\bfetch\s*\(/],
   ['XMLHttpRequest', /\bXMLHttpRequest\b/],
   ['WebSocket', /\bWebSocket\b/],
+  ['commitConfig', /\bcommitConfig\b/],
+  ['.click(', /\.click\s*(?:\?\.)?\(/],
+  ['.dispatchEvent(', /\.dispatchEvent\s*(?:\?\.)?\(/],
+  ['invoke', /\binvoke\b/],
+  ['@tauri-apps/', /@tauri-apps\//],
+  ['__TAURI', /\b__TAURI/],
   ['innerHTML', /\binnerHTML\b/],
   ['dangerouslySetInnerHTML', /\bdangerouslySetInnerHTML\b/],
 ];
+
+/** Each can send any command to the host, so only `HOST_READER` may name one. */
+const HOST_BRIDGES = /\b(?:tauriInvoke|devWsInvoke)\b/;
+/** A module whose exports reach the host: the transport, and the inspector's bridge and its commit. */
+const THROUGH_HOST_MODULE = /(?:^|\/)(?:transport(?:\/|$)|ConfigPanel(?:\.tsx?)?$)/;
 
 const CAMERA_CALL = /\.camera\s*(?:\?\.)?\(\s*\)/;
 const IMPORT_FORMS: readonly RegExp[] = [
@@ -82,6 +101,27 @@ function namesFound(stripped: string, names: ReadonlyArray<readonly [string, Reg
   });
 }
 
+/**
+ * The reader may import a bridge and pass it to `loadConfig`. A bridge on any other line could send a
+ * command, and any export but the answer could hand a bridge out.
+ */
+function hostReaderBreaches(path: string, stripped: string): string[] {
+  const findings: string[] = [];
+  stripped.split('\n').forEach((text, i) => {
+    if (!HOST_BRIDGES.test(text)) return;
+    const plainImport = /^\s*import\b/.test(text) && !/\bas\b/.test(text);
+    if (!plainImport && !text.includes('loadConfig(')) {
+      findings.push(`${path}:${i + 1}: uses a host bridge outside loadConfig, and this file makes that one read`);
+    }
+  });
+  const exported = [...stripped.matchAll(/\bexport\b[^\n]*/g)].map((m) => m[0]);
+  if (exported.length !== 1 || !exported[0]?.startsWith('export async function readAppliedTrigger(')) {
+    findings.push(`${path}: exports ${exported.length} things, and it must export readAppliedTrigger alone`);
+  }
+  if (!stripped.includes('loadConfig(')) findings.push(`${path}: makes no loadConfig read, which is all this file is for`);
+  return findings;
+}
+
 /** One string per breach, so a failure names the file, the line and the rule. Empty means clean. */
 export function auditTutorialSources(files: readonly SourceFile[]): string[] {
   const findings: string[] = [];
@@ -106,6 +146,18 @@ export function auditTutorialSources(files: readonly SourceFile[]): string[] {
     if (pure || layer) {
       for (const hit of namesFound(stripped, NO_WRITE_NAMES)) {
         findings.push(`${path}:${hit.line}: names ${hit.name}, and the tutorial sends nothing but a New through its callback`);
+      }
+      if (path === HOST_READER) {
+        findings.push(...hostReaderBreaches(path, stripped));
+      } else {
+        for (const hit of namesFound(stripped, [['a host bridge', HOST_BRIDGES]])) {
+          findings.push(`${path}:${hit.line}: names ${hit.name}, and only ${HOST_READER} holds one`);
+        }
+        for (const imported of importPaths(stripped)) {
+          if (THROUGH_HOST_MODULE.test(imported.path)) {
+            findings.push(`${path}:${imported.line}: imports ${imported.path}, and only ${HOST_READER} reaches the host`);
+          }
+        }
       }
     }
     if (layer && path !== CAMERA_READER) {
@@ -143,7 +195,7 @@ const layerFile = (source: string): SourceFile => ({ path: 'src/chrome/tutorial/
 describe('the tutorial stays a reader of the app', () => {
   it('reads the real tree, so a clean result below is a real reading', () => {
     const paths = REAL.map((f) => f.path);
-    for (const named of ['src/tutorial/machine.ts', 'src/tutorial/check.ts', 'src/chrome/tutorial/TutorialLayer.tsx', 'src/render/pixiApp.ts']) {
+    for (const named of ['src/tutorial/machine.ts', 'src/tutorial/check.ts', 'src/chrome/tutorial/TutorialLayer.tsx', HOST_READER, 'src/render/pixiApp.ts']) {
       expect(paths, named).toContain(named);
     }
     expect(REAL.find((f) => f.path === 'src/tutorial/machine.ts')?.source).toContain('export function reduce');
@@ -201,10 +253,70 @@ describe('the tutorial stays a reader of the app', () => {
         ["fetch('/x');", 'fetch('],
         ['new XMLHttpRequest();', 'XMLHttpRequest'],
         ['new WebSocket(url);', 'WebSocket'],
+        ['commitConfig(1, c, deps);', 'commitConfig'],
+        ["document.querySelector('button').click();", '.click('],
+        ['button?.click?.();', '.click('],
+        ['button.dispatchEvent(new MouseEvent("click"));', '.dispatchEvent('],
+        ["invoke('submit_input', {});", 'invoke'],
+        ["import('@tauri-apps/api/core');", '@tauri-apps/'],
+        ['window.__TAURI_INTERNALS__;', '__TAURI'],
       ] as const) {
         expect(auditTutorialSources([layerFile(source)]).join('\n'), `layer: ${source}`).toContain(`names ${name}`);
         expect(auditTutorialSources([pureFile(source)]).join('\n'), `pure: ${source}`).toContain(`names ${name}`);
       }
+    });
+
+    it('a host bridge named outside the reader, in either folder', () => {
+      for (const bridge of ['tauriInvoke', 'devWsInvoke']) {
+        const source = `const go = ${bridge};`;
+        for (const file of [layerFile(source), pureFile(source)]) {
+          expect(auditTutorialSources([file]).join('\n'), `${file.path}: ${bridge}`).toContain(`names a host bridge, and only ${HOST_READER} holds one`);
+        }
+      }
+    });
+
+    it('an import of the transport or the inspector outside the reader, in either folder', () => {
+      for (const path of ['../../transport/transport', '../../transport/devWsInvoke', '../ConfigPanel', '../ConfigPanel.tsx']) {
+        const source = `import { thing } from '${path}';\n`;
+        for (const file of [layerFile(source), pureFile(source)]) {
+          expect(auditTutorialSources([file]).join('\n'), `${file.path}: ${path}`).toContain(`imports ${path}, and only ${HOST_READER} reaches the host`);
+        }
+      }
+    });
+
+    describe('in the reader', () => {
+      const FIRST_LINES = [
+        "import { devWsInvoke } from '../../transport/devWsInvoke';",
+        "import { loadConfig, tauriInvoke } from '../ConfigPanel';",
+      ];
+      const read = 'export async function readAppliedTrigger(node) { return loadConfig(node, tauriInvoke); }';
+      const reader = (...lines: string[]): SourceFile => ({ path: HOST_READER, source: [...FIRST_LINES, read, ...lines].join('\n') });
+
+      it('a bridge called directly', () => {
+        expect(auditTutorialSources([reader("tauriInvoke('submit_input', {});")]).join('\n')).toContain(`${HOST_READER}:4: uses a host bridge outside loadConfig`);
+        expect(auditTutorialSources([reader("devWsInvoke('step', {});")]).join('\n')).toContain(`${HOST_READER}:4: uses a host bridge outside loadConfig`);
+      });
+
+      it('a bridge held under another name', () => {
+        expect(auditTutorialSources([reader('const go = tauriInvoke;')]).join('\n')).toContain('uses a host bridge outside loadConfig');
+        const aliased = { path: HOST_READER, source: `import { tauriInvoke as go } from '../ConfigPanel';\n${read}` };
+        expect(auditTutorialSources([aliased]).join('\n')).toContain('uses a host bridge outside loadConfig');
+      });
+
+      it('a second export, or a bridge handed out', () => {
+        expect(auditTutorialSources([reader('export const go = 1;')]).join('\n')).toContain('exports 2 things');
+        expect(auditTutorialSources([reader('export { tauriInvoke };')]).join('\n')).toContain('uses a host bridge outside loadConfig');
+      });
+
+      it('no read at all', () => {
+        expect(auditTutorialSources([{ path: HOST_READER, source: 'export async function readAppliedTrigger() { return null; }' }]).join('\n')).toContain('makes no loadConfig read');
+      });
+
+      it('a word the reader has no use for', () => {
+        expect(auditTutorialSources([reader("invoke('step', {});")]).join('\n')).toContain('names invoke');
+        expect(auditTutorialSources([reader("import('@tauri-apps/api/core');")]).join('\n')).toContain('names @tauri-apps/');
+        expect(auditTutorialSources([reader('commitConfig(1, c, deps);')]).join('\n')).toContain('names commitConfig');
+      });
     });
 
     it('lesson text turned into HTML', () => {
@@ -238,6 +350,22 @@ describe('the tutorial stays a reader of the app', () => {
     it('a name that only contains a forbidden word', () => {
       expect(auditTutorialSources([pureFile('export function localStorageProgress(storage) { return storage; }')])).toEqual([]);
       expect(auditTutorialSources([layerFile("import { devWebSocketThing } from '../../fixture';")])).toEqual([]);
+      expect(auditTutorialSources([layerFile('const onClick = reinvoked; const a = fauxtauriInvoke;')])).toEqual([]);
+      expect(auditTutorialSources([layerFile("import { thing } from '../../fixture/transportless';")])).toEqual([]);
+    });
+
+    it('a click handler on a button of its own, which only reacts to the user', () => {
+      expect(auditTutorialSources([layerFile('<button onClick={onLeave}>Leave</button>')])).toEqual([]);
+    });
+
+    it('the host read in the reader', () => {
+      const source = [
+        "import { devWsInvoke } from '../../transport/devWsInvoke';",
+        "import { transportKind } from '../../transport/transport';",
+        "import { loadConfig, tauriInvoke } from '../ConfigPanel';",
+        "export async function readAppliedTrigger(node) { return loadConfig(node, transportKind() === 'dev' ? devWsInvoke : tauriInvoke); }",
+      ].join('\n');
+      expect(auditTutorialSources([{ path: HOST_READER, source }])).toEqual([]);
     });
 
     it('a lesson sentence that ends in the window', () => {

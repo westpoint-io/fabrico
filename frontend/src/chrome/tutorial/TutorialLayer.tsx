@@ -8,18 +8,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react';
 import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
-import { devWsInvoke } from '../../transport/devWsInvoke';
-import { transportKind } from '../../transport/transport';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import type { BindingName, BoardFacts, ChromeFacts, LessonId, Stage } from '../../tutorial/types';
-import { loadConfig, tauriInvoke } from '../ConfigPanel';
 import type { ArmedTool } from '../Palette';
 import { readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
 import { LessonPanel } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
+import { readAppliedTrigger } from './triggerRead';
 
 export interface HintRect {
   x: number;
@@ -230,24 +228,20 @@ export function TutorialLayer({
   progressRef.current ??= browserProgress();
   const progress = progressRef.current;
 
-  // THE TRIGGER READ, only while the lesson sits at or past the Timer step. The model has no Source
-  // trigger: `machine_config` is the one read, the same query the inspector makes. It's async, so it
-  // runs on a timer and the frame loop reads the ref, because a query per frame is what the Route sweep
-  // in App.tsx warns against. It reads and enqueues nothing, so the simulation can't tell it ran.
+  // THE TRIGGER READ, only while the lesson sits at or past the Timer step. It's async, so it runs on
+  // a timer and the frame loop reads the ref, because a query per frame is what the Route sweep in
+  // App.tsx warns against. It reads and enqueues nothing, so the simulation can't tell it ran.
   const watch = triggerWatch(state);
   const watchedNode =
     watch !== null && state.card === 'running' && state.stepIndex >= watch.from ? (state.bindings[watch.of]?.id ?? null) : null;
   useEffect(() => {
     if (watchedNode === null) return undefined;
-    const invoke = transportKind() === 'dev' ? devWsInvoke : tauriInvoke;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const read = async (): Promise<void> => {
       try {
-        const config = await loadConfig(watchedNode, invoke);
-        if (!disposed) {
-          appliedRef.current = config?.kind === 'Source' ? { node: watchedNode, kind: config.trigger.kind } : null;
-        }
+        const applied = await readAppliedTrigger(watchedNode);
+        if (!disposed) appliedRef.current = applied;
       } catch {
         // A query that fails says nothing about the trigger, so the last answer stands.
       }
