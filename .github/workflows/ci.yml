@@ -88,7 +88,7 @@ jobs:
   # decides it.
   #
   # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
-  # golden-corpus, e2e, e2e-live and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
+  # golden-corpus, e2e, e2e-live, e2e-walk and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
   # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
   # private-residue and neutrality. Each always-on job either reads files a docs-only
   # change can edit or costs about one minute, so gating it would save little and risk a
@@ -1277,6 +1277,59 @@ jobs:
           name: live-test-results
           path: frontend/test-results/
           retention-days: 14
+
+  # THE LESSON WALK, in a job of its own. The live job has hundreds of tests, runs past its limit
+  # and may leave tests unstarted, so a lesson test there could never start and would add to the
+  # overrun. The walk's files are named *.walk.ts, which neither live config matches, so they stay
+  # out of the live suite's test count too.
+  #
+  # ITS EXIT CODE IS ITS VERDICT. The live job swallows its suite's exit code because that suite
+  # carries a declared red. The walk has none, so nothing follows the run step here.
+  #
+  # THE LIMIT. All 12 walk tests took 4 minutes unthrottled and 22 minutes on two CPUs at a 100%
+  # quota, both read from a local run and rounded up. The slowest figure plus about 10 minutes of
+  # build before the suite is 32, and twice that is 64. The `globalTimeout` in
+  # frontend/playwright.walk.config.ts is 54, the limit less those 10 minutes, so an overrun writes a
+  # report before the runner is killed. These are local numbers: a recorded CI run replaces them.
+  e2e-walk:
+    name: lesson walk (real headless host)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: rustup show
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Before any Playwright step, so the webServer timeout never covers compilation. The parity
+      # test reads saved boards with replay_hash, so it is built here too.
+      - name: Build dev_render_server and replay_hash
+        run: cargo build -p fabrico-host --example dev_render_server --example replay_hash
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the lesson walk
+        working-directory: frontend
+        run: npm run e2e:walk
 
   # Frontend unit gate (Phase 56, plan 56-02, decision D-26) - the frontend's own
   # vitest suite and its typecheck, neither of which any CI job ran until now.

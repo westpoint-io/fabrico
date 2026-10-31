@@ -434,13 +434,14 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// repository root when measured on 2026-09-30. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 7] = [
+const HEAVY_JOBS: [&str; 8] = [
     "determinism",
     "headless-build",
     "wasm-player",
     "golden-corpus",
     "e2e",
     "e2e-live",
+    "e2e-walk",
     "unit",
 ];
 
