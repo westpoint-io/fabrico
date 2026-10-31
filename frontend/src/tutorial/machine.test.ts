@@ -602,6 +602,50 @@ describe('reduce: leave and resume', () => {
     expect(resumed(running)).toBe(running);
   });
 
+  describe('a trigger applied while left', () => {
+    const LEFT_AT_TIMER = (): TutorialState => left(atStep(2));
+
+    it('finishes the Timer step with a note, when the first answer after Resume reads Timer', () => {
+      const waiting = frame(resumed(LEFT_AT_TIMER()), { nodes: BOTH }, { appliedTrigger: null });
+      expect(waiting.stepIndex, 'no answer yet finishes nothing').toBe(2);
+      expect(waiting.note).toBeNull();
+      const s = frame(waiting, { nodes: BOTH }, TIMER);
+      expect(s.stepIndex).toBe(3);
+      expect(s.note).toEqual({ kind: 'skippedOne', a: 3, b: 3 });
+    });
+
+    it('widens the note when the machines were also placed while left', () => {
+      const first = frame(resumed(left(atStep(1))), { nodes: BOTH }, { appliedTrigger: null });
+      expect(first.stepIndex, 'the Sink finished its step on the first frame').toBe(2);
+      expect(first.note).toEqual({ kind: 'skippedOne', a: 2, b: 2 });
+      const s = frame(first, { nodes: BOTH }, TIMER);
+      expect(s.stepIndex).toBe(3);
+      expect(s.note).toEqual({ kind: 'skippedMany', a: 2, b: 3 });
+    });
+
+    it('ends the re-check on a Webhook answer, so a Timer applied after it carries no note', () => {
+      const webhook = { appliedTrigger: { node: THE_SOURCE.id, kind: 'Webhook' as const } };
+      const answered = frame(resumed(LEFT_AT_TIMER()), { nodes: BOTH }, webhook);
+      expect(answered.stepIndex).toBe(2);
+      const s = frame(answered, { nodes: BOTH }, TIMER);
+      expect(s.stepIndex).toBe(3);
+      expect(s.note, 'the user applied this one with the card on screen').toBeNull();
+    });
+
+    it('waits through an answer about an older handle', () => {
+      const old = { appliedTrigger: { node: 99, kind: 'Webhook' as const } };
+      const waiting = frame(resumed(LEFT_AT_TIMER()), { nodes: BOTH }, old);
+      const s = frame(waiting, { nodes: BOTH }, TIMER);
+      expect(s.note).toEqual({ kind: 'skippedOne', a: 3, b: 3 });
+    });
+
+    it('a Timer step reached live is no re-check', () => {
+      const s = frame(atStep(2), { nodes: BOTH }, TIMER);
+      expect(s.stepIndex).toBe(3);
+      expect(s.note).toBeNull();
+    });
+  });
+
   describe('the floor spot across a leave', () => {
     const SINK_ARMED = { armed: { kind: 'machine', machineKind: SINK } } as const;
     /** Left at the Sink's floor stage, with the ring on its spot. */

@@ -72,7 +72,11 @@ export interface TutorialState {
   floor: number;
   /** The floor of the board the lesson was left on, or null when it wasn't left on a running step. */
   leftFloor: number | null;
-  /** Set by Resume until the next frame, which counts every step already true as one the user didn't do here. */
+  /**
+   * Set by Resume, and every step found true while it's set counts as one the user didn't do here. It
+   * ends with the first frame that has nothing left to read. At the Timer step that's the frame holding
+   * the host's first answer about the Source, because that answer comes by query, a few frames later.
+   */
   rechecking: boolean;
   bindings: Partial<Record<BindingName, BoundNode>>;
   baseline: StepBaseline | null;
@@ -279,8 +283,10 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
   if (finished === 0) return next;
   const lastDone = s.stepIndex + finished;
   // The first step finished in a pass is the one the user was on, unless they've only just come back
-  // from leaving: then they did all of them somewhere the card couldn't see.
-  const firstSkipped = s.rechecking ? s.stepIndex + 1 : s.stepIndex + 2;
+  // from leaving: then they did all of them somewhere the card couldn't see. A re-check can take two
+  // passes, machines and then the trigger, and the note covers both.
+  const earlier = s.rechecking && (s.note?.kind === 'skippedOne' || s.note?.kind === 'skippedMany') ? s.note.a : null;
+  const firstSkipped = earlier ?? (s.rechecking ? s.stepIndex + 1 : s.stepIndex + 2);
   let note: LessonNote | null = null;
   if (finished === 1 && endedOnRunningBoard) note = { kind: 'alreadyRunning', a: lastDone, b: lastDone };
   else if (firstSkipped === lastDone) note = { kind: 'skippedOne', a: lastDone, b: lastDone };
@@ -372,6 +378,13 @@ function withWatchRead(s: TutorialState, board: BoardFacts, lessons: readonly Le
   return { ...s, baseline: { ...s.baseline, lowestSlot, generation: board.generation } };
 }
 
+/** Is a re-check on the Timer step still waiting for the host's first answer about the bound Source? */
+function awaitsTriggerAnswer(s: TutorialState, chrome: ChromeFacts, lessons: readonly Lesson[]): boolean {
+  if (s.card !== 'running') return false;
+  const check = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex]?.done;
+  return check?.is === 'triggerApplied' && chrome.appliedTrigger?.node !== s.bindings[check.of]?.id;
+}
+
 /** One frame of a running lesson. The check reads last frame's slot, and only then is it replaced. */
 function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
   const found = rebound(s, board);
@@ -380,7 +393,7 @@ function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
   // A machine moved to another cell has a new key, so its step goes back and finishes again in this one
   // pass. The user is on the step they were on, and there's nothing to tell them.
   if (checked !== found && next.card === 'running' && next.stepIndex >= found.stepIndex) next = { ...next, note: found.note };
-  if (next.rechecking) next = { ...next, rechecking: false };
+  if (next.rechecking && !awaitsTriggerAnswer(next, chrome, lessons)) next = { ...next, rechecking: false };
   return withSpot(withWatchRead(next, board, lessons), board, chrome, lessons);
 }
 

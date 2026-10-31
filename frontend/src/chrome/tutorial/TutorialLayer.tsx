@@ -334,6 +334,9 @@ export function TutorialLayer({
   );
 
   const resume = useCallback((): void => {
+    // The last answer is from before the lesson was left, and the poll stopped there, so it can't say
+    // what the trigger is now. The re-check waits for a fresh one.
+    appliedRef.current = null;
     dispatch({ type: 'resumed' });
     onLessonsOpenChange(false);
   }, [dispatch, onLessonsOpenChange]);

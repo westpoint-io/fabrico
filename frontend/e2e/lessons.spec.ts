@@ -1200,6 +1200,54 @@ test.describe('a swapped board and going back', () => {
   });
 });
 
+test.describe('a trigger applied while the lesson is left', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  async function pressResume(page: Page): Promise<void> {
+    await openLessons(page);
+    await page.getByRole('button', { name: RESUME, exact: true }).click();
+  }
+
+  test('left at the Timer step: Resume moves on, and the note says so', async ({ page }) => {
+    const host = configuredHost();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h);
+    await placeBoth(page, h);
+    await ringAt(page, 'tool-down');
+    // The layer has had its first answer, Webhook, before the lesson is left.
+    await expect.poll(() => host.asked(), { message: 'the layer asked about the trigger' }).toBeGreaterThan(0);
+    await pressLeave(page);
+
+    host.set({ kind: 'Timer', interval_ticks: 60 });
+    await pressResume(page);
+    const card = page.locator(CARD);
+    await expect(card).toContainText(`Step 4 of ${STEP_COUNT}`);
+    await expect(card, 'the step number jumped, so the note explains it').toContainText('Step 3 was already done, so the lesson moved on.');
+  });
+
+  test('left at the Sink step: Resume covers both steps in one note', async ({ page }) => {
+    const host = configuredHost();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h);
+    const { cell } = await armSourceForFloor(page);
+    const source = sourceAt(cell);
+    h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [source] }));
+    await ringAt(page, 'sink-tool');
+    await pressLeave(page);
+
+    // The Sink and the Timer both happen with no card on screen.
+    const sink = sinkAt([cell[0] + 6, cell[1]]);
+    h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: [source, sink] }));
+    await waitForBoard(page, { machines: 2, tick: 7 });
+    host.set({ kind: 'Timer', interval_ticks: 60 });
+
+    await pressResume(page);
+    const card = page.locator(CARD);
+    await expect(card).toContainText(`Step 4 of ${STEP_COUNT}`);
+    await expect(card).toContainText('Steps 2 to 3 were already done, so the lesson moved on.');
+  });
+});
+
 test.describe('the welcome card opens the list', () => {
   // The mock configs preset the first-run flag, so this block clears it to see the card.
   test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1280, height: 800 } });
