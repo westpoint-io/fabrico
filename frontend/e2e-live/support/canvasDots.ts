@@ -796,3 +796,57 @@ export function cablesOnCanvas(img: DecodedImage, cables: readonly CableToRead[]
     out.every((c) => c.cellInk.every((n) => n <= CABLE_CELL_EMPTY_MAX * d2) && c.endInk.every((n) => n <= TERMINAL_EMPTY_MAX * d2));
   return { cables: out, seen, gone };
 }
+
+// ===========================================================================
+// THE LESSON'S HINT RING, IN PIXELS
+// ===========================================================================
+//
+// The ring's rect comes from `getBoundingClientRect`, which reads the same at opacity 0 and behind a
+// panel. So this reads a capture of exactly that rect. `.fab-hint` strokes a 2 px border in
+// `--fab-focus` on the rect's outer edge, with dark keylines either side of it. A target's own blue
+// sits inside the inner keyline, so the read stays in the band the border can occupy.
+
+/** The band read along the ring's edge, in CSS px: the 2 px border, its inner keyline and no further. */
+export const RING_BAND_PX = 4;
+/** A ring pixel is within this many levels of the focus colour on every channel. */
+export const RING_INK_TOLERANCE = 32;
+
+/**
+ * Ink wanted per CSS px of the ring's length. A whole 2 px border inks 2. A ring on a fractional pixel
+ * anti-aliases down to about one solid row, measured at 154 pixels along a 164 px floor ring, so this
+ * sits under 1, with room for a curve on a fractional pixel, which read 87 pixels along a 104 px port ring.
+ * A ring with three sides covered inks 0.5, and fails.
+ */
+export const RING_FLOOR_PER_PX = 0.6;
+
+export type RingShape = 'square' | 'circle';
+
+/** What a capture of the ring's rect shows of its border. */
+export interface RingOnCanvas {
+  ink: number;
+  /** See `RING_FLOOR_PER_PX`. */
+  floor: number;
+  seen: boolean;
+}
+
+/** The ring read off a capture of its rect. `colour` is the focus colour, `dpr` device pixels per CSS pixel. */
+export function ringOnCanvas(img: DecodedImage, shape: RingShape, colour: number, dpr: number): RingOnCanvas {
+  const c = rgbOf(colour);
+  const { width: w, height: h, data } = img;
+  const band = RING_BAND_PX * dpr;
+  const radius = Math.min(w, h) / 2;
+  let ink = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const fromEdge =
+        shape === 'circle'
+          ? radius - Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2)
+          : Math.min(x + 0.5, y + 0.5, w - x - 0.5, h - y - 0.5);
+      if (fromEdge < 0 || fromEdge > band) continue;
+      if (isNear(data, (y * w + x) << 2, c, RING_INK_TOLERANCE)) ink++;
+    }
+  }
+  const length = shape === 'circle' ? 2 * Math.PI * radius : 2 * (w + h);
+  const floor = RING_FLOOR_PER_PX * length * dpr;
+  return { ink, floor, seen: ink >= floor };
+}

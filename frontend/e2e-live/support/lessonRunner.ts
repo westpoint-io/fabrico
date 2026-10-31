@@ -5,7 +5,7 @@ import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/Tutorial
 import { SHORTCUTS } from '../../src/input/shortcuts';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
-import { DOT_INK_MIN, isDotInk } from './canvasDots';
+import { DOT_INK_MIN, isDotInk, ringOnCanvas } from './canvasDots';
 import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
 import {
   DRAWN_STATE_FRAMES,
@@ -187,6 +187,8 @@ interface WalkState {
   walk: LessonWalk;
   /** The refused gesture has been made and read. */
   refusalDone: boolean;
+  /** The kinds of ring this walk has read off the screen, as a stage's `hint.on`. */
+  ringsRead: Set<string>;
 }
 
 /**
@@ -306,6 +308,58 @@ export async function captureWithGhostGone(
       .toBeNull();
   }
   return captureClip(page, clip);
+}
+
+/** The focus colour the ring's stylesheet paints with, as the page resolves it. */
+async function focusColour(page: Page): Promise<number> {
+  const hex = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fab-focus').trim());
+  return Number.parseInt(hex.replace('#', ''), 16);
+}
+
+/**
+ * Can a person see this stage's ring? A rect reads the same at opacity 0 and behind a panel, and
+ * `elementFromPoint` passes through a ring that takes no press, so this reads a capture of the ring's
+ * own border. It runs once per kind of ring in a walk, because a capture is slow on a CI runner. A read
+ * that a fresh probe says outlived its stage judges nothing, and the next stage of that kind reads it.
+ */
+async function expectRingPainted(
+  page: Page,
+  state: WalkState,
+  label: string,
+  stepIndex: number,
+  stage: Stage,
+  rects: readonly HintRect[],
+): Promise<void> {
+  const kind = stage.hint?.on;
+  if (kind === undefined || state.ringsRead.has(kind)) return;
+  const colour = await focusColour(page);
+  const reads: string[] = [];
+  for (const rect of rects) {
+    const clip = {
+      x: Math.floor(rect.x),
+      y: Math.floor(rect.y),
+      width: Math.ceil(rect.x + rect.width) - Math.floor(rect.x),
+      height: Math.ceil(rect.y + rect.height) - Math.floor(rect.y),
+    };
+    const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
+    if ((await probeAtStage(page, stepIndex, stage.id)) === null) return;
+    const read = ringOnCanvas(img, rect.shape, colour, img.width / clip.width);
+    reads.push(`${read.ink}/${Math.round(read.floor)}`);
+    expect(read.ink, `${label}: the ring's border shows on screen in the focus colour, around (${clip.x},${clip.y})`).toBeGreaterThanOrEqual(read.floor);
+  }
+  state.ringsRead.add(kind);
+  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')}`);
+}
+
+/** A walk that never read a kind of ring it pressed would pass with that ring invisible. */
+function checkRingsRead(lesson: Lesson, state: WalkState): void {
+  const wanted = new Set(
+    lesson.steps.flatMap((step, i) =>
+      state.walked.has(i) ? step.stages.flatMap((s) => (s.hint !== null && (s.gesture.do === 'pressHint' || s.gesture.do === 'dragHint') ? [s.hint.on] : [])) : [],
+    ),
+  );
+  const unread = [...wanted].filter((kind) => !state.ringsRead.has(kind));
+  expect(unread, `${lesson.id}: the kinds of ring the walk pressed and never read off the screen`).toEqual([]);
 }
 
 /** Travel from wherever the pointer is and press and release at `point`. */
@@ -699,6 +753,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     if (gesture.do === 'pressHint') {
       const rects = await hintsForStage(page, lesson, stepIndex, stage);
       if (rects !== null) {
+        await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint]);
         if (stage.hint?.on === 'floor' && cellClip === null) {
           cellClip = {
             x: rects.hint.x + CELL_INTERIOR_INSET_PX,
@@ -722,6 +777,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       const rects = await hintsForStage(page, lesson, stepIndex, stage);
       if (rects !== null) {
         if (rects.hintTo === null) throw new Error(`${label}: this stage names a drag and reports no release ring`);
+        await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint, rects.hintTo]);
         const start = pointInRect(rects.hint, fromOffset(walk.dragFrom));
         const end = pointInRect(rects.hintTo, fromOffset(walk.dragTo));
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
@@ -828,6 +884,7 @@ async function walkSteps(page: Page, lesson: Lesson, state: WalkState, from: num
 async function finishWalk(page: Page, lesson: Lesson, state: WalkState): Promise<void> {
   const record = await readRecord(page);
   checkRecord(lesson, record, state);
+  checkRingsRead(lesson, state);
   const line = record.map((e) => `${positionOf(e)}:${e.stageId ?? '-'}@${Math.round(e.atMs)}`).join(' ');
   console.log(`STEP_RECORD ${lesson.id} ${line}`);
   const indexes = [...new Set(record.map((e) => e.stepIndex))];
@@ -858,7 +915,7 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
   expect(first?.stepIndex, `${lesson.id}: the record starts on step 1`).toBe(0);
 
   const to = opts.until === undefined ? lesson.steps.length : indexOfStep(lesson, opts.until);
-  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk, refusalDone: false };
+  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk, refusalDone: false, ringsRead: new Set() };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
   if (opts.until === undefined) await finishWalk(page, lesson, state);

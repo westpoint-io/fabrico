@@ -50,6 +50,7 @@ import {
   GAUGE_THICK_PX,
   GAUGE_TICK_PX,
   type CableToRead,
+  ringOnCanvas,
   type DecodedImage,
   type ImageFrame,
   type StageSample,
@@ -733,5 +734,55 @@ describe('the pack order graded from the boundary brackets (plan 84-18)', () => 
 
   it('REFUSES a boundary never reached', () => {
     expect(packOrderViolations(RUN5.filter((r) => r.packed < 24), B)).toContainEqual('boundary 24 never reached');
+  });
+});
+
+describe('ringOnCanvas: the hint ring, read off a capture of its rect', () => {
+  const FOCUS = 0x4fa8ff;
+  const GROUND = { r: 0x1b, g: 0x1f, b: 0x27 };
+  const PAINT = { r: 0x4f, g: 0xa8, b: 0xff };
+
+  /** A capture of `size` px holding ground, with `paint` deciding which pixels take the focus colour. */
+  function capture(size: number, paint: (x: number, y: number) => boolean, ink = PAINT): DecodedImage {
+    const data = new Uint8Array(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const c = paint(x, y) ? ink : GROUND;
+        data.set([c.r, c.g, c.b, 255], (y * size + x) * 4);
+      }
+    }
+    return { width: size, height: size, data };
+  }
+  const squareBorder = (size: number) => (x: number, y: number): boolean => Math.min(x, y, size - 1 - x, size - 1 - y) < 2;
+  const circleBorder = (size: number) => (x: number, y: number): boolean => {
+    const out = size / 2 - Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
+    return out >= 0 && out < 2;
+  };
+
+  it('sees a whole square border and a whole circle', () => {
+    expect(ringOnCanvas(capture(60, squareBorder(60)), 'square', FOCUS, 1).seen).toBe(true);
+    expect(ringOnCanvas(capture(32, circleBorder(32)), 'circle', FOCUS, 1).seen).toBe(true);
+  });
+
+  it('refuses a capture with no ring in it', () => {
+    const read = ringOnCanvas(capture(60, () => false), 'square', FOCUS, 1);
+    expect(read.ink).toBe(0);
+    expect(read.seen).toBe(false);
+  });
+
+  it('refuses a ring at half opacity, which is another colour on the screen', () => {
+    const half = { r: 0x35, g: 0x63, b: 0x93 };
+    expect(ringOnCanvas(capture(60, squareBorder(60), half), 'square', FOCUS, 1).seen).toBe(false);
+  });
+
+  it('refuses a ring with three of its sides covered', () => {
+    const topOnly = (x: number, y: number): boolean => y < 2 && x >= 0;
+    expect(ringOnCanvas(capture(60, topOnly), 'square', FOCUS, 1).seen).toBe(false);
+  });
+
+  it("does not count the focus colour on the target inside the ring's band", () => {
+    const target = (x: number, y: number): boolean => Math.min(x, y, 59 - x, 59 - y) >= 5;
+    const read = ringOnCanvas(capture(60, target), 'square', FOCUS, 1);
+    expect(read.ink).toBe(0);
   });
 });
