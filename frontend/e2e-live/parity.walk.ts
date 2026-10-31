@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { CONFIG_NOT_APPLIED_MARKER } from '../src/chrome/configCopy';
+import { machine_kind } from '../src/protocol/kinds';
 import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
 import { frameBudgetMs } from '../e2e/support/frameSampler';
 import { portOf, transport } from './support/beltBoard';
@@ -257,10 +258,10 @@ async function runBoard(page: Page, mode: Mode, cells: BoardCells, outPath: stri
     expect(probe.card, 'the lesson is still on screen when the board is saved').toBe('running');
     expect(probe.stepIndex, `the lesson reached press-play or later (at ${probe.stepId ?? 'no step'})`).toBeGreaterThanOrEqual(PRESS_PLAY_INDEX);
     expect(probe.bound.belt, 'the lesson bound the belt on the board').toBe(held.belts[0].id);
-    expect(
-      [probe.bound.source, probe.bound.sink].sort(),
-      'the lesson bound the two machines on the board',
-    ).toEqual(held.nodes.map((n) => n.id).sort());
+    // Each one looked up, rather than the whole list compared: a machine the tutorial added has to
+    // reach the compare of the edit lines and the hash, which is the check that speaks to it.
+    expect(held.nodes.find((n) => n.id === probe.bound.source)?.kind, 'the lesson bound the Source on the board').toBe(machine_kind.SOURCE);
+    expect(held.nodes.find((n) => n.id === probe.bound.sink)?.kind, 'the lesson bound the Sink on the board').toBe(machine_kind.SINK);
   } else {
     expect(probe.card, 'no lesson is on screen in the plain sitting').toBe('none');
   }
