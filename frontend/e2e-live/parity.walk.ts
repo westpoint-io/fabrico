@@ -1,13 +1,17 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { CONFIG_NOT_APPLIED_MARKER } from '../src/chrome/configCopy';
+import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
 import { frameBudgetMs } from '../e2e/support/frameSampler';
 import { portOf, transport } from './support/beltBoard';
+import { latchStepRecord, openLessonsFromHelp, readProbe, readRecord, startLesson } from './support/lessonRunner';
 import {
   CELL,
   cameraOf,
   expectRenderLoopAlive,
+  guardWillAsk,
   handDragBetween,
   handPlaceAt,
   newBoard,
@@ -21,21 +25,26 @@ import {
   selectMachineAt,
   waitForAppReady,
   waitForCameraSettle,
+  waitForEditVerdicts,
   waitForFile,
   watchPageErrors,
 } from './support/oracle';
 
-// parity.walk.ts - does the same list of gestures end on the same board?
+// parity.walk.ts - does the tutorial change what the user builds?
 //
-// A tutorial that watches the user must not change what the user builds. The comparison that
-// says so has to be able to tell two boards apart, and it has to hold still: a live board advances
-// on wall-clock time, so two sittings land on different ticks. So this runs on a paused board,
-// where nothing moves until the Step button says so, and every gesture is followed by a fixed
-// number of Steps: one, or two for a belt, whose Docks go out after the belt is echoed. A retry
-// Step would make the tick counts differ, so a missing echo is a hard failure.
+// A tutorial that watches the user must not change the board. The comparison that says so has to
+// be able to tell two boards apart, and it has to hold still: a live board advances on wall-clock
+// time, so two sittings land on different ticks. So this runs on a paused board, where nothing moves
+// until the Step button says so, and every gesture is followed by a fixed number of Steps: one, or
+// two for a belt, whose Docks go out after the belt is echoed. A retry Step would make the tick
+// counts differ, so a missing echo is a hard failure.
 //
 // Each board is saved through the toolbar and read back from the file by the `replay_hash` example,
 // which prints the head tick, the tick hash and the edit log.
+//
+// THE TWO SITTINGS DIFFER ONLY IN HOW THE BOARD STARTS. One presses New, the other starts the lesson
+// through the real panel, which asks the host for the same New. The test presses the gestures itself
+// and never goes through the hints, because only the hint reads differ between the sittings.
 //
 // THE RUN STOPS WHILE ITEMS STILL RIDE THE BELT. A Sink emits a Command on delivery, the executor
 // is held while paused, and Save then drains on real time, so the saved tick would depend on the
@@ -55,6 +64,16 @@ const PARITY_STEPS = 76;
 const SINK_OFFSET = 6;
 /** Drawn frames the page may take to see the echoed belt and send its Docks. */
 const DOCKS_SENT_FRAMES = 8;
+/** Drawn frames for a read of the lesson to catch up with the board. */
+const LESSON_FRAMES = 20;
+/** The gestures the Undo test makes: two machines placed and two Undos. */
+const UNDO_TEST_INPUTS = 4;
+/** The step index of the lesson's press-play step, which a sitting has to reach before it saves. */
+const PRESS_PLAY_INDEX = 4;
+/** The strings a saved board could hold if lesson state leaked into it: the lesson's id and the progress key's stem. */
+const LESSON_STATE_STRINGS = ['your-first-line', 'fab.tutorial'] as const;
+/** What the gestures of one sitting log, in order, as each edit line's op name. */
+const USER_GESTURE_OPS = ['Place', 'Place', 'Configure', 'DrawBelt', 'Dock', 'Dock'] as const;
 
 /** Port roles (oracle `PortFacts.role`). */
 const ROLE_IN = 0;
@@ -70,6 +89,15 @@ interface Printed {
   hash: string;
   edits: string[];
 }
+
+/** One sitting: what the file holds, the sends since just before its New, and how far the lesson got. */
+interface Sitting extends Printed {
+  inputs: number;
+  controls: number;
+  stepIndex: number;
+}
+
+type Mode = 'off' | 'on';
 
 /** The built example; a run from a throwaway worktree names this tree's binary with the env var. */
 function replayHashBinary(): string {
@@ -98,6 +126,15 @@ async function inputsSent(page: Page): Promise<number> {
     const hook = (window as unknown as { __fabrico?: { inputsSent?(): number } }).__fabrico;
     if (typeof hook?.inputsSent !== 'function') throw new Error('window.__fabrico.inputsSent() not installed');
     return hook.inputsSent();
+  });
+}
+
+/** How many controls the page has handed to the transport. */
+async function controlsSent(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const hook = (window as unknown as { __fabrico?: { controlsSent?(): number } }).__fabrico;
+    if (typeof hook?.controlsSent !== 'function') throw new Error('window.__fabrico.controlsSent() not installed');
+    return hook.controlsSent();
   });
 }
 
@@ -136,12 +173,28 @@ async function saveTo(page: Page, path: string): Promise<void> {
   await waitForFile(path, `the host wrote ${path}`);
 }
 
+/** Start the lesson through Help and its list, discarding the board if the question comes up. */
+async function startLessonFromHelp(page: Page): Promise<void> {
+  await waitForEditVerdicts(page);
+  const asks = await guardWillAsk(page);
+  await openLessonsFromHelp(page);
+  // `startLesson` presses Start and waits for the lesson to run, which the question holds up.
+  await Promise.all([
+    startLesson(page, LESSON),
+    asks ? page.locator('.fab-dialog-panel').getByRole('button', { name: 'Discard' }).click() : Promise.resolve(),
+  ]);
+}
+
 /**
- * One sitting: a New board on the paused host, the gestures with one Step each, a fixed number
- * of further Steps, then a save. Answers what `replay_hash` prints from the file.
+ * One sitting: a New board on the paused host, from the toolbar or from the lesson's Start, the
+ * gestures with one Step each, a fixed number of further Steps, then a save. Answers what
+ * `replay_hash` prints from the file, with the sends counted from just before the New.
  */
-async function runBoard(page: Page, cells: BoardCells, outPath: string): Promise<Printed> {
-  await newBoard(page);
+async function runBoard(page: Page, mode: Mode, cells: BoardCells, outPath: string): Promise<Sitting> {
+  const inputsAtStart = await inputsSent(page);
+  const controlsAtStart = await controlsSent(page);
+  if (mode === 'off') await newBoard(page);
+  else await startLessonFromHelp(page);
   expect((await readScene(page)).nodes, 'New left an empty board').toEqual([]);
 
   await handPlaceAt(page, 'Source', cells.source[0], cells.source[1]);
@@ -197,56 +250,197 @@ async function runBoard(page: Page, cells: BoardCells, outPath: string): Promise
   expect(held.belts[0].headOccupied, 'no item has reached the Sink, so Save does not drain').toBe(false);
   expect(held.tick, 'the board stayed on the tick the last Step reached').toBe(tick);
 
+  // A tutorial that never started would match the plain board without proving anything. Reaching the
+  // step after the belt takes a bound Source, Sink and belt and an answer from `machine_config`.
+  const probe = await readProbe(page);
+  if (mode === 'on') {
+    expect(probe.card, 'the lesson is still on screen when the board is saved').toBe('running');
+    expect(probe.stepIndex, `the lesson reached press-play or later (at ${probe.stepId ?? 'no step'})`).toBeGreaterThanOrEqual(PRESS_PLAY_INDEX);
+    expect(probe.bound.belt, 'the lesson bound the belt on the board').toBe(held.belts[0].id);
+    expect(
+      [probe.bound.source, probe.bound.sink].sort(),
+      'the lesson bound the two machines on the board',
+    ).toEqual(held.nodes.map((n) => n.id).sort());
+  } else {
+    expect(probe.card, 'no lesson is on screen in the plain sitting').toBe('none');
+  }
+
   await saveTo(page, outPath);
   const printed = readSavedBoard(outPath);
   expect(printed.tick, 'the file holds the tick read before the save, so no drain ran').toBe(tick);
-  return printed;
+  return {
+    ...printed,
+    inputs: (await inputsSent(page)) - inputsAtStart,
+    controls: (await controlsSent(page)) - controlsAtStart,
+    stepIndex: probe.stepIndex,
+  };
+}
+
+/** The app on a paused, empty board at actual size, and two free cells either side of the middle of the view. */
+async function pausedBoardCells(page: Page): Promise<BoardCells> {
+  await page.goto('/');
+  await waitForAppReady(page);
+  await pauseBoard(page);
+  await newBoard(page);
+  await resetZoomToActualSize(page);
+  await waitForCameraSettle(page);
+  return middleCells(page);
+}
+
+/** The row through the middle of the view, with the Source and Sink either side of the middle. */
+async function middleCells(page: Page): Promise<BoardCells> {
+  const cam = await cameraOf(page);
+  const viewport = page.viewportSize()!;
+  const midX = Math.floor((viewport.width / 2 - cam.x) / cam.scale / CELL);
+  const midY = Math.floor((viewport.height / 2 - cam.y) / cam.scale / CELL);
+  return { source: [midX - 3, midY], sink: [midX - 3 + SINK_OFFSET, midY] };
+}
+
+/** Leave the shared host playing, for whichever test comes next. */
+async function pressPlayIfPaused(page: Page): Promise<void> {
+  if ((await transport(page).getAttribute('aria-label')) === 'Play') await transport(page).click();
+}
+
+/** A sitting's line in the run's output, read into the evidence file. */
+function measure(sitting: Sitting): string {
+  return `MEASURE parity-on-off tick=${sitting.tick} hash=${sitting.hash.slice(0, 12)} edits=${sitting.edits.length} inputs=${sitting.inputs} controls=${sitting.controls} stepIndex=${sitting.stepIndex}`;
+}
+
+/** An edit line is `edit <sequence> <tick> <action> <op, Debug form>`. The op's name starts the Debug form. */
+function opNameOf(editLine: string): string {
+  const op = editLine.split(' ')[4] ?? '';
+  return /^[A-Za-z]+/.exec(op)?.[0] ?? `unreadable: ${editLine}`;
 }
 
 test.afterEach(async ({ page }, testInfo) => {
   await restoreHostAfterFailedTest(page, testInfo);
 });
 
-test('the same gestures on a paused board end on the same tick hash', async ({ page }, testInfo) => {
+test('the same gestures with the tutorial on and off end on the same tick hash', async ({ page }, testInfo) => {
   // Two sittings of 81 Steps each took 3.9 minutes on two CPUs at a 100% quota.
   test.setTimeout(8 * 60_000);
   const watcher = watchPageErrors(page);
-  await page.goto('/');
-  await waitForAppReady(page);
   try {
-    await pauseBoard(page);
-    await newBoard(page);
-    await resetZoomToActualSize(page);
-    await waitForCameraSettle(page);
+    const cells = await pausedBoardCells(page);
 
-    // The row through the middle of the view, with the Source and Sink either side of the middle.
-    const cam = await cameraOf(page);
-    const viewport = page.viewportSize()!;
-    const midX = Math.floor((viewport.width / 2 - cam.x) / cam.scale / CELL);
-    const midY = Math.floor((viewport.height / 2 - cam.y) / cam.scale / CELL);
-    const cells: BoardCells = { source: [midX - 3, midY], sink: [midX - 3 + SINK_OFFSET, midY] };
+    const off = await runBoard(page, 'off', cells, testInfo.outputPath('tutorial-off.fab'));
+    const on = await runBoard(page, 'on', cells, testInfo.outputPath('tutorial-on.fab'));
+    console.log(measure(off));
+    console.log(measure(on));
 
-    const first = await runBoard(page, cells, testInfo.outputPath('run-1.fab'));
-    const second = await runBoard(page, cells, testInfo.outputPath('run-2.fab'));
-    console.log(`MEASURE parity run=1 tick=${first.tick} hash=${first.hash.slice(0, 12)} edits=${first.edits.length} steps=${PARITY_STEPS}`);
-    console.log(`MEASURE parity run=2 tick=${second.tick} hash=${second.hash.slice(0, 12)} edits=${second.edits.length} steps=${PARITY_STEPS}`);
+    expect(on.tick, 'both sittings ended on one tick').toBe(off.tick);
+    expect(on.edits, 'both sittings logged the same edits').toEqual(off.edits);
+    expect(on.hash, 'both sittings ended on one tick hash').toBe(off.hash);
+    expect(on.inputs, 'both sittings handed the host the same number of gestures').toBe(off.inputs);
+    expect(on.controls, 'both sittings handed the host the same number of controls').toBe(off.controls);
 
-    expect(second.tick, 'both sittings ended on one tick').toBe(first.tick);
-    expect(second.edits, 'both sittings logged the same edits').toEqual(first.edits);
-    expect(second.hash, 'both sittings ended on one tick hash').toBe(first.hash);
-
-    // The negative control: one more Step moves both what is printed.
+    // The negative control, on the tutorial's board: one more Step moves both what is printed.
     await stepOnce(page, 'the negative control');
-    const controlPath = testInfo.outputPath('run-2-plus-one.fab');
+    const controlPath = testInfo.outputPath('tutorial-on-plus-one.fab');
     await saveTo(page, controlPath);
     const third = readSavedBoard(controlPath);
     console.log(`MEASURE parity control tick=${third.tick} hash=${third.hash.slice(0, 12)} edits=${third.edits.length}`);
-    expect(third.tick, 'one more Step moved the printed tick by one').toBe(second.tick + 1);
-    expect(third.hash, 'one more Step moved the hash').not.toBe(second.hash);
+    expect(third.tick, 'one more Step moved the printed tick by one').toBe(on.tick + 1);
+    expect(third.hash, 'one more Step moved the hash').not.toBe(on.hash);
 
     await expectRenderLoopAlive(page, 'after the paused sittings', { boardHeld: true });
     watcher.assertNone('during the paused sittings');
   } finally {
-    if ((await transport(page).getAttribute('aria-label')) === 'Play') await transport(page).click();
+    await pressPlayIfPaused(page);
   }
+});
+
+test('a board saved mid-lesson holds no lesson state', async ({ page }, testInfo) => {
+  // One sitting of 81 Steps took about 2 minutes on two CPUs at a 100% quota.
+  test.setTimeout(5 * 60_000);
+  const watcher = watchPageErrors(page);
+  try {
+    const cells = await pausedBoardCells(page);
+    // Its own path: Playwright starts a new worker after a failed test, so a path kept from the test
+    // above wouldn't survive into this one.
+    const path = testInfo.outputPath('saved-mid-lesson.fab');
+    const saved = await runBoard(page, 'on', cells, path);
+
+    // A hash can't speak to bytes outside the core, so this reads them. The file is plain postcard
+    // with no compression, so a string in it can be found as its UTF-8 bytes. Collected first, so
+    // one hit can't hide the other.
+    const bytes = readFileSync(path);
+    expect(bytes.length, 'the saved file holds something to search').toBeGreaterThan(0);
+    const found = LESSON_STATE_STRINGS.filter((s) => bytes.includes(Buffer.from(s, 'utf8')));
+    expect(found, 'lesson state found in the bytes of the saved board').toEqual([]);
+
+    expect(saved.edits.map(opNameOf), "the edit log holds the user's gestures and nothing else").toEqual([...USER_GESTURE_OPS]);
+
+    await expectRenderLoopAlive(page, 'after the save', { boardHeld: true });
+    watcher.assertNone('during the paused sitting');
+  } finally {
+    await pressPlayIfPaused(page);
+  }
+});
+
+test("Undo takes back only the user's own gestures", async ({ page }) => {
+  const watcher = watchPageErrors(page);
+  await page.goto('/');
+  await waitForAppReady(page);
+  await expect(transport(page), 'this test runs on a playing board').toHaveAttribute('aria-label', 'Pause');
+
+  await startLessonFromHelp(page);
+  await pollScene(page, (s) => s.canUndo, { message: 'a new board has nothing to undo' }).toBe(false);
+  await resetZoomToActualSize(page);
+  await waitForCameraSettle(page);
+  const cells = await middleCells(page);
+
+  await latchStepRecord(page);
+  const inputsAtStart = await inputsSent(page);
+
+  await handPlaceAt(page, 'Source', cells.source[0], cells.source[1]);
+  await pollScene(page, (s) => s.nodes.length, { message: 'the Source landed' }).toBe(1);
+  await handPlaceAt(page, 'Sink', cells.sink[0], cells.sink[1]);
+  await page.keyboard.press('Escape');
+  await pollScene(page, (s) => s.nodes.length, { message: 'the Sink landed' }).toBeGreaterThanOrEqual(2);
+  await expect
+    .poll(async () => (await readProbe(page)).stepId, {
+      message: 'the two machines took the lesson to the Timer step',
+      timeout: frameBudgetMs(LESSON_FRAMES),
+    })
+    .toBe('set-timer');
+
+  for (const press of ['first', 'second'] as const) {
+    const before = (await readScene(page)).nodes.length;
+    await page.keyboard.press('Control+z');
+    await pollScene(page, (s) => s.nodes.length, { message: `the ${press} Undo took one machine away` }).toBe(before - 1);
+  }
+
+  // Read as one value, so a machine the tutorial placed shows the board, the button and the count at once.
+  await expect
+    .poll(
+      async () => {
+        const scene = await readScene(page);
+        return { machines: scene.nodes.length, canUndo: scene.canUndo, inputs: (await inputsSent(page)) - inputsAtStart };
+      },
+      { message: "two Undos emptied the board, and every gesture sent was the user's own" },
+    )
+    .toEqual({ machines: 0, canUndo: false, inputs: UNDO_TEST_INPUTS });
+
+  await expect
+    .poll(
+      async () => {
+        const probe = await readProbe(page);
+        return `${probe.card}:${probe.stepId ?? 'no step'}`;
+      },
+      { message: 'the lesson went back to its first step', timeout: frameBudgetMs(LESSON_FRAMES) },
+    )
+    .toBe('running:place-source');
+  const record = await readRecord(page);
+  expect(
+    record.filter((e) => e.card !== 'running').map((e) => e.card),
+    'the lesson read running throughout',
+  ).toEqual([]);
+  expect(
+    record.map((e) => e.stepIndex).filter((index, i, all) => index !== all[i - 1]),
+    'the lesson went forward with the two machines and back with the two Undos',
+  ).toEqual([0, 1, 2, 1, 0]);
+
+  await expectRenderLoopAlive(page, 'after the Undos');
+  watcher.assertNone('during the Undos');
 });
