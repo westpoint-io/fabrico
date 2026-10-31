@@ -318,7 +318,7 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 test('the same gestures with the tutorial on and off end on the same tick hash', async ({ page }, testInfo) => {
-  // Two sittings of 81 Steps each took 3.9 minutes on two CPUs at a 100% quota.
+  // Two sittings of 81 Steps each took 3.3 minutes on two CPUs at a 100% quota.
   test.setTimeout(8 * 60_000);
   const watcher = watchPageErrors(page);
   try {
@@ -352,7 +352,7 @@ test('the same gestures with the tutorial on and off end on the same tick hash',
 });
 
 test('a board saved mid-lesson holds no lesson state', async ({ page }, testInfo) => {
-  // One sitting of 81 Steps took about 2 minutes on two CPUs at a 100% quota.
+  // One sitting of 81 Steps took 1.8 minutes on two CPUs at a 100% quota.
   test.setTimeout(5 * 60_000);
   const watcher = watchPageErrors(page);
   try {
