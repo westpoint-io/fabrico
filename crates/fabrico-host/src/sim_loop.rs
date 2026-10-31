@@ -1911,6 +1911,44 @@ impl SimLoop {
         // recovery, which rebuilds a fresh empty registry (the asymmetry this fixes).
         // Host-side socket writes only: nothing enters the sim fold or the log.
         self.registry.drain_all(HttpResponse::reloaded_503);
+        // Requests still queued on the two HTTP front doors belong to the board being replaced:
+        // each `NodeId` came from that board's route table, and the new board may give the same
+        // id to a different machine. The new board must not log them, so they end here.
+        //
+        // A webhook's `ack` is dropped, and `hook` reads that as a 503 with an empty body: its
+        // caller has been told nothing yet, because the 200 goes out only after the tick that
+        // logs the event. An endpoint caller is sent the same `reloaded_503` a parked socket
+        // gets just above. Neither request reached the log or a seen-set: `acquire_input` is the
+        // only way out of these queues and `record_delivery` sits inside it. So the fold and
+        // every replay are unchanged, and a provider's retry of a dropped delivery logs once.
+        //
+        // This drain is not exact the way the gesture drain below it is. A handler that has read
+        // the route table and has not sent yet can still enqueue after this point.
+        let mut refused = 0usize;
+        if let Some(rx) = self.webhook_rx.as_mut() {
+            while let Ok(ing) = rx.try_recv() {
+                refused += 1;
+                drop(ing.ack);
+            }
+        }
+        if let Some(rx) = self.endpoint_rx.as_mut() {
+            while let Ok(ing) = rx.try_recv() {
+                refused += 1;
+                let _ = ing.respond.send(HttpResponse::reloaded_503());
+            }
+        }
+        if refused > 0 {
+            eprintln!(
+                "fabrico-host: board swap refused {refused} request(s) queued on the replaced board"
+            );
+        }
+        // `acquire_input` is the only sender on this channel and `tick_body` empties it after
+        // each `acquire_input`, so nothing is waiting here. If that stopped being true, an old
+        // board's event would fold on the new one.
+        debug_assert!(
+            self.ingress_rx.is_empty(),
+            "an event was left forwarded across a board swap"
+        );
         // REVIEW ROUND 4 WR-01 (plan 74.1-32) AND ROUND 5 CR-01 (plan 74.1-35): DISCARD
         // EVERY EDIT QUEUED ON THE BOARD BEING REPLACED, before the new board is installed.
         //

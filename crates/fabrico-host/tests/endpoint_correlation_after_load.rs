@@ -10,10 +10,13 @@
 //! socket with the old request's answer.
 //!
 //! # Shape
-//! Request A is admitted and left on the forward wire, then the board is saved. A fresh
-//! loop is told to Load and request B is queued BEFORE the step that services the Load,
-//! so B is parked before A's reply resolves. Pushed after the Load step, A's reply runs
-//! first, finds nothing parked and is dropped, and the collision hides (seen in triage).
+//! Request A is admitted and left on the forward wire, then the board is saved. B has to be
+//! parked on the loaded board before A's reply comes back: pushed a tick later, A's reply
+//! runs first, finds nothing parked and is dropped, and the collision hides (seen in
+//! triage). B can't be queued before the step that services the Load, because a swap refuses
+//! whatever is queued on the board it replaces. So the fresh loop holds the board first:
+//! with the Load serviced on a paused board no tick runs between the swap and B, and the
+//! step that services the Resume mints B ahead of the loaded board's first tick.
 //!
 //! Run target: `cargo test -p fabrico-host --test endpoint_correlation_after_load`
 
@@ -206,11 +209,14 @@ fn a_request_saved_on_the_wire_does_not_answer_the_next_caller_after_load() {
         .with_control(crx)
         .with_endpoint(endpoint_rx);
 
+    // Held so no tick runs between the swap and B, which is parked before A's reply comes back.
+    ctx.send(ControlMsg::Pause).expect("send pause");
+    sim.step().expect("hold the fresh board");
     ctx.send(ControlMsg::Load(fab)).expect("send load");
-    // Queued before the Load step: B is minted on the loaded board in the same step,
-    // and parked before A's reply comes back.
+    sim.step().expect("service the Load on the held board");
+    ctx.send(ControlMsg::Resume).expect("send resume");
     let mut b = ask(&endpoint_tx, route, "BBBB");
-    sim.step().expect("service the Load and admit B");
+    sim.step().expect("resume and admit B");
     sim.run(Some(60), Duration::from_millis(2)).expect("drive both round trips");
 
     let answer = b.try_recv().expect("B received an answer");
