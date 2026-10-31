@@ -278,6 +278,68 @@ describe('reduce: bindings follow a re-minted handle', () => {
   });
 });
 
+describe('reduce: a line drawn in two pieces', () => {
+  const FIRST_PIECE: BoardBelt = {
+    id: 20,
+    items: 0,
+    occupiedSlots: [],
+    docks: [
+      { end: 'Head', node: 21, port: 0 },
+      { end: 'Tail', node: THE_SOURCE.id, port: 0 },
+    ],
+  };
+  const SECOND_PIECE: BoardBelt = {
+    id: 21,
+    items: 0,
+    occupiedSlots: [],
+    docks: [
+      { end: 'Head', node: THE_SINK.id, port: 0 },
+      { end: 'Tail', node: 20, port: 0 },
+    ],
+  };
+  const PIECES = [FIRST_PIECE, SECOND_PIECE];
+  const drawn = (): TutorialState => frame(atStep(3), { nodes: BOTH, belts: PIECES }, TIMER);
+
+  it('finishes the belt step', () => {
+    const s = drawn();
+    expect(s.stepIndex).toBe(4);
+    expect(s.note).toBeNull();
+    expect(s.bindings.belt?.id).toBe(SECOND_PIECE.id);
+  });
+
+  it('stays finished on later frames', () => {
+    const s = frame(drawn(), { nodes: BOTH, belts: PIECES, tick: 11 }, TIMER);
+    expect(s.stepIndex).toBe(5);
+    expect(s.note?.kind).not.toBe('wentBack');
+  });
+
+  it('goes back to the belt step when either piece is taken away', () => {
+    for (const left of PIECES) {
+      const s = frame(drawn(), { nodes: BOTH, belts: [left] }, TIMER);
+      expect(s.stepIndex, `with only belt ${left.id}`).toBe(3);
+      expect(s.note).toEqual({ kind: 'wentBack', a: 4, b: 4 });
+    }
+  });
+
+  it('follows the bound piece through a re-mint', () => {
+    const source = node(41, SOURCE, 2, 2);
+    const sink = node(42, SINK, 8, 2);
+    const first: BoardBelt = { ...FIRST_PIECE, id: 43, docks: [{ end: 'Head', node: 44, port: 0 }, { end: 'Tail', node: 41, port: 0 }] };
+    const second: BoardBelt = { ...SECOND_PIECE, id: 44, docks: [{ end: 'Head', node: 42, port: 0 }, { end: 'Tail', node: 43, port: 0 }] };
+    const s = frame(drawn(), { nodes: [source, sink], belts: [first, second], generation: 2 }, { appliedTrigger: { node: 41, kind: 'Timer' } });
+    expect(s.stepIndex).toBe(4);
+    expect(s.bindings.belt?.id).toBe(44);
+  });
+
+  it('finishes the lesson when an item leaves the piece that runs into the Sink', () => {
+    const carrying = (slots: number[]): BoardBelt => ({ ...SECOND_PIECE, items: slots.length, occupiedSlots: slots });
+    let s = frame(drawn(), { nodes: BOTH, belts: [FIRST_PIECE, carrying([0])], tick: 11 }, TIMER);
+    expect(s.stepIndex).toBe(5);
+    s = frame(s, { nodes: BOTH, belts: [FIRST_PIECE, carrying([])], tick: 12 }, TIMER);
+    expect(s.card).toBe('finished');
+  });
+});
+
 describe('currentStage', () => {
   const stageOf = (s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts>): string | undefined =>
     currentStage(s, board(b), chrome(c), LESSONS)?.id;

@@ -140,6 +140,69 @@ test('a belt drawn from the Sink back to the Source finishes the same step', asy
   errors.assertNone('during the reversed belt');
 });
 
+test('a line drawn in two pieces finishes the same step', async ({ page }) => {
+  const errors = watchPageErrors(page);
+  await startFromDemo(page);
+  await walkLesson(page, LESSON, { until: 'draw-belt' });
+
+  await reachStage(page, DRAW_BELT, 'belt-tool');
+  const tool = await ringsAt(page, DRAW_BELT, 'belt-tool');
+  await pressPointByHand(page, pointInRect(tool.hint, { x: -6, y: 3 }));
+
+  await reachStage(page, DRAW_BELT, 'belt-draw');
+  const rings = await ringsAt(page, DRAW_BELT, 'belt-draw');
+  if (rings.hintTo === null) throw new Error('belt-draw reported no release ring');
+  const before = await readProbe(page);
+  const board = await readScene(page);
+  const source = board.nodes.find((n) => n.id === before.bound.source)?.cells[0] as readonly [number, number] | undefined;
+  const sink = board.nodes.find((n) => n.id === before.bound.sink)?.cells[0] as readonly [number, number] | undefined;
+  if (source === undefined || sink === undefined) throw new Error('the bound machines are not both on the board');
+  expect(sink[1], 'the two machines share a row, so a straight piece stops short between them').toBe(source[1]);
+
+  // The first piece stops two cells past the Source's doorstep, short of the Sink.
+  const shortCell = [source[0] + 3, source[1]] as const;
+  const shortAt = await screenCellCentre(page, shortCell[0], shortCell[1]);
+  await dragByHand(page, pointInRect(rings.hint, { x: 3, y: -2 }), { x: shortAt.x + 3, y: shortAt.y - 2 });
+  await expect
+    .poll(async () => (await readScene(page)).belts.length, {
+      message: 'the first piece reached the board',
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(1);
+  await waitTwoTickRises(page);
+  const held = await readProbe(page);
+  expect(held.stepIndex, 'a piece that stops short finishes nothing').toBe(DRAW_BELT);
+
+  // The second piece starts on the free cell past the first piece's end and runs into the Sink.
+  const nextCell = await screenCellCentre(page, shortCell[0] + 1, shortCell[1]);
+  const into = await ringsAt(page, DRAW_BELT, 'belt-draw');
+  if (into.hintTo === null) throw new Error('belt-draw reported no release ring');
+  await dragByHand(page, { x: nextCell.x + 2, y: nextCell.y + 3 }, pointInRect(into.hintTo, { x: -2, y: 3 }));
+
+  await expect
+    .poll(async () => (await readProbe(page)).stepIndex, {
+      message: 'the second piece finished draw-belt',
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBeGreaterThan(DRAW_BELT);
+
+  const probe = await readProbe(page);
+  const scene = await readScene(page);
+  expect(scene.belts, 'the line is two belts').toHaveLength(2);
+  const last = scene.belts.find((b) => b.id === probe.bound.belt);
+  const first = scene.belts.find((b) => b.id !== probe.bound.belt);
+  console.log(`MEASURE two-piece-docks first=${JSON.stringify(first?.docks)} last=${JSON.stringify(last?.docks)}`);
+  expect(last?.docks.find((d) => d.end === 'Head')?.node, 'the bound piece runs into the Sink').toBe(probe.bound.sink);
+  expect(last?.docks.find((d) => d.end === 'Tail')?.node, 'and follows the first piece').toBe(first?.id);
+  expect(first?.docks.find((d) => d.end === 'Tail')?.node, 'which leaves the Source').toBe(probe.bound.source);
+  expect(first?.docks.find((d) => d.end === 'Head')?.node, 'and runs into the second piece').toBe(last?.id);
+
+  await continueLesson(page, LESSON, { from: 'press-play' });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
+  await expectRenderLoopAlive(page, 'after the line in two pieces');
+  errors.assertNone('during the line in two pieces');
+});
+
 test('a click finishes nothing, and a Sink placed first waits for its step', async ({ page }) => {
   const errors = watchPageErrors(page);
   await startFromDemo(page);

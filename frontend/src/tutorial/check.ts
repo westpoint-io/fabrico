@@ -29,9 +29,27 @@ export type CheckResult = { done: false } | { done: true; bound: { name: Binding
 const NOT_DONE: CheckResult = { done: false };
 const DONE: CheckResult = { done: true, bound: null };
 
-/** The belt joining the two handles, whichever way round it was drawn. */
+/**
+ * The belt joining the two handles. One belt counts whichever way round it was drawn. A line drawn in
+ * pieces counts too, from `a` to `b`: a piece's Head docks the next piece by its handle, so this
+ * follows Head docks through belts until one reaches `b`, and that last piece is the answer. A machine
+ * on the way stops the walk, because that's two lines. A host orients a belt from its Out end, so a
+ * line of pieces only ever runs from the Source to the Sink.
+ */
 export function beltJoining(board: BoardFacts, a: number, b: number): BoardBelt | undefined {
-  return board.belts.find((belt) => belt.docks.some((d) => d.node === a) && belt.docks.some((d) => d.node === b));
+  const direct = board.belts.find((belt) => belt.docks.some((d) => d.node === a) && belt.docks.some((d) => d.node === b));
+  if (direct !== undefined) return direct;
+  const seen = new Set<number>();
+  const queue = board.belts.filter((belt) => belt.docks.some((d) => d.end === 'Tail' && d.node === a));
+  for (const belt of queue) {
+    if (seen.has(belt.id)) continue;
+    seen.add(belt.id);
+    const head = belt.docks.find((d) => d.end === 'Head')?.node;
+    if (head === b) return belt;
+    const next = board.belts.find((other) => other.id === head);
+    if (next !== undefined) queue.push(next);
+  }
+  return undefined;
 }
 
 /** The name a bound belt goes by. A belt holds no cell the lesson keeps, so it goes by the machines it joins. */

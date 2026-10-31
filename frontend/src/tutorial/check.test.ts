@@ -133,6 +133,72 @@ describe('beltJoins', () => {
     expect(evaluateCheck(check, ctx({ board: { belts: [belt(9, [], stranger)] } })).done).toBe(false);
   });
 
+  describe('a line drawn in two pieces', () => {
+    const FIRST = 20;
+    const SECOND = 21;
+    const THIRD = 22;
+    const intoFirst: BoardBelt['docks'] = [
+      { end: 'Head', node: SECOND, port: 0 },
+      { end: 'Tail', node: THE_SOURCE.id, port: 0 },
+    ];
+    const intoSink: BoardBelt['docks'] = [
+      { end: 'Head', node: THE_SINK.id, port: 0 },
+      { end: 'Tail', node: FIRST, port: 0 },
+    ];
+
+    it('finishes, and binds the piece that runs into the Sink', () => {
+      const result = evaluateCheck(check, ctx({ board: { belts: [belt(FIRST, [], intoFirst), belt(SECOND, [], intoSink)] } }));
+      expect(result.done).toBe(true);
+      expect(result.done && result.bound?.node.id).toBe(SECOND);
+    });
+
+    it('finishes through three pieces, whichever order the board lists them in', () => {
+      const first = belt(FIRST, [], intoFirst);
+      const second = belt(SECOND, [], [
+        { end: 'Head', node: THIRD, port: 0 },
+        { end: 'Tail', node: FIRST, port: 0 },
+      ]);
+      const third = belt(THIRD, [], [
+        { end: 'Head', node: THE_SINK.id, port: 0 },
+        { end: 'Tail', node: SECOND, port: 0 },
+      ]);
+      const result = evaluateCheck(check, ctx({ board: { belts: [third, first, second] } }));
+      expect(result.done && result.bound?.node.id).toBe(THIRD);
+    });
+
+    it('does not finish while the first piece stops short of the Sink', () => {
+      const shortOfTheSink: BoardBelt['docks'] = [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }];
+      expect(evaluateCheck(check, ctx({ board: { belts: [belt(FIRST, [], shortOfTheSink)] } })).done).toBe(false);
+    });
+
+    it('does not finish when the two pieces only abut, with no join between them', () => {
+      const fromSource: BoardBelt['docks'] = [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }];
+      const toSink: BoardBelt['docks'] = [{ end: 'Head', node: THE_SINK.id, port: 0 }];
+      expect(evaluateCheck(check, ctx({ board: { belts: [belt(FIRST, [], fromSource), belt(SECOND, [], toSink)] } })).done).toBe(false);
+    });
+
+    it('does not finish on a line from the Source into another machine', () => {
+      const elsewhere: BoardBelt['docks'] = [
+        { end: 'Head', node: 123, port: 0 },
+        { end: 'Tail', node: FIRST, port: 0 },
+      ];
+      const fromStranger: BoardBelt['docks'] = [
+        { end: 'Head', node: THE_SINK.id, port: 0 },
+        { end: 'Tail', node: 123, port: 0 },
+      ];
+      const belts = [belt(FIRST, [], intoFirst), belt(SECOND, [], elsewhere), belt(THIRD, [], fromStranger)];
+      expect(evaluateCheck(check, ctx({ board: { belts } })).done, 'a machine between them is not one line').toBe(false);
+    });
+
+    it('survives a loop of belts, and finishes nothing', () => {
+      const looped: BoardBelt['docks'] = [
+        { end: 'Head', node: FIRST, port: 0 },
+        { end: 'Tail', node: FIRST, port: 0 },
+      ];
+      expect(evaluateCheck(check, ctx({ board: { belts: [belt(FIRST, [], intoFirst), belt(SECOND, [], looped)] } })).done).toBe(false);
+    });
+  });
+
   it('with no bound Sink, nothing joins', () => {
     const noSink = { source: BINDINGS.source! };
     expect(evaluateCheck(check, ctx({ board: { belts: [belt(9, [], INTO_THE_SINK)] }, bindings: noSink })).done).toBe(false);
