@@ -152,6 +152,17 @@ async function clipAround(page: Page, belt: Belt): Promise<{ x: number; y: numbe
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+/** The smallest screen box holding each belt's `clipAround` box. */
+async function clipAroundBelts(page: Page, belts: Belt[]): Promise<{ x: number; y: number; width: number; height: number }> {
+  expect(belts.length, 'the board has belts').toBeGreaterThan(0);
+  const boxes = await Promise.all(belts.map((b) => clipAround(page, b)));
+  const left = Math.min(...boxes.map((b) => b.x));
+  const top = Math.min(...boxes.map((b) => b.y));
+  const right = Math.max(...boxes.map((b) => b.x + b.width));
+  const bottom = Math.max(...boxes.map((b) => b.y + b.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 /**
  * Holds the belt treads still by pinning the render clock, or frees them again with `null`. The
  * pin reaches the canvas on the next draw, so this returns after two display frames, and a capture
@@ -423,10 +434,14 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     const status = (await held).status();
     expect.soft(status, 'the caller of a POST held across the load reads 503').toBe(503);
 
-    // From just after the swap, for as long as an item would need to cross the first belt.
-    const swapTick = (await readScene(page)).tick;
-    const belt = firstBelt(await readScene(page));
-    const clip = await clipAround(page, belt);
+    // From just after the swap, for as long as an item would need to cross the first belt. A leaked
+    // item has left the first belt by the time the camera settles, so the clip covers all the belts:
+    // a clip of the first belt alone stayed the same with 33 item samples in the model. A clip this
+    // size can be slow to capture on a busy machine, so the loop also waits for enough samples, and
+    // it can't exit having checked nothing.
+    const swapped = await readScene(page);
+    const swapTick = swapped.tick;
+    const clip = await clipAroundBelts(page, swapped.belts);
     await pinTreads(page, 0);
     const reference = await captureClip(page, clip);
     let samples = 0;
@@ -434,15 +449,14 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     let clipChanges = 0;
     for (;;) {
       const scene = await readScene(page);
-      if (scene.tick >= swapTick + FIRST_BELT_TICKS) break;
+      if (scene.tick >= swapTick + FIRST_BELT_TICKS && samples >= CONTROL_SAMPLES) break;
       itemsSeen += scene.belts.reduce((sum, b) => sum + b.items, 0);
       if (!(await captureClip(page, clip)).equals(reference)) clipChanges += 1;
       samples += 1;
       await page.waitForTimeout(SAMPLE_GAP_MS);
     }
-    expect(samples, 'enough samples were taken to mean something').toBeGreaterThanOrEqual(CONTROL_SAMPLES);
     expect.soft(itemsSeen, `the model reports no item on the new board across ${samples} samples`).toBe(0);
-    expect.soft(clipChanges, `the first belt's clip stays the same across ${samples} samples`).toBe(0);
+    expect.soft(clipChanges, `the clip of the board's belts stays the same across ${samples} samples`).toBe(0);
     await pinTreads(page, null);
 
     // The door is open again and the same check can see an item.
