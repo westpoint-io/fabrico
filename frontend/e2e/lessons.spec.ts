@@ -239,6 +239,58 @@ test.describe('the step card and the hint ring', () => {
     expect(await cameraOf(page), 'scrolling chrome leaves the camera alone').toEqual(camBefore);
   });
 
+  test('the ring stays inside the column its control scrolls in', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await page.setViewportSize({ width: 1280, height: 420 });
+    const { cell } = await armSourceForFloor(page);
+    h.inject(sourceOn(cell, 6));
+    const tools = page.getByTestId('palette-tools');
+    const sinkRow = page.getByRole('button', { name: 'Place Sink', exact: true });
+    const placed = await ringAt(page, 'sink-tool');
+    expectRingAround(placed, await boxOf(sinkRow, 'the Sink row'), 'the ring when the stage begins');
+
+    // Scroll the row right out of the column, the way a user's wheel would.
+    const rowHeight = (await boxOf(sinkRow, 'the Sink row')).height;
+    const scrolledOut = await tools.evaluate((el, name) => {
+      const row = el.querySelector(`button[aria-label="${name}"]`) as HTMLElement;
+      for (const top of [0, el.scrollHeight]) {
+        el.scrollTop = top;
+        const r = row.getBoundingClientRect();
+        const c = el.getBoundingClientRect();
+        if (r.bottom <= c.top || r.top >= c.bottom) return true;
+      }
+      return false;
+    }, 'Place Sink');
+    expect(scrolledOut, 'this window is short enough to scroll the row out of the column').toBe(true);
+    await expect.poll(async () => (await readProbe(page)).hint, { message: 'the ring hides with its control out of the column' }).toBeNull();
+    await expect(page.locator('[data-fab-hint]'), 'and it is off the screen').toBeHidden();
+    expect((await readProbe(page)).stageId, 'the stage is still the same').toBe('sink-tool');
+
+    // Half the row showing: the ring marks the half a press can reach, inside the column.
+    await tools.evaluate((el, name) => {
+      const row = el.querySelector(`button[aria-label="${name}"]`) as HTMLElement;
+      const r = row.getBoundingClientRect();
+      const c = el.getBoundingClientRect();
+      el.scrollTop += r.top >= c.bottom ? r.top + r.height / 2 - c.bottom : r.bottom - r.height / 2 - c.top;
+    }, 'Place Sink');
+    const half = await ringAt(page, 'sink-tool');
+    const column = await boxOf(tools, 'the palette column');
+    expect(half.height, 'the ring is shorter than the whole row').toBeLessThan(rowHeight + 2 * OUTSET - TOLERANCE);
+    expect(half.y, 'it starts at the column').toBeGreaterThanOrEqual(column.y - OUTSET - TOLERANCE);
+    expect(half.y + half.height, 'and ends at the column').toBeLessThanOrEqual(column.y + column.height + OUTSET + TOLERANCE);
+
+    // Scrolled back, it is around the whole row again.
+    await sinkRow.scrollIntoViewIfNeeded();
+    await expect
+      .poll(async () => {
+        const probe = await readProbe(page);
+        const row = await boxOf(sinkRow, 'the Sink row');
+        return probe.hint === null ? null : Math.abs(probe.hint.height - (row.height + 2 * OUTSET));
+      }, { message: 'the ring comes back around the row' })
+      .toBeLessThanOrEqual(TOLERANCE);
+  });
+
   test('the floor ring follows zoom and pan', async ({ page }) => {
     const h = await boot(page);
     await startLesson(page, h);

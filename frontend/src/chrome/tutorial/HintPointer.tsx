@@ -108,6 +108,27 @@ function portBox(
   };
 }
 
+/**
+ * The part of a control its scrolling ancestors still show, or null when they show none of it. The
+ * ring goes around this part, because the rest can't take a press and a ring around all of it would
+ * float over whatever sits past the column's edge.
+ */
+function shownPart(control: HTMLElement): { left: number; top: number; right: number; bottom: number } | null {
+  let { left, top, right, bottom } = control.getBoundingClientRect();
+  for (let el = control.parentElement; el !== null; el = el.parentElement) {
+    const { overflowX, overflowY } = getComputedStyle(el);
+    if (overflowX === 'visible' && overflowY === 'visible') continue;
+    const box = el.getBoundingClientRect();
+    const clipLeft = box.left + el.clientLeft;
+    const clipTop = box.top + el.clientTop;
+    left = Math.max(left, clipLeft);
+    top = Math.max(top, clipTop);
+    right = Math.min(right, clipLeft + el.clientWidth);
+    bottom = Math.min(bottom, clipTop + el.clientHeight);
+  }
+  return right > left && bottom > top ? { left, top, right, bottom } : null;
+}
+
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
 function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean, nodes: SceneNodes | undefined): RingBox | null {
   const hint = target.hint;
@@ -118,14 +139,14 @@ function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean, no
     // Once, when the stage begins: a palette row can sit below the fold of its scrolling column.
     // This moves chrome only, so the camera and the board stay as they were.
     if (stageBegan) control.scrollIntoView({ block: 'nearest' });
-    const r = control.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return null;
+    const shown = shownPart(control);
+    if (shown === null) return null;
     const origin = layer.getBoundingClientRect();
     return {
-      x: r.left - origin.left - OUTSET_PX,
-      y: r.top - origin.top - OUTSET_PX,
-      width: r.width + 2 * OUTSET_PX,
-      height: r.height + 2 * OUTSET_PX,
+      x: shown.left - origin.left - OUTSET_PX,
+      y: shown.top - origin.top - OUTSET_PX,
+      width: shown.right - shown.left + 2 * OUTSET_PX,
+      height: shown.bottom - shown.top + 2 * OUTSET_PX,
       zIndex: PANEL_TARGET_Z,
     };
   }
