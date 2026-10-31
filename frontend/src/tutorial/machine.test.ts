@@ -122,13 +122,23 @@ describe('reduce: a lesson that starts from a swap', () => {
     expect(next.stepIndex).toBe(0);
   });
 
-  it("the first board's nodes become known, so the old board can't finish anything", () => {
+  it('a higher floor with machines on it is a Load that was already on its way, so the lesson waits', () => {
     const sent = reduce(IDLE, { type: 'newSent', lessonId: LESSON, floorAtSend: FLOOR }, LESSONS);
-    const next = frame(sent, { nodes: [THE_SOURCE] });
-    expect(next.card).toBe('running');
-    expect(next.stepIndex).toBe(0);
-    expect(next.baseline?.knownKeys).toEqual(['0@2,2']);
-    expect(frame(next, { nodes: [THE_SOURCE] }).stepIndex, 'the same machine a frame later').toBe(0);
+    const loaded = frame(sent, { nodes: [THE_SOURCE], swapFloor: FLOOR + 1 });
+    expect(loaded.card).toBe('starting');
+    expect(loaded.floor, 'the floor to beat is still the one at the send').toBe(FLOOR);
+
+    const lessonBoard = frame(loaded, { swapFloor: FLOOR + 2 });
+    expect(lessonBoard.card, "New's empty board starts the lesson").toBe('running');
+    expect(lessonBoard.floor).toBe(FLOOR + 2);
+    expect(lessonBoard.stepIndex).toBe(0);
+    expect(lessonBoard.baseline?.knownKeys).toEqual([]);
+    expect(frame(lessonBoard, { swapFloor: FLOOR + 2 }).card, 'and it reads no swap on the next frame').toBe('running');
+  });
+
+  it('a higher floor with only a belt on it is not the empty board either', () => {
+    const sent = reduce(IDLE, { type: 'newSent', lessonId: LESSON, floorAtSend: FLOOR }, LESSONS);
+    expect(frame(sent, { belts: [JOINED] }).card).toBe('starting');
   });
 });
 

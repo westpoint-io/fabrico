@@ -1146,6 +1146,27 @@ test.describe('a swapped board and going back', () => {
     await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
   });
 
+  test('a Load already on its way when the lesson starts is not taken for the lesson board', async ({ page }) => {
+    const h = await boot(page);
+    await openLessons(page);
+    await page.getByRole('button', { name: START, exact: true }).click();
+    await expect.poll(() => newCount(h), { message: 'Start sent New' }).toBe(1);
+    const card = page.locator(CARD);
+
+    // The Load's keyframe lands first, with its machines on it and a higher floor.
+    h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1, nodes: [OLD_MACHINE] }));
+    await waitForBoard(page, { machines: 1, tick: 5 });
+    // A drawn frame has read that board by the time this one resolves.
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+    expect((await readProbe(page)).card, 'the lesson waits for its own board').toBe('starting');
+    await expect(card).toContainText('Clearing the board.');
+
+    h.inject(swappedBoard(2, 6));
+    await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
+    await expect(card, 'the empty board it asked for is no swap').not.toContainText('Lesson paused');
+    expect((await readProbe(page)).card).toBe('running');
+  });
+
   test('Leave on a swapped card leaves Restart alone in the row', async ({ page }) => {
     const h = await boot(page);
     await startLesson(page, h);

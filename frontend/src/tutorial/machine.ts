@@ -33,10 +33,9 @@ export interface BoundNode {
 /**
  * What a step compares with. It isn't a plain snapshot of the board at step start, because a snapshot
  * taken when step 2 begins already holds a Sink placed during step 1, and the user would have to place
- * a second one. So `knownKeys` holds the keys on the lesson's first board plus the keys earlier steps
- * bound, and a machine no step has claimed still counts as new. The old board can't finish anything,
- * because the first board comes from the first packet with a higher swap floor. The rest are read when
- * the step begins.
+ * a second one. So `knownKeys` holds the keys earlier steps bound, and a machine no step has claimed
+ * still counts as new. Another board can't finish anything, because a lesson begins only on an empty
+ * board with a higher swap floor. The rest are read when the step begins.
  */
 export interface StepBaseline {
   knownKeys: readonly string[];
@@ -418,20 +417,15 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
   if (s.card === 'starting') {
     // The swap floor, not the generation: Undo raises the generation too, and only a real swap
     // means the empty board has arrived. Frames from the old board wait here, so its machines
-    // can't finish a step.
-    if (e.board.swapFloor <= s.floor) return s;
+    // can't finish a step. So does a board with anything on it: New's board is always empty, and a
+    // higher floor with machines is a Load sent before this New, whose keyframe landed first.
+    if (e.board.swapFloor <= s.floor || e.board.nodes.length > 0 || e.board.belts.length > 0) return s;
     const running: TutorialState = {
       ...s,
       card: 'running',
       stepIndex: 0,
       floor: e.board.swapFloor,
-      baseline: baselineFor(
-        lessons.find((l) => l.id === s.lessonId)?.steps[0],
-        e.board.nodes.map(nodeKey),
-        e.board,
-        e.chrome,
-        s.bindings,
-      ),
+      baseline: baselineFor(lessons.find((l) => l.id === s.lessonId)?.steps[0], [], e.board, e.chrome, s.bindings),
     };
     return runFrame(running, e.board, e.chrome, lessons);
   }
