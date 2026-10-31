@@ -965,6 +965,43 @@ test.describe('the lesson list', () => {
     expect(newCount(h), 'and nothing was pressed').toBe(1);
   });
 
+  test('a refusal moves clear of the list', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await boot(page, { answerGesture: () => 'FootprintCollision' });
+    const refusal = page.locator('#fab-refusal .fab-panel');
+    const list = page.locator(PANEL);
+    const refuseAPlace = async (): Promise<void> => {
+      const at = await screenCellCentre(page, OLD_MACHINE.cell_x, OLD_MACHINE.cell_y);
+      await page.mouse.click(at.x, at.y);
+      await expect(page.locator('#fab-refusal')).toHaveText('That space is taken. Clear it or try elsewhere.');
+    };
+    const expectApart = async (what: string): Promise<void> => {
+      await expect
+        .poll(
+          async () => {
+            const r = await boxOf(refusal, 'the refusal');
+            const l = await boxOf(list, 'the list');
+            return r.x + r.width <= l.x || l.x + l.width <= r.x || r.y + r.height <= l.y || l.y + l.height <= r.y;
+          },
+          { message: what },
+        )
+        .toBe(true);
+    };
+
+    // A refusal that arrives with the list open.
+    await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+    await openLessons(page);
+    await refuseAPlace();
+    await expectApart('a refusal said with the list open stays clear of it');
+
+    // And a list that opens over a refusal already showing.
+    await list.getByRole('button', { name: 'Close', exact: true }).click();
+    await refuseAPlace();
+    await openLessons(page);
+    await expect(refusal, 'the refusal still holds').toBeVisible();
+    await expectApart('a refusal already showing moves when the list opens');
+  });
+
   test('declining the question leaves everything as it was', async ({ page }) => {
     const h = await boot(page);
     h.inject(buildPacket({ full: false, tick: 4, nodes: [{ id: 2, kind: 0, cell_x: 14, cell_y: 8 }] }));

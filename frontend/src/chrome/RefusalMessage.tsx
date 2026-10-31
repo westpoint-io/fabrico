@@ -478,8 +478,8 @@ export interface RefusalMessageProps {
  *  centred place: a box this narrow would wrap a sentence onto more lines than it reads well in. */
 export const BAND_DODGE_MIN_PX = 200;
 
-/** The top-right panels the band keeps clear of: the inspector and Help (UI review item 7). */
-const TOP_RIGHT_PANELS = 'aside[aria-labelledby="fab-config-heading"], #fab-help-panel';
+/** The top-right panels the band keeps clear of: the inspector, Help and the lesson list (UI review item 7). */
+const TOP_RIGHT_PANELS = 'aside[aria-labelledby="fab-config-heading"], #fab-help-panel, #fab-lessons-panel';
 
 /** The band's shipped top (see the wrapper's `top` below for why it is this expression). */
 const BAND_TOP =
@@ -519,8 +519,8 @@ export function RefusalMessage({ message, avoid = null, dodgeKey = '' }: Refusal
   // move it to just below that cell. Written on the node before paint, so it never flickers;
   // reset on every sentence and every new flash box, so a band moved once does not stay moved.
   //
-  // THE BAND KEEPS CLEAR OF A SHOWING TOP-RIGHT PANEL (phase 91 UI review item 7). The inspector
-  // and Help dock at 116 on the right, under the band's centred place, so a refusal with a machine
+  // THE BAND KEEPS CLEAR OF A SHOWING TOP-RIGHT PANEL (phase 91 UI review item 7). The inspector,
+  // Help and the lesson list dock at 116 on the right, under the band's centred place, so a refusal with a machine
   // selected covered the inspector's heading for the 4 s it held. When the centred box meets one,
   // it is centred instead in the room between the palette and the leftmost showing panel, one
   // `--fab-space-sm` gutter each side, as the status strip is, and its width is capped to that
