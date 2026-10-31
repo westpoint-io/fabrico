@@ -663,11 +663,19 @@ struct BoardExecutor {
 /// the old call's answer resolve the new board's command. With a pair per board, that late send
 /// fails because the old receiver is gone.
 ///
-/// The consumer ends once the board's sender is dropped and its queue is empty. A command
-/// already on that queue still fires, because a board swap doesn't recall an effect it has asked
-/// for. The pause gate, the wake, the dispatch counter and the correlation registry are shared
-/// across boards, and that registry resolves a stale Reply to nothing, because a swap drains it
-/// and correlations aren't reused.
+/// The consumer ends once the board's sender is dropped and its queue is empty. `cancelled_c` is
+/// this board's own flag, which a swap sets before waking the consumer. From then on the consumer
+/// drops each command it hasn't started, whether that command is parked on the pause gate or still
+/// queued, so it ends at the swap and doesn't wait for the next Resume. A swap normally runs only
+/// once the board has nothing in flight, so the old board has already settled what is dropped here.
+/// The exception is a latched swap whose drain ran out of `MAX_SETTLE_TICKS`, and there the board
+/// waiting on the command is the one going away. A call already started is left to finish, and its
+/// result goes nowhere because the old receiver is gone. Dropping a command touches neither the
+/// fold nor the log: the only thing it would have sent back is a result for the board that's gone.
+///
+/// The pause gate, the wake, the dispatch counter and the correlation registry are shared across
+/// boards, and that registry resolves a stale Reply to nothing, because a swap drains it and
+/// correlations aren't reused.
 fn spawn_executor(
     rt: &tokio::runtime::Handle,
     cfg: HostConfig,
@@ -675,6 +683,7 @@ fn spawn_executor(
     paused_c: Arc<AtomicBool>,
     notify_c: Arc<Notify>,
     dispatched_c: Arc<AtomicUsize>,
+    cancelled_c: Arc<AtomicBool>,
 ) -> BoardExecutor {
     let (cmd_tx, mut cmd_rx) = unbounded_channel::<Command>();
     let (res_tx, results_rx) = unbounded_channel::<ResultEvent>();
@@ -689,15 +698,26 @@ fn spawn_executor(
             // handed to `dispatch()` still completes (you cannot un-send an
             // HTTP/email); only NEW pickups are held. The `enable()`-before-
             // check pattern makes this race-free against a `notify_waiters()`
-            // that fires between the load and the await.
+            // that fires between the load and the await. A swap also ends the wait, through
+            // the same wake, because this board's commands have nowhere left to go.
             loop {
                 let notified = notify_c.notified();
                 tokio::pin!(notified);
                 notified.as_mut().enable();
-                if !paused_c.load(Ordering::Acquire) {
+                if cancelled_c.load(Ordering::Acquire) || !paused_c.load(Ordering::Acquire) {
                     break;
                 }
                 notified.await;
+            }
+            // This board was replaced before the command started, so drop it. See
+            // `spawn_executor`. Keep taking from the queue: the swap drops the sender, so the
+            // queue empties and the loop ends.
+            if cancelled_c.load(Ordering::Acquire) {
+                eprintln!(
+                    "fabrico-host: board swap dropped command {:?}, which hadn't started on the replaced board",
+                    cmd.id
+                );
+                continue;
             }
             // ENDP-01/04: intercept a Reply to a parked endpoint request BEFORE
             // `dispatch`. Resolve the caller's socket off-thread via the shared
@@ -756,6 +776,9 @@ pub struct SimLoop {
     /// What a host swap needs to start the new board's executor consumer.
     executor_rt: tokio::runtime::Handle,
     executor_cfg: HostConfig,
+    /// The current board's cancelled flag. A host swap sets it and starts the new board with a
+    /// fresh one, see [`spawn_executor`].
+    executor_cancelled: Arc<AtomicBool>,
     // ── SEAMS (present, inert in the shell this phase) ──
     webhook_rx: Option<Receiver<Ingress>>,
     control_rx: Option<UnboundedReceiver<ControlMsg>>,
@@ -796,7 +819,7 @@ pub struct SimLoop {
     /// reads it lock-free per request to fast-503 while the sim is Draining/Frozen
     /// (Gate A), a one-way host publish that never re-enters the deterministic fold.
     is_playing: Arc<AtomicBool>,
-    /// Wakes the parked executor consumer on Resume.
+    /// Wakes the parked executor consumer on Resume, and on a swap so it can end.
     resume_notify: Arc<Notify>,
     /// Draining-tick counter, reset on entering [`RunState::Draining`]; the
     /// max-settle budget ([`MAX_SETTLE_TICKS`]) forces Frozen when it overruns.
@@ -1002,6 +1025,7 @@ impl SimLoop {
         let registry = Registry::default();
 
         let executor_rt = rt.clone();
+        let executor_cancelled = Arc::new(AtomicBool::new(false));
         let BoardExecutor { cmd_tx, results_rx } = spawn_executor(
             &executor_rt,
             cfg.clone(),
@@ -1009,6 +1033,7 @@ impl SimLoop {
             Arc::clone(&paused),
             Arc::clone(&resume_notify),
             Arc::clone(&dispatched),
+            Arc::clone(&executor_cancelled),
         );
 
         Self {
@@ -1021,6 +1046,7 @@ impl SimLoop {
             results_rx,
             executor_rt,
             executor_cfg: cfg,
+            executor_cancelled,
             webhook_rx: None,
             control_rx: None,
             pre_tick: None,
@@ -2137,6 +2163,14 @@ impl SimLoop {
         // made can't reach it (see `spawn_executor`). Dropping the old receiver also drops any
         // result still queued on it. Nothing here touches the fold or the log: the dropped
         // results were never logged, and the old host that dispatched those calls is gone.
+        //
+        // The old consumer is told first, and woken in case it is parked on the pause gate with a
+        // command. Only this tail sets the flag, so a refused Load, which never gets here, leaves
+        // the kept board's commands to fire. The new consumer gets its own flag, and this wake
+        // can't reach it because it doesn't exist yet.
+        self.executor_cancelled.store(true, Ordering::Release);
+        self.resume_notify.notify_waiters();
+        self.executor_cancelled = Arc::new(AtomicBool::new(false));
         let BoardExecutor { cmd_tx, results_rx } = spawn_executor(
             &self.executor_rt,
             self.executor_cfg.clone(),
@@ -2144,6 +2178,7 @@ impl SimLoop {
             Arc::clone(&self.paused),
             Arc::clone(&self.resume_notify),
             Arc::clone(&self.dispatched),
+            Arc::clone(&self.executor_cancelled),
         );
         self.cmd_tx = cmd_tx;
         self.results_rx = results_rx;
@@ -7368,6 +7403,38 @@ mod tests {
             false
         }
 
+        /// Step a held board one tick at a time until `done`.
+        fn step_held_until(
+            sim: &mut SimLoop,
+            ctx: &UnboundedSender<ControlMsg>,
+            what: &str,
+            done: impl Fn(&SimLoop) -> bool,
+        ) {
+            for _ in 0..MAX_STEPS {
+                if done(sim) {
+                    return;
+                }
+                ctx.send(ControlMsg::Step).expect("send a step");
+                sim.step().expect("a step");
+            }
+            panic!("{what}: not reached in {MAX_STEPS} steps, tick {}", sim.host().core().tick);
+        }
+
+        /// Wait for the old consumers to end, and return how many handles on the dispatch counter
+        /// are left. The loop holds one and each running consumer holds one, so 2 means only the
+        /// current board's consumer is running.
+        fn handles_after_old_consumers_end(sim: &SimLoop) -> usize {
+            let mut count = Arc::strong_count(&sim.dispatched);
+            for _ in 0..1000 {
+                if count == 2 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                count = Arc::strong_count(&sim.dispatched);
+            }
+            count
+        }
+
         /// The outcome of each `CommandResult` in the log, in order.
         fn logged_results(sim: &SimLoop) -> Vec<(CommandId, Outcome)> {
             sim.host()
@@ -7506,7 +7573,8 @@ mod tests {
             assert_eq!(sim.dispatched_count(), 1, "the counter carries across the swap");
         }
 
-        /// A long session of swaps leaves one consumer running: each old one ends with its board.
+        /// A long session of swaps leaves one consumer running. The three old consumers here are
+        /// idle: `a_replaced_boards_parked_command_never_fires` covers one holding a command.
         #[test]
         fn old_executors_end_after_their_swaps() {
             let rt = test_rt();
@@ -7515,16 +7583,90 @@ mod tests {
             for _ in 0..3 {
                 sim.new_swap();
             }
-            // The loop's own handle plus the one running consumer's.
-            let mut count = Arc::strong_count(&sim.dispatched);
-            for _ in 0..1000 {
-                if count == 2 {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-                count = Arc::strong_count(&sim.dispatched);
+            assert_eq!(handles_after_old_consumers_end(&sim), 2, "the three old consumers have ended");
+        }
+
+        /// A held board's command waits on the pause gate past its own timeout, and then the board
+        /// is replaced. The call must not go out on the next Resume, because the old board has
+        /// already logged that command's timeout and the new board may not have a Sink at all.
+        #[test]
+        fn a_replaced_boards_parked_command_never_fires() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, mut held) = holding_server(&rt);
+            let host = timer_board_with_http_sink(dir.path(), &url);
+            let (_gtx, grx) = gesture_channel();
+            let (ctx, crx) = unbounded_channel::<ControlMsg>();
+            let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
+                .with_control(crx);
+
+            ctx.send(ControlMsg::Pause).expect("pause");
+            sim.step().expect("freeze");
+            assert!(sim.is_paused(), "frozen before the command exists");
+            step_held_until(&mut sim, &ctx, "the command in flight", |s| s.host().in_flight_len() == 1);
+            step_held_until(&mut sim, &ctx, "the command's timeout", |s| s.host().in_flight_len() == 0);
+            assert_eq!(sim.dispatched_count(), 0, "the hold kept the command from starting");
+
+            ctx.send(ControlMsg::New).expect("send new");
+            sim.step().expect("service the new board");
+            assert_eq!(sim.host().core().state.node_ids().count(), 0, "the board was replaced");
+            // Read before the Resume, so a consumer that waits for the Resume to end is caught.
+            let handles_before_resume = handles_after_old_consumers_end(&sim);
+
+            ctx.send(ControlMsg::Resume).expect("resume");
+            sim.step().expect("service the resume");
+            let call = rt.block_on(async { tokio::time::timeout(Duration::from_secs(1), held.recv()).await });
+            if let Ok(Some(call)) = call {
+                panic!("the replaced board's call went out with key {}", call.key);
             }
-            assert_eq!(count, 2, "the three old consumers have ended");
+            assert_eq!(sim.dispatched_count(), 0, "the replaced board's command isn't counted");
+            assert_eq!(handles_before_resume, 2, "the parked consumer ended at the swap");
+        }
+
+        /// A command on the old executor's queue that its consumer hasn't taken yet.
+        #[test]
+        fn a_replaced_boards_queued_command_never_fires() {
+            // This runtime only runs tasks inside `block_on`, so the old consumer can't take the
+            // command before the swap.
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime");
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, _ctx) = swap_rig(dir.path(), &rt);
+            let run_the_consumers = || rt.block_on(async { tokio::time::sleep(Duration::from_millis(50)).await });
+
+            sim.test_send_command(noop((3, NodeId::null(), 0)));
+            sim.new_swap();
+            run_the_consumers();
+            assert_eq!(sim.dispatched_count(), 0, "the old board's queued command is dropped");
+
+            sim.test_send_command(noop((4, NodeId::null(), 0)));
+            run_the_consumers();
+            assert_eq!(sim.dispatched_count(), 1, "the new board's own command still goes out");
+        }
+
+        /// A refused Load keeps the board, so a command parked on it still fires on Resume.
+        #[allow(clippy::disallowed_methods)]
+        #[test]
+        fn a_refused_load_leaves_a_parked_command_to_fire() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, ctx) = swap_rig(dir.path(), &rt);
+            ctx.send(ControlMsg::Pause).expect("pause");
+            sim.step().expect("freeze");
+            sim.test_send_command(noop((3, NodeId::null(), 0)));
+
+            let bad = dir.path().join("not-a-board.fab");
+            std::fs::write(&bad, b"this is not a fabrico project file").expect("write garbage");
+            ctx.send(ControlMsg::Load(bad)).expect("send the load");
+            sim.step().expect("service the load");
+            assert_eq!(sim.host().core().state.node_ids().count(), 1, "the load was refused");
+            assert!(!wait_for_dispatches(&sim, 1, SHORT_WAIT), "the hold still stops the command");
+
+            ctx.send(ControlMsg::Resume).expect("resume");
+            sim.step().expect("service the resume");
+            assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "the kept board's command fires");
         }
     }
 }
