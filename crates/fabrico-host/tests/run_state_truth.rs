@@ -556,17 +556,26 @@ impl Demo {
     /// each Step starts from no effect in flight, with a 1 ms sleep per tick to give the executor
     /// time, and a Step that leaves an effect in flight is followed by a Resume so the board runs
     /// on until that effect has folded. The last control message is always a Step, so the board
-    /// this returns is held by a Step, as it would be for a user pressing it.
+    /// this returns is held by a Step, as it would be for a user pressing it. The wait for effects
+    /// stops at 10 drain budgets across all the Steps, so a board whose effects never fold fails
+    /// in seconds, not minutes.
     fn stepped_with_items_on_the_belts(&mut self, case: &str) {
         self.busy(case);
         for _ in 0..200 {
             self.step();
         }
+        let mut waited = 0;
         for _ in 0..BUSY_BUDGET {
             for _ in 0..DRAIN_BUDGET {
                 if self.in_flight().0 == 0 {
                     break;
                 }
+                waited += 1;
+                assert!(
+                    waited <= 10 * DRAIN_BUDGET,
+                    "PRECONDITION: the effects in flight folded within {} ticks of waiting",
+                    10 * DRAIN_BUDGET
+                );
                 std::thread::sleep(Duration::from_millis(1));
                 self.step();
             }
@@ -584,6 +593,35 @@ impl Demo {
         }
         panic!("PRECONDITION: a Step left belt items and no effect in flight within {BUSY_BUDGET} steps");
     }
+}
+
+/// A Step on a held board folds a result the executor has sent since the hold. The sleep gives the
+/// executor time to answer, and a slow answer or a newly dispatched effect just takes another round.
+#[test]
+fn a_step_on_a_held_board_folds_an_answered_effect() {
+    let mut d = demo();
+    d.busy("step-folds");
+    for _ in 0..200 {
+        d.step();
+    }
+    let mut folded = false;
+    for _ in 0..BUSY_BUDGET {
+        d.send(ControlMsg::Step);
+        d.step();
+        let before = d.in_flight().0;
+        if before > 0 {
+            std::thread::sleep(Duration::from_millis(20));
+            d.send(ControlMsg::Step);
+            d.step();
+            if d.in_flight().0 < before {
+                folded = true;
+                break;
+            }
+        }
+        d.send(ControlMsg::Resume);
+        d.step();
+    }
+    assert!(folded, "A STEP ON A HELD BOARD FOLDS AN ANSWERED EFFECT");
 }
 
 /// Review fix pass 1, WR-A-02: a Save on a board the user stepped or paused, with items still
