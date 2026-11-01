@@ -184,9 +184,14 @@ fn shallow_recursion_runs_and_runaway_recursion_faults() {
 /// QuickJS keeps a default stack limit of its own, so the bounds above would still hold if
 /// `build` stopped passing its argument on. A depth that runs at the default and overflows
 /// under a small limit can only come from the limit reaching the engine.
+///
+/// `build` runs the prelude under this same limit, which took 12,800 to 14,784 bytes on gcc and
+/// clang with the engine at opt-level 3, debug and release. 16 KiB left too little room for a
+/// compiler nobody measured here, and 32 KiB still faults at depth 50: the first fault there was
+/// at depth 15 to 31.
 #[test]
 fn the_stack_limit_passed_to_build_reaches_the_engine() {
-    const SMALL_STACK_LIMIT: u32 = 16 * 1024;
+    const SMALL_STACK_LIMIT: u32 = 32 * 1024;
 
     let source = recursion(50);
     let small = run_with_limits(&source, DEFAULT_MEM_LIMIT, SMALL_STACK_LIMIT);
