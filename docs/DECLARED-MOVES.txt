@@ -164,6 +164,9 @@ crates/fabrico-host/tests/fixtures/host_parity/order_processing.hashes a86eb413e
 # moves from 110247 to 62134. No golden fixture moves.
 crates/fabrico-qjs-alloc/src/lib.rs
 crates/fabrico-core/tests/factory_memory_pin.rs
+# The default Factory stack limit goes from 256 KiB to 512 KiB, because Windows first faulted at
+# recursion depth 51. A Factory that recursed past the old limit now runs further, and no board or
+# fixture in the repo recurses that deep, so no hash moves.
 crates/fabrico-core/src/factory.rs
 # Comment lines only: the header names the pinned rquickjs version and the memory limit's new home.
 crates/fabrico-core/tests/rquickjs_spike.rs

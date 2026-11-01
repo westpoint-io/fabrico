@@ -178,7 +178,11 @@ pub const DEFAULT_MEM_LIMIT: u32 = 8 * 1024 * 1024;
 
 /// Default stack fence (bytes). Caps deep-recursion / stack-bomb factories.
 /// Fixed-width `u32` for the same reason as [`DEFAULT_MEM_LIMIT`].
-pub const DEFAULT_STACK_LIMIT: u32 = 256 * 1024;
+///
+/// MSVC's frames are the largest we've seen: at 256 KiB a plain recursion first faulted at depth
+/// 51 on Windows, against 239 on macOS and 335 on Ubuntu. This has to stay under the stack of the
+/// thread that runs a Factory, which is 2 MiB for a spawned Rust thread.
+pub const DEFAULT_STACK_LIMIT: u32 = 512 * 1024;
 
 /// Sentinel budget used while *building* the runtime (running the trusted prelude,
 /// curating `Math`, and parse-validating the user source). The fuse must not trip
