@@ -20,3 +20,7 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Debug tests should run the engine as optimised as shipped builds, because -O0 C stack frames make a Factory fault at far shallower recursion.
+[profile.dev.package.rquickjs-sys]
+opt-level = 3
