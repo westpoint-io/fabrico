@@ -1158,6 +1158,14 @@ jobs:
       - name: Live red set is exactly the declared CUTs
         working-directory: frontend
         run: bash ../scripts/check-live-red-set.sh test-results/live-report.json
+      # A failing run's traces go nowhere otherwise, and a red that only CI shows needs them.
+      - name: Keep the traces of a red live run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-test-results
+          path: frontend/test-results/
+          retention-days: 14
 
   # Frontend unit gate (Phase 56, plan 56-02, decision D-26) - the frontend's own
   # vitest suite and its typecheck, neither of which any CI job ran until now.
