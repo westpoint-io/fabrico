@@ -5,7 +5,7 @@
 // changed, so the React layer can skip an update on all but the frames that matter.
 
 import { CELL } from '../../shared/geometry';
-import { beltJoining, evaluateCheck, lineDoorstep, lowestSlotInto, nodeKey } from './check';
+import { beltJoining, evaluateCheck, lineDoorstep, lineStuck, looseBeltInTheWay, lowestSlotInto, nodeKey } from './check';
 import type { Progress } from './progress';
 import type {
   BindingName,
@@ -82,6 +82,11 @@ export interface TutorialState {
   /** The floor spot of the stage showing now, fixed in world cells when that stage begins, so it follows pan and zoom. */
   spot: { stageId: string; cell: readonly [number, number] } | null;
   note: LessonNote | null;
+  /**
+   * The line was stuck and hasn't been cleared yet. Undo takes a draw back one command at a time, so the
+   * first press leaves the belt in the way with no docks, and the undo card has to stay up for the next.
+   */
+  undoing: boolean;
 }
 
 export const IDLE: TutorialState = {
@@ -95,6 +100,7 @@ export const IDLE: TutorialState = {
   baseline: null,
   spot: null,
   note: null,
+  undoing: false,
 };
 
 export type TutorialEvent =
@@ -129,7 +135,8 @@ export function noteTokens(note: LessonNote): readonly PhraseToken[] {
   return [`The board was already running, so step ${note.a} is done. `, { key: 'playPause' }, ' pauses it.'];
 }
 
-function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, bindings: TutorialState['bindings']): boolean {
+function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<TutorialState, 'bindings' | 'undoing'>): boolean {
+  const { bindings } = s;
   const { armed } = chrome;
   switch (when.is) {
     case 'always':
@@ -150,6 +157,12 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, bindings
       const from = bindings[when.from];
       return armed?.kind === 'belt' && from !== undefined && lineDoorstep(board, from.id) !== null;
     }
+    case 'lineStuck': {
+      const from = bindings[when.from];
+      const to = bindings[when.to];
+      if (armed?.kind !== 'belt' || from === undefined || to === undefined) return false;
+      return lineStuck(board, from.id, to.id) || (s.undoing && looseBeltInTheWay(board, from.id, to.id));
+    }
     case 'notSelected':
       return chrome.selectedNode === null || chrome.selectedNode !== bindings[when.of]?.id;
     case 'triggerNotPressed':
@@ -169,7 +182,7 @@ export function currentStage(
 ): Stage | null {
   if (s.card !== 'running') return null;
   const step = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex];
-  return step?.stages.find((stage) => holds(stage.when, board, chrome, s.bindings)) ?? null;
+  return step?.stages.find((stage) => holds(stage.when, board, chrome, s)) ?? null;
 }
 
 /** Cells east or west of the Source that the Sink's spot sits, leaving room for a belt. */
@@ -388,6 +401,19 @@ function awaitsTriggerAnswer(s: TutorialState, chrome: ChromeFacts, lessons: rea
   return check?.is === 'triggerApplied' && chrome.appliedTrigger?.node !== s.bindings[check.of]?.id;
 }
 
+/** Keep `undoing` up to date for the step now showing. Only a stuck line starts it, so a good draw's first packet can't. */
+function withUndoing(s: TutorialState, board: BoardFacts, lessons: readonly Lesson[]): TutorialState {
+  const when = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex]?.stages.find((stage) => stage.when.is === 'lineStuck')?.when;
+  const from = when?.is === 'lineStuck' ? s.bindings[when.from] : undefined;
+  const to = when?.is === 'lineStuck' ? s.bindings[when.to] : undefined;
+  const undoing =
+    s.card === 'running' &&
+    from !== undefined &&
+    to !== undefined &&
+    (lineStuck(board, from.id, to.id) || (s.undoing && looseBeltInTheWay(board, from.id, to.id)));
+  return undoing === s.undoing ? s : { ...s, undoing };
+}
+
 /** One frame of a running lesson. The check reads last frame's slot, and only then is it replaced. */
 function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
   const found = rebound(s, board);
@@ -397,7 +423,7 @@ function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
   // pass. The user is on the step they were on, and there's nothing to tell them.
   if (checked !== found && next.card === 'running' && next.stepIndex >= found.stepIndex) next = { ...next, note: found.note };
   if (next.rechecking && !awaitsTriggerAnswer(next, chrome, lessons)) next = { ...next, rechecking: false };
-  return withSpot(withWatchRead(next, board, lessons), board, chrome, lessons);
+  return withSpot(withUndoing(withWatchRead(next, board, lessons), board, lessons), board, chrome, lessons);
 }
 
 export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Lesson[]): TutorialState {

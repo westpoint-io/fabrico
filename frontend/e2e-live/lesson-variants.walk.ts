@@ -14,8 +14,10 @@ import {
   openLessonsFromHelp,
   pointInRect,
   pressPointByHand,
+  pressShortcut,
   probeAtStage,
   readProbe,
+  readRecord,
   startLesson,
   walkLesson,
 } from './support/lessonRunner';
@@ -94,6 +96,71 @@ async function waitTwoTickRises(page: Page): Promise<void> {
     .toBeGreaterThanOrEqual(tick0 + 2);
 }
 
+/** Step 4 with the Belt tool armed, the plain drag's rings, and where the bound machines stand. */
+async function armedForTheBelt(page: Page): Promise<{
+  rings: { hint: HintRect; hintTo: HintRect };
+  sourceId: number;
+  sinkId: number;
+  source: readonly [number, number];
+  sink: readonly [number, number];
+}> {
+  await startFromDemo(page);
+  await walkLesson(page, LESSON, { until: 'draw-belt' });
+  await reachStage(page, DRAW_BELT, 'belt-tool');
+  const tool = await ringsAt(page, DRAW_BELT, 'belt-tool');
+  await pressPointByHand(page, pointInRect(tool.hint, { x: -6, y: 3 }));
+  await reachStage(page, DRAW_BELT, 'belt-draw');
+  const { hint, hintTo } = await ringsAt(page, DRAW_BELT, 'belt-draw');
+  if (hintTo === null) throw new Error('belt-draw reported no release ring');
+  const { bound } = await readProbe(page);
+  const { nodes } = await readScene(page);
+  const source = nodes.find((n) => n.id === bound.source)?.cells[0] as readonly [number, number] | undefined;
+  const sink = nodes.find((n) => n.id === bound.sink)?.cells[0] as readonly [number, number] | undefined;
+  if (source === undefined || sink === undefined) throw new Error('the bound machines are not both on the board');
+  expect(sink[1], 'the two machines share a row, so these belts lie where the test says').toBe(source[1]);
+  return { rings: { hint, hintTo }, sourceId: bound.source as number, sinkId: bound.sink as number, source, sink };
+}
+
+/** The card a stuck belt gets, with no ring: nothing on the board can start the way on. */
+async function expectUndoCard(page: Page, what: string): Promise<void> {
+  await reachStage(page, DRAW_BELT, 'belt-undo');
+  const text = phrasePlain(stageNamed(DRAW_BELT, 'belt-undo').text);
+  await expect(page.locator('[data-fab-step-card]'), `${what}: the card says to undo it, and names the key`).toContainText(text);
+  expect((await readProbe(page)).hint, `${what}: no ring marks a press that can't work`).toBeNull();
+}
+
+/**
+ * Press the key the card names until the belt has gone. Undo takes the belt's docks back first, so the
+ * first press leaves the belt on the board with no docks, and the plain drag would still be refused. The
+ * card has to stay up for that, so this reads it again after the press.
+ */
+async function undoTheBelt(page: Page, beltsAfter: number, what: string): Promise<void> {
+  const before = (await readScene(page)).belts.length;
+  await pressShortcut(page, 'undo');
+  await expect
+    .poll(async () => (await readScene(page)).belts.filter((b) => b.docks.length === 0).length, {
+      message: `${what}: the first press took the docks back`,
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(1);
+  expect((await readScene(page)).belts, `${what}: the belt is still on the board`).toHaveLength(before);
+  await waitTwoTickRises(page);
+  await expectUndoCard(page, `${what}, after one press`);
+  await pressShortcut(page, 'undo');
+  await expect
+    .poll(async () => (await readScene(page)).belts.length, {
+      message: `${what}: the second press took the belt`,
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(beltsAfter);
+}
+
+/** A good draw must never flash the undo card, in the packets before its docks arrive. */
+async function expectNoUndoCardSeen(page: Page, what: string): Promise<void> {
+  const seen = (await readRecord(page)).filter((e) => e.stageId === 'belt-undo');
+  expect(seen, `${what}: the card never asked for Undo`).toEqual([]);
+}
+
 const PLACE_SOURCE = LESSON.steps.findIndex((s) => s.id === 'place-source');
 const DRAW_BELT = LESSON.steps.findIndex((s) => s.id === 'draw-belt');
 
@@ -134,6 +201,7 @@ test('a belt drawn from the Sink back to the Source finishes the same step', asy
   console.log(`MEASURE reversed-belt docks=${tailKind === machine_kind.SOURCE ? 'Source' : tailKind},${headKind === machine_kind.SINK ? 'Sink' : headKind}`);
   expect(tailKind, "the belt's Tail docks the Source").toBe(machine_kind.SOURCE);
   expect(headKind, "the belt's Head docks the Sink").toBe(machine_kind.SINK);
+  await expectNoUndoCardSeen(page, 'the reversed belt');
 
   // The arrival check, on a belt drawn this way.
   await continueLesson(page, LESSON, { from: 'press-play' });
@@ -200,8 +268,84 @@ test('a line drawn in two pieces finishes the same step', async ({ page }) => {
   expect(last?.docks.find((d) => d.end === 'Tail')?.node, 'and follows the first piece').toBe(first?.id);
   expect(first?.docks.find((d) => d.end === 'Tail')?.node, 'which leaves the Source').toBe(probe.bound.source);
   expect(first?.docks.find((d) => d.end === 'Head')?.node, 'and runs into the second piece').toBe(last?.id);
+  await expectNoUndoCardSeen(page, 'the line in two pieces');
   await expectRenderLoopAlive(page, 'after the line in two pieces');
   errors.assertNone('during the line in two pieces');
+});
+
+test('a click on the output ring, or a drag let go too early, gets the undo card and the lesson still finishes', async ({ page }) => {
+  const errors = watchPageErrors(page);
+  const { rings, sourceId } = await armedForTheBelt(page);
+  // The ring's east half is the Source's doorstep, where a press seeds a belt on that one cell.
+  const press = pointInRect(rings.hint, { x: 3, y: -2 });
+
+  await pressPointByHand(page, press);
+  await expectUndoCard(page, 'after the click');
+  const clicked = (await readScene(page)).belts;
+  console.log(`MEASURE stuck-click belts=${JSON.stringify(clicked.map((b) => ({ tiles: b.tiles.length, docks: b.docks })))}`);
+  expect(clicked, 'the click drew one belt').toHaveLength(1);
+  expect(clicked[0]?.tiles, 'of one tile').toHaveLength(1);
+  expect(clicked[0]?.docks.find((d) => d.end === 'Tail')?.node, 'docked to the Source').toBe(sourceId);
+
+  await undoTheBelt(page, 0, 'the click');
+  await reachStage(page, DRAW_BELT, 'belt-draw');
+
+  await dragByHand(page, press, { x: press.x + 2, y: press.y + 1 });
+  await expectUndoCard(page, 'after the drag let go on its first cell');
+  await undoTheBelt(page, 0, 'the early release');
+  await reachStage(page, DRAW_BELT, 'belt-draw');
+
+  await continueLesson(page, LESSON, { from: 'draw-belt', undone: true });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
+  await expectRenderLoopAlive(page, 'after the stuck click');
+  errors.assertNone('during the stuck click');
+});
+
+test('a click on the ring at a free end gets the undo card, and Undo goes back to carrying on', async ({ page }) => {
+  const errors = watchPageErrors(page);
+  const { rings, sourceId, source } = await armedForTheBelt(page);
+  const shortAt = await screenCellCentre(page, source[0] + 3, source[1]);
+  await dragByHand(page, pointInRect(rings.hint, { x: 3, y: -2 }), { x: shortAt.x + 3, y: shortAt.y - 2 });
+  await reachStage(page, DRAW_BELT, 'belt-carry-on');
+
+  const door = lineDoorstep(await readScene(page), sourceId);
+  if (door === null) throw new Error('the short piece has no free end');
+  const doorAt = await screenCellCentre(page, door[0], door[1]);
+  await pressPointByHand(page, { x: doorAt.x + 3, y: doorAt.y - 2 });
+  await expectUndoCard(page, 'after the click on the free end');
+  const clicked = (await readScene(page)).belts;
+  console.log(`MEASURE stuck-free-end belts=${JSON.stringify(clicked.map((b) => ({ tiles: b.tiles.length, docks: b.docks })))}`);
+  expect(clicked.map((b) => b.tiles.length).sort(), 'the click drew a second piece of one tile').toEqual([1, 3]);
+
+  await undoTheBelt(page, 1, 'the second piece');
+  await reachStage(page, DRAW_BELT, 'belt-carry-on');
+
+  await continueLesson(page, LESSON, { from: 'draw-belt', undone: true });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
+  await expectRenderLoopAlive(page, 'after the click on the free end');
+  errors.assertNone('during the click on the free end');
+});
+
+test('a short piece drawn backwards from the Sink gets the undo card and the lesson still finishes', async ({ page }) => {
+  const errors = watchPageErrors(page);
+  const { rings, sinkId, sink } = await armedForTheBelt(page);
+  // Pressed on the ring's west half, the Sink's doorstep, and let go two cells short of the Source's.
+  const stopAt = await screenCellCentre(page, sink[0] - 3, sink[1]);
+  await dragByHand(page, pointInRect(rings.hintTo, { x: -3, y: 2 }), { x: stopAt.x + 3, y: stopAt.y - 2 });
+  await expectUndoCard(page, 'after the backward piece');
+  const drawn = (await readScene(page)).belts;
+  console.log(`MEASURE stuck-backward belts=${JSON.stringify(drawn.map((b) => ({ tiles: b.tiles.length, docks: b.docks })))}`);
+  expect(drawn, 'one belt').toHaveLength(1);
+  expect(drawn[0]?.docks.find((d) => d.end === 'Head')?.node, 'running into the Sink').toBe(sinkId);
+  expect(drawn[0]?.docks.find((d) => d.end === 'Tail'), 'with nothing behind it').toBeUndefined();
+
+  await undoTheBelt(page, 0, 'the backward piece');
+  await reachStage(page, DRAW_BELT, 'belt-draw');
+
+  await continueLesson(page, LESSON, { from: 'draw-belt', undone: true });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
+  await expectRenderLoopAlive(page, 'after the backward piece');
+  errors.assertNone('during the backward piece');
 });
 
 test('a click finishes nothing, and a Sink placed first waits for its step', async ({ page }) => {

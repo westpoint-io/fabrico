@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCheck, lineDoorstep, nodeKey, type CheckContext } from './check.ts';
+import { evaluateCheck, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
 
@@ -260,6 +260,108 @@ describe('lineDoorstep', () => {
     const first = piece(FIRST, tiles([3, 2], [4, 2]), [...leavesSource, { end: 'Head', node: SECOND, port: 0 }]);
     const second = piece(SECOND, tiles([5, 2], [6, 2]), [{ end: 'Head', node: FIRST, port: 0 }]);
     expect(lineDoorstep(on([first, second]), THE_SOURCE.id)).toBeNull();
+  });
+});
+
+describe('lineStuck', () => {
+  // The Source's output feeds (3,2) and the Sink's input is fed from (7,2), as on a real board.
+  const OUT_EAST = { index: 0, cell_x: 2, cell_y: 2, side: 1, role: 1 };
+  const FAULT_SOUTH = { index: 0, cell_x: 8, cell_y: 2, side: 2, role: 2 };
+  const IN_WEST = { index: 1, cell_x: 8, cell_y: 2, side: 3, role: 0 };
+  const SOURCE_NODE: BoardNode = { ...THE_SOURCE, ports: [OUT_EAST] };
+  const SINK_NODE: BoardNode = { ...THE_SINK, ports: [FAULT_SOUTH, IN_WEST] };
+  const FIRST = 20;
+  const SECOND = 21;
+  const tiles = (...cells: ReadonlyArray<readonly [number, number]>): BoardBelt['tiles'] =>
+    cells.map(([cell_x, cell_y]) => ({ cell_x, cell_y }));
+  const piece = (id: number, cells: BoardBelt['tiles'], docks: BoardBelt['docks']): BoardBelt => ({ ...belt(id, [], docks), tiles: cells });
+  const tail = (node: number): BoardBelt['docks'][number] => ({ end: 'Tail', node, port: 0 });
+  const head = (node: number): BoardBelt['docks'][number] => ({ end: 'Head', node, port: 0 });
+  const stuck = (belts: readonly BoardBelt[], extra: readonly BoardNode[] = []): boolean =>
+    lineStuck({ nodes: [SOURCE_NODE, SINK_NODE, ...extra], belts }, SOURCE_NODE.id, SINK_NODE.id);
+
+  it('is false on a board with no belt, and for a belt that has nothing to do with either machine', () => {
+    expect(stuck([])).toBe(false);
+    expect(stuck([piece(FIRST, tiles([3, 6], [4, 6]), [])])).toBe(false);
+  });
+
+  it('is false once the line reaches the Sink, in one piece or two', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id), head(SINK_NODE.id)])])).toBe(false);
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
+    const second = piece(SECOND, tiles([5, 2], [6, 2], [7, 2]), [tail(FIRST), head(SINK_NODE.id)]);
+    expect(stuck([first, second])).toBe(false);
+  });
+
+  it('is false for a piece with a free end a press can carry on from', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)])])).toBe(false);
+  });
+
+  it('holds for a single tile left by a click on the output ring', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2]), [tail(SOURCE_NODE.id)])])).toBe(true);
+  });
+
+  it('holds for a single tile left by a click on the ring at a free end', () => {
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
+    expect(stuck([first, piece(SECOND, tiles([5, 2]), [tail(FIRST)])])).toBe(true);
+  });
+
+  it('is false for a single tile on the input doorstep, which docks on the next packet', () => {
+    const first = piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
+    expect(stuck([first, piece(SECOND, tiles([7, 2]), [tail(FIRST)])])).toBe(false);
+  });
+
+  it('holds for a short piece drawn backwards from the input', () => {
+    expect(stuck([piece(FIRST, tiles([5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(true);
+  });
+
+  it('holds for that backward piece beside a short piece from the Source, because the input is taken', () => {
+    const fromSource = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]);
+    expect(stuck([fromSource, piece(SECOND, tiles([6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(true);
+  });
+
+  it('is false for a whole backward draw whose Tail dock is one packet behind its Head dock', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(false);
+    const fromSource = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]);
+    expect(stuck([fromSource, piece(SECOND, tiles([5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(false);
+  });
+
+  it('holds for a belt into the Sink that came from some other machine', () => {
+    expect(stuck([piece(FIRST, tiles([5, 2], [6, 2], [7, 2]), [tail(123), head(SINK_NODE.id)])])).toBe(true);
+  });
+
+  it('holds for a line that ends in some other machine, or in a loop', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(123)])])).toBe(true);
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
+    expect(stuck([first, piece(SECOND, tiles([5, 2], [6, 2]), [head(FIRST)])])).toBe(true);
+  });
+});
+
+describe('looseBeltInTheWay', () => {
+  const OUT_EAST = { index: 0, cell_x: 2, cell_y: 2, side: 1, role: 1 };
+  const IN_WEST = { index: 1, cell_x: 8, cell_y: 2, side: 3, role: 0 };
+  const nodes: BoardNode[] = [{ ...THE_SOURCE, ports: [OUT_EAST] }, { ...THE_SINK, ports: [IN_WEST] }];
+  const at = (id: number, cells: ReadonlyArray<readonly [number, number]>, docks: BoardBelt['docks'] = []): BoardBelt => ({
+    ...belt(id, [], docks),
+    tiles: cells.map(([cell_x, cell_y]) => ({ cell_x, cell_y })),
+  });
+  const loose = (belts: readonly BoardBelt[]): boolean => looseBeltInTheWay({ nodes, belts }, THE_SOURCE.id, THE_SINK.id);
+
+  it("finds a belt with no docks on the Source's output doorstep", () => {
+    expect(loose([at(20, [[3, 2]])])).toBe(true);
+  });
+
+  it("finds one on the Sink's input doorstep", () => {
+    expect(loose([at(20, [[6, 2], [7, 2]])])).toBe(true);
+  });
+
+  it('finds one on the cell past the end of the line', () => {
+    const line = at(20, [[3, 2], [4, 2]], [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }]);
+    expect(loose([line, at(21, [[5, 2]])])).toBe(true);
+  });
+
+  it('leaves a belt with no docks somewhere else, and a docked belt, alone', () => {
+    expect(loose([at(20, [[3, 6], [4, 6]])])).toBe(false);
+    expect(loose([at(20, [[3, 2], [4, 2]], [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }])])).toBe(false);
   });
 });
 

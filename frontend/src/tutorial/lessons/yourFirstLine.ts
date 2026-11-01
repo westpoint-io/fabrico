@@ -120,6 +120,16 @@ export const YOUR_FIRST_LINE: Lesson = {
           gesture: { do: 'pressHint' },
           text: ['A ', { kind: BELT_KIND }, ' carries items between machines. Click ', { kind: BELT_KIND }, ' in the palette.'],
         },
+        // Ahead of both drags, because each of them starts or ends on something this belt holds, and a
+        // press can't carry it on. The user presses the key, and this stage sends nothing itself. It takes
+        // more than one press, because Undo takes the belt's docks back before the belt.
+        {
+          id: 'belt-undo',
+          when: { is: 'lineStuck', from: 'source', to: 'sink' },
+          hint: null,
+          gesture: { do: 'key', shortcut: 'undo' },
+          text: ['That ', { kind: BELT_KIND }, " can't be carried on. Press ", { key: 'undo' }, " until it's gone, then draw it again."],
+        },
         // Ahead of the plain drag, because that drag starts on an output this belt already holds and the
         // host refuses it. The app rings the belt's free end while the tool is armed, so this ring only
         // marks where the drag finishes.

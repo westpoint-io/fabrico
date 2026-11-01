@@ -4,7 +4,7 @@
 // relation and compares with the step's baseline. It never counts nodes, because a count can be
 // satisfied by a machine the user didn't place for this step.
 
-import { beltEndPort, doorstepCell } from '../protocol/ports';
+import { PORT_ROLE, beltEndPort, doorstepCell } from '../protocol/ports';
 import type { BoundNode, StepBaseline, TutorialState } from './machine';
 import type { BindingName, BoardBelt, BoardFacts, BoardNode, Check, ChromeFacts } from './types';
 
@@ -37,7 +37,7 @@ const DONE: CheckResult = { done: true, bound: null };
  * on the way stops the walk, because that's two lines. A host orients a belt from its Out end, so a
  * line of pieces only ever runs from the Source to the Sink.
  */
-export function beltJoining(board: BoardFacts, a: number, b: number): BoardBelt | undefined {
+export function beltJoining(board: Pick<BoardFacts, 'belts'>, a: number, b: number): BoardBelt | undefined {
   const direct = board.belts.find((belt) => belt.docks.some((d) => d.node === a) && belt.docks.some((d) => d.node === b));
   if (direct !== undefined) return direct;
   const seen = new Set<number>();
@@ -63,17 +63,83 @@ export function beltJoining(board: BoardFacts, a: number, b: number): BoardBelt 
  * its dock does, with this cell on the Sink, and the card shouldn't change for that one frame.
  */
 export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number): readonly [number, number] | null {
+  const belt = lastPiece(board, a);
+  if (belt === undefined || belt.docks.some((d) => d.end === 'Head')) return null;
+  const port = beltEndPort(belt.tiles, 'Head');
+  return port === null ? null : doorstepCell(port);
+}
+
+/** The last piece of the line leaving `a`, following Head docks through belts. Undefined with no belt leaving it. */
+function lastPiece(board: Pick<BoardFacts, 'belts'>, a: number): BoardBelt | undefined {
   const seen = new Set<number>();
   let belt = board.belts.find((b) => b.docks.some((d) => d.end === 'Tail' && d.node === a));
   while (belt !== undefined && !seen.has(belt.id)) {
     seen.add(belt.id);
     const head = belt.docks.find((d) => d.end === 'Head')?.node;
-    if (head === undefined) break;
-    belt = board.belts.find((other) => other.id === head);
+    const next = head === undefined ? undefined : board.belts.find((other) => other.id === head);
+    if (next === undefined) return belt;
+    belt = next;
   }
-  if (belt === undefined || belt.docks.some((d) => d.end === 'Head')) return null;
-  const port = beltEndPort(belt.tiles, 'Head');
-  return port === null ? null : doorstepCell(port);
+  return belt;
+}
+
+type Cell = { cell_x: number; cell_y: number };
+
+/** Is this tile on the doorstep of one of the machine's ports in this role? */
+function onDoorstep(board: Pick<BoardFacts, 'nodes'>, node: number, role: number, tile: Cell): boolean {
+  const ports = board.nodes.find((n) => n.id === node)?.ports ?? [];
+  return ports.some((port) => {
+    const [x, y] = doorstepCell(port);
+    return port.role === role && x === tile.cell_x && y === tile.cell_y;
+  });
+}
+
+/**
+ * Has the user drawn a belt the lesson can't build on from `a` to `b`, so that the only way on is to
+ * undo it? The plain drag is refused because the output or the input is taken, and a press can't carry
+ * this belt on. That's a belt into `b` that didn't come from `a`, or a line from `a` that ends in another
+ * machine or in a single tile, which has no direction and so no Head a press can find.
+ *
+ * The app sends a draw's docks after the host has minted the belt, so a good draw can look like this
+ * for a packet. A tile on `b`'s input doorstep is about to dock there, and a belt into `b` starting
+ * where its Tail would dock is about to join up. Neither is stuck.
+ */
+export function lineStuck(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number): boolean {
+  if (beltJoining(board, a, b) !== undefined) return false;
+  const door = lineDoorstep(board, a);
+  const into = board.belts.find((belt) => belt.docks.some((d) => d.end === 'Head' && d.node === b));
+  if (into !== undefined) {
+    const start = into.tiles[0];
+    if (start === undefined || into.docks.some((d) => d.end === 'Tail')) return true;
+    const atDoor = door !== null && door[0] === start.cell_x && door[1] === start.cell_y;
+    return !atDoor && !onDoorstep(board, a, PORT_ROLE.OUT, start);
+  }
+  const last = lastPiece(board, a);
+  if (last === undefined) return false;
+  if (last.docks.some((d) => d.end === 'Head')) return true;
+  const end = last.tiles[last.tiles.length - 1];
+  if (end !== undefined && onDoorstep(board, b, PORT_ROLE.IN, end)) return false;
+  return door === null;
+}
+
+/**
+ * Is a belt with no docks left on one of the cells this line needs? Undo takes a draw back one command
+ * at a time, the docks first, so one press leaves the belt where it was with nothing holding it. A good
+ * draw looks the same for the packet before its docks arrive, so this means nothing on its own, and
+ * `machine.ts` only reads it once the line has been stuck.
+ */
+export function looseBeltInTheWay(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number): boolean {
+  const door = lineDoorstep(board, a);
+  return board.belts.some(
+    (belt) =>
+      belt.docks.length === 0 &&
+      belt.tiles.some(
+        (tile) =>
+          onDoorstep(board, a, PORT_ROLE.OUT, tile) ||
+          onDoorstep(board, b, PORT_ROLE.IN, tile) ||
+          (door !== null && door[0] === tile.cell_x && door[1] === tile.cell_y),
+      ),
+  );
 }
 
 /** The name a bound belt goes by. A belt holds no cell the lesson keeps, so it goes by the machines it joins. */

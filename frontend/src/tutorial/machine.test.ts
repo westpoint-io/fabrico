@@ -46,8 +46,14 @@ function started(): TutorialState {
   return frame(sent, {});
 }
 
-const THE_SOURCE = node(4, SOURCE, 2, 2);
-const THE_SINK = node(5, SINK, 8, 2);
+const THE_SOURCE: BoardNode = { ...node(4, SOURCE, 2, 2), ports: [{ index: 0, cell_x: 2, cell_y: 2, side: 1, role: 1 }] };
+const THE_SINK: BoardNode = {
+  ...node(5, SINK, 8, 2),
+  ports: [
+    { index: 0, cell_x: 8, cell_y: 2, side: 2, role: 2 },
+    { index: 1, cell_x: 8, cell_y: 2, side: 3, role: 0 },
+  ],
+};
 const JOINED: BoardBelt = {
   id: 9,
   items: 0,
@@ -89,7 +95,7 @@ describe('the lesson data', () => {
     const stages = (id: string): string[] =>
       LESSONS[0]?.steps.find((s) => s.id === id)?.stages.map((stage) => stage.id) ?? [];
     expect(stages('set-timer')).toEqual(['board-paused', 'tool-down', 'select-source', 'press-timer', 'apply-timer']);
-    expect(stages('draw-belt')).toEqual(['board-paused', 'belt-tool', 'belt-carry-on', 'belt-draw']);
+    expect(stages('draw-belt')).toEqual(['board-paused', 'belt-tool', 'belt-undo', 'belt-carry-on', 'belt-draw']);
     expect(stages('press-play')).toEqual(['board-paused', 'board-running']);
     expect(stages('watch-items')).toEqual(['board-paused', 'watch']);
   });
@@ -118,6 +124,20 @@ describe('the lesson data', () => {
     expect(stage?.hint).toEqual({ on: 'port', of: 'sink', role: 'in' });
     expect(stage?.gesture).toEqual({ do: 'dragToHint' });
     expect(phrasePlain(stage?.text ?? [])).toBe("That Belt stops before the Sink. Drag from the ring at its end to the Sink's input dot.");
+  });
+});
+
+describe('the stage for a belt that cannot be carried on', () => {
+  const stage = LESSONS[0]?.steps.find((s) => s.id === 'draw-belt')?.stages.find((x) => x.id === 'belt-undo');
+
+  it('marks nothing and asks for the undo key', () => {
+    expect(stage?.hint).toBeNull();
+    expect(stage?.gesture).toEqual({ do: 'key', shortcut: 'undo' });
+  });
+
+  it('names the key through the shortcut table', () => {
+    expect(stage?.text).toContainEqual({ key: 'undo' });
+    expect(phrasePlain(stage?.text ?? [])).toBe("That Belt can't be carried on. Press Ctrl+Z until it's gone, then draw it again.");
   });
 });
 
@@ -414,11 +434,66 @@ describe('currentStage', () => {
       expect(stageOf(atStep(3), { nodes: BOTH, belts: [first, touching] }, ARMED)).toBe('belt-carry-on');
     });
 
-    it('stays on the plain drag when that belt has no end a press can carry on from', () => {
+    it('asks for Undo when that belt has no end a press can carry on from', () => {
       const s = atStep(3);
-      expect(stageOf(s, { nodes: BOTH, belts: [{ ...SHORT, tiles: tilesOf(3) }] }, ARMED), 'a single tile').toBe('belt-draw');
+      expect(stageOf(s, { nodes: BOTH, belts: [{ ...SHORT, tiles: tilesOf(3) }] }, ARMED), 'a single tile').toBe('belt-undo');
       const intoAnother: BoardBelt = { ...SHORT, docks: [...SHORT.docks, { end: 'Head', node: 123, port: 0 }] };
-      expect(stageOf(s, { nodes: BOTH, belts: [intoAnother] }, ARMED), 'a line into another machine').toBe('belt-draw');
+      expect(stageOf(s, { nodes: BOTH, belts: [intoAnother] }, ARMED), 'a line into another machine').toBe('belt-undo');
+    });
+
+    it('asks for Undo when a short piece was drawn backwards from the Sink', () => {
+      const backward: BoardBelt = { ...JOINED, tiles: tilesOf(6, 7), docks: [{ end: 'Head', node: THE_SINK.id, port: 0 }] };
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [backward] }, ARMED)).toBe('belt-undo');
+    });
+
+    describe('while the user undoes it', () => {
+      const ONE_TILE: BoardBelt = { ...SHORT, tiles: tilesOf(3) };
+      const LOOSE: BoardBelt = { ...ONE_TILE, docks: [] };
+      const run = (s: TutorialState, belts: readonly BoardBelt[]): TutorialState => frame(s, { nodes: BOTH, belts }, { ...TIMER, ...ARMED });
+      const shown = (s: TutorialState, belts: readonly BoardBelt[]): string | undefined => stageOf(s, { nodes: BOTH, belts }, ARMED);
+
+      it('stays on the undo card when the first press leaves the belt with no docks', () => {
+        const stuck = run(atStep(3), [ONE_TILE]);
+        expect(shown(stuck, [ONE_TILE])).toBe('belt-undo');
+        const firstPress = run(stuck, [LOOSE]);
+        expect(shown(firstPress, [LOOSE]), 'the plain drag would be refused here').toBe('belt-undo');
+        const secondPress = run(firstPress, []);
+        expect(shown(secondPress, []), 'the belt has gone').toBe('belt-draw');
+      });
+
+      it('does the same for a backward piece on the input doorstep', () => {
+        const backward: BoardBelt = { ...JOINED, tiles: tilesOf(6, 7), docks: [{ end: 'Head', node: THE_SINK.id, port: 0 }] };
+        const loose: BoardBelt = { ...backward, docks: [] };
+        const firstPress = run(run(atStep(3), [backward]), [loose]);
+        expect(shown(firstPress, [loose])).toBe('belt-undo');
+      });
+
+      it("doesn't flash the undo card in the packet before a good draw's docks arrive", () => {
+        const whole: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4, 5, 6, 7), docks: [] };
+        const s = run(atStep(3), [whole]);
+        expect(shown(s, [whole])).toBe('belt-draw');
+      });
+
+      it("doesn't flash it on the good draw after an undo either", () => {
+        const cleared = run(run(run(atStep(3), [ONE_TILE]), [LOOSE]), []);
+        const whole: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4, 5, 6, 7), docks: [] };
+        expect(shown(run(cleared, [whole]), [whole])).toBe('belt-draw');
+      });
+
+      it('forgets it when the lesson goes back past the step', () => {
+        const stuck = run(atStep(3), [ONE_TILE]);
+        expect(stuck.undoing).toBe(true);
+        const back = frame(stuck, { nodes: [THE_SOURCE], belts: [] }, TIMER);
+        expect(back.stepIndex).toBe(1);
+        expect(back.undoing).toBe(false);
+      });
+    });
+
+    it('asks for the tool first, and for Play before that, even with a belt that needs undoing', () => {
+      const s = atStep(3);
+      const one: BoardBelt = { ...SHORT, tiles: tilesOf(3) };
+      expect(stageOf(s, { nodes: BOTH, belts: [one] }, {})).toBe('belt-tool');
+      expect(stageOf(s, { nodes: BOTH, belts: [one] }, { ...ARMED, playing: false })).toBe('board-paused');
     });
 
     it('stays on the plain drag for a belt that left some other machine', () => {

@@ -72,6 +72,8 @@ export type StageWhen =
   | { is: 'beltArmed' }
   /** The Belt tool is armed, and the line leaving this machine stops short with an end a press can carry on from. */
   | { is: 'lineStopsShort'; from: BindingName }
+  /** The Belt tool is armed, and a belt on the way from one machine to the other can only be undone, until it's gone. */
+  | { is: 'lineStuck'; from: BindingName; to: BindingName }
   | { is: 'notSelected'; of: BindingName }
   | { is: 'triggerNotPressed'; trigger: 'Timer' }
   | { is: 'triggerNotApplied'; trigger: 'Timer' };

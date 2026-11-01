@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { addFrameBudget, addWaitBudget, frameBudgetMs, tickBudgetMs } from '../../e2e/support/frameSampler';
 import { CELL } from '../../shared/geometry';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
-import { SHORTCUTS } from '../../src/input/shortcuts';
+import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
 import { lineDoorstep } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
@@ -190,6 +190,8 @@ interface WalkState {
   refusalDone: boolean;
   /** The kinds of ring this walk has read off the screen, as a stage's `hint.on`. */
   ringsRead: Set<string>;
+  /** The test pressed Undo along the way. Undo's keyframe drops the selection, so the inspector has closed. */
+  undone: boolean;
 }
 
 /**
@@ -427,6 +429,22 @@ export async function dragByHand(page: Page, start: { x: number; y: number }, en
   await moveHand(page, start);
   await handDragBetween(page, start, end);
   handAt.set(page, end);
+}
+
+/** Press through several points the way a hand does, letting go at the last. A straight drag can't draw a turn. */
+export async function dragAlongByHand(page: Page, points: ReadonlyArray<{ x: number; y: number }>): Promise<void> {
+  const [first, ...rest] = points;
+  if (first === undefined) throw new Error('a drag needs a point to start from');
+  await moveHand(page, first);
+  await page.mouse.down();
+  for (const point of rest) await moveHand(page, point);
+  await page.mouse.up();
+}
+
+/** Press a shortcut with the modifiers its table entry names. */
+export async function pressShortcut(page: Page, id: ShortcutId): Promise<void> {
+  const { keys, ctrl, shift } = SHORTCUTS[id];
+  await page.keyboard.press(`${ctrl === true ? 'Control+' : ''}${shift === true ? 'Shift+' : ''}${keys[0] as string}`);
 }
 
 /** What `expectDotsRideBelt` read from the page's drawn frames. */
@@ -826,7 +844,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       }
     } else if (gesture.do === 'key') {
       if ((await probeAtStage(page, stepIndex, stage.id)) !== null) {
-        await page.keyboard.press(SHORTCUTS[gesture.shortcut].keys[0] as string);
+        await pressShortcut(page, gesture.shortcut);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
     }
@@ -882,10 +900,14 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   // Steps 3 and 5 change no board cell, so no byte compare can grade them. What a person sees is the
   // pressed segment and the clock still moving, so that's what these read.
   if (step.done.is === 'triggerApplied' || step.done.is === 'tickRose') {
-    const asked = lesson.steps.flatMap((s) => (s.done.is === 'triggerApplied' ? [s.done.trigger] : []));
-    const pressed = await page.locator('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]').textContent();
-    expect(asked, `${label}: the lesson's data names the trigger it asks for`).toHaveLength(1);
-    expect(pressed?.trim(), `${label}: the inspector's pressed segment reads the trigger the lesson asked for`).toBe(asked[0]);
+    if (!state.undone) {
+      const asked = lesson.steps.flatMap((s) => (s.done.is === 'triggerApplied' ? [s.done.trigger] : []));
+      const pressed = await page
+        .locator('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]')
+        .textContent({ timeout: frameBudgetMs(MOVE_ON_FRAMES) });
+      expect(asked, `${label}: the lesson's data names the trigger it asks for`).toHaveLength(1);
+      expect(pressed?.trim(), `${label}: the inspector's pressed segment reads the trigger the lesson asked for`).toBe(asked[0]);
+    }
     await expectToolbarTickRises(page, label);
   }
   await expectRenderLoopAlive(page, `after ${label}`);
@@ -960,7 +982,7 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
   expect(first?.stepIndex, `${lesson.id}: the record starts on step 1`).toBe(0);
 
   const to = opts.until === undefined ? lesson.steps.length : indexOfStep(lesson, opts.until);
-  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk, refusalDone: false, ringsRead: new Set() };
+  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk, refusalDone: false, ringsRead: new Set(), undone: false };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
   if (opts.until === undefined) await finishWalk(page, lesson, state);
@@ -971,8 +993,9 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
  * Carry on a walk from a step, against the same record. Rules 1 and 3 still read the whole record, and
  * rule 2 covers only the steps the runner walked, because the test did the others by hand.
  */
-export async function continueLesson(page: Page, lesson: Lesson, opts: { from: string }): Promise<void> {
+export async function continueLesson(page: Page, lesson: Lesson, opts: { from: string; undone?: boolean }): Promise<void> {
   const state = walkStateOf(page, lesson);
+  state.undone = opts.undone ?? false;
   const from = indexOfStep(lesson, opts.from);
   for (let i = from; i < lesson.steps.length; i++) state.walked.add(i);
   await walkSteps(page, lesson, state, from, lesson.steps.length);
