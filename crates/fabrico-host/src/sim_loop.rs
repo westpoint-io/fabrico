@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use fabrico_core::command::{Command, Effect, Outcome, ResultEvent};
@@ -654,6 +654,42 @@ struct BoardExecutor {
     results_rx: UnboundedReceiver<ResultEvent>,
 }
 
+/// What the sim thread tells one board's executor consumer. Each board gets its own, because a
+/// swap has to reach the old consumer alone and because a new board's tick says nothing about
+/// the old board's commands.
+struct BoardFlags {
+    /// Set by a swap before it wakes the consumer. See [`spawn_executor`].
+    cancelled: AtomicBool,
+    /// `core.tick` after this board's latest `tick_once`, so every tick below it has been folded
+    /// and logged. See [`timeout_is_logged`].
+    logged_tick: AtomicU64,
+}
+
+impl BoardFlags {
+    fn new(tick: u64) -> Arc<Self> {
+        Arc::new(Self {
+            cancelled: AtomicBool::new(false),
+            logged_tick: AtomicU64::new(tick),
+        })
+    }
+}
+
+/// Whether the board has logged `cmd`'s Timeout, given a [`BoardFlags::logged_tick`].
+///
+/// `Engine::step` logs a Timeout at the head of a tick when `deadline <= tick`, then folds, which
+/// moves `core.tick` one past that tick. So the last head tick logged is `logged_tick - 1`, and
+/// `deadline < logged_tick` means that tick's check has run. When `logged_tick == deadline` the
+/// check hasn't run, and a result that arrives before it still wins, so the call goes out.
+///
+/// The engine adds a command to its waiting list after that tick's check, so the first check that
+/// can see it is on the tick after it started. That matters when a deadline is the starting tick
+/// itself, which is what a script's `ctx.command(effect, 0)` makes: its Timeout comes one tick
+/// later than the deadline alone says.
+fn timeout_is_logged(cmd: &Command, logged_tick: u64) -> bool {
+    let first_check = cmd.id.0.saturating_add(1);
+    cmd.deadline.max(first_check) < logged_tick
+}
+
 /// Start one board's executor consumer on `rt` and return that board's half of its channels.
 ///
 /// Each board gets its own pair, because a call can outlive the board that made it. The board
@@ -663,17 +699,24 @@ struct BoardExecutor {
 /// the old call's answer resolve the new board's command. With a pair per board, that late send
 /// fails because the old receiver is gone.
 ///
-/// The consumer ends once the board's sender is dropped and its queue is empty. `cancelled_c` is
-/// this board's own flag, which a swap sets before waking the consumer. From then on the consumer
-/// drops each command it hasn't started, whether that command is parked on the pause gate or still
-/// queued, so it ends at the swap and doesn't wait for the next Resume. A swap normally runs only
-/// once the board has nothing in flight, so the old board has already settled what is dropped here.
-/// A drain clears the pause gate and wakes the consumer, so a command the drain is waiting on goes
-/// out rather than being dropped at the swap. The exception is a latched swap whose drain ran out
-/// of `MAX_SETTLE_TICKS` before the consumer got to the command, and there the board waiting on
-/// the command is the one going away. A call already started is left to finish, and its
-/// result goes nowhere because the old receiver is gone. Dropping a command touches neither the
-/// fold nor the log: the only thing it would have sent back is a result for the board that's gone.
+/// The consumer ends once the board's sender is dropped and its queue is empty. `board_c` holds
+/// this board's own flags, and a swap sets `cancelled` there before waking the consumer. From then
+/// on the consumer drops each command it hasn't started, whether that command is parked on the
+/// pause gate or still queued, so it ends at the swap and doesn't wait for the next Resume. A swap
+/// normally runs only once the board has nothing in flight, so the old board has already settled
+/// what is dropped here.
+///
+/// A drain or a Resume clears the pause gate and wakes the consumer. Commands the board still waits
+/// for go out, so a drain isn't left waiting on one until the swap drops it. A command whose Timeout
+/// the board has already logged doesn't go out (see [`timeout_is_logged`]), because the log says that
+/// call timed out and its fault may already have started another. The swap can still drop a live
+/// command when a latched swap's drain ran out of `MAX_SETTLE_TICKS` before the consumer got to
+/// it, and there the board waiting on the command is the one going away. A call already started is
+/// left to finish, and its result goes nowhere because the old receiver is gone.
+///
+/// Neither drop touches the fold or the log. After a swap, the only thing the command would have
+/// sent back is a result for the board that's gone. After a logged Timeout, the engine discards a
+/// result for that command.
 ///
 /// The pause gate, the wake, the dispatch counter and the correlation registry are shared across
 /// boards, and that registry resolves a stale Reply to nothing, because a swap drains it and
@@ -685,7 +728,7 @@ fn spawn_executor(
     paused_c: Arc<AtomicBool>,
     notify_c: Arc<Notify>,
     dispatched_c: Arc<AtomicUsize>,
-    cancelled_c: Arc<AtomicBool>,
+    board_c: Arc<BoardFlags>,
 ) -> BoardExecutor {
     let (cmd_tx, mut cmd_rx) = unbounded_channel::<Command>();
     let (res_tx, results_rx) = unbounded_channel::<ResultEvent>();
@@ -706,7 +749,7 @@ fn spawn_executor(
                 let notified = notify_c.notified();
                 tokio::pin!(notified);
                 notified.as_mut().enable();
-                if cancelled_c.load(Ordering::Acquire) || !paused_c.load(Ordering::Acquire) {
+                if board_c.cancelled.load(Ordering::Acquire) || !paused_c.load(Ordering::Acquire) {
                     break;
                 }
                 notified.await;
@@ -714,7 +757,7 @@ fn spawn_executor(
             // This board was replaced before the command started, so drop it. See
             // `spawn_executor`. Keep taking from the queue: the swap drops the sender, so the
             // queue empties and the loop ends.
-            if cancelled_c.load(Ordering::Acquire) {
+            if board_c.cancelled.load(Ordering::Acquire) {
                 eprintln!(
                     "fabrico-host: board swap dropped command {:?}, which hadn't started on the replaced board",
                     cmd.id
@@ -740,6 +783,18 @@ fn spawn_executor(
                     tick: 0,
                     outcome: Outcome::Success,
                 });
+                continue;
+            }
+            // The board has already logged this command's Timeout, so its call doesn't go out. The
+            // engine's waiting list no longer has it, so nothing waits for a result. This check
+            // sits below the Reply arm on purpose: a handler's `ctx.command(reply, 0)` logs its
+            // Timeout a tick after it starts as a matter of course, and dropping that reply would
+            // turn the answer a connected caller is waiting for into a 504 at the sweep.
+            if timeout_is_logged(&cmd, board_c.logged_tick.load(Ordering::Acquire)) {
+                eprintln!(
+                    "fabrico-host: dropped command {:?}, whose Timeout the board has already logged",
+                    cmd.id
+                );
                 continue;
             }
             // Past the gate: count this dispatch pickup, then fire the effect.
@@ -778,9 +833,9 @@ pub struct SimLoop {
     /// What a host swap needs to start the new board's executor consumer.
     executor_rt: tokio::runtime::Handle,
     executor_cfg: HostConfig,
-    /// The current board's cancelled flag. A host swap sets it and starts the new board with a
-    /// fresh one, see [`spawn_executor`].
-    executor_cancelled: Arc<AtomicBool>,
+    /// The current board's flags for its consumer. A host swap sets `cancelled` here and starts
+    /// the new board with fresh ones, see [`spawn_executor`].
+    executor_board: Arc<BoardFlags>,
     // ── SEAMS (present, inert in the shell this phase) ──
     webhook_rx: Option<Receiver<Ingress>>,
     control_rx: Option<UnboundedReceiver<ControlMsg>>,
@@ -1028,7 +1083,7 @@ impl SimLoop {
         let registry = Registry::default();
 
         let executor_rt = rt.clone();
-        let executor_cancelled = Arc::new(AtomicBool::new(false));
+        let executor_board = BoardFlags::new(start_tick);
         let BoardExecutor { cmd_tx, results_rx } = spawn_executor(
             &executor_rt,
             cfg.clone(),
@@ -1036,7 +1091,7 @@ impl SimLoop {
             Arc::clone(&paused),
             Arc::clone(&resume_notify),
             Arc::clone(&dispatched),
-            Arc::clone(&executor_cancelled),
+            Arc::clone(&executor_board),
         );
 
         Self {
@@ -1049,7 +1104,7 @@ impl SimLoop {
             results_rx,
             executor_rt,
             executor_cfg: cfg,
-            executor_cancelled,
+            executor_board,
             webhook_rx: None,
             control_rx: None,
             pre_tick: None,
@@ -1299,7 +1354,8 @@ impl SimLoop {
 
     /// TEST-ONLY: the number of commands the off-thread executor consumer has
     /// picked up for dispatch (incremented AFTER the pause gate). Stable while
-    /// frozen; increases once a Resume or a drain wakes the parked consumer.
+    /// frozen; increases once a Resume or a drain wakes the parked consumer, for each command
+    /// whose Timeout isn't logged.
     #[cfg(test)]
     pub(crate) fn dispatched_count(&self) -> usize {
         self.dispatched.load(Ordering::Relaxed)
@@ -1410,7 +1466,8 @@ impl SimLoop {
                         self.pending_load = None;
                         self.pending_save = None;
                         // Wake the parked executor consumer (race-free against its
-                        // enable()-before-check gate).
+                        // enable()-before-check gate). It sends only what the board still
+                        // waits for, see `timeout_is_logged`.
                         self.resume_notify.notify_waiters();
                     }
                 }
@@ -1770,7 +1827,8 @@ impl SimLoop {
             self.draining_ticks = 0;
             self.paused.store(false, Ordering::Release);
             // A held board's consumer can be parked on the pause gate with a command that this
-            // drain is waiting on. Without the wake it stays asleep until the budget runs out.
+            // drain is waiting on. Without the wake it stays asleep until the budget runs out. The
+            // wake sends only what the board still waits for, see `timeout_is_logged`.
             self.resume_notify.notify_waiters();
         }
     }
@@ -2172,11 +2230,13 @@ impl SimLoop {
         //
         // The old consumer is told first, and woken in case it is parked on the pause gate with a
         // command. Only this tail sets the flag, so a refused Load, which never gets here, leaves
-        // the kept board's commands to fire. The new consumer gets its own flag, and this wake
-        // can't reach it because it doesn't exist yet.
-        self.executor_cancelled.store(true, Ordering::Release);
+        // the kept board's commands to the usual check. The new consumer gets its own flags, and
+        // this wake can't reach it because it doesn't exist yet. Its `logged_tick` starts at the
+        // new board's tick: the old board's could be far ahead of a loaded file, and would read
+        // the new board's first commands as timed out.
+        self.executor_board.cancelled.store(true, Ordering::Release);
         self.resume_notify.notify_waiters();
-        self.executor_cancelled = Arc::new(AtomicBool::new(false));
+        self.executor_board = BoardFlags::new(self.host.core().tick);
         let BoardExecutor { cmd_tx, results_rx } = spawn_executor(
             &self.executor_rt,
             self.executor_cfg.clone(),
@@ -2184,7 +2244,7 @@ impl SimLoop {
             Arc::clone(&self.paused),
             Arc::clone(&self.resume_notify),
             Arc::clone(&self.dispatched),
-            Arc::clone(&self.executor_cancelled),
+            Arc::clone(&self.executor_board),
         );
         self.cmd_tx = cmd_tx;
         self.results_rx = results_rx;
@@ -2576,6 +2636,11 @@ impl SimLoop {
 
         // (1) The shared deterministic fold.
         self.host.tick_once(&mut self.ingress_rx, &mut self.results_rx, &self.cmd_tx)?;
+
+        // Tell the consumer how far the log has got, so it can leave a call whose Timeout is
+        // logged. This runs after `tick_once` returns, because that is when the tick's events are
+        // on disk. It reads the tick and writes nothing back to the fold.
+        self.executor_board.logged_tick.store(self.host.core().tick, Ordering::Release);
 
         // (1a) CFG-01: re-project the host Timer set after any edit folds this tick
         //      (a `Configure{Source, Timer/Webhook}` installs/changes/clears a live
@@ -7660,9 +7725,9 @@ mod tests {
         }
 
         /// A latched New whose drain runs out of its budget replaces a board that is still waiting
-        /// on the command. The drain's own wake normally sends a parked command, so the command
-        /// stays parked only if the consumer doesn't run before the budget ends, which this runtime
-        /// arranges: it runs tasks only inside `block_on`.
+        /// on the command. The drain's own wake normally sends a parked command the board still
+        /// waits for, so the command stays parked only if the consumer doesn't run before the
+        /// budget ends, which this runtime arranges: it runs tasks only inside `block_on`.
         #[test]
         fn a_replaced_boards_parked_command_never_fires_when_the_drain_runs_out_of_budget() {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -7720,7 +7785,7 @@ mod tests {
             assert_eq!(sim.dispatched_count(), 1, "the new board's own command still goes out");
         }
 
-        /// A refused Load keeps the board, so a command parked on it still fires on Resume.
+        /// A refused Load keeps the board, so a command it still waits for fires on Resume.
         #[allow(clippy::disallowed_methods)]
         #[test]
         fn a_refused_load_leaves_a_parked_command_to_fire() {
@@ -7871,6 +7936,303 @@ mod tests {
             assert_eq!(calls.load(Ordering::Relaxed), 1, "the server got the call once");
             assert_eq!(sim.dispatched_count(), 1);
             assert!(!sim.is_paused(), "the Resume lifted the hold, so the new board plays");
+        }
+
+        /// The tick Sink A's command starts on, and the key its call would carry.
+        const STALE_TICK: u64 = 722;
+        const STALE_KEY: &str = "fabrico-cmd-722-4294967298-0";
+        /// A Sink's default deadline is 600 ticks, so the board logs A's Timeout at the head of
+        /// this tick, which leaves `core.tick` one past it.
+        const STALE_DEADLINE: u64 = STALE_TICK + 600;
+        /// The tick Sink B's command starts on, after A's fault rides the belt to B.
+        const LIVE_TICK: u64 = 1352;
+        const LIVE_KEY: &str = "fabrico-cmd-1352-4294967299-0";
+
+        async fn record_and_answer(
+            State(keys): State<Arc<std::sync::Mutex<Vec<String>>>>,
+            headers: HeaderMap,
+        ) -> StatusCode {
+            let key = headers
+                .get("idempotency-key")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            keys.lock().expect("the key list").push(key);
+            StatusCode::OK
+        }
+
+        /// A loopback server that answers each request at once, and the keys it has received.
+        fn recording_server(rt: &tokio::runtime::Runtime) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+            let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let listener = rt
+                .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+                .expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let app = Router::new().route("/call", any(record_and_answer)).with_state(Arc::clone(&keys));
+            rt.spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+            (format!("http://{addr}/call"), keys)
+        }
+
+        /// The keys the server has, after a pause long enough for a stray call to arrive.
+        fn keys_after_a_pause(keys: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+            std::thread::sleep(Duration::from_millis(100));
+            keys.lock().expect("the key list").clone()
+        }
+
+        /// Timer Source, belt, HTTP Sink A, and a belt from A's fault port to HTTP Sink B, both
+        /// Sinks on one URL, held from the first tick.
+        fn held_board_with_a_fault_sink(
+            rt: &tokio::runtime::Runtime,
+            dir: &std::path::Path,
+            url: &str,
+        ) -> (SimLoop, GestureTx, UnboundedSender<ControlMsg>) {
+            let board = format!(
+                r#"Board(format: 1, seed: 1, commands: [
+                    Place(kind: 0, cell_x: 1, cell_y: 6),
+                    Place(kind: 7, cell_x: 5, cell_y: 6),
+                    Place(kind: 7, cell_x: 7, cell_y: 9),
+                    DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),
+                    Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+                    Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+                    DrawBelt(cells: [(5, 7), (5, 8), (5, 9), (6, 9)]),
+                    Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+                    Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+                    Configure(node: 0, config: Source(trigger: Timer(interval_ticks: {TIMER_INTERVAL}))),
+                    Configure(node: 1, config: Sink(target: Http(url: "{url}", method: Post))),
+                    Configure(node: 2, config: Sink(target: Http(url: "{url}", method: Post))),
+                ],
+                script: [],
+                executor: Executor(default: Reply(after_ticks: 1), rules: []),
+                view: View(fit: Board),
+                end_tick: 1500)"#
+            );
+            let commands = load_board_commands(&board).expect("the test board parses");
+            let mut host = build_host(dir, |_| {});
+            seed_scene(&mut host, &commands).expect("the test board seeds");
+            let timers = timers_from_log(&host).expect("read the edit log");
+            let host = host.with_timers(timers);
+            let (gtx, grx) = gesture_channel();
+            let (ctx, crx) = unbounded_channel::<ControlMsg>();
+            let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
+                .with_control(crx);
+            ctx.send(ControlMsg::Pause).expect("pause");
+            sim.step().expect("freeze");
+            (sim, gtx, ctx)
+        }
+
+        /// How many Timeouts the board's log holds for the command that started on `tick`.
+        fn logged_timeouts(sim: &SimLoop, tick: u64) -> usize {
+            sim.host()
+                .logged_events()
+                .expect("read log")
+                .into_iter()
+                .filter(|e| matches!(e.payload, EventPayload::Timeout { command_id } if command_id.0 == tick))
+                .count()
+        }
+
+        /// Hold the board at the tick where A's Timeout is logged and its fault has started B's
+        /// command, both parked in order on the pause gate. Then send what `wake` builds, run the
+        /// drain or the play until `settled`, and check that only B's call reached the server. A's
+        /// is first in the queue, so a dispatch count of 1 once B's result is back means A's was
+        /// never picked up.
+        fn only_the_live_call_goes_out_after(
+            wake: impl FnOnce(&std::path::Path) -> ControlMsg,
+            settled: impl Fn(&SimLoop) -> bool,
+        ) -> (SimLoop, tempfile::TempDir, tokio::runtime::Runtime) {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, keys) = recording_server(&rt);
+            let (mut sim, _gtx, ctx) = held_board_with_a_fault_sink(&rt, dir.path(), &url);
+
+            step_held_until(&mut sim, &ctx, "B's command", |s| s.host().core().tick == LIVE_TICK + 1);
+            assert_eq!(logged_timeouts(&sim, STALE_TICK), 1, "the board logged A's Timeout");
+            assert_eq!(sim.host().in_flight_len(), 1, "and it is waiting on B's command");
+            // Time for the consumer to take A's command and park. See `held_board_with_a_parked_call`.
+            std::thread::sleep(Duration::from_millis(50));
+            assert_eq!(sim.dispatched_count(), 0, "the hold kept both commands from starting");
+
+            ctx.send(wake(dir.path())).expect("send the wake");
+            sim.step().expect("service the wake");
+            assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "B's call goes out");
+            drain_until(&mut sim, "the board settling", settled);
+
+            assert_eq!(keys_after_a_pause(&keys), vec![LIVE_KEY.to_owned()], "the server got B's call alone");
+            assert_eq!(sim.dispatched_count(), 1, "A's call wasn't picked up");
+            (sim, dir, rt)
+        }
+
+        #[test]
+        fn new_on_a_held_board_sends_only_the_call_the_board_still_waits_for() {
+            only_the_live_call_goes_out_after(
+                |_| ControlMsg::New,
+                |s| s.host().core().state.node_ids().count() == 0,
+            );
+        }
+
+        #[test]
+        fn save_on_a_held_board_sends_only_the_call_the_board_still_waits_for() {
+            let (sim, dir, _rt) = only_the_live_call_goes_out_after(
+                |dir| ControlMsg::Save(dir.join("held.fab")),
+                |s| s.run_state == RunState::Frozen,
+            );
+            assert!(dir.path().join("held.fab").exists(), "the save wrote the file");
+            assert_eq!(logged_timeouts(&sim, STALE_TICK), 1, "A ends in its Timeout");
+            let results = logged_results(&sim);
+            assert_eq!(results.len(), 1, "B ends in its result: {results:?}");
+            assert_eq!(results[0].0.0, LIVE_TICK);
+            assert_eq!(results[0].1, Outcome::Success);
+        }
+
+        #[allow(clippy::disallowed_methods)]
+        #[test]
+        fn a_refused_load_on_a_held_board_sends_only_the_call_the_board_still_waits_for() {
+            let (sim, _dir, _rt) = only_the_live_call_goes_out_after(
+                |dir| {
+                    let bad = dir.join("not-a-board.fab");
+                    std::fs::write(&bad, b"this is not a fabrico project file").expect("write garbage");
+                    ControlMsg::Load(bad)
+                },
+                |s| s.run_state == RunState::Frozen,
+            );
+            assert!(sim.host().core().tick > LIVE_TICK, "the load was refused, so the board is the same one");
+            assert_eq!(logged_results(&sim).len(), 1, "B ends in its result");
+        }
+
+        #[test]
+        fn resume_sends_only_the_call_the_board_still_waits_for() {
+            let (sim, _dir, _rt) = only_the_live_call_goes_out_after(
+                |_| ControlMsg::Resume,
+                |s| s.host().in_flight_len() == 0,
+            );
+            assert_eq!(logged_timeouts(&sim, STALE_TICK), 1, "A ends in its Timeout");
+            assert_eq!(logged_results(&sim).len(), 1, "B ends in its result");
+        }
+
+        /// Clear the pause gate and wake the consumer with no tick running, so the tick it reads
+        /// is the one the test stopped at.
+        fn lift_the_hold_without_a_tick(sim: &SimLoop) {
+            sim.paused.store(false, Ordering::Release);
+            sim.resume_notify.notify_waiters();
+        }
+
+        /// Wait until the consumer has dealt with everything queued ahead of this call, by sending
+        /// a Noop that can't time out and waiting for its result. The Noop counts as one dispatch.
+        fn wait_for_the_queue_ahead(sim: &mut SimLoop) {
+            let fence: CommandId = (u64::MAX, NodeId::null(), 0);
+            sim.test_send_command(noop(fence));
+            for _ in 0..LONG_WAIT {
+                match sim.results_rx.try_recv() {
+                    Ok(result) if result.command_id == fence => return,
+                    Ok(_) => {}
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
+            }
+            panic!("the fence never came back");
+        }
+
+        /// Stopped on the deadline tick itself, the board hasn't logged the Timeout: it logs it at
+        /// the head of this tick, and a result that arrives first still wins. The call goes out.
+        #[test]
+        fn a_call_parked_on_its_deadline_tick_goes_out() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, keys) = recording_server(&rt);
+            let (mut sim, _gtx, ctx) = held_board_with_a_fault_sink(&rt, dir.path(), &url);
+
+            step_held_until(&mut sim, &ctx, "A's deadline", |s| s.host().core().tick == STALE_DEADLINE);
+            assert_eq!(logged_timeouts(&sim, STALE_TICK), 0, "the Timeout isn't logged yet");
+            assert_eq!(sim.host().in_flight_len(), 1, "the board still waits for A");
+
+            lift_the_hold_without_a_tick(&sim);
+            wait_for_the_queue_ahead(&mut sim);
+            assert_eq!(sim.dispatched_count(), 2, "A's call and the fence");
+            assert_eq!(keys_after_a_pause(&keys), vec![STALE_KEY.to_owned()], "the server got A's call");
+        }
+
+        /// One tick on, the Timeout is logged, so the same call stays home.
+        #[test]
+        fn a_call_parked_one_tick_past_its_deadline_stays_home() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, keys) = recording_server(&rt);
+            let (mut sim, _gtx, ctx) = held_board_with_a_fault_sink(&rt, dir.path(), &url);
+
+            step_held_until(&mut sim, &ctx, "past A's deadline", |s| s.host().core().tick == STALE_DEADLINE + 1);
+            assert_eq!(logged_timeouts(&sim, STALE_TICK), 1, "the Timeout is logged");
+            assert_eq!(sim.host().in_flight_len(), 0, "the board has stopped waiting for A");
+
+            lift_the_hold_without_a_tick(&sim);
+            wait_for_the_queue_ahead(&mut sim);
+            assert_eq!(sim.dispatched_count(), 1, "the fence alone");
+            assert_eq!(keys_after_a_pause(&keys), Vec::<String>::new(), "the server got nothing");
+        }
+
+        /// A deadline can be the tick the command started on: a script's `ctx.command(effect, 0)`
+        /// makes one. The engine adds the command to its waiting list after that tick's Timeout
+        /// check, so its Timeout comes a tick later than the deadline alone says. Until then the
+        /// call goes out, and once the Timeout is logged it doesn't.
+        #[test]
+        fn a_deadline_on_the_starting_tick_times_out_one_tick_later() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, _ctx) = swap_rig(dir.path(), &rt);
+            for _ in 0..3 {
+                sim.step().expect("a tick");
+            }
+            let started = sim.host().core().tick - 1;
+            // The engine waits on this id, and no call carrying it goes out before its Timeout, so
+            // no result can beat the Timeout. The first call is the same but for its sequence
+            // number, and the engine discards its result.
+            let waited_on: CommandId = (started, NodeId::null(), 0);
+            let sent_early: CommandId = (started, NodeId::null(), 1);
+            sim.host.test_insert_in_flight(waited_on, started);
+
+            sim.test_send_command(Command { deadline: started, ..noop(sent_early) });
+            wait_for_the_queue_ahead(&mut sim);
+            assert_eq!(sim.dispatched_count(), 2, "not logged yet, so the call and the fence");
+            assert_eq!(sim.host().in_flight_len(), 1, "the engine still waits");
+
+            sim.step().expect("the tick that logs the Timeout");
+            assert_eq!(sim.host().in_flight_len(), 0, "the engine stopped waiting");
+            assert!(
+                sim.host().logged_events().expect("read log").into_iter().any(
+                    |e| matches!(e.payload, EventPayload::Timeout { command_id } if command_id == waited_on)
+                ),
+                "the normal Timeout is in the log"
+            );
+
+            sim.test_send_command(Command { deadline: started, ..noop(waited_on) });
+            wait_for_the_queue_ahead(&mut sim);
+            assert_eq!(sim.dispatched_count(), 3, "logged now, so the fence alone");
+        }
+
+        /// The new board's consumer reads the new board's tick, from the moment of the swap. This
+        /// one starts at tick 0 with the old board at tick 30, and a command due at tick 5 is alive
+        /// until the new board has run past it.
+        #[test]
+        fn the_new_board_reads_its_own_tick() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, _ctx) = swap_rig(dir.path(), &rt);
+            for _ in 0..30 {
+                sim.step().expect("a tick on the old board");
+            }
+            sim.new_swap();
+            assert_eq!(sim.host().core().tick, 0, "the new board starts over");
+            let command = Command { deadline: 5, ..noop((0, NodeId::null(), 0)) };
+
+            sim.test_send_command(command.clone());
+            wait_for_the_queue_ahead(&mut sim);
+            assert_eq!(sim.dispatched_count(), 2, "alive on the new board's clock: the call and the fence");
+
+            for _ in 0..7 {
+                sim.step().expect("a tick on the new board");
+            }
+            sim.test_send_command(command);
+            wait_for_the_queue_ahead(&mut sim);
+            assert_eq!(sim.dispatched_count(), 3, "past it on the new board's clock: the fence alone");
         }
     }
 }
@@ -8603,6 +8965,28 @@ mod endpoint {
             let ev = poll_result(&mut sim.results_rx);
             assert_eq!(ev.outcome, Outcome::Success, "the command still closes in-flight");
             assert!(sim.registry.is_empty(), "resolve removed the parked entry");
+        }
+
+        /// A handler's `ctx.command(reply, 0)` has its deadline on its starting tick, so its Timeout
+        /// is logged a tick later as a matter of course. The reply is the answer the caller is
+        /// connected and waiting for, so a consumer running late still delivers it.
+        #[test]
+        fn a_reply_past_its_timeout_still_answers_the_caller() {
+            let rt = rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (host, ep) = host_with_ep(dir.path());
+            let (_gtx, grx) = gesture_channel();
+            let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), cfg(), grx);
+            for _ in 0..3 {
+                sim.step().expect("a tick");
+            }
+
+            let (tx, mut socket) = oneshot::channel();
+            sim.registry.try_park(42, 1000, tx).expect("park under cap");
+            sim.test_send_command(Command { deadline: 0, ..reply_command(ep, 42, 200, "pong") });
+
+            let resp = poll_socket(&mut socket);
+            assert_eq!(resp.status().as_u16(), 200, "the reply reaches the caller");
         }
 
         #[test]
