@@ -117,7 +117,18 @@ function namesFound(stripped: string, names: ReadonlyArray<readonly [string, Reg
 }
 
 /**
- * The reader may import a bridge and pass it to `loadConfig`. A bridge on any other line could send a
+ * The one way a bridge may be used: as the direct second argument of `loadConfig(`, alone or as the two
+ * arms of the `transportKind()` choice. Anything else on that line, such as a wrapper or a second call,
+ * is left behind when this is cut out, and the bridge it names is a breach.
+ */
+const BRIDGE = '(?:tauriInvoke|devWsInvoke)';
+const THE_ONE_READ = new RegExp(
+  `\\bloadConfig\\(\\s*(?!${BRIDGE}\\b)\\w+\\s*,\\s*(?:${BRIDGE}|transportKind\\(\\)\\s*[!=]==\\s*'\\w+'\\s*\\?\\s*${BRIDGE}\\s*:\\s*${BRIDGE})\\s*\\)`,
+  'g',
+);
+
+/**
+ * The reader may import a bridge and pass it to `loadConfig`. A bridge anywhere else could send a
  * command, and any export but the answer could hand a bridge out.
  */
 function hostReaderBreaches(path: string, stripped: string): string[] {
@@ -125,7 +136,7 @@ function hostReaderBreaches(path: string, stripped: string): string[] {
   stripped.split('\n').forEach((text, i) => {
     if (!HOST_BRIDGES.test(text)) return;
     const plainImport = /^\s*import\b/.test(text) && !/\bas\b/.test(text);
-    if (!plainImport && !text.includes('loadConfig(')) {
+    if (!plainImport && HOST_BRIDGES.test(text.replace(THE_ONE_READ, ''))) {
       findings.push(`${path}:${i + 1}: uses a host bridge outside loadConfig, and this file makes that one read`);
     }
   });
@@ -326,6 +337,26 @@ describe('the tutorial stays a reader of the app', () => {
         expect(auditTutorialSources([reader('const go = tauriInvoke;')]).join('\n')).toContain('uses a host bridge outside loadConfig');
         const aliased = { path: HOST_READER, source: `import { tauriInvoke as go } from '../ConfigPanel';\n${read}` };
         expect(auditTutorialSources([aliased]).join('\n')).toContain('uses a host bridge outside loadConfig');
+      });
+
+      it('a bridge wrapped in a function on the same line as loadConfig', () => {
+        const body = "export async function readAppliedTrigger(node) { return loadConfig(node, (cmd, args) => tauriInvoke('ctrl_new', args)); }";
+        expect(auditTutorialSources([{ path: HOST_READER, source: [...FIRST_LINES, body].join('\n') }]).join('\n')).toContain(`${HOST_READER}:3: uses a host bridge outside loadConfig`);
+      });
+
+      it('a write after the read on the same line', () => {
+        const body = "export async function readAppliedTrigger(node) { const c = await loadConfig(node, tauriInvoke); tauriInvoke('ctrl_new', {}); return c; }";
+        expect(auditTutorialSources([{ path: HOST_READER, source: [...FIRST_LINES, body].join('\n') }]).join('\n')).toContain(`${HOST_READER}:3: uses a host bridge outside loadConfig`);
+      });
+
+      it('a bridge as the first argument of loadConfig', () => {
+        const body = 'export async function readAppliedTrigger(node) { return loadConfig(tauriInvoke, node); }';
+        expect(auditTutorialSources([{ path: HOST_READER, source: [...FIRST_LINES, body].join('\n') }]).join('\n')).toContain(`${HOST_READER}:3: uses a host bridge outside loadConfig`);
+      });
+
+      it('a transport choice with a call in one arm', () => {
+        const body = "export async function readAppliedTrigger(node) { return loadConfig(node, transportKind() === 'dev' ? devWsInvoke('step', {}) : tauriInvoke); }";
+        expect(auditTutorialSources([{ path: HOST_READER, source: [...FIRST_LINES, body].join('\n') }]).join('\n')).toContain(`${HOST_READER}:3: uses a host bridge outside loadConfig`);
       });
 
       it('a second export, or a bridge handed out', () => {
