@@ -4,6 +4,7 @@
 // relation and compares with the step's baseline. It never counts nodes, because a count can be
 // satisfied by a machine the user didn't place for this step.
 
+import { beltEndPort, doorstepCell } from '../protocol/ports';
 import type { BoundNode, StepBaseline, TutorialState } from './machine';
 import type { BindingName, BoardBelt, BoardFacts, BoardNode, Check, ChromeFacts } from './types';
 
@@ -71,10 +72,8 @@ export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number): reado
     belt = board.belts.find((other) => other.id === head);
   }
   if (belt === undefined || belt.docks.some((d) => d.end === 'Head')) return null;
-  const end = belt.tiles[belt.tiles.length - 1];
-  const inner = belt.tiles[belt.tiles.length - 2];
-  if (end === undefined || inner === undefined) return null;
-  return [2 * end.cell_x - inner.cell_x, 2 * end.cell_y - inner.cell_y];
+  const port = beltEndPort(belt.tiles, 'Head');
+  return port === null ? null : doorstepCell(port);
 }
 
 /** The name a bound belt goes by. A belt holds no cell the lesson keeps, so it goes by the machines it joins. */

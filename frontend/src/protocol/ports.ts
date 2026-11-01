@@ -350,7 +350,7 @@ export function worldNubSpecs(node: NodeView): NubSpec[] {
  * command.rs:472-537). Assumes `tiles.length >= 1` (post-P20 every belt is
  * DrawBelt-minted with tiles >= 1).
  */
-export function beltEndCell(tiles: TileView[], end: BeltEnd): [number, number] {
+export function beltEndCell(tiles: ReadonlyArray<Pick<TileView, 'cell_x' | 'cell_y'>>, end: BeltEnd): [number, number] {
   const t = end === 'Head' ? tiles[tiles.length - 1] : tiles[0];
   return [t.cell_x, t.cell_y];
 }
@@ -360,7 +360,7 @@ export function beltEndCell(tiles: TileView[], end: BeltEnd): [number, number] {
  * = tiles[len-2], Tail inner = tiles[1]). `null` for a single-tile belt — the
  * host skips the facing check in that case (command.rs / state.rs mirror).
  */
-export function beltEndOutward(tiles: TileView[], end: BeltEnd): [number, number] | null {
+export function beltEndOutward(tiles: ReadonlyArray<Pick<TileView, 'cell_x' | 'cell_y'>>, end: BeltEnd): [number, number] | null {
   if (tiles.length < 2) {
     return null;
   }
@@ -431,7 +431,7 @@ export function beltDockPartnerEnd(end: BeltEnd): BeltEnd {
  * (`tside.ok_or(CommandError::InvalidDock)`). Answering with a fabricated side here
  * would make the client rank a target the host cannot accept.
  */
-export function beltEndPort(tiles: TileView[], end: BeltEnd): PortView | null {
+export function beltEndPort(tiles: ReadonlyArray<Pick<TileView, 'cell_x' | 'cell_y'>>, end: BeltEnd): PortView | null {
   if (tiles.length === 0) {
     return null;
   }
@@ -470,7 +470,7 @@ export function beltEndPort(tiles: TileView[], end: BeltEnd): PortView | null {
  * readers share this function: two copies of `cell + unitDelta(side)` that agree today
  * and drift later is this repository's named failure class (T-63-14).
  */
-export function doorstepCell(port: PortView): [number, number] {
+export function doorstepCell(port: Pick<PortView, 'cell_x' | 'cell_y' | 'side'>): [number, number] {
   const [dx, dy] = unitDelta(port.side);
   return [port.cell_x + dx, port.cell_y + dy];
 }
