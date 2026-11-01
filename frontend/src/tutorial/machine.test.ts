@@ -127,6 +127,28 @@ describe('the lesson data', () => {
   });
 });
 
+describe('a Timer applied before its step comes up', () => {
+  const NOTE = { kind: 'skippedOne', a: 3, b: 3 };
+
+  it('finishes with the Sink and writes the note, when the answer is already held', () => {
+    const atSink = frame(started(), { nodes: [THE_SOURCE] }, TIMER);
+    expect(atSink.stepIndex, 'the Sink is still to come').toBe(1);
+    const landed = frame(atSink, { nodes: BOTH }, TIMER);
+    expect(landed.stepIndex).toBe(3);
+    expect(landed.note).toEqual(NOTE);
+  });
+
+  it('does the same when the Timer was applied while left at the Sink step', () => {
+    const left = reduce(atStep(1), { type: 'left' }, LESSONS);
+    const back = frame(reduce(left, { type: 'resumed' }, LESSONS), { nodes: [THE_SOURCE] }, TIMER);
+    expect(back.stepIndex, 'nothing to skip yet').toBe(1);
+    expect(back.note).toBeNull();
+    const landed = frame(back, { nodes: BOTH }, TIMER);
+    expect(landed.stepIndex).toBe(3);
+    expect(landed.note).toEqual(NOTE);
+  });
+});
+
 describe('the stage for a belt that cannot be carried on', () => {
   const stage = LESSONS[0]?.steps.find((s) => s.id === 'draw-belt')?.stages.find((x) => x.id === 'belt-undo');
 

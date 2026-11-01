@@ -1611,6 +1611,46 @@ test.describe('a trigger applied while the lesson is left', () => {
     await expect(card, 'the step number jumped, so the note explains it').toContainText('Step 3 was already done, so the lesson moved on.');
   });
 
+  test('a Timer applied before its step comes up: the step number jumps, and the note says so', async ({ page }) => {
+    const host = configuredHost();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h);
+    const { cell } = await armSourceForFloor(page);
+    const source = sourceAt(cell);
+    h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [source] }));
+    await ringAt(page, 'sink-tool');
+
+    // The user sets the Timer up on the Source that's there, with step 2 still on the card.
+    host.set({ kind: 'Timer', interval_ticks: 60 });
+    await page.waitForTimeout(TWO_TRIGGER_READS_MS);
+
+    h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: [source, sinkAt([cell[0] + 6, cell[1]])] }));
+    const card = page.locator(CARD);
+    await expect(card).toContainText(`Step 4 of ${STEP_COUNT}`);
+    await expect(card, 'step 3 was never on the card, so the note explains it').toContainText('Step 3 was already done, so the lesson moved on.');
+  });
+
+  test('a Timer applied while left at the Sink step: the note shows when the Sink lands after Resume', async ({ page }) => {
+    const host = configuredHost();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h);
+    const { cell } = await armSourceForFloor(page);
+    const source = sourceAt(cell);
+    h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [source] }));
+    await ringAt(page, 'sink-tool');
+    await pressLeave(page);
+
+    host.set({ kind: 'Timer', interval_ticks: 60 });
+    await pressResume(page);
+    const card = page.locator(CARD);
+    await expect(card).toContainText(`Step 2 of ${STEP_COUNT}`);
+    await page.waitForTimeout(TWO_TRIGGER_READS_MS);
+
+    h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: [source, sinkAt([cell[0] + 6, cell[1]])] }));
+    await expect(card).toContainText(`Step 4 of ${STEP_COUNT}`);
+    await expect(card, 'step 3 was never on the card, so the note explains it').toContainText('Step 3 was already done, so the lesson moved on.');
+  });
+
   test('left at the Sink step: Resume covers both steps in one note', async ({ page }) => {
     const host = configuredHost();
     const h = await boot(page, host.opts);

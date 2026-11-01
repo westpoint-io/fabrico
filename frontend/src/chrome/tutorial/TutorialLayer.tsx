@@ -162,12 +162,11 @@ export function handFocusBackFromList(lessonOnScreen: boolean): void {
 /** How often the layer asks the host for the bound Source's trigger: slower than a person presses Apply. */
 export const TRIGGER_POLL_MS = 400;
 
-/** The step that waits on an applied trigger, and the binding it names. Null when the lesson has none. */
-function triggerWatch(s: TutorialState): { from: number; of: BindingName } | null {
+/** The binding the lesson's trigger step asks about. Null when the lesson has no such step. */
+function triggerWatch(s: TutorialState): BindingName | null {
   const steps = LESSONS.find((l) => l.id === s.lessonId)?.steps ?? [];
-  const from = steps.findIndex((step) => step.done.is === 'triggerApplied');
-  const done = steps[from]?.done;
-  return done?.is === 'triggerApplied' ? { from, of: done.of } : null;
+  const done = steps.find((step) => step.done.is === 'triggerApplied')?.done;
+  return done?.is === 'triggerApplied' ? done.of : null;
 }
 
 /** The pressed segment of the inspector's Trigger group: the unapplied buffer, read from the DOM. */
@@ -228,12 +227,13 @@ export function TutorialLayer({
   progressRef.current ??= browserProgress();
   const progress = progressRef.current;
 
-  // THE TRIGGER READ, only while the lesson sits at or past the Timer step. It's async, so it runs on
-  // a timer and the frame loop reads the ref, because a query per frame is what the Route sweep in
-  // App.tsx warns against. It reads and enqueues nothing, so the simulation can't tell it ran.
+  // THE TRIGGER READ, from the moment the Source is bound. A Timer applied before its step comes up
+  // has to be known when that step does, so the step finishes in the same pass and the note says so.
+  // It's async, so it runs on a timer and the frame loop reads the ref, because a query per frame is
+  // what the Route sweep in App.tsx warns against. It reads and enqueues nothing, so the simulation
+  // can't tell it ran.
   const watch = triggerWatch(state);
-  const watchedNode =
-    watch !== null && state.card === 'running' && state.stepIndex >= watch.from ? (state.bindings[watch.of]?.id ?? null) : null;
+  const watchedNode = watch !== null && state.card === 'running' ? (state.bindings[watch]?.id ?? null) : null;
   useEffect(() => {
     if (watchedNode === null) return undefined;
     let disposed = false;
