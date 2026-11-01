@@ -550,12 +550,26 @@ fn a_step_during_a_plain_pause_drain_steps_one_tick_and_holds() {
 impl Demo {
     /// Run the board on, then Step from Playing until the frozen board holds belt items and no
     /// executor effect: the held board WR-A-02 is about (D-07 freezes it on the spot).
+    ///
+    /// A Step holds the board, and a command the executor hasn't picked up by then parks until a
+    /// Resume. On a slow machine those pile up and the count of effects in flight only climbs. So
+    /// each Step starts from no effect in flight, with a 1 ms sleep per tick to give the executor
+    /// time, and a Step that leaves an effect in flight is followed by a Resume so the board runs
+    /// on until that effect has folded. The last control message is always a Step, so the board
+    /// this returns is held by a Step, as it would be for a user pressing it.
     fn stepped_with_items_on_the_belts(&mut self, case: &str) {
         self.busy(case);
         for _ in 0..200 {
             self.step();
         }
         for _ in 0..BUSY_BUDGET {
+            for _ in 0..DRAIN_BUDGET {
+                if self.in_flight().0 == 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+                self.step();
+            }
             self.send(ControlMsg::Step);
             self.step();
             let (fx, belt) = self.in_flight();
@@ -563,6 +577,9 @@ impl Demo {
                 self.facts(case, "stepped");
                 assert!(self.sim.is_paused(), "PRECONDITION: the Step holds the board");
                 return;
+            }
+            if fx > 0 {
+                self.send(ControlMsg::Resume);
             }
         }
         panic!("PRECONDITION: a Step left belt items and no effect in flight within {BUSY_BUDGET} steps");
