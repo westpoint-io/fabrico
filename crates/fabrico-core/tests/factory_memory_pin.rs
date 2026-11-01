@@ -164,6 +164,13 @@ fn cyclic_garbage_runs_out_of_memory_at_the_pinned_count() {
 
 #[test]
 fn shallow_recursion_runs_and_runaway_recursion_faults() {
+    // Printed before any assertion, so a red run shows it too. Nothing asserts this number: it is
+    // the stack limit divided by a frame size that changes with the compiler and the profile.
+    println!(
+        "first-faulting recursion depth at the default {DEFAULT_STACK_LIMIT}-byte stack limit: {:?}",
+        first_fault(100_000, recursion)
+    );
+
     let shallow = run(&recursion(50));
     assert_eq!(shallow.fault, None, "depth 50 faulted: {}", message(&shallow));
 

@@ -941,6 +941,12 @@ jobs:
           PROPTEST_CASES: 1024
         run: cargo test --workspace --all-features --no-fail-fast
 
+      # cargo hides a passing test's output, and the first-fault depth has to reach this log on
+      # every leg, because the recursion test holds only coarse bounds on it.
+      - name: First-fault recursion depth on this runner
+        if: ${{ always() }}
+        run: cargo test -p fabrico-core --test factory_memory_pin shallow_recursion -- --nocapture
+
       # Disk and memory after the certification suite, on Linux only and whatever the
       # earlier steps did (added 2026-10-12, plan 84-01). The 2026-10-09 CI run died on the
       # ubuntu leg with `ld terminated with signal 7 [Bus error]` while linking test
