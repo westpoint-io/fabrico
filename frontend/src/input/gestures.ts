@@ -445,8 +445,9 @@ export interface GestureController {
    * would diverge until the next selection change. App calls this from
    * onPacket (non-full packets only; a full keyframe takes `clearSelection`
    * instead) with the packet's placed node ids and emitted belt ids.
-   * Display-only: no command, no scene write, and a no-op unless the current
-   * selection is among the re-emitted ids.
+   * Display-only: no command and no scene write. It acts when the current
+   * selection is among the re-emitted ids, and repaints the armed Belt tool's
+   * rings when a belt is, so they match the board with the pointer at rest.
    */
   refreshSelection(
     placedNodeIds: readonly number[],
@@ -6119,6 +6120,12 @@ export function createGestureController(deps: GestureDeps): GestureController {
       emittedBeltIds.includes(selection.id)
     ) {
       reshowBeltHandles();
+    }
+    // A belt reaching the board moves the armed rings: its free end gains one, the doorstep it now
+    // sits on loses one, and the release has already dropped the grab. A draw in progress keeps the
+    // rings its press painted, as the move branch does.
+    if (beltArmed && drawnCells === null && emittedBeltIds.length > 0) {
+      paintDockTargets();
     }
   };
 

@@ -10215,6 +10215,52 @@ describe('belt ends are dock targets (LINK-02 / LINK-10)', () => {
   // ending on the tile just above the main belt's Tail. Every gesture moves like a hand:
   // an off-centre press inside the main belt's first tile, a sub-cell sample still inside
   // it, then the drop point, which is never a tile centre.
+  describe('the armed rings when a belt arrives', () => {
+    /** A packet echoing this belt, as App reports it: the scene first, then the ids. */
+    const belts = (r: Rig, ...arriving: BeltView[]): void => {
+      for (const b of arriving) r.scene.belts.set(b.id, b);
+      r.refreshSel([], arriving.map((b) => b.id));
+    };
+
+    it('rings the new belt free end with no pointer move', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.armBelt();
+      expect(lastDockTargets(rig), 'NON-VACUITY: the board has no ring to offer yet').toEqual([]);
+      belts(rig, upBelt());
+      expect(lastDockTargets(rig)).toEqual([{ ...centre(4, 0), filled: false }]);
+    });
+
+    it('takes the grabbed disc off the old ring', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.armBelt();
+      belts(rig, upBelt());
+      rig.canvas.fire('pointerdown', { button: 0, buttons: 1, pointerId: 1, target: rig.canvas, ...atW(centre(4, 0)) });
+      expect(lastDockTargets(rig), 'NON-VACUITY: the press filled the ring').toEqual([{ ...centre(4, 0), filled: true }]);
+      rig.win.fire('pointerup', { button: 0, buttons: 0, pointerId: 1, target: rig.canvas, ...atW(centre(4, 0)) });
+      belts(rig, mkBelt(22, [hTile(4, 0)]));
+      expect(lastDockTargets(rig).some((p) => p.filled), 'the release cleared the grab, and the belt landing repaints that').toBe(false);
+    });
+
+    it('leaves the rings of a draw in progress alone', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.armBelt();
+      rig.canvas.fire('pointerdown', { button: 0, buttons: 1, pointerId: 1, target: rig.canvas, ...atW(centre(8, 4)) });
+      const painted = rig.overlay.dockTargetCalls.length;
+      belts(rig, upBelt());
+      expect(rig.overlay.dockTargetCalls).toHaveLength(painted);
+    });
+
+    it('paints nothing with the tool down, or for a packet with no belt in it', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      belts(rig, upBelt());
+      expect(rig.overlay.dockTargetCalls, 'the tool is down').toHaveLength(0);
+      rig.armBelt();
+      const painted = rig.overlay.dockTargetCalls.length;
+      rig.refreshSel([7], []);
+      expect(rig.overlay.dockTargetCalls, 'a machine arrived and no belt did').toHaveLength(painted);
+    });
+  });
+
   describe('a belt-end dot dropped anywhere on the target end tile lands (plan 74.1-25, N4-DROP)', () => {
     const MAIN = 31;
     const SIDE = 32;

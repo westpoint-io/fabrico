@@ -3928,8 +3928,9 @@ export function App() {
             // SELECTED one, its affordances may have moved (effective box /
             // rotate-handle corner for a node; endpoint handle anchors for a
             // belt) — re-derive them from the post-apply scene so the drawn
-            // affordance matches the hit-tested one. No-op unless the current
-            // selection is in the packet.
+            // affordance matches the hit-tested one. It does that only when the
+            // current selection is in the packet, and also repaints the armed Belt
+            // tool's rings when a belt is.
             gesturesRef.current?.refreshSelection(
               packet.placed.map((n) => n.id),
               packet.belts.map((b) => b.id),

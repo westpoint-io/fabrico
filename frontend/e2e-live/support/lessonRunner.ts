@@ -3,6 +3,8 @@ import { addFrameBudget, addWaitBudget, frameBudgetMs, tickBudgetMs } from '../.
 import { CELL } from '../../shared/geometry';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
 import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
+import { NUB_RING_R, NUB_RING_STROKE } from '../../src/protocol/ports';
+import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import { lineDoorstep } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
@@ -352,6 +354,27 @@ async function expectRingPainted(
   }
   state.ringsRead.add(kind);
   console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')}`);
+}
+
+/**
+ * Can a person see the ring the carry-on card sends them to? It belongs to the app, so the lesson reports
+ * no rect for it, and the card would point at nothing if it stopped painting. The pointer goes off the
+ * belt first, the way a hand does, and the read takes a capture around the cell the press will land on.
+ */
+async function expectBeltEndRingPainted(page: Page, label: string, cell: readonly [number, number]): Promise<void> {
+  await moveHand(page, await screenCellCentre(page, cell[0], cell[1] + 2));
+  const at = await screenCellCentre(page, cell[0], cell[1]);
+  const reach = (NUB_RING_R + NUB_RING_STROKE / 2) * (await cameraOf(page)).scale;
+  const clip = {
+    x: Math.floor(at.x - reach),
+    y: Math.floor(at.y - reach),
+    width: Math.ceil(at.x + reach) - Math.floor(at.x - reach),
+    height: Math.ceil(at.y + reach) - Math.floor(at.y - reach),
+  };
+  const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
+  const read = ringOnCanvas(img, 'circle', LOCKED_SKIN.palette.accents.build, img.width / clip.width);
+  console.log(`MEASURE ring belt-end ink/floor=${read.ink}/${Math.round(read.floor)} sides ${read.sideInk.join(',')}`);
+  expect(read.seen, `${label}: the ring at the belt's end shows on the board, around (${clip.x},${clip.y}), side ink ${read.sideInk.join(',')} against ${read.sideFloor.map(Math.round).join(',')}`).toBe(true);
 }
 
 /** A walk that never read a kind of ring it pressed would pass with that ring invisible. */
@@ -835,6 +858,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const from = stage.when.is === 'lineStopsShort' ? bound[stage.when.from] : undefined;
         const cell = from === undefined ? null : lineDoorstep(await readScene(page), from);
         if (cell === null) throw new Error(`${label}: the board holds no line end to carry on from`);
+        await expectBeltEndRingPainted(page, label, cell);
         const at = await screenCellCentre(page, cell[0], cell[1]);
         const start = { x: at.x + walk.dragFrom.dx, y: at.y + walk.dragFrom.dy };
         const end = pointInRect(rects.hint, fromOffset(walk.dragTo));

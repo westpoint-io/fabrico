@@ -29,6 +29,7 @@ import {
   resetToDemo,
   restoreHostAfterFailedTest,
   screenCellCentre,
+  targetRingsPlotted,
   waitForAppReady,
   watchPageErrors,
 } from './support/oracle';
@@ -254,6 +255,17 @@ test('a line drawn in two pieces finishes the same step', async ({ page }) => {
   expect(into.hint.x + into.hint.width / 2, 'the ring is the one the plain drag let go on').toBeCloseTo(rings.hintTo.x + rings.hintTo.width / 2, 0);
   expect(into.hint.y + into.hint.height / 2, 'on both axes').toBeCloseTo(rings.hintTo.y + rings.hintTo.height / 2, 0);
   expect(lineDoorstep(await readScene(page), before.bound.source as number), 'the end the card names is the free cell past the short piece').toEqual([shortCell[0] + 1, shortCell[1]]);
+
+  // The pointer hasn't moved since the release, and the rings already match the card: one on the belt's
+  // end, and no filled one left on the doorstep the press came from. The runner reads the end's ring off
+  // the screen when it carries on below.
+  const endRing = { x: (shortCell[0] + 1) * CELL + CELL / 2, y: shortCell[1] * CELL + CELL / 2, filled: false };
+  await expect
+    .poll(async () => (await targetRingsPlotted(page)).resting.filter((r) => r.filled || r.x === endRing.x), {
+      message: 'with the pointer at rest, the rings show the belt end and no grabbed ring',
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toEqual([endRing]);
 
   // The runner drives this stage from its gesture, so a walk reaching it can finish the lesson.
   await continueLesson(page, LESSON, { from: 'draw-belt' });
