@@ -668,8 +668,10 @@ struct BoardExecutor {
 /// drops each command it hasn't started, whether that command is parked on the pause gate or still
 /// queued, so it ends at the swap and doesn't wait for the next Resume. A swap normally runs only
 /// once the board has nothing in flight, so the old board has already settled what is dropped here.
-/// The exception is a latched swap whose drain ran out of `MAX_SETTLE_TICKS`, and there the board
-/// waiting on the command is the one going away. A call already started is left to finish, and its
+/// A drain clears the pause gate and wakes the consumer, so a command the drain is waiting on goes
+/// out rather than being dropped at the swap. The exception is a latched swap whose drain ran out
+/// of `MAX_SETTLE_TICKS` before the consumer got to the command, and there the board waiting on
+/// the command is the one going away. A call already started is left to finish, and its
 /// result goes nowhere because the old receiver is gone. Dropping a command touches neither the
 /// fold nor the log: the only thing it would have sent back is a result for the board that's gone.
 ///
@@ -694,7 +696,7 @@ fn spawn_executor(
     rt.spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             // PAUSE GATE: hold NEW dispatch while the sim is Frozen. Park on
-            // `resume_notify` until Resume clears `paused`. A command already
+            // `resume_notify` until a Resume or a drain clears `paused`. A command already
             // handed to `dispatch()` still completes (you cannot un-send an
             // HTTP/email); only NEW pickups are held. The `enable()`-before-
             // check pattern makes this race-free against a `notify_waiters()`
@@ -819,7 +821,8 @@ pub struct SimLoop {
     /// reads it lock-free per request to fast-503 while the sim is Draining/Frozen
     /// (Gate A), a one-way host publish that never re-enters the deterministic fold.
     is_playing: Arc<AtomicBool>,
-    /// Wakes the parked executor consumer on Resume, and on a swap so it can end.
+    /// Wakes the parked executor consumer on Resume, when a drain starts, and on a swap so it
+    /// can end.
     resume_notify: Arc<Notify>,
     /// Draining-tick counter, reset on entering [`RunState::Draining`]; the
     /// max-settle budget ([`MAX_SETTLE_TICKS`]) forces Frozen when it overruns.
@@ -1296,7 +1299,7 @@ impl SimLoop {
 
     /// TEST-ONLY: the number of commands the off-thread executor consumer has
     /// picked up for dispatch (incremented AFTER the pause gate). Stable while
-    /// frozen; increases once Resume wakes the parked consumer.
+    /// frozen; increases once a Resume or a drain wakes the parked consumer.
     #[cfg(test)]
     pub(crate) fn dispatched_count(&self) -> usize {
         self.dispatched.load(Ordering::Relaxed)
@@ -1766,6 +1769,9 @@ impl SimLoop {
             self.run_state = RunState::Draining;
             self.draining_ticks = 0;
             self.paused.store(false, Ordering::Release);
+            // A held board's consumer can be parked on the pause gate with a command that this
+            // drain is waiting on. Without the wake it stays asleep until the budget runs out.
+            self.resume_notify.notify_waiters();
         }
     }
 
@@ -7667,6 +7673,136 @@ mod tests {
             ctx.send(ControlMsg::Resume).expect("resume");
             sim.step().expect("service the resume");
             assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "the kept board's command fires");
+        }
+
+        async fn count_and_answer(State(calls): State<Arc<AtomicUsize>>) -> StatusCode {
+            calls.fetch_add(1, Ordering::Relaxed);
+            StatusCode::OK
+        }
+
+        /// A loopback server that answers each request at once, and its count of requests.
+        fn answering_server(rt: &tokio::runtime::Runtime) -> (String, Arc<AtomicUsize>) {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let listener = rt
+                .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+                .expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let app = Router::new().route("/call", any(count_and_answer)).with_state(Arc::clone(&calls));
+            rt.spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+            (format!("http://{addr}/call"), calls)
+        }
+
+        /// A timer Source and an HTTP Sink, paused and stepped until the Sink's command is in
+        /// flight, so the executor consumer holds that command on the pause gate.
+        fn held_board_with_a_parked_call(
+            rt: &tokio::runtime::Runtime,
+            dir: &std::path::Path,
+            url: &str,
+        ) -> (SimLoop, GestureTx, UnboundedSender<ControlMsg>) {
+            let host = timer_board_with_http_sink(dir, url);
+            let (gtx, grx) = gesture_channel();
+            let (ctx, crx) = unbounded_channel::<ControlMsg>();
+            let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
+                .with_control(crx);
+            ctx.send(ControlMsg::Pause).expect("pause");
+            sim.step().expect("freeze");
+            step_held_until(&mut sim, &ctx, "the command in flight", |s| s.host().in_flight_len() == 1);
+            // Time for the consumer to take the command and park. A consumer that gets here late
+            // reads `paused` as false and passes the gate without the wake, so a slow machine can
+            // only weaken these tests, never fail them.
+            std::thread::sleep(Duration::from_millis(50));
+            assert_eq!(sim.dispatched_count(), 0, "the hold kept the command from starting");
+            (sim, gtx, ctx)
+        }
+
+        /// Run a drain until `done`. With a command in flight the next tick waits for its answer,
+        /// so a slow machine can't use up the drain's budget.
+        fn drain_until(sim: &mut SimLoop, what: &str, done: impl Fn(&SimLoop) -> bool) {
+            for _ in 0..MAX_SETTLE_TICKS {
+                if done(sim) {
+                    return;
+                }
+                if sim.host().in_flight_len() > 0 {
+                    assert!(wait_for_a_result(sim, LONG_WAIT), "{what}: the call never got an answer");
+                }
+                sim.step().expect("a drain step");
+            }
+            panic!("{what}: not reached in {MAX_SETTLE_TICKS} steps");
+        }
+
+        /// The drain a New starts on a held board has to send the parked call. Otherwise the call
+        /// sits until the budget runs out and the swap drops it, inside the command's deadline.
+        #[test]
+        fn new_on_a_held_board_sends_the_parked_call_and_then_swaps() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, calls) = answering_server(&rt);
+            let (mut sim, _gtx, ctx) = held_board_with_a_parked_call(&rt, dir.path(), &url);
+
+            ctx.send(ControlMsg::New).expect("send new");
+            sim.step().expect("start the drain");
+            assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "the drain wakes the parked consumer");
+            drain_until(&mut sim, "the swap", |s| s.host().core().state.node_ids().count() == 0);
+
+            assert_eq!(calls.load(Ordering::Relaxed), 1, "the server got the call once");
+            assert_eq!(sim.dispatched_count(), 1);
+            assert!(sim.draining_ticks < MAX_SETTLE_TICKS, "the swap didn't wait out the budget");
+            assert!(sim.is_paused(), "the swap keeps the user's hold");
+        }
+
+        /// The same call on a Save: the file carries the result, and loading it gives back the
+        /// board that wrote it, event for event.
+        #[test]
+        fn save_on_a_held_board_sends_the_parked_call_and_writes_the_file() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, calls) = answering_server(&rt);
+            let (mut sim, _gtx, ctx) = held_board_with_a_parked_call(&rt, dir.path(), &url);
+            let fab = dir.path().join("held.fab");
+
+            ctx.send(ControlMsg::Save(fab.clone())).expect("send save");
+            sim.step().expect("start the drain");
+            assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "the drain wakes the parked consumer");
+            drain_until(&mut sim, "the freeze", |s| s.run_state == RunState::Frozen);
+
+            assert_eq!(calls.load(Ordering::Relaxed), 1, "the server got the call once");
+            assert!(sim.draining_ticks < MAX_SETTLE_TICKS, "the save didn't wait out the budget");
+            let results = logged_results(&sim);
+            assert_eq!(results.len(), 1, "one result in the log: {results:?}");
+            assert_eq!(results[0].1, Outcome::Success);
+            assert!(fab.exists(), "the save wrote the file");
+
+            let load_dir = tempfile::tempdir().expect("load dir");
+            let loaded = load_project(&fab, load_dir.path(), None).expect("load the saved file");
+            assert_eq!(
+                loaded.logged_events().expect("read loaded log"),
+                sim.host().logged_events().expect("read log"),
+                "the loaded log holds the same events in the same order"
+            );
+            assert_eq!(loaded.core().tick, sim.host().core().tick, "replay reaches the saved tick");
+            assert_eq!(loaded.snapshot_bytes(), sim.host().snapshot_bytes(), "replay reaches the same state");
+        }
+
+        /// A Resume during the drain keeps the latch and only lifts the hold, so it sends no wake
+        /// of its own. Both messages land in one step, so the Resume can't miss the drain.
+        #[test]
+        fn resume_during_a_new_drain_finds_the_parked_call_already_sent() {
+            let rt = test_rt();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (url, calls) = answering_server(&rt);
+            let (mut sim, _gtx, ctx) = held_board_with_a_parked_call(&rt, dir.path(), &url);
+
+            ctx.send(ControlMsg::New).expect("send new");
+            ctx.send(ControlMsg::Resume).expect("send resume");
+            sim.step().expect("service both");
+            assert!(wait_for_dispatches(&sim, 1, LONG_WAIT), "the parked call goes out");
+            drain_until(&mut sim, "the swap", |s| s.host().core().state.node_ids().count() == 0);
+
+            assert_eq!(calls.load(Ordering::Relaxed), 1, "the server got the call once");
+            assert_eq!(sim.dispatched_count(), 1);
+            assert!(!sim.is_paused(), "the Resume lifted the hold, so the new board plays");
         }
     }
 }
