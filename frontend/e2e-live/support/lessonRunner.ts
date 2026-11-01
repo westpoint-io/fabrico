@@ -347,8 +347,8 @@ async function expectRingPainted(
     const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
     if ((await probeAtStage(page, stepIndex, stage.id)) === null) return;
     const read = ringOnCanvas(img, rect.shape, colour, img.width / clip.width);
-    reads.push(`${read.ink}/${Math.round(read.floor)}`);
-    expect(read.ink, `${label}: the ring's border shows on screen in the focus colour, around (${clip.x},${clip.y})`).toBeGreaterThanOrEqual(read.floor);
+    reads.push(`${read.ink}/${Math.round(read.floor)} sides ${read.sideInk.join(',')}`);
+    expect(read.seen, `${label}: the ring's border shows on every side in the focus colour, around (${clip.x},${clip.y}), side ink ${read.sideInk.join(',')} against ${read.sideFloor.map(Math.round).join(',')}`).toBe(true);
   }
   state.ringsRead.add(kind);
   console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')}`);

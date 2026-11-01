@@ -812,10 +812,11 @@ export const RING_BAND_PX = 4;
 export const RING_INK_TOLERANCE = 32;
 
 /**
- * Ink wanted per CSS px of the ring's length. A whole 2 px border inks 2. A ring on a fractional pixel
- * anti-aliases down to about one solid row, measured at 154 pixels along a 164 px floor ring, so this
- * sits under 1, with room for a curve on a fractional pixel, which read 87 pixels along a 104 px port ring.
- * A ring with three sides covered inks 0.5, and fails.
+ * Ink wanted per CSS px of the ring's length, on each side of a square and each quarter of a circle. A
+ * whole 2 px border inks 2. A ring on a fractional pixel anti-aliases down to about one solid row, measured
+ * at 154 pixels along a 164 px floor ring, so this sits under 1, with room for a curve on a fractional
+ * pixel, which read 87 pixels along a 104 px port ring. It's graded per side because a total can't see a
+ * covered side: on a ring about 154 by 52, the panel ring, one long side alone inks more than a total floor.
  */
 export const RING_FLOOR_PER_PX = 0.6;
 
@@ -823,9 +824,14 @@ export type RingShape = 'square' | 'circle';
 
 /** What a capture of the ring's rect shows of its border. */
 export interface RingOnCanvas {
+  /** The ink on the whole ring, for the log. */
   ink: number;
   /** See `RING_FLOOR_PER_PX`. */
   floor: number;
+  /** Ink on each part: top, right, bottom and left of a square, or the four quarters of a circle from the top right, clockwise. */
+  sideInk: number[];
+  sideFloor: number[];
+  /** Every part reached its own floor. */
   seen: boolean;
 }
 
@@ -835,20 +841,34 @@ export function ringOnCanvas(img: DecodedImage, shape: RingShape, colour: number
   const { width: w, height: h, data } = img;
   const band = RING_BAND_PX * dpr;
   const radius = Math.min(w, h) / 2;
-  let ink = 0;
+  const sideInk = [0, 0, 0, 0];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const fromEdge =
-        shape === 'circle'
-          ? radius - Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2)
-          : Math.min(x + 0.5, y + 0.5, w - x - 0.5, h - y - 0.5);
+      const px = x + 0.5;
+      const py = y + 0.5;
+      let fromEdge: number;
+      let side: number;
+      if (shape === 'circle') {
+        fromEdge = radius - Math.hypot(px - w / 2, py - h / 2);
+        side = py < h / 2 ? (px < w / 2 ? 3 : 0) : px < w / 2 ? 2 : 1;
+      } else {
+        const edges = [py, w - px, h - py, px];
+        fromEdge = Math.min(...edges);
+        side = edges.indexOf(fromEdge);
+      }
       if (fromEdge < 0 || fromEdge > band) continue;
-      if (isNear(data, (y * w + x) << 2, c, RING_INK_TOLERANCE)) ink++;
+      if (isNear(data, (y * w + x) << 2, c, RING_INK_TOLERANCE)) sideInk[side] = (sideInk[side] as number) + 1;
     }
   }
-  const length = shape === 'circle' ? 2 * Math.PI * radius : 2 * (w + h);
-  const floor = RING_FLOOR_PER_PX * length * dpr;
-  return { ink, floor, seen: ink >= floor };
+  const lengths = shape === 'circle' ? [0, 1, 2, 3].map(() => (Math.PI * radius) / 2) : [w, h, w, h];
+  const sideFloor = lengths.map((length) => RING_FLOOR_PER_PX * length * dpr);
+  return {
+    ink: sideInk.reduce((a, b) => a + b, 0),
+    floor: sideFloor.reduce((a, b) => a + b, 0),
+    sideInk,
+    sideFloor,
+    seen: sideInk.every((ink, i) => ink >= (sideFloor[i] as number)),
+  };
 }
 
 /** Pixels in the clip that read as belt ink: `ramp[4]`, the rails' and the marching dash's colour. A dot is warm, so it adds none. */

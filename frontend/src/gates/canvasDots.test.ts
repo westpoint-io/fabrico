@@ -743,17 +743,18 @@ describe('ringOnCanvas: the hint ring, read off a capture of its rect', () => {
   const GROUND = { r: 0x1b, g: 0x1f, b: 0x27 };
   const PAINT = { r: 0x4f, g: 0xa8, b: 0xff };
 
-  /** A capture of `size` px holding ground, with `paint` deciding which pixels take the focus colour. */
-  function capture(size: number, paint: (x: number, y: number) => boolean, ink = PAINT): DecodedImage {
-    const data = new Uint8Array(size * size * 4);
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
+  /** A capture of `width` by `height` px holding ground, with `paint` deciding which pixels take the focus colour. */
+  function captureOf(width: number, height: number, paint: (x: number, y: number) => boolean, ink = PAINT): DecodedImage {
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
         const c = paint(x, y) ? ink : GROUND;
-        data.set([c.r, c.g, c.b, 255], (y * size + x) * 4);
+        data.set([c.r, c.g, c.b, 255], (y * width + x) * 4);
       }
     }
-    return { width: size, height: size, data };
+    return { width, height, data };
   }
+  const capture = (size: number, paint: (x: number, y: number) => boolean, ink = PAINT): DecodedImage => captureOf(size, size, paint, ink);
   const squareBorder = (size: number) => (x: number, y: number): boolean => Math.min(x, y, size - 1 - x, size - 1 - y) < 2;
   const circleBorder = (size: number) => (x: number, y: number): boolean => {
     const out = size / 2 - Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
@@ -779,6 +780,42 @@ describe('ringOnCanvas: the hint ring, read off a capture of its rect', () => {
   it('refuses a ring with three of its sides covered', () => {
     const topOnly = (x: number, y: number): boolean => y < 2 && x >= 0;
     expect(ringOnCanvas(capture(60, topOnly), 'square', FOCUS, 1).seen).toBe(false);
+  });
+
+  describe('on the panel ring, about 154 by 52', () => {
+    const W = 154;
+    const H = 52;
+    const border = (rows: number) => (x: number, y: number): boolean => Math.min(x, y, W - 1 - x, H - 1 - y) < rows;
+
+    it('sees a whole border, and one anti-aliased down to a single solid row', () => {
+      expect(ringOnCanvas(captureOf(W, H, border(2)), 'square', FOCUS, 1).seen).toBe(true);
+      expect(ringOnCanvas(captureOf(W, H, border(1)), 'square', FOCUS, 1).seen).toBe(true);
+    });
+
+    it('refuses a ring covered on three sides, which holds enough ink in its one long side', () => {
+      const read = ringOnCanvas(captureOf(W, H, (_x, y) => y < 2), 'square', FOCUS, 1);
+      expect(read.ink, 'the total alone would pass').toBeGreaterThanOrEqual(read.floor);
+      expect(read.seen).toBe(false);
+    });
+
+    it('refuses a ring with either short side covered', () => {
+      expect(ringOnCanvas(captureOf(W, H, (x, y) => border(2)(x, y) && x >= 2), 'square', FOCUS, 1).seen).toBe(false);
+      expect(ringOnCanvas(captureOf(W, H, (x, y) => border(2)(x, y) && x < W - 2), 'square', FOCUS, 1).seen).toBe(false);
+    });
+
+    it('reports each side, in the order top, right, bottom, left', () => {
+      const read = ringOnCanvas(captureOf(W, H, (_x, y) => y < 2), 'square', FOCUS, 1);
+      expect(read.sideInk[0]).toBeGreaterThan(0);
+      expect(read.sideInk.slice(1).every((ink) => ink < read.sideFloor[1]!)).toBe(true);
+    });
+  });
+
+  it('refuses a circle with one quarter covered', () => {
+    const size = 32;
+    const paint = (x: number, y: number): boolean => circleBorder(size)(x, y) && !(x >= size / 2 && y < size / 2);
+    const read = ringOnCanvas(capture(size, paint), 'circle', FOCUS, 1);
+    expect(read.ink, 'the total alone would pass').toBeGreaterThanOrEqual(read.floor);
+    expect(read.seen).toBe(false);
   });
 
   it("does not count the focus colour on the target inside the ring's band", () => {
