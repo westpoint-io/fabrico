@@ -65,6 +65,12 @@ const QUIET_TICKS = 60;
 
 /** A real order. The order board has no timer, so nothing moves on it until one of these arrives. */
 const ORDER_BODY = '{"id":"ord-1","items":[{"sku":"widget","qty":2,"price":5}]}';
+/**
+ * The wait between orders in a stream. An item crosses the order board's 3-tile first belt in 22
+ * ticks, about 370 ms at full speed. Each POST takes time too, so the real gap measured 134 to 163 ms,
+ * which keeps items on the belt however long a capture takes.
+ */
+const ORDER_GAP_MS = 100;
 
 /** The ticks a timer needs to fire and its item to cross a Source's first belt, generously. */
 const FIRST_BELT_TICKS = 240;
@@ -214,7 +220,7 @@ async function sampleBelt(
 /**
  * Polls, under pinned treads, until a sample that has items on the board's first belt also differs
  * from the clip taken at the start. `beforeSample` runs ahead of each sample: it does nothing on a
- * board with a timer, and on the order board it posts a real order. The result names both halves,
+ * board with a timer, and on the order board it starts the stream of orders. The result names both halves,
  * so a failure says which one was missing: pixels false with items true is a canvas that doesn't
  * draw what the model reports.
  */
@@ -322,6 +328,43 @@ async function postOrder(page: Page): Promise<void> {
 }
 
 /**
+ * Runs `check` with real orders arriving, the way a timer feeds the other two boards. One order per
+ * sample can't work on a slow machine. The read just after the POST is too early to see that order,
+ * and it has left the first belt before the read after the capture once a capture outlasts its 22
+ * ticks: at 48 ticks a capture, 0 of 118 samples saw an item. `check` calls the function it is given
+ * once its reference clip is taken, so the reference holds no item.
+ */
+async function withOrdersFlowing(
+  page: Page,
+  check: (startOrders: () => Promise<void>) => Promise<void>,
+): Promise<void> {
+  let flowing = true;
+  let failure: unknown;
+  let stream: Promise<void> | undefined;
+  const startOrders = async (): Promise<void> => {
+    if (stream !== undefined) return;
+    await postOrder(page);
+    stream = (async () => {
+      while (flowing) {
+        await new Promise((resolve) => setTimeout(resolve, ORDER_GAP_MS));
+        if (flowing) await postOrder(page);
+      }
+    })().catch((e: unknown) => {
+      failure = e;
+    });
+  };
+  try {
+    await check(startOrders);
+  } finally {
+    flowing = false;
+    await stream;
+    // A check that timed out throws its own error first, so this names a refused order in the log.
+    if (failure !== undefined) console.error(`an order in the stream failed: ${String(failure)}`);
+  }
+  if (failure !== undefined) throw failure;
+}
+
+/**
  * Holds the dev host's sim loop: a second WebSocket from the test process sends `DEV_HOLD_FRAME`,
  * then this polls until two tick reads about `HOLD_SETTLE_MS` apart match. The loop lets go by
  * itself once a request and a control message are both waiting.
@@ -387,7 +430,7 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     await waitForAppReady(page);
     await openBoard(page, 'order_processing');
     await expectFreshBoard(page, 'order_processing');
-    await expectItemDrawnOnFirstBelt(page, 'order_processing', () => postOrder(page));
+    await withOrdersFlowing(page, (startOrders) => expectItemDrawnOnFirstBelt(page, 'order_processing', startOrders));
     await expectRenderLoopAlive(page, 'after an order crossed the order board');
     errs.assertNone('on the order board');
   });
@@ -475,7 +518,7 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     await pinTreads(page, null);
 
     // The door is open again and the same check can see an item.
-    await expectItemDrawnOnFirstBelt(page, 'order_processing', () => postOrder(page));
+    await withOrdersFlowing(page, (startOrders) => expectItemDrawnOnFirstBelt(page, 'order_processing', startOrders));
     await expectRenderLoopAlive(page, 'after a POST was refused across a scene load');
     errs.assertNone('across the held scene load');
     await resetToDemo(page);
@@ -489,7 +532,11 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
       await page.goto('/');
       await waitForAppReady(page);
       await openBoard(page, id);
-      await expectNoChangeWithItemsHidden(page, id, id === 'order_processing' ? () => postOrder(page) : async () => {});
+      if (id === 'order_processing') {
+        await withOrdersFlowing(page, (startOrders) => expectNoChangeWithItemsHidden(page, id, startOrders));
+      } else {
+        await expectNoChangeWithItemsHidden(page, id, async () => {});
+      }
       await expectRenderLoopAlive(page, `after the negative control on ${id}`);
       errs.assertNone(`in the negative control on ${id}`);
     });
