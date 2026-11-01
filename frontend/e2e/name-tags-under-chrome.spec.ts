@@ -185,7 +185,8 @@ test.describe('machine name tags sit under every panel (CHROME-08, D-07)', () =>
     test(`name tags under the toolbar, the palette, the Legend, Help and the inspector at ${size.width}x${size.height}`, async ({
       page,
     }) => {
-      test.setTimeout(90_000);
+      // 14 screenshots under SwiftShader (software WebGL) went over 90 s on a slow CI runner.
+      test.setTimeout(180_000);
       await page.setViewportSize(size);
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await page.addInitScript(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
