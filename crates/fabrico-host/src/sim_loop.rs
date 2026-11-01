@@ -7592,11 +7592,14 @@ mod tests {
             assert_eq!(handles_after_old_consumers_end(&sim), 2, "the three old consumers have ended");
         }
 
-        /// A held board's command waits on the pause gate past its own timeout, and then the board
-        /// is replaced. The call must not go out on the next Resume, because the old board has
-        /// already logged that command's timeout and the new board may not have a Sink at all.
-        #[test]
-        fn a_replaced_boards_parked_command_never_fires() {
+        /// A held board's command waits on the pause gate past its own timeout, and then `swap`
+        /// replaces the board. The call must not go out on the next Resume, because the old board
+        /// has already logged that command's timeout and the new board may not have a Sink at all.
+        /// `swap` gets the path of a good file to load, saved from this board before it ran.
+        fn parked_command_never_fires_after(
+            swap: impl FnOnce(PathBuf) -> ControlMsg,
+            replaced: impl FnOnce(&SimLoop),
+        ) {
             let rt = test_rt();
             let dir = tempfile::tempdir().expect("tempdir");
             let (url, mut held) = holding_server(&rt);
@@ -7605,6 +7608,8 @@ mod tests {
             let (ctx, crx) = unbounded_channel::<ControlMsg>();
             let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
                 .with_control(crx);
+            let fab = dir.path().join("good.fab");
+            save_project(sim.host(), &fab).expect("save the quiet board");
 
             ctx.send(ControlMsg::Pause).expect("pause");
             sim.step().expect("freeze");
@@ -7613,9 +7618,9 @@ mod tests {
             step_held_until(&mut sim, &ctx, "the command's timeout", |s| s.host().in_flight_len() == 0);
             assert_eq!(sim.dispatched_count(), 0, "the hold kept the command from starting");
 
-            ctx.send(ControlMsg::New).expect("send new");
-            sim.step().expect("service the new board");
-            assert_eq!(sim.host().core().state.node_ids().count(), 0, "the board was replaced");
+            ctx.send(swap(fab)).expect("send the swap");
+            sim.step().expect("service the swap");
+            replaced(&sim);
             // Read before the Resume, so a consumer that waits for the Resume to end is caught.
             let handles_before_resume = handles_after_old_consumers_end(&sim);
 
@@ -7627,6 +7632,69 @@ mod tests {
             }
             assert_eq!(sim.dispatched_count(), 0, "the replaced board's command isn't counted");
             assert_eq!(handles_before_resume, 2, "the parked consumer ended at the swap");
+        }
+
+        #[test]
+        fn a_replaced_boards_parked_command_never_fires() {
+            parked_command_never_fires_after(
+                |_| ControlMsg::New,
+                |sim| assert_eq!(sim.host().core().state.node_ids().count(), 0, "the board was replaced"),
+            );
+        }
+
+        #[test]
+        fn a_replaced_boards_parked_command_never_fires_after_a_load() {
+            parked_command_never_fires_after(ControlMsg::Load, |sim| {
+                // The old board ran past its first timer. The file was saved before that.
+                assert!(sim.host().core().tick < TIMER_INTERVAL, "the file swapped in");
+                assert_eq!(sim.host().core().state.node_ids().count(), 3, "with its Source, belt and Sink");
+            });
+        }
+
+        #[test]
+        fn a_replaced_boards_parked_command_never_fires_after_a_scene_load() {
+            parked_command_never_fires_after(
+                |_| ControlMsg::LoadScene(SceneId::Demo),
+                |sim| assert_eq!(sim.loaded_scene, Some(SceneId::Demo), "the scene swapped in"),
+            );
+        }
+
+        /// A latched New whose drain runs out of its budget replaces a board that is still waiting
+        /// on the command. The drain's own wake normally sends a parked command, so the command
+        /// stays parked only if the consumer doesn't run before the budget ends, which this runtime
+        /// arranges: it runs tasks only inside `block_on`.
+        #[test]
+        fn a_replaced_boards_parked_command_never_fires_when_the_drain_runs_out_of_budget() {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime");
+            let dir = tempfile::tempdir().expect("tempdir");
+            let (mut sim, _gtx, ctx) = swap_rig(dir.path(), &rt);
+            let run_the_consumers = || rt.block_on(async { tokio::time::sleep(Duration::from_millis(50)).await });
+
+            ctx.send(ControlMsg::Pause).expect("pause");
+            sim.step().expect("freeze");
+            let id: CommandId = (3, NodeId::null(), 0);
+            sim.host.test_insert_in_flight(id, u64::MAX);
+            sim.test_send_command(noop(id));
+            run_the_consumers();
+            assert_eq!(sim.dispatched_count(), 0, "the hold parks the command");
+
+            ctx.send(ControlMsg::New).expect("send new");
+            sim.step().expect("start the drain");
+            assert_eq!(sim.run_state, RunState::Draining, "the command in flight latches the New");
+            step_until(&mut sim, "the swap", |s| s.host().core().state.node_ids().count() == 0);
+            assert_eq!(sim.draining_ticks, MAX_SETTLE_TICKS, "the drain used its whole budget");
+
+            run_the_consumers();
+            assert_eq!(sim.dispatched_count(), 0, "the swap drops the parked command");
+            assert_eq!(handles_after_old_consumers_end(&sim), 2, "the parked consumer ended at the swap");
+
+            ctx.send(ControlMsg::Resume).expect("resume");
+            sim.step().expect("service the resume");
+            run_the_consumers();
+            assert_eq!(sim.dispatched_count(), 0, "the Resume doesn't send it either");
         }
 
         /// A command on the old executor's queue that its consumer hasn't taken yet.
