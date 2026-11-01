@@ -9,6 +9,7 @@ import type { HintRect } from '../src/chrome/tutorial/TutorialLayer';
 import type { Stage } from '../src/tutorial/types';
 import {
   continueLesson,
+  dragAlongByHand,
   dragByHand,
   hintsForStage,
   openLessonsFromHelp,
@@ -346,6 +347,36 @@ test('a short piece drawn backwards from the Sink gets the undo card and the les
   expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
   await expectRenderLoopAlive(page, 'after the backward piece');
   errors.assertNone('during the backward piece');
+});
+
+test('a belt brought down onto the top of the Sink gets the undo card, because no ring can show at its end', async ({ page }) => {
+  const errors = watchPageErrors(page);
+  const { rings, sourceId, source, sink } = await armedForTheBelt(page);
+  // Up off the output's doorstep, along two rows above, then down to stop on the cell over the Sink.
+  const handOn = async (x: number, y: number): Promise<{ x: number; y: number }> => {
+    const at = await screenCellCentre(page, x, y);
+    return { x: at.x + 3, y: at.y - 2 };
+  };
+  await dragAlongByHand(page, [
+    pointInRect(rings.hint, { x: 3, y: -2 }),
+    await handOn(source[0] + 1, source[1] - 2),
+    await handOn(sink[0], source[1] - 2),
+    await handOn(sink[0], sink[1] - 1),
+  ]);
+  await expectUndoCard(page, 'after the belt onto the Sink');
+  const scene = await readScene(page);
+  const drawn = scene.belts[0];
+  console.log(`MEASURE stuck-blocked belts=${JSON.stringify(scene.belts.map((b) => ({ tiles: b.tiles.map((t) => [t.cell_x, t.cell_y]), docks: b.docks })))}`);
+  expect(scene.belts, 'one belt').toHaveLength(1);
+  expect(drawn?.docks.find((d) => d.end === 'Head'), 'that docked to nothing at its end').toBeUndefined();
+  expect(lineDoorstep(scene, sourceId), "the belt's next cell is the Sink").toEqual([sink[0], sink[1]]);
+
+  await undoTheBelt(page, 0, 'the belt onto the Sink');
+  await reachStage(page, DRAW_BELT, 'belt-draw');
+  await continueLesson(page, LESSON, { from: 'draw-belt', undone: true });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
+  await expectRenderLoopAlive(page, 'after the belt onto the Sink');
+  errors.assertNone('during the belt onto the Sink');
 });
 
 test('a click finishes nothing, and a Sink placed first waits for its step', async ({ page }) => {

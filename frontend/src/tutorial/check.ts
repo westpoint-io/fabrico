@@ -59,8 +59,8 @@ export function beltJoining(board: Pick<BoardFacts, 'belts'>, a: number, b: numb
  * direction, so no Head a press can find). The app rings this cell while the Belt tool is armed, and a
  * press there joins the new piece on.
  *
- * It doesn't ask whether the cell is free. A piece drawn into the Sink reaches the board a packet before
- * its dock does, with this cell on the Sink, and the card shouldn't change for that one frame.
+ * It doesn't ask whether the cell is free, because a piece drawn into the Sink reaches the board a packet
+ * before its dock does, with this cell on the Sink. `lineStuck` tells that packet from a real block.
  */
 export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number): readonly [number, number] | null {
   const belt = lastPiece(board, a);
@@ -98,7 +98,7 @@ function onDoorstep(board: Pick<BoardFacts, 'nodes'>, node: number, role: number
  * Has the user drawn a belt the lesson can't build on from `a` to `b`, so that the only way on is to
  * undo it? The plain drag is refused because the output or the input is taken, and a press can't carry
  * this belt on. That's a belt into `b` that didn't come from `a`, or a line from `a` that ends in another
- * machine or in a single tile, which has no direction and so no Head a press can find.
+ * machine, in a single tile (no direction, so no Head a press can find), or against a cell that's taken.
  *
  * The app sends a draw's docks after the host has minted the belt, so a good draw can look like this
  * for a packet. A tile on `b`'s input doorstep is about to dock there, and a belt into `b` starting
@@ -119,7 +119,24 @@ export function lineStuck(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number,
   if (last.docks.some((d) => d.end === 'Head')) return true;
   const end = last.tiles[last.tiles.length - 1];
   if (end !== undefined && onDoorstep(board, b, PORT_ROLE.IN, end)) return false;
-  return door === null;
+  return door === null || cellBlocked(board, door);
+}
+
+/**
+ * Does this cell hold something a new piece can't start on? That's a machine or a belt tile, as the app
+ * reads it, and then no ring shows there. The first tile of a belt with no docks doesn't count, because
+ * that's the next piece of this line in the packet before its docks arrive.
+ */
+function cellBlocked(board: Pick<BoardFacts, 'belts' | 'nodes'>, [x, y]: readonly [number, number]): boolean {
+  const at = (tile: Cell): boolean => tile.cell_x === x && tile.cell_y === y;
+  return (
+    board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === y)) ||
+    board.belts.some((belt) => {
+      const first = belt.tiles[0];
+      const arriving = belt.docks.length === 0 && first !== undefined && at(first);
+      return !arriving && belt.tiles.some(at);
+    })
+  );
 }
 
 /**

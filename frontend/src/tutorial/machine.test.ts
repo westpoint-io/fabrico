@@ -441,6 +441,11 @@ describe('currentStage', () => {
       expect(stageOf(s, { nodes: BOTH, belts: [intoAnother] }, ARMED), 'a line into another machine').toBe('belt-undo');
     });
 
+    it('asks for Undo when the belt points at the top of the Sink, where no ring can show', () => {
+      const down: BoardBelt = { ...SHORT, tiles: [{ cell_x: 8, cell_y: 0 }, { cell_x: 8, cell_y: 1 }] };
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [down] }, ARMED)).toBe('belt-undo');
+    });
+
     it('asks for Undo when a short piece was drawn backwards from the Sink', () => {
       const backward: BoardBelt = { ...JOINED, tiles: tilesOf(6, 7), docks: [{ end: 'Head', node: THE_SINK.id, port: 0 }] };
       expect(stageOf(atStep(3), { nodes: BOTH, belts: [backward] }, ARMED)).toBe('belt-undo');

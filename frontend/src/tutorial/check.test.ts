@@ -329,6 +329,25 @@ describe('lineStuck', () => {
     expect(stuck([piece(FIRST, tiles([5, 2], [6, 2], [7, 2]), [tail(123), head(SINK_NODE.id)])])).toBe(true);
   });
 
+  it('holds for a belt that points at a machine it cannot dock with', () => {
+    // Coming down onto the top of the Sink, whose input faces west.
+    expect(stuck([piece(FIRST, tiles([3, 2], [3, 0], [8, 0], [8, 1]), [tail(SOURCE_NODE.id)])])).toBe(true);
+  });
+
+  it('holds for a belt whose next cell holds another belt it can only cross', () => {
+    const crossing = piece(SECOND, tiles([5, 1], [5, 2], [5, 3]), []);
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]), crossing])).toBe(true);
+  });
+
+  it('is false for the packet where the last tile is on the input doorstep, with the Sink next', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id)])])).toBe(false);
+  });
+
+  it("is false for the packet where the next cell holds a new piece's first tile and its docks haven't come", () => {
+    const newPiece = piece(SECOND, tiles([5, 2], [6, 2]), []);
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]), newPiece])).toBe(false);
+  });
+
   it('holds for a line that ends in some other machine, or in a loop', () => {
     expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(123)])])).toBe(true);
     const first = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
