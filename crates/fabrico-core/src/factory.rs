@@ -862,7 +862,7 @@ pub struct FactoryRuntimeCache {
 
 impl Clone for FactoryRuntimeCache {
     fn clone(&self) -> Self {
-        // Intentionally no engines: never deep-clone or share live engines — rebuild
+        // Intentionally no engines: never deep-clone or share live engines. Rebuild
         // lazily from plain data instead (see the type doc).
         Self { engines: BTreeMap::new(), limits: self.limits, limit_faults: 0 }
     }

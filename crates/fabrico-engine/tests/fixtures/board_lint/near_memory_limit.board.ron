@@ -1,0 +1,32 @@
+// A test board the board lint has to reject. Its Factory allocates 300 arrays of 1000 elements.
+//
+// Through this board the memory limit first faults at 233 arrays at the lint's half limit of
+// 4 MiB, and at 477 at the 8 MiB default. The allocator counts the bytes it hands out, so the
+// same holds on every operating system: the board runs clear at the default and faults at 4 MiB.
+//
+// It lives in the engine's test fixtures, not under examples/boards/, because it isn't a board to
+// ship: the manifest check walks examples/boards/ and wants a hash line for every board there.
+//
+//   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2, one webhook at tick 40, the run ends on 120
+Board(
+    format: 1,
+    seed: 94,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),   // 3: source -> factory
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),  // 4: factory -> sink
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 1, config: Factory(source: r#"export default function (input, ctx) { const a = []; for (let k = 0; k < 300; k++) a.push(new Array(1000).fill(k)); ctx.emit(0, { arrays: a.length }); }"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: "{}")),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 120,
+)

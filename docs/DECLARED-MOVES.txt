@@ -176,3 +176,8 @@ crates/fabrico-player/fence-pins.txt
 crates/fabrico-engine/src/scripted.rs
 # The board lint: each board runs again at half the memory limit and a quarter of the stack limit.
 crates/fabrico-engine/tests/board_lint.rs
+# The board lint's test boards: deep recursion, an allocation near the memory limit, and one that
+# catches its own overflow. Each one has to be rejected.
+crates/fabrico-engine/tests/fixtures/board_lint/deep_recursion.board.ron
+crates/fabrico-engine/tests/fixtures/board_lint/near_memory_limit.board.ron
+crates/fabrico-engine/tests/fixtures/board_lint/swallowed_overflow.board.ron

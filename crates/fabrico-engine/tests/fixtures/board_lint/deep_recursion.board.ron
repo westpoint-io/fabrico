@@ -1,0 +1,33 @@
+// A test board the board lint has to reject. Its Factory recurses to depth 220.
+//
+// At the lint's quarter stack limit of 128 KiB, every compiler measured faults below that depth.
+// At the 512 KiB default it runs clear on Linux and macOS, which CI measured at depths 676 and
+// 484. Windows faults at 104 there, so on Windows it faults at both limits, and the lint's
+// limit-fault rule rejects it.
+//
+// It lives in the engine's test fixtures, not under examples/boards/, because it isn't a board to
+// ship: the manifest check walks examples/boards/ and wants a hash line for every board there.
+//
+//   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2, one webhook at tick 40, the run ends on 120
+Board(
+    format: 1,
+    seed: 94,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),   // 3: source -> factory
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),  // 4: factory -> sink
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 1, config: Factory(source: r#"export default function (input, ctx) { function f(k) { return k === 0 ? 0 : 1 + f(k - 1); } ctx.emit(0, { depth: f(220) }); }"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: "{}")),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 120,
+)
