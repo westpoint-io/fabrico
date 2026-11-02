@@ -1027,11 +1027,12 @@ jobs:
   # WASM_OPT IS ON THE BUILD STEP, not in the job's `env`. The `runner` context isn't available at job
   # level, and GitHub refuses the whole workflow file over it. Only scripts/build-wasm.sh reads it.
   #
-  # TIME LIMIT. A run adds up to about 157 seconds, so the limit is 1.9 times that. Measured on a
-  # developer machine: the cold scripts/build-wasm.sh on one core 62 seconds, the four checks on two
-  # cores 5, and scripts/install-wasm-opt.sh 6. Recorded on a GitHub run, 84 more: job setup and
-  # checkout 3, toolchain 9, Node 1, the determinism job's larger apt step 27 as a stand-in, the cargo
-  # cache 11 to restore and 9 to save, npm ci 5 and the Playwright browser 19.
+  # TIME LIMIT. A run adds up to about 166 seconds, so the limit is 1.8 times that. Measured on a
+  # developer machine: the cold scripts/build-wasm.sh on one core 67 seconds, with the corpus harness
+  # and its native tool in it, the six checks on two cores 9, and scripts/install-wasm-opt.sh 6.
+  # Recorded on a GitHub run, 84 more: job setup and checkout 3, toolchain 9, Node 1, the determinism
+  # job's larger apt step 27 as a stand-in, the cargo cache 11 to restore and 9 to save, npm ci 5 and
+  # the Playwright browser 19.
   wasm-player:
     name: the wasm player builds on the pinned compiler and passes its checks
     needs: changes
@@ -1092,6 +1093,12 @@ jobs:
 
       - name: Watch the size budget fail
         run: bash scripts/prove-player-size-bites.sh
+
+      - name: Replay the corpus in wasm and compare it with native
+        run: bash scripts/check-wasm-corpus.sh
+
+      - name: Watch the corpus comparison fail
+        run: bash scripts/prove-wasm-corpus-bites.sh
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand

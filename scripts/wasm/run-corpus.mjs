@@ -34,8 +34,8 @@
 // EXIT CODES
 //   0  every fixture matched, the counts agree and both passes read the clock.
 //   1  a difference, each one named on stderr.
-//   2  no comparison: a bad argument, the module or the report is missing or empty, a walk found
-//      nothing, or a native count is zero.
+//   2  no comparison: a bad argument, the module or the report is missing or empty, the module won't
+//      compile, a walk found nothing, or a native count is zero.
 
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -217,7 +217,12 @@ const outDir = dirname(args.wasm);
 
 const failures = [];
 
-const module = await WebAssembly.compile(wasmBytes);
+let module;
+try {
+  module = await WebAssembly.compile(wasmBytes);
+} catch (error) {
+  refuse(`the wasm module ${args.wasm} won't compile: ${error.message}`);
+}
 const imports = WebAssembly.Module.imports(module).map((i) => `${i.module}.${i.name}`);
 for (const name of imports) {
   if (name !== CLOCK_NAME) failures.push(`the harness imports ${name}, and only ${CLOCK_NAME} is allowed`);
