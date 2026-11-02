@@ -60,6 +60,8 @@ const ARRIVAL_TICKS = 200;
 /** How long the poll on the toolbar's tick may wait: two rises of the counter. */
 const TOOLBAR_TICKS = 4;
 const TOOLBAR_FRAMES = 8;
+/** Drawn frames for the Lessons list to show a row's buttons after it opens. */
+const ROW_FRAMES = 20;
 /**
  * Two rects with centres this close are one target. A palette row can grow 2 px when it arms and
  * shift 1 px while pressed, so exact equality would miss a stale rect on the stage change it matters
@@ -643,6 +645,21 @@ async function expectToolbarTickRises(page: Page, label: string): Promise<void> 
 export async function openLessonsFromHelp(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Help', exact: true }).click();
   await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
+}
+
+/**
+ * A lesson's row in the open Lessons list, read whole: its status word, then the names of its buttons
+ * in order. Every walk file reads a row through this one function.
+ */
+export async function expectLessonRow(page: Page, lesson: Lesson, status: string, buttons: readonly string[]): Promise<void> {
+  const row = page.locator(`#fab-lessons-panel [data-fab-lesson-row="${lesson.id}"]`);
+  await expect(row, `${lesson.id}: the row reads ${status}`).toContainText(status);
+  await expect
+    .poll(() => row.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label'))), {
+      message: `${lesson.id}: the row offers ${buttons.join(', ')}`,
+      timeout: frameBudgetMs(ROW_FRAMES),
+    })
+    .toEqual([...buttons]);
 }
 
 /** Press Start on a lesson's row and wait for the empty board to arrive. */

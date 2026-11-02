@@ -11,8 +11,8 @@
 # suite with top-level specs, and a nested describe with more. So the checker has to walk the same
 # nesting a real report has.
 #
-#   K1  13 tests, all passed                            -> exit 0, verdict=OK
-#   K2  14 tests, all passed                            -> exit 0, verdict=OK
+#   K1  20 tests, all passed                            -> exit 0, verdict=OK
+#   K2  21 tests, all passed                            -> exit 0, verdict=OK
 #   R1  a test skipped itself                           -> exit 1, the test named
 #   R2  a test didn't run, with a skipped result        -> exit 1, the test named
 #   R3  a test didn't run, with an empty result list    -> exit 1, the test named
@@ -21,7 +21,7 @@
 #   R6  a test was flaky                                -> exit 1, the test named
 #   R7  a test marked test.fail() failed                -> exit 1, the test named
 #   R8  a test titled like a live suite CUT failed      -> exit 1, the test named
-#   U1  12 tests, all passed                            -> exit 2, the floor named
+#   U1  19 tests, all passed                            -> exit 2, the floor named
 #   U2  a top-level error                               -> exit 2
 #   U3  the report is missing                           -> exit 2
 #   U4  the report is empty                             -> exit 2
@@ -82,8 +82,10 @@ TOP='a top-level test'
 NESTED='a test inside a describe'
 CUT='CUT - leg 1 of the walk'
 
-# The base report: 12 passing tests, 1 at the top of the file suite and 11 in a describe under it.
-TWELVE="$TMP/twelve.json"
+# The base report: 19 passing tests, one below the walk's floor of 20. One is at the top of the file
+# suite and 18 are in a describe under it. This proof keeps its own floor and doesn't read the
+# checker's, so a checker whose floor was lowered fails U1 here.
+NINETEEN="$TMP/nineteen.json"
 jq -n --arg spec "$SPEC" --arg top "$TOP" --arg nested "$NESTED" '
   def t(title; line):
     { title: title, ok: true, tags: [], id: ("id-" + (line|tostring)), file: $spec, line: line, column: 1,
@@ -96,10 +98,10 @@ jq -n --arg spec "$SPEC" --arg top "$TOP" --arg nested "$NESTED" '
     suites: [ { title: $spec, file: $spec, line: 0, column: 0,
                 specs: [ t($top; 5) ],
                 suites: [ { title: "a describe", file: $spec, line: 10, column: 1,
-                            specs: ( [ t($nested; 20) ] + [ range(10) as $i | t("filler \($i)"; 30 + $i) ] ) } ] } ],
+                            specs: ( [ t($nested; 20) ] + [ range(17) as $i | t("filler \($i)"; 30 + $i) ] ) } ] } ],
     errors: [],
-    stats: { startTime: "2026-10-31T07:00:00.000Z", duration: 4800, expected: 12, skipped: 0, unexpected: 0, flaky: 0 } }' \
-    > "$TWELVE" || {
+    stats: { startTime: "2026-10-31T07:00:00.000Z", duration: 4800, expected: 19, skipped: 0, unexpected: 0, flaky: 0 } }' \
+    > "$NINETEEN" || {
     echo "prove-walk-report-bites: could not build the base report; COULD NOT PROVE" >&2
     exit 2
 }
@@ -111,7 +113,7 @@ with_more() {
         "$1" > "$2"
 }
 BASE="$TMP/base.json"
-with_more "$TWELVE" "$BASE" 1
+with_more "$NINETEEN" "$BASE" 1
 
 # one_test OUT TITLE STATUS EXPECTED_STATUS RESULT... : copy the base with one test changed.
 one_test() {
@@ -158,9 +160,9 @@ run_case() {
 
 echo "prove-walk-report-bites: checker under test: $CHECKER"
 
-run_case "K1 13 tests, all passed" 0 "verdict=OK" "$BASE"
+run_case "K1 20 tests, all passed" 0 "verdict=OK" "$BASE"
 with_more "$BASE" "$TMP/k2.json" 1
-run_case "K2 14 tests, all passed" 0 "total=14" "$TMP/k2.json"
+run_case "K2 21 tests, all passed" 0 "total=21" "$TMP/k2.json"
 
 one_test "$TMP/r1.json" "$TOP" skipped skipped skipped
 run_case "R1 a test skipped itself" 1 "RED [skipped] $SPEC:5 > $TOP" "$TMP/r1.json"
@@ -187,7 +189,7 @@ jq --arg top "$TOP" --arg cut "$CUT" '(.suites[0].specs[] | select(.title == $to
 BASE_FOR_ONE="$TMP/r8.in.json" one_test "$TMP/r8.json" "$CUT" unexpected passed failed
 run_case "R8 a test titled like a CUT failed" 1 "RED [failed: failed] $SPEC:5 > $CUT" "$TMP/r8.json"
 
-run_case "U1 12 tests, all passed" 2 "below the floor of 13" "$TWELVE"
+run_case "U1 19 tests, all passed" 2 "below the floor of 20" "$NINETEEN"
 
 jq '.errors = [ { message: "Error: Timed out waiting 60000ms from config.webServer." } ]' "$BASE" > "$TMP/u2.json"
 run_case "U2 a top-level error" 2 "verdict=UNMEASURED" "$TMP/u2.json"
@@ -213,7 +215,7 @@ run_case "U9 no argument" 2 "verdict=UNMEASURED"
 
 run_case "U10 two reports" 2 "more than one report" "$BASE" "$BASE"
 
-run_case "U11 an attempt to lower the floor" 2 "unknown option" --min-tests 1 "$TWELVE"
+run_case "U11 an attempt to lower the floor" 2 "unknown option" --min-tests 1 "$NINETEEN"
 
 DECLARED_TOTAL=21
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then

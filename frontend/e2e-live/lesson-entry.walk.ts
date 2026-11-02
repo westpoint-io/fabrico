@@ -3,7 +3,7 @@ import { frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import { CELL } from '../shared/geometry';
 import { machine_kind } from '../src/protocol/kinds';
 import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
-import { openLessonsFromHelp, readProbe, startLesson, walkLesson } from './support/lessonRunner';
+import { expectLessonRow, openLessonsFromHelp, readProbe, startLesson, walkLesson } from './support/lessonRunner';
 import {
   armAndPlaceAt,
   cameraOf,
@@ -27,7 +27,6 @@ import {
 
 const CARD = '[data-fab-step-card]';
 const PANEL = '#fab-lessons-panel';
-const ROW = `${PANEL} [data-fab-lesson-row="${LESSON.id}"]`;
 const START = `Start ${LESSON.title}`;
 const RESUME = `Resume ${LESSON.title}`;
 const RESTART = `Restart ${LESSON.title}`;
@@ -48,17 +47,6 @@ test.afterEach(async ({ page }, testInfo) => {
 const guardButton = (page: Page, name: 'Cancel' | 'Discard'): Locator => page.locator('.fab-dialog-panel').getByRole('button', { name });
 const guardHeading = (page: Page): Locator => page.getByRole('alertdialog').getByText(GUARD_HEADING);
 const cardButton = (page: Page, name: string): Locator => page.locator(CARD).getByRole('button', { name, exact: true });
-
-/** The row whole: its status word and the names of its buttons. */
-async function expectRow(page: Page, status: string, buttons: readonly string[]): Promise<void> {
-  await expect(page.locator(ROW), `the row reads ${status}`).toContainText(status);
-  await expect
-    .poll(() => page.locator(ROW).getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label'))), {
-      message: `the row offers ${buttons.join(', ')}`,
-      timeout: frameBudgetMs(STAGE_FRAMES),
-    })
-    .toEqual([...buttons]);
-}
 
 /** The app's demo, clean and running, as a user would first see it. */
 async function fromDemo(page: Page): Promise<void> {
@@ -126,7 +114,7 @@ test('Help opens the list, and a lesson can be left, resumed and restarted', asy
   await fromDemo(page);
 
   await openLessonsFromHelp(page);
-  await expectRow(page, 'Not started', [START]);
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
   await startLesson(page, LESSON);
   await expect(page.locator(PANEL), 'Start closes the list').toHaveCount(0);
 
@@ -141,7 +129,7 @@ test('Help opens the list, and a lesson can be left, resumed and restarted', asy
   await expectRenderLoopAlive(page, 'after Leave');
 
   await openLessonsFromHelp(page);
-  await expectRow(page, 'In progress', [RESUME, RESTART]);
+  await expectLessonRow(page, LESSON, 'In progress', [RESUME, RESTART]);
   await page.getByRole('button', { name: RESUME, exact: true }).click();
   await expect(page.locator(CARD), 'Resume comes back on the saved step').toContainText(`Step 2 of ${STEP_COUNT}`);
   await expect(page.locator(PANEL), 'Resume closes the list').toHaveCount(0);
@@ -176,7 +164,7 @@ test('the welcome card opens the list', async ({ page }) => {
   await expect(page.locator(PANEL), 'the list opens').toBeVisible();
   await expect(heading, 'the card goes').toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('fab.onboarding.seen.v1')), 'and it stays gone').toBe('1');
-  await expectRow(page, 'Not started', [START]);
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
 
   await startLesson(page, LESSON);
   await expectFirstStepOnEmptyBoard(page, 'Start from the welcome card');
@@ -196,7 +184,7 @@ test('declining leaves the board and the lesson as they were', async ({ page }) 
   expect(await guardWillAsk(page), 'the machine is unsaved work').toBe(true);
 
   await openLessonsFromHelp(page);
-  await expectRow(page, 'Not started', [START]);
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
   await page.getByRole('button', { name: START, exact: true }).click();
   await expect(guardHeading(page), 'Start asks the question New asks').toBeVisible();
   await guardButton(page, 'Cancel').click();
@@ -209,7 +197,7 @@ test('declining leaves the board and the lesson as they were', async ({ page }) 
   expect(probe.lessonId, 'and none was marked').toBeNull();
   await expect(page.locator(CARD), 'no card came up').toHaveCount(0);
   await expect(page.locator(PANEL), 'the list is still open').toBeVisible();
-  await expectRow(page, 'Not started', [START]);
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
 
   await page.getByRole('button', { name: START, exact: true }).click();
   await expect(guardHeading(page), 'the second Start asks again').toBeVisible();
@@ -232,7 +220,7 @@ test('a Source placed while the lesson is left finishes step 1 on Resume', async
   await expectNodeKinds(page, [machine_kind.SOURCE], 'the Source reached the board');
 
   await openLessonsFromHelp(page);
-  await expectRow(page, 'In progress', [RESUME, RESTART]);
+  await expectLessonRow(page, LESSON, 'In progress', [RESUME, RESTART]);
   await page.getByRole('button', { name: RESUME, exact: true }).click();
 
   const card = page.locator(CARD);
