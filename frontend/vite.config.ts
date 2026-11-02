@@ -8,9 +8,9 @@ import { colorToCss } from './shared/geometry.ts';
  * The placeholder `index.html` carries in place of a hand-authored page background.
  * Nothing else in the tree contains it. `index.html` is the one rollup input; the
  * dev-only fixture pages beside it (`art-board.html`, `chrome-dpr-spike.html`,
- * `pixel-guard.html`, and the static `mark-sheet.html`) are served by the dev server
- * only, never built, and never mention the token (`devFixtureGuardPlugin` below keeps
- * them out of the build).
+ * `pixel-guard.html`, `player-test.html`, and the static `mark-sheet.html`) are served
+ * by the dev server only, never built, and never mention the token
+ * (`devFixtureGuardPlugin` below keeps them out of the build).
  */
 const PAGE_BG_TOKEN = '%FAB_PAGE_BG%';
 

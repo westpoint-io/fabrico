@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Fabrico - Player Test Page (dev only)</title>
+    <!--
+      DEV-ONLY page for the WebAssembly player's Chromium check. It sits at the root so the Vite dev
+      server serves it at /player-test.html, and the build never takes it as an input, because
+      index.html is the one rollup input in vite.config.ts. Its script runs a board through the
+      player and writes the outcome to window.__playerResult for e2e-player/player-board.spec.ts.
+      It draws nothing.
+    -->
+  </head>
+  <body>
+    <script type="module" src="/src/spike/playerTestPage.ts"></script>
+  </body>
+</html>
