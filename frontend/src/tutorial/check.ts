@@ -59,8 +59,8 @@ export function beltJoining(board: Pick<BoardFacts, 'belts'>, a: number, b: numb
  * direction, so no Head a press can find). The app rings this cell while the Belt tool is armed, and a
  * press there joins the new piece on.
  *
- * It doesn't ask whether the cell is free, because a piece drawn into the Sink reaches the board a packet
- * before its dock does, with this cell on the Sink. `lineStuck` tells that packet from a real block.
+ * It doesn't ask whether the cell is free, because a piece drawn into the Sink reaches the board before
+ * its dock does, with this cell on the Sink. `lineStuck` tells that moment from a real block.
  */
 export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number): readonly [number, number] | null {
   const belt = lastPiece(board, a);
@@ -99,18 +99,22 @@ function onDoorstep(board: Pick<BoardFacts, 'nodes'>, node: number, role: number
  * undo it? The plain drag is refused because the output or the input is taken, and a press can't carry
  * this belt on. That's a belt into `b` that didn't come from `a`, or a line from `a` that ends in another
  * machine, in a single tile (no direction, so no Head a press can find), or against a cell that's taken.
+ * A belt with no docks in the way of the drag counts too.
  *
- * The app sends a draw's docks after the host has minted the belt, so a good draw can look like this
- * for a packet. A tile on `b`'s input doorstep is about to dock there, and a belt into `b` starting
- * where its Tail would dock is about to join up. Neither is stuck.
+ * The app sends a draw's docks after the host has minted the belt, so a good draw passes through several
+ * of these shapes, and Undo stops on the same ones for as long as the user leaves them. The shape can't
+ * tell them apart, so `editsInFlight` does. While it's true, a tile on `b`'s input doorstep is about to
+ * dock there, a belt into `b` starting where its Tail would dock is about to join up, and a belt with no
+ * docks is about to get them. Once it's false, no dock is coming and each of them is stuck.
  */
-export function lineStuck(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number): boolean {
+export function lineStuck(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number, editsInFlight: boolean): boolean {
   if (beltJoining(board, a, b) !== undefined) return false;
+  if (!editsInFlight && looseBeltInTheWay(board, a, b)) return true;
   const door = lineDoorstep(board, a);
   const into = board.belts.find((belt) => belt.docks.some((d) => d.end === 'Head' && d.node === b));
   if (into !== undefined) {
     const start = into.tiles[0];
-    if (start === undefined || into.docks.some((d) => d.end === 'Tail')) return true;
+    if (start === undefined || into.docks.some((d) => d.end === 'Tail') || !editsInFlight) return true;
     const atDoor = door !== null && door[0] === start.cell_x && door[1] === start.cell_y;
     return !atDoor && !onDoorstep(board, a, PORT_ROLE.OUT, start);
   }
@@ -118,7 +122,7 @@ export function lineStuck(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number,
   if (last === undefined) return false;
   if (last.docks.some((d) => d.end === 'Head')) return true;
   const end = last.tiles[last.tiles.length - 1];
-  if (end !== undefined && onDoorstep(board, b, PORT_ROLE.IN, end)) return false;
+  if (editsInFlight && end !== undefined && onDoorstep(board, b, PORT_ROLE.IN, end)) return false;
   return door === null || cellBlocked(board, door);
 }
 
@@ -142,8 +146,7 @@ function cellBlocked(board: Pick<BoardFacts, 'belts' | 'nodes'>, [x, y]: readonl
 /**
  * Is a belt with no docks left on one of the cells this line needs? Undo takes a draw back one command
  * at a time, the docks first, so one press leaves the belt where it was with nothing holding it. A good
- * draw looks the same for the packet before its docks arrive, so this means nothing on its own, and
- * `machine.ts` only reads it once the line has been stuck.
+ * draw looks the same until its docks arrive, so `lineStuck` only reads this with no edit in flight.
  */
 export function looseBeltInTheWay(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number): boolean {
   const door = lineDoorstep(board, a);

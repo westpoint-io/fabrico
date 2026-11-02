@@ -1310,6 +1310,16 @@ export function App() {
   const standingStrandsRef = useRef<StandingStrand[]>([]);
   const shownRingKeyRef = useRef('');
   const gesturesRef = useRef<GestureController | null>(null);
+  /**
+   * Is a draw or a dock on its way to the board? A held belt owes its Docks until the frame that sends
+   * them, and that frame gives each Dock a claim, so one of these two is true from the release until the
+   * packet that shows the last Dock. A claim outlives its accept by one packet, so the board has caught up
+   * by the time this turns false.
+   */
+  const readEditsInFlight = useCallback(
+    (): boolean => (gesturesRef.current?.waiting().belts ?? 0) > 0 || queuedClaimsRef.current.size() > 0,
+    [],
+  );
   const transportRef = useRef<ITransport | null>(null);
   // SAFE-03: the dirty-since-last-save flag lives in a REF (not React state) so the
   // async OS close callbacks (Tauri onCloseRequested / web beforeunload) read the
@@ -4894,6 +4904,7 @@ export function App() {
             onActiveChange={setLessonActive}
             boardLive={simFatalReason === null && status.kind !== 'disconnected'}
             simStopped={simFatalReason !== null}
+            readEditsInFlight={readEditsInFlight}
           />
           {/* Phase 76 (plan 76-02, D-06): a label's WORDS, a DOM overlay pinned to each
               label every frame. ALWAYS mounted (a note's words are not an alt-mode

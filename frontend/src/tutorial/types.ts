@@ -45,6 +45,11 @@ export interface ChromeFacts {
   armed: ArmedFact;
   selectedNode: number | null;
   playing: boolean;
+  /**
+   * Has the app sent a draw or a dock the board doesn't show yet, or does it still owe one? A good draw's
+   * docks follow its belt, so a half-docked belt means something else while this is false: nothing is coming.
+   */
+  editsInFlight: boolean;
   /** The pressed segment in the inspector's Trigger group, read from the DOM. This is the unapplied buffer. */
   triggerPressed: 'Webhook' | 'Timer' | null;
   /** The host's last answer about a node's trigger. Only this says a trigger has been applied. */

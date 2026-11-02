@@ -41,6 +41,7 @@ function ctx(over: {
       armed: null,
       selectedNode: null,
       playing: true,
+      editsInFlight: false,
       triggerPressed: null,
       appliedTrigger: null,
       view: { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 0, right: 800, top: 0, bottom: 600 } },
@@ -277,8 +278,12 @@ describe('lineStuck', () => {
   const piece = (id: number, cells: BoardBelt['tiles'], docks: BoardBelt['docks']): BoardBelt => ({ ...belt(id, [], docks), tiles: cells });
   const tail = (node: number): BoardBelt['docks'][number] => ({ end: 'Tail', node, port: 0 });
   const head = (node: number): BoardBelt['docks'][number] => ({ end: 'Head', node, port: 0 });
-  const stuck = (belts: readonly BoardBelt[], extra: readonly BoardNode[] = []): boolean =>
-    lineStuck({ nodes: [SOURCE_NODE, SINK_NODE, ...extra], belts }, SOURCE_NODE.id, SINK_NODE.id);
+  const read = (belts: readonly BoardBelt[], editsInFlight: boolean): boolean =>
+    lineStuck({ nodes: [SOURCE_NODE, SINK_NODE], belts }, SOURCE_NODE.id, SINK_NODE.id, editsInFlight);
+  /** With nothing on its way from the app, so what's on the board is how it stays. */
+  const stuck = (belts: readonly BoardBelt[]): boolean => read(belts, false);
+  /** With a draw or a dock sent and not on the board yet. */
+  const arriving = (belts: readonly BoardBelt[]): boolean => read(belts, true);
 
   it('is false on a board with no belt, and for a belt that has nothing to do with either machine', () => {
     expect(stuck([])).toBe(false);
@@ -305,9 +310,11 @@ describe('lineStuck', () => {
     expect(stuck([first, piece(SECOND, tiles([5, 2]), [tail(FIRST)])])).toBe(true);
   });
 
-  it('is false for a single tile on the input doorstep, which docks on the next packet', () => {
+  it('is false for a single tile on the input doorstep while its dock is on the way, and holds once none is', () => {
     const first = piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
-    expect(stuck([first, piece(SECOND, tiles([7, 2]), [tail(FIRST)])])).toBe(false);
+    const belts = [first, piece(SECOND, tiles([7, 2]), [tail(FIRST)])];
+    expect(arriving(belts)).toBe(false);
+    expect(stuck(belts)).toBe(true);
   });
 
   it('holds for a short piece drawn backwards from the input', () => {
@@ -319,10 +326,14 @@ describe('lineStuck', () => {
     expect(stuck([fromSource, piece(SECOND, tiles([6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(true);
   });
 
-  it('is false for a whole backward draw whose Tail dock is one packet behind its Head dock', () => {
-    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(false);
+  it('is false for a whole backward draw while its Tail dock is on the way, and holds once none is', () => {
+    const whole = [piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])];
+    expect(arriving(whole)).toBe(false);
+    expect(stuck(whole), 'the output and the input are both taken, so only Undo clears this').toBe(true);
     const fromSource = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]);
-    expect(stuck([fromSource, piece(SECOND, tiles([5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])])).toBe(false);
+    const twoPieces = [fromSource, piece(SECOND, tiles([5, 2], [6, 2], [7, 2]), [head(SINK_NODE.id)])];
+    expect(arriving(twoPieces)).toBe(false);
+    expect(stuck(twoPieces)).toBe(true);
   });
 
   it('holds for a belt into the Sink that came from some other machine', () => {
@@ -339,13 +350,36 @@ describe('lineStuck', () => {
     expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]), crossing])).toBe(true);
   });
 
-  it('is false for the packet where the last tile is on the input doorstep, with the Sink next', () => {
-    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id)])])).toBe(false);
+  it('is false while the Head dock of a belt on the input doorstep is on the way', () => {
+    expect(arriving([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id)])])).toBe(false);
   });
 
-  it("is false for the packet where the next cell holds a new piece's first tile and its docks haven't come", () => {
+  it('holds for that belt once no dock is on the way, which is where one Undo leaves a finished belt', () => {
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id)])])).toBe(true);
+  });
+
+  it('holds where one Undo leaves a line of two pieces', () => {
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
+    expect(stuck([first, piece(SECOND, tiles([5, 2], [6, 2], [7, 2]), [tail(FIRST)])])).toBe(true);
+  });
+
+  it("is false while a new piece's docks are on the way, with its first tile on the next cell", () => {
     const newPiece = piece(SECOND, tiles([5, 2], [6, 2]), []);
-    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]), newPiece])).toBe(false);
+    expect(arriving([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]), newPiece])).toBe(false);
+  });
+
+  it('holds for that piece once no dock is on the way, because the next cell is taken', () => {
+    const loosePiece = piece(SECOND, tiles([5, 2], [6, 2]), []);
+    expect(stuck([piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id)]), loosePiece])).toBe(true);
+  });
+
+  it('holds for a belt with no docks in the way of the plain drag, once no dock is on the way', () => {
+    const onTheOutput = [piece(FIRST, tiles([3, 2], [4, 2]), [])];
+    const onTheInput = [piece(FIRST, tiles([6, 2], [7, 2]), [])];
+    expect(stuck(onTheOutput)).toBe(true);
+    expect(stuck(onTheInput)).toBe(true);
+    expect(arriving(onTheOutput), 'a good draw looks like this before its docks arrive').toBe(false);
+    expect(arriving(onTheInput)).toBe(false);
   });
 
   it('holds for a line that ends in some other machine, or in a loop', () => {

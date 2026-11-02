@@ -191,6 +191,8 @@ export interface TutorialLayerProps {
   boardLive: boolean;
   /** New can't reach a stopped host, so Start and Restart say so. */
   simStopped: boolean;
+  /** Has the app sent a draw or a dock the board doesn't show yet, or does it still owe one? */
+  readEditsInFlight: () => boolean;
 }
 
 export function TutorialLayer({
@@ -205,6 +207,7 @@ export function TutorialLayer({
   onActiveChange,
   boardLive,
   simStopped,
+  readEditsInFlight,
 }: TutorialLayerProps): JSX.Element {
   // The ref is the truth, and the probe reads it, so a test sees every value `reduce` returns.
   // React state follows only so the panel and the ring can mount and unmount.
@@ -221,6 +224,8 @@ export function TutorialLayer({
   // The frame loop below outlives any one render, so it reads the chrome's props through this.
   const chromeRef = useRef({ armed, selectedNode, playing });
   chromeRef.current = { armed, selectedNode, playing };
+  const readEditsInFlightRef = useRef(readEditsInFlight);
+  readEditsInFlightRef.current = readEditsInFlight;
   const boardLiveRef = useRef(boardLive);
   boardLiveRef.current = boardLive;
   const progressRef = useRef<ProgressStore | null>(null);
@@ -281,6 +286,7 @@ export function TutorialLayer({
         const board = sceneSnapshot(handle.sceneState);
         const chrome: ChromeFacts = {
           ...chromeRef.current,
+          editsInFlight: readEditsInFlightRef.current(),
           triggerPressed: readTriggerPressed(),
           appliedTrigger: appliedRef.current,
           view: { camera, freeArea: readFreeArea() },

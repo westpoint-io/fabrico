@@ -29,7 +29,7 @@ const VIEW: ChromeFacts['view'] = {
 };
 
 function chrome(over: Partial<ChromeFacts> = {}): ChromeFacts {
-  return { armed: null, selectedNode: null, playing: true, triggerPressed: null, appliedTrigger: null, view: VIEW, ...over };
+  return { armed: null, selectedNode: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, view: VIEW, ...over };
 }
 
 function board(over: Partial<BoardFacts> = {}): BoardFacts {
@@ -453,7 +453,7 @@ describe('currentStage', () => {
       const first: BoardBelt = { ...SHORT, docks: [...SHORT.docks, { end: 'Head', node: 30, port: 0 }] };
       const touching: BoardBelt = { ...JOINED, id: 30, tiles: tilesOf(5, 6, 7), docks: [{ end: 'Tail', node: first.id, port: 0 }] };
       expect(THE_SINK.cells[0]?.[0], 'its next cell is the Sink').toBe(8);
-      expect(stageOf(atStep(3), { nodes: BOTH, belts: [first, touching] }, ARMED)).toBe('belt-carry-on');
+      expect(stageOf(atStep(3), { nodes: BOTH, belts: [first, touching] }, { ...ARMED, editsInFlight: true })).toBe('belt-carry-on');
     });
 
     it('asks for Undo when that belt has no end a press can carry on from', () => {
@@ -495,24 +495,82 @@ describe('currentStage', () => {
         expect(shown(firstPress, [loose])).toBe('belt-undo');
       });
 
-      it("doesn't flash the undo card in the packet before a good draw's docks arrive", () => {
+      it("doesn't flash the undo card while a good draw's docks are on the way", () => {
         const whole: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4, 5, 6, 7), docks: [] };
-        const s = run(atStep(3), [whole]);
-        expect(shown(s, [whole])).toBe('belt-draw');
+        const inFlight = { ...ARMED, editsInFlight: true };
+        const s = frame(atStep(3), { nodes: BOTH, belts: [whole] }, { ...TIMER, ...inFlight });
+        expect(stageOf(s, { nodes: BOTH, belts: [whole] }, inFlight)).toBe('belt-draw');
       });
 
       it("doesn't flash it on the good draw after an undo either", () => {
         const cleared = run(run(run(atStep(3), [ONE_TILE]), [LOOSE]), []);
         const whole: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4, 5, 6, 7), docks: [] };
-        expect(shown(run(cleared, [whole]), [whole])).toBe('belt-draw');
+        const inFlight = { ...ARMED, editsInFlight: true };
+        const s = frame(cleared, { nodes: BOTH, belts: [whole] }, { ...TIMER, ...inFlight });
+        expect(stageOf(s, { nodes: BOTH, belts: [whole] }, inFlight)).toBe('belt-draw');
       });
 
-      it('forgets it when the lesson goes back past the step', () => {
-        const stuck = run(atStep(3), [ONE_TILE]);
-        expect(stuck.undoing).toBe(true);
-        const back = frame(stuck, { nodes: [THE_SOURCE], belts: [] }, TIMER);
-        expect(back.stepIndex).toBe(1);
-        expect(back.undoing).toBe(false);
+      it('asks for Undo when two presses in one frame leave the belt with no docks', () => {
+        const whole: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4, 5, 6, 7) };
+        const loose: BoardBelt = { ...whole, docks: [] };
+        const s = frame(atStep(5), { nodes: BOTH, belts: [loose] }, { ...TIMER, ...ARMED });
+        expect(s.stepIndex).toBe(3);
+        expect(shown(s, [loose])).toBe('belt-undo');
+      });
+    });
+
+    describe('a finished line taken back by Undo', () => {
+      const run = (s: TutorialState, belts: readonly BoardBelt[]): TutorialState => frame(s, { nodes: BOTH, belts }, { ...TIMER, ...ARMED });
+      const shown = (s: TutorialState, belts: readonly BoardBelt[]): string | undefined => stageOf(s, { nodes: BOTH, belts }, ARMED);
+      const WHOLE: BoardBelt = { ...JOINED, tiles: tilesOf(3, 4, 5, 6, 7) };
+      const TAIL_ONLY: BoardBelt = { ...WHOLE, docks: [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }] };
+      const HEAD_ONLY: BoardBelt = { ...WHOLE, docks: [{ end: 'Head', node: THE_SINK.id, port: 0 }] };
+      const LOOSE: BoardBelt = { ...WHOLE, docks: [] };
+
+      it('keeps the undo card through each press until the belt has gone, then asks for the plain drag', () => {
+        const first = run(atStep(5), [TAIL_ONLY]);
+        expect(first.stepIndex, 'the lesson went back to the belt').toBe(3);
+        expect(shown(first, [TAIL_ONLY]), 'its last tile rests on the doorstep and nothing will dock it').toBe('belt-undo');
+        const second = run(first, [LOOSE]);
+        expect(shown(second, [LOOSE]), 'the belt still takes the output and the input').toBe('belt-undo');
+        const third = run(second, []);
+        expect(shown(third, []), 'the belt has gone').toBe('belt-draw');
+      });
+
+      it('keeps the card on a later frame too, because the state lasts until the next press', () => {
+        const first = run(run(atStep(5), [TAIL_ONLY]), [TAIL_ONLY]);
+        expect(shown(first, [TAIL_ONLY])).toBe('belt-undo');
+      });
+
+      it('does the same when the press leaves the Head dock and takes the Tail dock', () => {
+        const first = run(atStep(5), [HEAD_ONLY]);
+        expect(first.stepIndex).toBe(3);
+        expect(shown(first, [HEAD_ONLY])).toBe('belt-undo');
+      });
+
+      it('sends a line of two pieces to Undo, and back to carrying on once the second piece has gone', () => {
+        const fromSource: BoardBelt = { ...JOINED, id: 9, tiles: tilesOf(3, 4), docks: [{ end: 'Tail', node: THE_SOURCE.id, port: 0 }] };
+        const intoSecond: BoardBelt = { ...fromSource, docks: [...fromSource.docks, { end: 'Head', node: 30, port: 0 }] };
+        const secondJoined: BoardBelt = {
+          ...JOINED,
+          id: 30,
+          tiles: tilesOf(5, 6, 7),
+          docks: [
+            { end: 'Tail', node: 9, port: 0 },
+            { end: 'Head', node: THE_SINK.id, port: 0 },
+          ],
+        };
+        const secondTailOnly: BoardBelt = { ...secondJoined, docks: [{ end: 'Tail', node: 9, port: 0 }] };
+        const secondLoose: BoardBelt = { ...secondJoined, docks: [] };
+        const line = run(atStep(3), [intoSecond, secondJoined]);
+        expect(line.stepIndex).toBeGreaterThan(3);
+        const first = run(line, [intoSecond, secondTailOnly]);
+        expect(first.stepIndex).toBe(3);
+        expect(shown(first, [intoSecond, secondTailOnly]), 'the second piece rests on the doorstep').toBe('belt-undo');
+        const second = run(first, [fromSource, secondLoose]);
+        expect(shown(second, [fromSource, secondLoose]), 'the second piece sits on the cell the first would carry on into').toBe('belt-undo');
+        const third = run(second, [fromSource]);
+        expect(shown(third, [fromSource]), 'the first piece has a free end again').toBe('belt-carry-on');
       });
     });
 
