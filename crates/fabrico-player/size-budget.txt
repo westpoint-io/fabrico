@@ -1,0 +1,11 @@
+# The WebAssembly player's size budget, in bytes.
+#
+# The number below is the most the shipped module may weigh after `gzip -9 -n`, measured on the
+# wasm-opt -Oz output of scripts/build-wasm.sh. scripts/check-player-size.sh reads this file.
+#
+# Comment lines and blank lines are ignored, and exactly one line holds the number.
+#
+# Moving the number is a declared change: this file sits in a crate that
+# scripts/check-core-declared.sh covers, so an edit needs a line in docs/DECLARED-MOVES.txt with a
+# stated reason. Don't raise it just to turn a red check green.
+578000

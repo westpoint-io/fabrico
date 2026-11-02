@@ -155,3 +155,5 @@ NONE
 crates/fabrico-player/src/lib.rs
 # The native side of that byte comparison.
 crates/fabrico-player/examples/dump_packets.rs
+# The player's gzipped size budget, which scripts/check-player-size.sh reads.
+crates/fabrico-player/size-budget.txt
