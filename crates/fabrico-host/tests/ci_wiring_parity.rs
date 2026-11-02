@@ -434,9 +434,10 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// repository root when measured on 2026-09-30. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 6] = [
+const HEAVY_JOBS: [&str; 7] = [
     "determinism",
     "headless-build",
+    "wasm-player",
     "golden-corpus",
     "e2e",
     "e2e-live",
@@ -565,6 +566,47 @@ fn the_headless_build_is_compiled_with_redb_off_in_its_own_job() {
          Without these lines `use fabrico_core::persist::RedbStore` in the engine, or a dropped \
          `#[cfg(feature = \"redb\")]` in persist.rs, leaves CI green with that build broken. \
          Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// The job that builds the WebAssembly player, and the exact lines that build and check it.
+const WASM_JOB: &str = "wasm-player";
+const WASM_RUN_LINES: [&str; 5] = [
+    "run: bash scripts/build-wasm.sh",
+    "run: bash scripts/check-wasm-player.sh",
+    "run: bash scripts/check-player-browser.sh",
+    "run: bash scripts/check-player-size.sh",
+    "run: bash scripts/prove-player-size-bites.sh",
+];
+
+/// No other job compiles for wasm, so a step dropped from this one leaves CI green with that check
+/// gone. The lines are matched whole, because a trailing `|| true` on one would keep the job green
+/// whatever the check found.
+#[test]
+fn the_wasm_player_job_builds_and_checks_the_player() {
+    let blocks = job_blocks();
+    let job = blocks
+        .iter()
+        .find(|(id, _)| *id == WASM_JOB)
+        .map(|(_, lines)| lines.as_slice())
+        .unwrap_or_default();
+    let mut wrong: Vec<String> = Vec::new();
+    for line in WASM_RUN_LINES {
+        let in_job = job.iter().filter(|l| **l == line).count();
+        let in_file = code_lines().iter().filter(|l| **l == line).count();
+        if in_job != 1 || in_file != 1 {
+            wrong.push(format!(
+                "`{line}` appears {in_job} time(s) in job `{WASM_JOB}` and {in_file} time(s) in \
+                 the workflow, expected 1 and 1."
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the wasm player job isn't wired as it has to be:\n{}\n\
+         Each of these lines is the only place CI runs that check. Update the WORKFLOW to match \
+         this test.",
         wrong.join("\n")
     );
 }

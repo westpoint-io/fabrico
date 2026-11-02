@@ -87,8 +87,8 @@ jobs:
   # `frontend/`, and every non-markdown file are NOT docs. `scripts/ci-classify-change.sh`
   # decides it.
   #
-  # GATED (skipped on a docs-only change): determinism, headless-build, golden-corpus, e2e,
-  # e2e-live and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
+  # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
+  # golden-corpus, e2e, e2e-live and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
   # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
   # private-residue and neutrality. Each always-on job either reads files a docs-only
   # change can edit or costs about one minute, so gating it would save little and risk a
@@ -1011,6 +1011,87 @@ jobs:
 
       - name: Clippy on the core, redb off
         run: cargo clippy -p fabrico-core --no-default-features --locked -- -D warnings
+
+  # ===================================================================================
+  # THE WEBASSEMBLY PLAYER: the engine built for the browser, and the checks on that build.
+  #
+  # WHY IT IS ITS OWN JOB. No other job compiles for wasm. A change that breaks the wasm build, makes
+  # the player's packets or hashes differ from a native run, or grows the module past its size budget
+  # would leave every other job green. `ci_wiring_parity.rs` matches each check's run line whole, so
+  # dropping a step fails that test.
+  #
+  # THE COMPILER. `rustup target add` runs after `rustup show`, so the wasm standard library lands on
+  # the toolchain rust-toolchain.toml pins. apt installs clang and llvm because QuickJS's C code needs
+  # a clang with a wasm32 backend, plus llvm-ar. The runner's gcc can't emit wasm.
+  #
+  # WASM_OPT IS ON THE BUILD STEP, not in the job's `env`. The `runner` context isn't available at job
+  # level, and GitHub refuses the whole workflow file over it. Only scripts/build-wasm.sh reads it.
+  #
+  # TIME LIMIT. A run adds up to about 157 seconds, so the limit is 1.9 times that. Measured on a
+  # developer machine: the cold scripts/build-wasm.sh on one core 62 seconds, the four checks on two
+  # cores 5, and scripts/install-wasm-opt.sh 6. Recorded on a GitHub run, 84 more: job setup and
+  # checkout 3, toolchain 9, Node 1, the determinism job's larger apt step 27 as a stand-in, the cargo
+  # cache 11 to restore and 9 to save, npm ci 5 and the Playwright browser 19.
+  wasm-player:
+    name: the wasm player builds on the pinned compiler and passes its checks
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          rustup show
+          rustup component add clippy || true
+          rustup target add wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install clang and llvm-ar for the wasm C build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Install the pinned wasm-opt
+        run: bash scripts/install-wasm-opt.sh "${{ runner.temp }}/binaryen"
+
+      - name: Build the player
+        env:
+          WASM_OPT: ${{ runner.temp }}/binaryen/wasm-opt
+        run: bash scripts/build-wasm.sh
+
+      - name: Compare the player with the native build under Node
+        run: bash scripts/check-wasm-player.sh
+
+      - name: Run the demo board in headless Chromium
+        run: bash scripts/check-player-browser.sh
+
+      - name: Check the player against its size budget
+        run: bash scripts/check-player-size.sh
+
+      - name: Watch the size budget fail
+        run: bash scripts/prove-player-size-bites.sh
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand
