@@ -21,9 +21,10 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fabrico_wasm_corpus::{Replay, replay_golden};
+use fabrico_wasm_corpus::{Replay, replay_golden, replay_scenario};
 
 const GOLDEN_DIR: &str = "crates/fabrico-core/tests/golden";
+const SCENARIO_DIR: &str = "crates/fabrico-scenario/fixtures";
 
 /// A failure and the exit code it maps to.
 struct Stop {
@@ -46,6 +47,22 @@ fn golden_fixtures(root: &Path) -> Result<Vec<(String, PathBuf)>, Stop> {
         let path = entry.path();
         if path.join("meta.toml").is_file() {
             fixtures.push((entry.file_name().to_string_lossy().into_owned(), path));
+        }
+    }
+    fixtures.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    Ok(fixtures)
+}
+
+/// The `.postcard` files under `root`, in byte order of name, each with its file stem.
+fn scenario_fixtures(root: &Path) -> Result<Vec<(String, PathBuf)>, Stop> {
+    let entries = fs::read_dir(root)
+        .map_err(|e| stop(2, format!("can't read {}: {e}", root.display())))?;
+    let mut fixtures = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| stop(2, format!("can't read {}: {e}", root.display())))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(stem) = name.strip_suffix(".postcard") {
+            fixtures.push((stem.to_owned(), entry.path()));
         }
     }
     fixtures.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
@@ -98,6 +115,17 @@ fn run() -> Result<(), Stop> {
     for (name, dir) in &golden {
         let replay = replay_golden_fixture(name, dir)?;
         print_replay(&mut out, "golden", name, &replay)?;
+    }
+
+    let scenarios = scenario_fixtures(Path::new(SCENARIO_DIR))?;
+    if scenarios.is_empty() {
+        return Err(stop(2, format!("no .postcard files under {SCENARIO_DIR}")));
+    }
+    for (name, path) in &scenarios {
+        let bytes = read(name, path)?;
+        let replay = replay_scenario(&bytes)
+            .map_err(|e| stop(1, format!("{name}: won't decode: {e}")))?;
+        print_replay(&mut out, "scenario", name, &replay)?;
     }
 
     out.flush().map_err(|e| stop(1, format!("can't write the report: {e}")))

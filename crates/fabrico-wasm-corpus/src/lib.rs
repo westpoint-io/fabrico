@@ -2,9 +2,9 @@
 //! desktop build runs, and it probes the Factory limits on that target. Nothing here ships: the
 //! player's dependency check refuses this crate by name, so a browser never downloads it.
 //!
-//! [`replay_golden`] is the one code path for both targets. The native report tool calls it
-//! directly, and the wasm module calls it through the `fc_` exports, so a difference between the
-//! two reports comes from the target and not from two copies of a loop.
+//! [`replay_golden`] and [`replay_scenario`] are the one code path for both targets. The native
+//! report tool calls them directly, and the wasm module calls them through the `fc_` exports, so a
+//! difference between the two reports comes from the target and not from two copies of a loop.
 //!
 //! The fixture bytes come from the caller. A fixture added to the repo then needs no table edit
 //! here, and changing an expected hash needs no rebuild.
@@ -18,10 +18,11 @@
 use std::cell::RefCell;
 use std::fmt::Write as _;
 
-use fabrico_core::core::Core;
+use fabrico_core::core::{Core, MAX_REPLAY_SPAN};
 use fabrico_core::edit::EditRecord;
-use fabrico_core::event::Event;
+use fabrico_core::event::{Event, LogHeader, SCHEMA_VERSION};
 use fabrico_core::snapshot;
+use fabrico_scenario::fixture::Scenario;
 use fabrico_scenario::tick_hash;
 
 /// The call succeeded, and the out buffer holds the replay's lines.
@@ -76,20 +77,79 @@ pub fn replay_golden(
     };
     let (mut event_at, mut edit_at) = (0usize, 0usize);
     for _ in 0..ticks {
-        advance_one_tick(&mut core, &edits, &events, &mut edit_at, &mut event_at, &mut replay);
+        replay.faults += advance_one_tick(&mut core, &edits, &events, &mut edit_at, &mut event_at).faults;
+        replay.hashes.push(tick_hash(&core));
     }
     Ok(replay)
 }
 
-/// One tick of the fold: the same gather, advance and hash order on both targets.
+/// Replay a scenario fixture from genesis, hashing after each tick. This repeats the loop in
+/// `Core::run_log_two_logs`, which is what `GridSession::replay_two_logs` runs: every tick from 0 to
+/// the highest tick in either log. Logs with no records give one hash, of the genesis core.
+///
+/// `run_log_two_logs` adds the events it consumed to `core.cursor` once, after its loop, and the
+/// snapshot holds the cursor. This adds them tick by tick, so each hash is the one a replay stopped
+/// at that tick would end on, and the last is the hash in the fixture's committed `.snap`.
+///
+/// # Errors
+/// Returns the error text when the fixture won't decode or its span is one that
+/// `run_log_two_logs` refuses.
+pub fn replay_scenario(bytes: &[u8]) -> Result<Replay, String> {
+    let scenario = Scenario::from_bytes(bytes).map_err(|e| format!("scenario: {e}"))?;
+    let mut core = Core::genesis(LogHeader {
+        schema_version: SCHEMA_VERSION,
+        seed: scenario.seed,
+    });
+    let highest_event = scenario.event_log.iter().map(|e| e.tick).max();
+    let highest_edit = scenario.edit_log.iter().map(|e| e.tick).max();
+    let Some(highest_tick) = highest_event.max(highest_edit) else {
+        return Ok(Replay {
+            hashes: vec![tick_hash(&core)],
+            faults: 0,
+        });
+    };
+    if highest_tick > MAX_REPLAY_SPAN {
+        return Err(format!(
+            "scenario: its highest tick {highest_tick} is over the replay limit {MAX_REPLAY_SPAN}"
+        ));
+    }
+
+    let mut replay = Replay {
+        hashes: Vec::new(),
+        faults: 0,
+    };
+    let (mut event_at, mut edit_at) = (0usize, 0usize);
+    while core.tick <= highest_tick {
+        let advanced = advance_one_tick(
+            &mut core,
+            &scenario.edit_log,
+            &scenario.event_log,
+            &mut edit_at,
+            &mut event_at,
+        );
+        core.cursor += advanced.events;
+        replay.faults += advanced.faults;
+        replay.hashes.push(tick_hash(&core));
+    }
+    Ok(replay)
+}
+
+/// What one tick of the fold did.
+struct Advanced {
+    /// The event records this tick consumed.
+    events: u64,
+    /// The entries in `core.last_tick.faulted` after this tick.
+    faults: u64,
+}
+
+/// One tick of the fold: the same gather and advance order on both targets, edits first.
 fn advance_one_tick(
     core: &mut Core,
     edits: &[EditRecord],
     events: &[Event],
     edit_at: &mut usize,
     event_at: &mut usize,
-    replay: &mut Replay,
-) {
+) -> Advanced {
     let tick = core.tick;
     let edit_start = *edit_at;
     while *edit_at < edits.len() && edits[*edit_at].tick == tick {
@@ -100,8 +160,10 @@ fn advance_one_tick(
         *event_at += 1;
     }
     core.advance_edits(&edits[edit_start..*edit_at], &events[event_start..*event_at]);
-    replay.faults += core.last_tick.faulted.len() as u64;
-    replay.hashes.push(tick_hash(core));
+    Advanced {
+        events: (*event_at - event_start) as u64,
+        faults: core.last_tick.faulted.len() as u64,
+    }
 }
 
 thread_local! {
@@ -189,6 +251,19 @@ pub unsafe extern "C" fn fc_replay_golden(
     finish(replay_golden(genesis, log, edit_log, ticks))
 }
 
+/// Replay a scenario fixture from one byte range. Returns [`FC_OK`] with the replay's lines in the
+/// out buffer, or [`FC_REFUSED`] with the error text there.
+///
+/// # Safety
+/// `ptr` must point at `len` initialised bytes, or be null with a length of 0, and those bytes must
+/// stay valid for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fc_replay_scenario(ptr: *const u8, len: u32) -> u32 {
+    // SAFETY: the caller promises the pointer and length describe valid bytes for this call.
+    let bytes = unsafe { bytes_at(ptr, len) };
+    finish(replay_scenario(bytes))
+}
+
 /// The out buffer's address, valid until the next export call.
 #[unsafe(no_mangle)]
 pub extern "C" fn fc_out_ptr() -> *const u8 {
@@ -219,6 +294,35 @@ mod tests {
                 .lines()
                 .collect();
         assert_eq!(replay.hashes, committed);
+    }
+
+    #[test]
+    fn a_scenario_ends_on_the_hash_in_its_committed_snap() {
+        let replay =
+            replay_scenario(include_bytes!("../../fabrico-scenario/fixtures/01-exit-gate.postcard"))
+                .expect("a committed fixture decodes");
+        let snap = include_str!("../../fabrico-scenario/snapshots/01-exit-gate.snap");
+        // The body starts after the second `---` of the header.
+        let committed = snap.split("---\n").nth(2).and_then(|body| body.lines().next());
+        assert!(committed.is_some(), "the snap has a hash line");
+        assert_eq!(replay.hashes.last().map(String::as_str), committed);
+    }
+
+    #[test]
+    fn a_scenario_with_empty_logs_gives_one_hash_of_the_genesis_core() {
+        let bytes = Scenario::new(7, Vec::new(), Vec::new()).to_bytes();
+        let replay = replay_scenario(&bytes).expect("an empty scenario decodes");
+        let genesis = Core::genesis(LogHeader {
+            schema_version: SCHEMA_VERSION,
+            seed: 7,
+        });
+        assert_eq!(replay.hashes, vec![tick_hash(&genesis)]);
+    }
+
+    #[test]
+    fn bytes_that_are_not_a_scenario_come_back_as_an_error() {
+        let error = replay_scenario(&[0xff; 4]).expect_err("refused");
+        assert!(error.starts_with("scenario:"), "{error}");
     }
 
     #[test]
