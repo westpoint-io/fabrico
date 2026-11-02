@@ -6,11 +6,15 @@
 //!
 //! `scripts/wasm/run-corpus.mjs` compares those lines with the wasm build's.
 //!
+//! With `--fence --pins <path>` it prints the native half of the fence report in place of the
+//! corpus report, one `FENCE` line per fact, from the same shape programs the wasm build runs.
+//! `scripts/wasm/fence-report.mjs` describes the lines and the rules.
+//!
 //! The tick count comes from `hash_lines` in `meta.toml`, not from `hashes.txt`, so a shortened
 //! hashes file can't shorten the replay with it.
 //!
 //! EXIT CODES: 0 the report was printed, 1 a fixture wouldn't decode or stdout failed, 2 the walk
-//! found nothing.
+//! found nothing, or the fence arguments or the pins file couldn't be read.
 
 // This tool reads fixtures from disk. The lint's rule is about the simulation, and this file never
 // runs inside one.
@@ -21,7 +25,8 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fabrico_wasm_corpus::{Replay, replay_golden, replay_scenario};
+use fabrico_core::factory::{DEFAULT_GAS_BUDGET, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT};
+use fabrico_wasm_corpus::{FENCE_RAN, Replay, UNSPENDABLE_GAS, fence, replay_golden, replay_scenario, shape};
 
 const GOLDEN_DIR: &str = "crates/fabrico-core/tests/golden";
 const SCENARIO_DIR: &str = "crates/fabrico-scenario/fixtures";
@@ -131,8 +136,121 @@ fn run() -> Result<(), Stop> {
     out.flush().map_err(|e| stop(1, format!("can't write the report: {e}")))
 }
 
+/// The memory shapes in report order, with each one's shape number and search ceiling, the same
+/// ceilings the native pins search to.
+const MEMORY_SHAPES: [(&str, u32, u64); 4] = [
+    ("arrays", shape::ARRAYS, 20_000),
+    ("strings", shape::STRINGS, 50_000),
+    ("objects", shape::OBJECTS, 2_000_000),
+    ("cyclic", shape::CYCLIC, 2_000_000),
+];
+
+/// How far the gas loop and the recursion searches go.
+const GAS_CEILING: u64 = 100_000_000;
+const RECURSION_CEILING: u64 = 100_000;
+
+/// What this tool takes from a pins file.
+struct Pins {
+    /// The `native <shape> <count>` lines.
+    native: Vec<(String, u64)>,
+    /// The `gas <count>` line, where the gas search starts.
+    gas: Option<u64>,
+}
+
+/// The native counts and the gas hint from a pins file: `<target> <shape> <count>` and
+/// `gas <count>` lines, with `#` comments and blank lines skipped.
+fn read_pins(path: &Path) -> Result<Pins, Stop> {
+    let text = fs::read_to_string(path)
+        .map_err(|e| stop(2, format!("can't read the pins file {}: {e}", path.display())))?;
+    let mut native = Vec::new();
+    let mut gas = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let bad = || stop(2, format!("the pins file has a line this tool can't read: {line}"));
+        match fields.as_slice() {
+            ["gas", count] => gas = Some(count.parse().map_err(|_| bad())?),
+            [target, name, count] => {
+                let count: u64 = count.parse().map_err(|_| bad())?;
+                if *target == "native" {
+                    native.push(((*name).to_owned(), count));
+                }
+            }
+            _ => return Err(bad()),
+        }
+    }
+    Ok(Pins { native, gas })
+}
+
+/// The first count that doesn't run, using `hint` when `hint - 1` runs and `hint` doesn't, and
+/// searching `1..=ceiling` otherwise. A count that still runs at the ceiling reports the ceiling
+/// plus 1, which no pin equals.
+fn first_fault(hint: Option<u64>, ceiling: u64, faults: impl Fn(u64) -> bool) -> u64 {
+    if let Some(hint) = hint.filter(|hint| *hint > 1)
+        && !faults(hint - 1)
+        && faults(hint)
+    {
+        return hint;
+    }
+    if !faults(ceiling) {
+        return ceiling + 1;
+    }
+    let (mut low, mut high) = (1, ceiling);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if faults(middle) {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    low
+}
+
+fn faults_at(shape: u32, gas: u64) -> impl Fn(u64) -> bool {
+    move |n| fence(shape, n, gas, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT).0 != FENCE_RAN
+}
+
+fn run_fence(pins: &Path) -> Result<(), Stop> {
+    let Pins { native, gas: gas_hint } = read_pins(pins)?;
+    let mut out = BufWriter::new(io::stdout().lock());
+    let failed = |e: io::Error| stop(1, format!("can't write the report: {e}"));
+
+    let gas = first_fault(gas_hint, GAS_CEILING, faults_at(shape::GAS_LOOP, DEFAULT_GAS_BUDGET));
+    writeln!(out, "FENCE gas native {gas}").map_err(failed)?;
+    for (name, number, ceiling) in MEMORY_SHAPES {
+        let hint = native.iter().find(|(pinned, _)| pinned == name).map(|(_, count)| *count);
+        let count = first_fault(hint, ceiling, faults_at(number, UNSPENDABLE_GAS));
+        writeln!(out, "FENCE memory native {name} {count}").map_err(failed)?;
+    }
+    let plain = first_fault(None, RECURSION_CEILING, faults_at(shape::RECURSION, UNSPENDABLE_GAS));
+    let map = first_fault(None, RECURSION_CEILING, faults_at(shape::MAP_RECURSION, UNSPENDABLE_GAS));
+    writeln!(out, "FENCE stack native first_fault={plain} map_first_fault={map} limit={DEFAULT_STACK_LIMIT}")
+        .map_err(failed)?;
+    writeln!(out, "FENCE limits native mem={DEFAULT_MEM_LIMIT} gas={DEFAULT_GAS_BUDGET}").map_err(failed)?;
+    out.flush().map_err(|e| stop(1, format!("can't write the report: {e}")))
+}
+
+/// `Some(path)` for `--fence --pins <path>`, `None` for no arguments.
+fn fence_args() -> Result<Option<PathBuf>, Stop> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => Ok(None),
+        [fence, pins, path] if fence == "--fence" && pins == "--pins" => Ok(Some(PathBuf::from(path))),
+        _ => Err(stop(2, format!("unknown arguments {args:?}; use none, or --fence --pins <path>"))),
+    }
+}
+
 fn main() -> ExitCode {
-    match run() {
+    let result = match fence_args() {
+        Ok(Some(pins)) => run_fence(&pins),
+        Ok(None) => run(),
+        Err(error) => Err(error),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(Stop { code, message }) => {
             eprintln!("corpus_native: {message}");

@@ -17,7 +17,9 @@
 //! Every assertion here is clock-free, I/O-free and float-free, so this file passes the crate's
 //! determinism clippy gate.
 
-use fabrico_core::factory::{DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT, FactoryOutcome, FactoryRuntime};
+use fabrico_core::factory::{
+    DEFAULT_GAS_BUDGET, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT, FactoryOutcome, FactoryRuntime,
+};
 use fabrico_core::fault::FaultReason;
 use fabrico_core::rng::SimRng;
 
@@ -30,10 +32,15 @@ const PINNED_STRINGS: u64 = 7416;
 const PINNED_OBJECTS: u64 = 59434;
 const PINNED_CYCLIC: u64 = 62134;
 
+/// The first loop count of [`fence_shapes::gas_loop`] that trips the fuse at [`DEFAULT_GAS_BUDGET`].
+/// The wasm build's fence report has to measure the same number, so all three operating systems
+/// check the value it is compared with.
+const PINNED_GAS_LOOP: u64 = 1_284_960;
+
 #[path = "common/fence_shapes.rs"]
 mod fence_shapes;
 
-use fence_shapes::{arrays, cyclic, objects, recursion, strings};
+use fence_shapes::{arrays, cyclic, gas_loop, objects, recursion, strings};
 
 fn run_with_limits(src: &str, mem_limit: u32, stack_limit: u32) -> FactoryOutcome {
     let mut factory = FactoryRuntime::build(src, GAS, mem_limit, stack_limit).expect("builds");
@@ -121,6 +128,46 @@ fn small_objects_run_out_of_memory_at_the_pinned_count() {
 #[test]
 fn cyclic_garbage_runs_out_of_memory_at_the_pinned_count() {
     assert_first_fault("cyclic garbage", cyclic, PINNED_CYCLIC, 2_000_000);
+}
+
+fn run_at_the_default_gas(src: &str) -> FactoryOutcome {
+    let mut factory = FactoryRuntime::build(src, DEFAULT_GAS_BUDGET, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT)
+        .expect("builds");
+    let mut rng = SimRng::from_seed_u64(1);
+    factory.run(b"1", b"{}", &mut rng)
+}
+
+/// The fuse counts interrupt callbacks, which QuickJS makes at a fixed bytecode interval, so the
+/// first loop count that trips it is the same on every target and every compiler. A miss searches
+/// and prints the count this build gives.
+#[test]
+fn a_loop_trips_the_gas_fuse_at_the_pinned_count() {
+    let below = run_at_the_default_gas(&gas_loop(PINNED_GAS_LOOP - 1));
+    let at = run_at_the_default_gas(&gas_loop(PINNED_GAS_LOOP));
+    if below.fault.is_some() || at.fault.is_none() {
+        let (mut low, mut high) = (1, 100_000_000);
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if run_at_the_default_gas(&gas_loop(middle)).fault.is_some() {
+                high = middle;
+            } else {
+                low = middle + 1;
+            }
+        }
+        panic!(
+            "gas loop: pinned first-faulting count is {PINNED_GAS_LOOP}, and this build's is {low} \
+             at a budget of {DEFAULT_GAS_BUDGET}. At {}: {:?}. At {PINNED_GAS_LOOP}: {:?}.",
+            PINNED_GAS_LOOP - 1,
+            below.fault,
+            at.fault,
+        );
+    }
+    assert_eq!(
+        at.fault,
+        Some(FaultReason::FactoryTimeout),
+        "gas loop at {PINNED_GAS_LOOP} faulted with a reason other than the fuse: {}",
+        message(&at)
+    );
 }
 
 #[test]

@@ -166,3 +166,6 @@ crates/fabrico-core/src/factory.rs
 crates/fabrico-core/tests/factory_memory_pin.rs
 # That shared file, with the gas loop and the recursion through Array.map added.
 crates/fabrico-core/tests/common/fence_shapes.rs
+# The memory first-fault counts pinned per target for the fence report, which
+# scripts/check-fence-report.sh reads.
+crates/fabrico-player/fence-pins.txt

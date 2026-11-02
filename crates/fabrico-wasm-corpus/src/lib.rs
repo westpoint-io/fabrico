@@ -14,11 +14,16 @@
 //!
 //! [`fence`] runs one of the limit shapes once on a fresh Factory runtime. The shapes come from the
 //! file the native pins use, included by path, so a shape can't differ between the targets.
+//!
+//! [`alloc_self_check`] checks the memory limit's accounting on the target it runs on. This crate
+//! installs a global allocator that counts the bytes it is asked for, so the check can compare
+//! `FenceAllocator`'s total with what the blocks really cost.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::all)]
 
-use std::cell::RefCell;
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 
 use fabrico_core::core::{Core, MAX_REPLAY_SPAN};
@@ -30,8 +35,10 @@ use fabrico_core::factory::{
 use fabrico_core::fault::FaultReason;
 use fabrico_core::rng::SimRng;
 use fabrico_core::snapshot;
+use fabrico_qjs_alloc::FenceAllocator;
 use fabrico_scenario::fixture::Scenario;
 use fabrico_scenario::tick_hash;
+use rquickjs::allocator::Allocator as _;
 
 /// The call succeeded, and the out buffer holds the replay's lines.
 pub const FC_OK: u32 = 0;
@@ -247,6 +254,162 @@ pub fn fence(shape: u32, n: u64, gas: u64, mem_limit: u32, stack_limit: u32) -> 
 }
 
 thread_local! {
+    /// The bytes this thread's live heap blocks were allocated with, by their layouts. Per thread,
+    /// so a test running beside the self-check can't move it.
+    static REQUESTED: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Moves this thread's [`REQUESTED`] total. It runs inside the allocator, so it must not allocate
+/// or panic, and a thread that is shutting down is skipped.
+fn count(add: usize, remove: usize) {
+    let _ = REQUESTED.try_with(|total| total.set(total.get().wrapping_add(add).wrapping_sub(remove)));
+}
+
+/// The system allocator with a running total beside it, for [`alloc_self_check`].
+struct Counting;
+
+// SAFETY: each call goes straight to `System` with the caller's arguments, and only the total is
+// added.
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller meets `GlobalAlloc::alloc`'s contract, which `System` shares.
+        let block = unsafe { System.alloc(layout) };
+        if !block.is_null() {
+            count(layout.size(), 0);
+        }
+        block
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: as for `alloc`.
+        let block = unsafe { System.alloc_zeroed(layout) };
+        if !block.is_null() {
+            count(layout.size(), 0);
+        }
+        block
+    }
+
+    unsafe fn dealloc(&self, block: *mut u8, layout: Layout) {
+        count(0, layout.size());
+        // SAFETY: the caller passes a block from this allocator with the layout it was given.
+        unsafe { System.dealloc(block, layout) }
+    }
+
+    unsafe fn realloc(&self, block: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: the caller meets `GlobalAlloc::realloc`'s contract, which `System` shares.
+        let moved = unsafe { System.realloc(block, layout, new_size) };
+        if !moved.is_null() {
+            count(new_size, layout.size());
+        }
+        moved
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Counting = Counting;
+
+fn requested() -> usize {
+    REQUESTED.with(Cell::get)
+}
+
+/// What a block of `size` bytes should cost, written out here so the check doesn't call the
+/// arithmetic it is checking: the size rounded up to 8, plus an 8-byte header.
+const fn expected_cost(size: usize) -> usize {
+    size.div_ceil(8) * 8 + 8
+}
+
+/// Checks the memory limit's accounting on this target. For sizes 1, 8, 9 and 4096, the total has
+/// to grow by the size rounded up to 8 plus 8, the global allocator has to be asked for the same
+/// number of bytes, the pointer has to be 8-aligned and `usable_size` has to return the rounded
+/// size. A `realloc` has to keep both totals right, freeing every block has to bring both back to
+/// where they started, and an allocation past the limit has to return null.
+///
+/// # Errors
+/// Returns the first difference it finds.
+pub fn alloc_self_check() -> Result<(), String> {
+    const SIZES: [usize; 4] = [1, 8, 9, 4096];
+    let mut fence = FenceAllocator::new(1 << 20);
+    // The list gets its room first, so its own growth stays out of the heap total.
+    let mut blocks = Vec::with_capacity(SIZES.len());
+    let heap_before = requested();
+    for size in SIZES {
+        let (used, heap) = (fence.used(), requested());
+        let block = fence.alloc(size);
+        if block.is_null() {
+            return Err(format!("alloc({size}) returned null under a 1 MiB limit"));
+        }
+        blocks.push(block);
+        let charged = fence.used() - used;
+        let real = requested().wrapping_sub(heap);
+        if charged != expected_cost(size) {
+            return Err(format!("alloc({size}) charged {charged}, expected {}", expected_cost(size)));
+        }
+        if real != charged {
+            return Err(format!("alloc({size}) charged {charged}, and the heap was asked for {real}"));
+        }
+        if !(block as usize).is_multiple_of(8) {
+            return Err(format!("alloc({size}) returned {block:p}, which isn't 8-aligned"));
+        }
+        // SAFETY: `block` is a live block from `fence`.
+        let usable = unsafe { FenceAllocator::usable_size(block) };
+        if usable != expected_cost(size) - 8 {
+            return Err(format!("usable_size after alloc({size}) is {usable}, expected {}", expected_cost(size) - 8));
+        }
+    }
+
+    let total = fence.used();
+    let (heap, first) = (requested(), blocks[0]);
+    // SAFETY: `first` is a live block from `fence`, and it is replaced by the result.
+    let grown = unsafe { fence.realloc(first, 5000) };
+    if grown.is_null() {
+        return Err("realloc to 5000 returned null under a 1 MiB limit".to_owned());
+    }
+    blocks[0] = grown;
+    let expected = total - expected_cost(1) + expected_cost(5000);
+    if fence.used() != expected {
+        return Err(format!("after realloc to 5000 the total is {}, expected {expected}", fence.used()));
+    }
+    let real = requested().wrapping_sub(heap);
+    if real != expected_cost(5000) - expected_cost(1) {
+        return Err(format!("realloc to 5000 grew the heap by {real}, expected {}", expected_cost(5000) - expected_cost(1)));
+    }
+
+    // `drain` keeps the list's own allocation, which isn't one of the blocks under test.
+    for block in blocks.drain(..) {
+        // SAFETY: each block is live, came from `fence`, and is freed once.
+        unsafe { fence.dealloc(block) };
+    }
+    if fence.used() != 0 {
+        return Err(format!("after freeing every block the total is {}", fence.used()));
+    }
+    if requested() != heap_before {
+        return Err(format!(
+            "after freeing every block the heap holds {} bytes more than before",
+            requested().wrapping_sub(heap_before)
+        ));
+    }
+
+    let mut small = FenceAllocator::new(expected_cost(16));
+    let fits = small.alloc(16);
+    if fits.is_null() {
+        return Err("alloc(16) returned null under a limit of exactly its cost".to_owned());
+    }
+    let over = small.alloc(1);
+    let refused = over.is_null();
+    // SAFETY: each non-null block came from `small` and is freed once.
+    unsafe {
+        if !refused {
+            small.dealloc(over);
+        }
+        small.dealloc(fits);
+    }
+    if !refused {
+        return Err("an allocation past the limit returned a block".to_owned());
+    }
+    Ok(())
+}
+
+thread_local! {
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -376,6 +539,18 @@ pub extern "C" fn fc_default_gas() -> u32 {
     u32::try_from(DEFAULT_GAS_BUDGET).unwrap_or(u32::MAX)
 }
 
+/// Run [`alloc_self_check`] on this target. Returns 0 when it passes and 1 with the reason in the out
+/// buffer when it doesn't.
+#[unsafe(no_mangle)]
+pub extern "C" fn fc_alloc_self_check() -> u32 {
+    let (status, text) = match alloc_self_check() {
+        Ok(()) => (0, "ok".to_owned()),
+        Err(reason) => (1, reason),
+    };
+    OUT.with(|out| *out.borrow_mut() = text.into_bytes());
+    status
+}
+
 /// The out buffer's address, valid until the next export call.
 #[unsafe(no_mangle)]
 pub extern "C" fn fc_out_ptr() -> *const u8 {
@@ -441,6 +616,18 @@ mod tests {
     fn bytes_that_are_not_a_snapshot_come_back_as_an_error() {
         let error = replay_golden(b"not a snapshot", &[0], &[0], 1).expect_err("refused");
         assert!(error.starts_with("genesis:"), "{error}");
+    }
+
+    #[test]
+    fn the_allocator_self_check_passes_on_this_target() {
+        assert_eq!(alloc_self_check(), Ok(()));
+    }
+
+    #[test]
+    fn a_runaway_recursion_faults_with_the_stack_message() {
+        let (status, text) = fence(shape::RECURSION, 100_000, UNSPENDABLE_GAS, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT);
+        assert_eq!(status, FENCE_ERROR, "{text}");
+        assert!(text.contains("Maximum call stack size exceeded"), "{text}");
     }
 
     #[test]

@@ -1,0 +1,27 @@
+# First-fault counts for the Factory memory limit, per target, at the 8 MiB default. Each count is
+# the first size of a shape in crates/fabrico-core/tests/common/fence_shapes.rs that runs out of
+# memory. scripts/check-fence-report.sh fails when a measured count differs from its line here.
+#
+# The two targets differ because wasm32 stores a JavaScript value in 8 bytes where a 64-bit
+# desktop build uses 16, so the same shape fits more values into the same limit. The native lines
+# repeat the pins in crates/fabrico-core/tests/factory_memory_pin.rs.
+#
+# This file is covered by docs/DECLARED-MOVES.txt. Moving a count needs a declared line in the
+# same commit, with a comment saying why the count moved. Don't move one only to turn a red check
+# green.
+#
+# Format: <target> <shape> <count>, and one `gas <count>` line. The gas line is only where the
+# search starts. The gas rule compares the two targets with each other, and the native count is
+# pinned in factory_memory_pin.rs.
+
+native arrays 477
+native strings 7416
+native objects 59434
+native cyclic 62134
+
+wasm32 arrays 955
+wasm32 strings 7615
+wasm32 objects 98088
+wasm32 cyclic 106656
+
+gas 1284960
