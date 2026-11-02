@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------------
 # WHY THIS EXISTS. The gate has ONE blind spot and it is structural: IT CANNOT SEE EDITS TO
 # ITSELF, OR TO ITS OWN `COVERED_CRATES` LIST. `scripts/` is not a covered path, there is
-# no self-hash, and nothing else asserts that list still names five crates. A change that
+# no self-hash, and nothing else asserts that list still names six crates. A change that
 # deleted "crates/fabrico-protocol" from it would go GREEN and nothing else in this
 # repository would fire, because a comparison taken against a narrowed path set is
 # vacuously empty by construction.
@@ -30,9 +30,9 @@
 #   5. THE UNTRACKED WALK BITES. A brand-new untracked file under a covered path exits 1
 #      naming it. This is the hole no diff against a commit can see.
 #   6. THE LOCKFILE CHECK BITES. A one-byte Cargo.lock edit exits 1.
-#   7. THE GATE'S OWN COVERED-PATH LIST STILL HOLDS ALL EIGHT ROOTS. The five crate roots
+#   7. THE GATE'S OWN COVERED-PATH LIST STILL HOLDS ALL NINE ROOTS. The six crate roots
 #      are read from `COVERED_CRATES` BY BLOCK with comment lines filtered out, so the
-#      gate's header prose - which names all five crates in English - cannot satisfy the
+#      gate's header prose - which names all six crates in English - cannot satisfy the
 #      check on its own. The other three roots are the lockfile, the board manifest and the
 #      host parity fixtures.
 #   8. CLEAN REVERT. This run left the working tree exactly as it found it.
@@ -179,7 +179,7 @@ LOCKFILE="Cargo.lock"
 BOARD_MANIFEST="examples/boards/hashes.manifest"
 HOST_PARITY_FIXTURE_DIR="crates/fabrico-host/tests/fixtures/host_parity"
 
-# The five covered crate roots, written out HERE rather than read from the gate. If the
+# The six covered crate roots, written out HERE rather than read from the gate. If the
 # two ever disagree, property 7 below is what says so, and a proof that sourced its
 # subject's own list could not.
 EXPECTED_CRATES=(
@@ -188,6 +188,7 @@ EXPECTED_CRATES=(
     "crates/fabrico-scenario"
     "crates/fabrico-engine"
     "crates/fabrico-qjs-alloc"
+    "crates/fabrico-player"
 )
 
 # The fixture path prefixes, written out here for the same reason EXPECTED_CRATES is: if
@@ -223,7 +224,7 @@ usage() {
 usage: scripts/prove-declared-gate-non-vacuous.sh [--base <ref> | <ref>]
 
 Proves that scripts/check-core-declared.sh actually BITES, in all twelve ways listed
-below, and that the gate's own covered-path list still names all eight covered roots.
+below, and that the gate's own covered-path list still names all nine covered roots.
 
 The twelve properties, in run order:
   1. baseline green            - the gate exits 0 with no probe applied
@@ -233,7 +234,7 @@ The twelve properties, in run order:
   4. declared-but-unmoved      - a line naming a path that did not move exits 1 NAMING it
   5. the untracked walk bites  - a new untracked file under a covered path exits 1
   6. the lockfile check bites  - a one-byte Cargo.lock edit exits 1
-  7. the covered list holds    - COVERED_CRATES still names all five crates, read BY
+  7. the covered list holds    - COVERED_CRATES still names all six crates, read BY
                                  BLOCK with comments filtered, plus the lockfile, the
                                  board manifest and the host parity fixtures
  10. the manifest edit bites   - a comment line appended to the board manifest exits 1
@@ -801,7 +802,7 @@ fail_named() {
 
 # Reads the gate's OWN covered-path list and records every root it no longer names in the
 # global MISSING_ROOTS. The array body is read BY BLOCK and comment lines are dropped, so
-# the gate's header prose - which names all five crates in English - cannot satisfy this
+# the gate's header prose - which names all six crates in English - cannot satisfy this
 # on its own. An array that cannot be located at all is exit 2, not a missing root: the
 # assertion could not be MADE, and an assertion that silently found nothing to check is
 # precisely the vacuous green this family refuses.
@@ -1001,10 +1002,10 @@ prover_put_back "$LOCKFILE"
 # it stop reddening, which reads as "the gate is broken" rather than "the gate was
 # NARROWED" - and a change that narrowed the list would have every reason to also move the
 # probe.
-step "property 7: the COVERED LIST HOLDS all eight roots (read by block, comments filtered)"
+step "property 7: the COVERED LIST HOLDS all nine roots (read by block, comments filtered)"
 compute_missing_roots
 if [ -n "$MISSING_ROOTS" ]; then
-    fail_named "${GATE}'s covered set no longer holds all five crate roots, the lockfile, the board manifest and the host parity fixtures. Missing: ${MISSING_ROOTS}"
+    fail_named "${GATE}'s covered set no longer holds all six crate roots, the lockfile, the board manifest and the host parity fixtures. Missing: ${MISSING_ROOTS}"
     echo >&2
     echo "      REMOVING AN ENTRY FROM THAT LIST IS THE GATE-WEAKENING MOVE THE GATE'S OWN" >&2
     echo "      HEADER FORBIDS, and NOTHING ELSE IN THIS REPOSITORY CAN SEE IT. scripts/ is" >&2
@@ -1012,7 +1013,7 @@ if [ -n "$MISSING_ROOTS" ]; then
     echo "      narrowed path set is vacuously empty by construction. The response is to" >&2
     echo "      restore the entry, never to relax this assertion." >&2
 else
-    echo "      the covered set holds all five crate roots, ${LOCKFILE}, ${BOARD_MANIFEST} and ${HOST_PARITY_FIXTURE_DIR}"
+    echo "      the covered set holds all six crate roots, ${LOCKFILE}, ${BOARD_MANIFEST} and ${HOST_PARITY_FIXTURE_DIR}"
 fi
 
 # --- The carve-out case ---------------------------------------------------------------

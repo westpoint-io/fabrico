@@ -24,7 +24,7 @@
 #        - a declared path whose recomputed digest is not the declared one is named, with
 #          BOTH digests printed so correcting the entry is copy-paste, not re-derivation.
 #
-#   2. [source], in BOTH directions, over the tracked non-fixture files under the five
+#   2. [source], in BOTH directions, over the tracked non-fixture files under the six
 #      covered crate roots. A path list with NO digests: a changed source file that is not
 #      listed is named, and a listed source file that did not change is named too.
 #
@@ -39,7 +39,7 @@
 #   digest, because an absent path has no bytes to digest; a DELETED source path is
 #   declared the way every source path is, as a bare path under [source].
 #
-#   3. No UNTRACKED file under the five covered crate roots, under the host parity fixtures or at the manifest path. A diff against a commit
+#   3. No UNTRACKED file under the six covered crate roots, under the host parity fixtures or at the manifest path. A diff against a commit
 #      cannot see a file git has never been told about, so a brand-new module would ride
 #      in green without this walk.
 #
@@ -138,12 +138,14 @@ cd "$(git rev-parse --show-toplevel)"
 # filtered out, which is the only thing in this repository that can see the list narrowed.
 # Keep it a top-level array literal opened by `COVERED_CRATES=(` and closed by a line that
 # is exactly `)`. Do not inline it into a loop and do not build it from a function.
+# crates/fabrico-wasm-corpus stays off this list, because it is a test harness and doesn't ship.
 COVERED_CRATES=(
     "crates/fabrico-core"
     "crates/fabrico-protocol"
     "crates/fabrico-scenario"
     "crates/fabrico-engine"
     "crates/fabrico-qjs-alloc"
+    "crates/fabrico-player"
 )
 
 GOLDEN_DIR="crates/fabrico-core/tests/golden"
@@ -231,7 +233,7 @@ Four checks:
      An undeclared move is named; a
      declared path that did not move is named; a digest that does not match the declared
      one is named with BOTH digests printed.
-  2. [source], both directions, over the tracked non-fixture files under the five
+  2. [source], both directions, over the tracked non-fixture files under the six
      covered crate roots. A path list with no digests.
   3. No untracked new file under the covered crate roots, under the host parity fixtures or
      at the manifest path.
@@ -263,7 +265,7 @@ Exit codes:
      the floor). This is a FAILURE, not a pass: an assertion that measures nothing must
      never be green.
 
-That the covered path set is still all five crate roots plus the lockfile, the board
+That the covered path set is still all six crate roots plus the lockfile, the board
 manifest and the host parity fixtures is checked by
 something OTHER than this script, because this script cannot see its own COVERED_CRATES
 array:
@@ -514,7 +516,7 @@ done
 # A rename or deletion empties the compared set, which `git diff --quiet` reports as
 # clean. Existence on BOTH sides is what makes the covered path set load-bearing.
 missing=""
-for p in "${COVERED_CRATES[@]}" "$GOLDEN_DIR" "$SCENARIO_FIXTURE_DIR" "$SCENARIO_SNAPSHOT_DIR" "$PROTOCOL_FIXTURE_DIR" "$LOCKFILE" "$BOARD_MANIFEST"; do
+for p in "${COVERED_CRATES[@]}" "$GOLDEN_DIR" "$SCENARIO_FIXTURE_DIR" "$SCENARIO_SNAPSHOT_DIR" "$PROTOCOL_FIXTURE_DIR" "$HOST_PARITY_FIXTURE_DIR" "$LOCKFILE" "$BOARD_MANIFEST"; do
     if [ ! -e "$p" ]; then
         missing="${missing}  working tree: ${p}"$'\n'
     fi
@@ -522,13 +524,6 @@ for p in "${COVERED_CRATES[@]}" "$GOLDEN_DIR" "$SCENARIO_FIXTURE_DIR" "$SCENARIO
         missing="${missing}  ${BASE}: ${p}"$'\n'
     fi
 done
-
-# On disk only, for now. The base tag predates the host parity fixtures, so at that base they are
-# ADDITIONS: the union below walks them, and [fixtures] declares them. Once the tag moves past
-# them, this directory can join the loop above.
-if [ ! -d "$HOST_PARITY_FIXTURE_DIR" ]; then
-    missing="${missing}  working tree: ${HOST_PARITY_FIXTURE_DIR}"$'\n'
-fi
 
 if [ -n "$missing" ]; then
     echo "FAIL: a covered path is missing, so the assertion could not be made:" >&2
@@ -742,7 +737,7 @@ path_is_under_fixture() {
     return 1
 }
 
-# The covered SOURCE set: every tracked file under the five crate roots that is not part
+# The covered SOURCE set: every tracked file under the six crate roots that is not part
 # of a covered fixture path. crates/fabrico-core/tests/golden/README.md sits under the
 # golden directory but is not inside a fixture directory, so it is source, not a fixture -
 # that boundary is deliberate and stated here because it is the one a reader gets wrong.
@@ -776,7 +771,7 @@ done < <(union_listing "$tracked_listing" "$base_tracked_listing")
 if [ "${#COVERED_SOURCE_PATHS[@]}" -eq 0 ]; then
     echo "FAIL: the covered SOURCE walk came back empty, so the assertion could not be made." >&2
     echo >&2
-    echo "The five covered crate roots hold tracked non-fixture files. A walk that found" >&2
+    echo "The six covered crate roots hold tracked non-fixture files. A walk that found" >&2
     echo "none of them compares clean and would report a green that measured nothing." >&2
     exit 2
 fi
@@ -1054,7 +1049,7 @@ if ! git diff --quiet "$BASE_SHA" -- "$LOCKFILE"; then
     echo "FAIL: ${LOCKFILE} changed against '${BASE}' (${BASE_SHA:0:12})." >&2
     echo "      A dependency bump can change generated code and therefore serialized bytes" >&2
     echo "      without touching a line under crates/, so the lockfile is covered alongside" >&2
-    echo "      the five crate roots. It is deliberately NOT declarable: a dependency" >&2
+    echo "      the six crate roots. It is deliberately NOT declarable: a dependency" >&2
     echo "      change is a reviewed move of the base tag (see BASE MOVES in this script's" >&2
     echo "      header), not a line appended to a data file. Revert the lockfile change," >&2
     echo "      or move the base as that section describes." >&2

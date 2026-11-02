@@ -145,7 +145,8 @@ jobs:
   # THE DECLARED-MOVES GATE.
   #
   # `scripts/check-core-declared.sh` compares fabrico-core, fabrico-protocol,
-  # fabrico-scenario, fabrico-engine, fabrico-qjs-alloc, examples/boards/hashes.manifest,
+  # fabrico-scenario, fabrico-engine, fabrico-qjs-alloc, fabrico-player,
+  # examples/boards/hashes.manifest,
   # the host parity fixtures and Cargo.lock against the annotated tag `public-base`, which sits on the commit its
   # own message names. A covered path may move, and the move must be declared in
   # docs/DECLARED-MOVES.txt with the digest it now carries; an undeclared move, a declared

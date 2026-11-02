@@ -9,9 +9,9 @@
 # WHAT THIS FILE IS. The golden corpus, the scenario corpus, the protocol fixtures, the host
 # parity fixtures (crates/fabrico-host/tests/fixtures/host_parity), the
 # board hash manifest (examples/boards/hashes.manifest) and the source of fabrico-core,
-# fabrico-protocol, fabrico-scenario, fabrico-engine and fabrico-qjs-alloc are COVERED
-# paths. A covered byte may move, and it must be DECLARED here first, with the digest it is
-# expected to carry afterwards. An undeclared move exits 1 by name. A declared move that
+# fabrico-protocol, fabrico-scenario, fabrico-engine, fabrico-qjs-alloc and fabrico-player
+# are COVERED paths. A covered byte may move, and it must be DECLARED here first, with the
+# digest it is expected to carry afterwards. An undeclared move exits 1 by name. A declared move that
 # did not happen exits 1 by name too, so a stale entry cannot become a blanket permission.
 #
 # ANCHOR. Every comparison is against the annotated tag `public-base`, which sits on the
@@ -119,7 +119,7 @@
 # =====================================================================================
 #
 # [source] is a PATH LIST WITH NO DIGESTS. It catches an edit to a core, protocol,
-# scenario, engine or allocator source file that was not declared. It is checked in BOTH directions, exactly
+# scenario, engine, allocator or player source file that was not declared. It is checked in BOTH directions, exactly
 # as [fixtures] is: a changed source file that is not listed exits 1, and a listed source
 # file that did not change also exits 1.
 #
