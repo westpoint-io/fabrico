@@ -20,10 +20,10 @@ export default defineConfig({
   // instead of a runner killed at the CI job's limit: Playwright stops, marks what is left not
   // run, and writes the JSON report with a top-level "Timed out waiting ... for the test suite
   // to run" error, which scripts/check-live-red-set.sh refuses by name (exit 2, never a pass).
-  // The slowest whole pass measured was 1.3 h (78 min, the GPU proxy; a full CI
-  // run took 1.2 h), and the CI job's own limit is 120 min with about ten of build
-  // before the suite starts, so 100.
-  globalTimeout: 100 * 60_000,
+  // The suite has grown to 335 tests. The one whole CI pass took 96 min, and 3 of the 4 runs on
+  // 2026-11-01 hit the old 100 min ceiling with up to 71 tests not run. The CI job's own limit
+  // is 170 min with about ten of build before the suite starts, so 150.
+  globalTimeout: 150 * 60_000,
   // ONE mutable host process is shared by every spec: serialize everything
   // (Pitfall 4 - a parallel worker would mutate the scene under another spec).
   fullyParallel: false,
