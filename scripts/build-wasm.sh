@@ -8,12 +8,17 @@
 # It also builds the native dump_packets tool with the same compiler and copies it beside the
 # module, because scripts/check-wasm-player.sh compares the two builds byte for byte.
 #
+# The corpus harness is built and optimised the same way, so the corpus runs on what wasm-opt emits,
+# as the player does, and its native report tool is copied beside it for
+# scripts/check-wasm-corpus.sh. The harness doesn't ship, and the player's dependency check refuses
+# it by name.
+#
 # OUTPUT, exactly one line on stdout after cargo's own output:
-#   WASM_BUILD player_raw=<bytes> player_opt=<bytes>
+#   WASM_BUILD player_raw=<bytes> player_opt=<bytes> corpus_opt=<bytes>
 #
 # ENVIRONMENT
 #   WASM_OPT          the wasm-opt binary, from scripts/install-wasm-opt.sh. Required.
-#   FABRICO_WASM_OUT  where the module and the tool go. Defaults to target/wasm-out under the repo root.
+#   FABRICO_WASM_OUT  where the modules and the tools go. Defaults to target/wasm-out under the repo root.
 #   CARGO_TARGET_DIR  cargo's build folder. Defaults to target under the repo root.
 #
 # EXIT CODES
@@ -62,16 +67,26 @@ TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 OUT="${FABRICO_WASM_OUT:-$ROOT/target/wasm-out}"
 MODULE="$OUT/fabrico_player.wasm"
 DUMP_TOOL="$OUT/dump_packets"
+CORPUS_MODULE="$OUT/fabrico_wasm_corpus.wasm"
+CORPUS_TOOL="$OUT/corpus_native"
 mkdir -p "$OUT"
-rm -f "$MODULE" "$DUMP_TOOL"
+rm -f "$MODULE" "$DUMP_TOOL" "$CORPUS_MODULE" "$CORPUS_TOOL"
 
-cargo build --locked -p fabrico-player --lib --target wasm32-unknown-unknown --profile wasm-player
+cargo build --locked -p fabrico-player -p fabrico-wasm-corpus --lib --target wasm32-unknown-unknown --profile wasm-player
+
+optimise() {
+  "$WASM_OPT" -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
+    --enable-mutable-globals "$1" -o "$2"
+}
 
 RAW="$TARGET_DIR/wasm32-unknown-unknown/wasm-player/fabrico_player.wasm"
-"$WASM_OPT" -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
-  --enable-mutable-globals "$RAW" -o "$MODULE"
+optimise "$RAW" "$MODULE"
+optimise "$TARGET_DIR/wasm32-unknown-unknown/wasm-player/fabrico_wasm_corpus.wasm" "$CORPUS_MODULE"
 
 cargo build --locked -p fabrico-player --example dump_packets
 cp "$TARGET_DIR/debug/examples/dump_packets" "$DUMP_TOOL"
 
-echo "WASM_BUILD player_raw=$(wc -c <"$RAW") player_opt=$(wc -c <"$MODULE")"
+cargo build --locked -p fabrico-wasm-corpus --bin corpus_native
+cp "$TARGET_DIR/debug/corpus_native" "$CORPUS_TOOL"
+
+echo "WASM_BUILD player_raw=$(wc -c <"$RAW") player_opt=$(wc -c <"$MODULE") corpus_opt=$(wc -c <"$CORPUS_MODULE")"
