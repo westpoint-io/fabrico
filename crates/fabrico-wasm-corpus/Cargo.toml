@@ -1,0 +1,23 @@
+[package]
+name = "fabrico-wasm-corpus"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Replays the repo's fixtures and probes Factory limits in the wasm build. Nothing from this crate
+# ships: it stays separate from `fabrico-player` so the player's size budget measures the player
+# alone and feature unification can't pull the harness in. The player's dependency check forbids
+# this crate by name. The `cdylib` is the wasm module the checks run, and the `rlib` lets
+# `cargo test --workspace` link the crate on the desktop targets too. `fabrico-core` is taken with
+# `default-features = false` because its default feature brings in the on-disk store.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fabrico-core      = { path = "../fabrico-core", default-features = false }
+fabrico-scenario  = { path = "../fabrico-scenario" }
+fabrico-qjs-alloc = { path = "../fabrico-qjs-alloc" }
+rquickjs          = "0.14"
+postcard          = { version = "1", features = ["use-std"] }
