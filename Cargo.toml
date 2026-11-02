@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"           # edition-2024 default resolver
-members  = ["crates/fabrico-core", "crates/fabrico-host", "crates/fabrico-protocol", "crates/fabrico-command", "crates/fabrico-app", "crates/fabrico-scenario", "crates/fabrico-engine", "crates/fabrico-qjs-alloc"]
+members  = ["crates/fabrico-core", "crates/fabrico-host", "crates/fabrico-protocol", "crates/fabrico-command", "crates/fabrico-app", "crates/fabrico-scenario", "crates/fabrico-engine", "crates/fabrico-qjs-alloc", "crates/fabrico-player"]
 
 [workspace.package]
 edition = "2024"
@@ -24,3 +24,14 @@ debug = false
 # Debug tests should run the engine as optimised as shipped builds, because -O0 C stack frames make a Factory fault at far shallower recursion.
 [profile.dev.package.rquickjs-sys]
 opt-level = 3
+
+# The WebAssembly player's build. A named profile leaves the desktop's release build alone. The
+# optimisation level moves how deep a Factory can recurse in wasm, because it changes how much
+# linear memory each call spends, so any limit number for wasm is measured on exactly this
+# profile.
+[profile.wasm-player]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

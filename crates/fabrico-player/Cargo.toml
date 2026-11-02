@@ -1,0 +1,22 @@
+[package]
+name = "fabrico-player"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The engine as a WebAssembly module: it takes a board file's text, steps it and hands back render
+# packets and state hashes as bytes. It holds no tick loop of its own, it calls the engine's
+# `BoardRun::step`. The `cdylib` is the wasm module. The `rlib` lets `cargo test --workspace` link
+# the crate on the desktop targets too. `fabrico-core` is taken with `default-features = false`
+# because its default feature brings in the on-disk store.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fabrico-engine   = { path = "../fabrico-engine" }
+fabrico-core     = { path = "../fabrico-core", default-features = false }
+fabrico-scenario = { path = "../fabrico-scenario" }
+postcard         = { version = "1", features = ["use-std"] }
+serde            = { version = "1", features = ["derive"] }

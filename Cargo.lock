@@ -1084,6 +1084,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabrico-player"
+version = "0.1.0"
+dependencies = [
+ "fabrico-core",
+ "fabrico-engine",
+ "fabrico-scenario",
+ "postcard",
+ "serde",
+]
+
+[[package]]
 name = "fabrico-protocol"
 version = "0.1.0"
 dependencies = [
