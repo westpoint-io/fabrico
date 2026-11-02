@@ -13,8 +13,8 @@
 //! The third reads every `.rs` file under this crate's `src/` and `examples/`, because the
 //! production sender lives in `sim_loop.rs` and a send written there would pass the first two. It
 //! covers the files in [`FILES_NAMING_A_COMMAND_SENDER`]: `driver.rs`, `sim_loop.rs`,
-//! `demo_scene.rs`, `input_apply.rs`, `project.rs`, `examples/read_project.rs` and
-//! `examples/vertical_slice.rs`. The only sends it allows are the one in `tick_once` and the
+//! `demo_scene.rs`, `input_apply.rs`, `project.rs`, `examples/read_project.rs`,
+//! `examples/replay_hash.rs` and `examples/vertical_slice.rs`. The only sends it allows are the one in `tick_once` and the
 //! `#[cfg(test)]` `test_send_command` in `sim_loop.rs`.
 //!
 //! That scan reads text and can't work out a channel's type, so two forms get past it: a type alias
@@ -54,6 +54,7 @@ const MIN_DISPATCHES: usize = 3;
 /// test pins the executor's end of the channel.
 const FILES_NAMING_A_COMMAND_SENDER: &[&str] = &[
     "examples/read_project.rs",
+    "examples/replay_hash.rs",
     "examples/vertical_slice.rs",
     "src/demo_scene.rs",
     "src/driver.rs",
@@ -67,9 +68,13 @@ const FILES_NAMING_A_COMMAND_SENDER: &[&str] = &[
 const ALLOWED_SENDS: &[(&str, usize)] = &[("src/driver.rs", 1), ("src/sim_loop.rs", 1)];
 
 /// How many lines hold the sender's type alone, as one member of a multi-line tuple, in each file.
-/// Such a line has no name on it for the name check to read. Both of these are in a `channels()`
+/// Such a line has no name on it for the name check to read. All of these are in a `channels()`
 /// test helper that drops the receiver, so a send on what they return reaches no executor.
-const BARE_SENDER_TYPES: &[(&str, usize)] = &[("examples/read_project.rs", 1), ("src/input_apply.rs", 1)];
+const BARE_SENDER_TYPES: &[(&str, usize)] = &[
+    ("examples/read_project.rs", 1),
+    ("examples/replay_hash.rs", 1),
+    ("src/input_apply.rs", 1),
+];
 
 /// Every line in `sim_loop.rs` that mentions the production sender. Listing them whole catches an
 /// alias or a clone taken from the field, and a renamed field, which the send count can't see.
