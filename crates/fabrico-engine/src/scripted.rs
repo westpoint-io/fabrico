@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use fabrico_core::command::{Command, Effect, Outcome, ResultEvent};
 use fabrico_core::core::Core;
 use fabrico_core::event::{EventPayload, LogHeader, SCHEMA_VERSION};
+use fabrico_core::factory::FactoryLimits;
 use fabrico_core::ids::{CommandId, Item, NodeId};
 use fabrico_core::state::HttpMethod;
 use fabrico_core::wire::DEFAULT_WIRE_BUDGET;
@@ -228,8 +229,21 @@ impl BoardRun {
     /// # Errors
     /// [`BoardError`] if the board fails the parser's checks or a command is refused.
     pub fn boot(board: BoardFile) -> Result<Self, BoardError> {
+        Self::boot_with_limits(board, FactoryLimits::default())
+    }
+
+    /// Boot `board` as [`BoardRun::boot`] does, with every Factory built at `limits`.
+    ///
+    /// The limits sit on the core's engine cache, which never reaches a snapshot or a hash, so at
+    /// [`FactoryLimits::default`] this run is the same run as [`BoardRun::boot`]'s. The board lint
+    /// boots each board a second time at smaller limits and compares the two runs.
+    ///
+    /// # Errors
+    /// The same as [`BoardRun::boot`].
+    pub fn boot_with_limits(board: BoardFile, limits: FactoryLimits) -> Result<Self, BoardError> {
         validate(&board)?;
-        let core = Core::genesis(LogHeader { schema_version: SCHEMA_VERSION, seed: board.seed });
+        let mut core = Core::genesis(LogHeader { schema_version: SCHEMA_VERSION, seed: board.seed });
+        core.factory_runtimes.set_limits(limits);
         let mut engine = Engine::from_core(core);
         let minted = boot_engine(&mut engine, &board)?;
         let executor = ScriptedExecutor::new(board.executor.clone());

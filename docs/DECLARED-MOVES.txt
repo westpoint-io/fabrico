@@ -160,6 +160,9 @@ crates/fabrico-player/size-budget.txt
 # The stack limit gets its own default on wasm32, because the 512 KiB native default lets a
 # runaway recursion run the JavaScript engine's stack out and kill the wasm instance. The native
 # value stays 512 KiB.
+# The engine cache also holds the memory and stack limits its engines are built with, and counts
+# the faults a limit caused, so the board lint can run a board at smaller limits. The defaults are
+# unchanged, and the cache never reaches a snapshot.
 crates/fabrico-core/src/factory.rs
 # The limit shapes move to one shared file, so the native pins and the wasm probes run the same
 # programs.
@@ -169,3 +172,7 @@ crates/fabrico-core/tests/common/fence_shapes.rs
 # The memory first-fault counts pinned per target for the fence report, which
 # scripts/check-fence-report.sh reads.
 crates/fabrico-player/fence-pins.txt
+# A board can boot with chosen Factory limits, through the same boot path as before.
+crates/fabrico-engine/src/scripted.rs
+# The board lint: each board runs again at half the memory limit and a quarter of the stack limit.
+crates/fabrico-engine/tests/board_lint.rs
