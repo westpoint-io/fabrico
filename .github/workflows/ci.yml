@@ -1027,20 +1027,30 @@ jobs:
   # WASM_OPT IS ON THE BUILD STEP, not in the job's `env`. The `runner` context isn't available at job
   # level, and GitHub refuses the whole workflow file over it. Only scripts/build-wasm.sh reads it.
   #
-  # TIME LIMIT. A run adds up to about 166 seconds, so the limit is 1.8 times that. Measured on a
+  # THE WASM CLIPPY STEP. The workspace clippy line compiles for the host only, so it never reads code
+  # under a wasm32 `cfg` or a build script's wasm32 branch. This step lints the player and the corpus
+  # harness for wasm32, with the toolchain pin check directly before it as on every clippy step. It
+  # compiles the vendored QuickJS outside scripts/build-wasm.sh, which is why CC and AR for wasm32 are
+  # in the job's `env`.
+  #
+  # TIME LIMIT. A run adds up to about 204 seconds, so the limit is 1.76 times that. Measured on a
   # developer machine: the cold scripts/build-wasm.sh on one core 67 seconds, with the corpus harness
-  # and its native tool in it, the six checks on two cores 9, and scripts/install-wasm-opt.sh 6.
-  # Recorded on a GitHub run, 84 more: job setup and checkout 3, toolchain 9, Node 1, the determinism
-  # job's larger apt step 27 as a stand-in, the cargo cache 11 to restore and 9 to save, npm ci 5 and
-  # the Playwright browser 19.
+  # and its native tool in it, the six checks on two cores 9, the fence report and its prover on two
+  # cores 3, the toolchain pin check under 1, the cold wasm32 clippy on one core 34 (an upper bound,
+  # since that run also compiled the standard library), and scripts/install-wasm-opt.sh 6. Recorded
+  # on a GitHub run, 84 more: job setup and checkout 3, toolchain 9, Node 1, the determinism job's
+  # larger apt step 27 as a stand-in, the cargo cache 11 to restore and 9 to save, npm ci 5 and the
+  # Playwright browser 19.
   wasm-player:
     name: the wasm player builds on the pinned compiler and passes its checks
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 6
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
+      CC_wasm32_unknown_unknown: clang
+      AR_wasm32_unknown_unknown: llvm-ar
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1099,6 +1109,18 @@ jobs:
 
       - name: Watch the corpus comparison fail
         run: bash scripts/prove-wasm-corpus-bites.sh
+
+      - name: Check where a Factory runs out of gas, memory and stack on both targets
+        run: bash scripts/check-fence-report.sh
+
+      - name: Watch the fence report fail
+        run: bash scripts/prove-fence-report-bites.sh
+
+      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
+        run: bash scripts/check-toolchain-pin.sh
+
+      - name: Clippy on the player and the corpus harness, for wasm32
+        run: cargo clippy -p fabrico-player -p fabrico-wasm-corpus --target wasm32-unknown-unknown --locked -- -D warnings
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand

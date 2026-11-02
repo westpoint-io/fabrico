@@ -572,7 +572,9 @@ fn the_headless_build_is_compiled_with_redb_off_in_its_own_job() {
 
 /// The job that builds the WebAssembly player, and the exact lines that build and check it.
 const WASM_JOB: &str = "wasm-player";
-const WASM_RUN_LINES: [&str; 7] = [
+/// The clippy line is here as well as under the pin-check test. That test checks each clippy step
+/// has a pin check directly before it, and it would stay green if both steps were deleted together.
+const WASM_RUN_LINES: [&str; 10] = [
     "run: bash scripts/build-wasm.sh",
     "run: bash scripts/check-wasm-player.sh",
     "run: bash scripts/check-player-browser.sh",
@@ -580,6 +582,10 @@ const WASM_RUN_LINES: [&str; 7] = [
     "run: bash scripts/prove-player-size-bites.sh",
     "run: bash scripts/check-wasm-corpus.sh",
     "run: bash scripts/prove-wasm-corpus-bites.sh",
+    "run: bash scripts/check-fence-report.sh",
+    "run: bash scripts/prove-fence-report-bites.sh",
+    "run: cargo clippy -p fabrico-player -p fabrico-wasm-corpus --target wasm32-unknown-unknown \
+     --locked -- -D warnings",
 ];
 
 /// No other job compiles for wasm, so a step dropped from this one leaves CI green with that check
