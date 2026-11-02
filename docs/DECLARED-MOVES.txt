@@ -147,69 +147,7 @@
 # =====================================================================================
 
 [fixtures]
-# The board hash manifest gets its first real lines: one per board file, with the end tick and the
-# final hash the generator measured. The boards and the fold are unchanged.
-examples/boards/hashes.manifest cab238c5c1e3c4dff8124820e2e0ea03e6060c2e96b09eac6bab023b8c303ae5
-# The host parity fixtures join the covered set (review 93 WR-06), so a re-record can't pass unseen.
-# The base tag predates them, so they read as additions. These are the bytes commit bc20bb7 recorded.
-crates/fabrico-host/tests/fixtures/host_parity/advanced.hashes cf283b2af3aeb659f22b502f92747d1f3f6bee2593cea6b65bfee4c79fee0e01
-crates/fabrico-host/tests/fixtures/host_parity/demo_scene.hashes 1a6dcd7112d01d8b724e38c0bec3387ae860acb0872d1f4df97d885ea93ef0ec
-crates/fabrico-host/tests/fixtures/host_parity/order_processing.hashes a86eb413eb53317cb75bddda5c8628ecf349d6ed901a17e6936b4e48414b8b2c
+NONE
 
 [source]
-# The Factory memory limit moves into an allocator, so it stops depending on QuickJS's
-# platform constant MALLOC_OVERHEAD. First-faulting counts change from 481 arrays, 7534 strings
-# and 60693 small objects to 477, 7416 and 59434. Automatic garbage collection goes off and each
-# call collects first, because the automatic trigger reads that same constant. Cyclic garbage
-# moves from 110247 to 62134. No golden fixture moves.
-crates/fabrico-qjs-alloc/src/lib.rs
-crates/fabrico-core/tests/factory_memory_pin.rs
-# The default Factory stack limit goes from 256 KiB to 512 KiB, because Windows first faulted at
-# recursion depth 51. A Factory that recursed past the old limit now runs further, and no board or
-# fixture in the repo recurses that deep, so no hash moves.
-crates/fabrico-core/src/factory.rs
-# Comment lines only: the header names the pinned rquickjs version and the memory limit's new home.
-crates/fabrico-core/tests/rquickjs_spike.rs
-# The timers move out of the desktop host so the tick loop can run without tokio, axum or redb.
-# The code is unchanged, and the host re-exports it from the old paths.
-crates/fabrico-engine/src/lib.rs
-crates/fabrico-engine/src/timer.rs
-# The per-tick loop body moves out of the desktop host. Its order among stamps and fold is
-# unchanged, and no golden fixture moves.
-crates/fabrico-engine/src/engine.rs
-# Gesture application moves out of the desktop host, so a board can take scripted edits with no
-# host. The code is unchanged apart from taking the engine, and the host keeps a wrapper with the
-# old signature. The headless test proves the path from gesture to command. No golden fixture moves.
-crates/fabrico-engine/src/gesture.rs
-crates/fabrico-engine/tests/headless_slice.rs
-# The render-packet builder moves out of the desktop host, so a board with no host can emit real
-# packets. The builder now reads a RenderSource, which the engine and the host both implement. Its
-# output is unchanged, and the host keeps the producer, the relay and their channels.
-crates/fabrico-engine/src/render_packet.rs
-# The request envelope and the default reply deadline move out of the desktop host, so a scripted
-# request and a real one go through one serializer. The field order and the bytes are unchanged,
-# and a test pins them to a literal.
-crates/fabrico-engine/src/envelope.rs
-# The board format, its parser and its typed refusals, and the boot a board runs with no host. The
-# three shipped scenes become data files in this format, so the app, the tests and later the browser
-# read one file. No golden fixture moves.
-crates/fabrico-engine/src/board.rs
-# A comment line only: the demo's list moved out of the host into a board file.
-crates/fabrico-core/src/tick.rs
-# The scripted run: a board's own inputs and outside answers reach the fold through Engine::step,
-# with no host and no network. Nothing in the fold changes, and no golden fixture moves.
-crates/fabrico-engine/src/scripted.rs
-crates/fabrico-engine/tests/board_outcomes.rs
-# The check that runs each board file to its end tick and compares the end tick and final hash
-# with the board hash manifest. It adds no behaviour to the engine, and no golden fixture moves.
-crates/fabrico-engine/tests/board_manifest.rs
-# Review 93 WR-01, in files listed above (board.rs, scripted.rs, tests/board_outcomes.rs): the parser
-# refuses an after_ticks larger than end_tick, and the scripted executor uses a checked add. No board
-# in the repo has such a delay, so no hash moves.
-# Review 93 WR-07, in board.rs listed above: ScriptInput and OutboundOutcome refuse an unknown field.
-# Only text is affected, and no board file holds one, so no hash moves.
-# Review 93 WR-04: the headless dependency check compares the tree with a committed list of packages.
-# It is a test file only, and no hash moves.
-# Review 93 WR-10, in the same test file: cargo tree now runs with --all-features, so a package behind
-# an optional engine feature reaches the list too. It is a test file only, and no hash moves.
-crates/fabrico-engine/tests/deps_headless.rs
+NONE
