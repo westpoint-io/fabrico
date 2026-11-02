@@ -182,7 +182,27 @@ pub const DEFAULT_MEM_LIMIT: u32 = 8 * 1024 * 1024;
 /// MSVC's frames are the largest we've seen: at 256 KiB a plain recursion first faulted at depth
 /// 51 on Windows, against 239 on macOS and 335 on Ubuntu. This has to stay under the stack of the
 /// thread that runs a Factory, which is 2 MiB for a spawned Rust thread.
+#[cfg(not(target_arch = "wasm32"))]
 pub const DEFAULT_STACK_LIMIT: u32 = 512 * 1024;
+
+/// Default stack fence (bytes) on wasm32. Caps deep-recursion / stack-bomb factories.
+///
+/// QuickJS's check reads wasm's linear-memory stack pointer, so this limit counts only that stack,
+/// which is 1 MiB in this build. The same wasm frames also spend the stack of the JavaScript engine
+/// that runs the module, and QuickJS can't see that one. When it runs out first, the engine throws
+/// a `RangeError` out of the wasm call, which kills the whole instance in place of faulting the one
+/// Factory. So the limit here has to fire before that second stack runs out.
+///
+/// On the `-Oz` build, at 512 KiB a runaway recursion trapped the instance under Node, on
+/// Chromium's main thread and in a Chromium Worker, and at 128 KiB it faulted cleanly in all three,
+/// for plain recursion and for recursion through `Array.map`. The Worker is the tightest: its
+/// engine stack is about half the main thread's, and recursion through `Array.map` faulted at depth
+/// 302 there, with the trap at 361 to 405 depending on which tier compiled the wasm. Plain recursion
+/// faulted at depth 742, deeper than a native build reaches at 512 KiB, because each level costs
+/// less linear memory than a native C frame. A Factory that gets near its limit can therefore give
+/// different hashes here and on the desktop.
+#[cfg(target_arch = "wasm32")]
+pub const DEFAULT_STACK_LIMIT: u32 = 128 * 1024;
 
 /// Sentinel budget used while *building* the runtime (running the trusted prelude,
 /// curating `Math`, and parse-validating the user source). The fuse must not trip

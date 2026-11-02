@@ -11,6 +11,9 @@
 //!
 //! A panic traps a wasm instance, so a fixture that won't decode comes back as a status with its
 //! error text in the out buffer.
+//!
+//! [`fence`] runs one of the limit shapes once on a fresh Factory runtime. The shapes come from the
+//! file the native pins use, included by path, so a shape can't differ between the targets.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::all)]
@@ -21,6 +24,11 @@ use std::fmt::Write as _;
 use fabrico_core::core::{Core, MAX_REPLAY_SPAN};
 use fabrico_core::edit::EditRecord;
 use fabrico_core::event::{Event, LogHeader, SCHEMA_VERSION};
+use fabrico_core::factory::{
+    DEFAULT_GAS_BUDGET, DEFAULT_MEM_LIMIT, DEFAULT_STACK_LIMIT, FactoryRuntime,
+};
+use fabrico_core::fault::FaultReason;
+use fabrico_core::rng::SimRng;
 use fabrico_core::snapshot;
 use fabrico_scenario::fixture::Scenario;
 use fabrico_scenario::tick_hash;
@@ -166,6 +174,78 @@ fn advance_one_tick(
     }
 }
 
+#[path = "../../fabrico-core/tests/common/fence_shapes.rs"]
+mod fence_shapes;
+
+/// The shape numbers [`fence`] and `fc_fence` take.
+pub mod shape {
+    /// 1000-element arrays, counted to the memory limit.
+    pub const ARRAYS: u32 = 0;
+    /// 1 KiB strings, counted to the memory limit.
+    pub const STRINGS: u32 = 1;
+    /// Small objects, counted to the memory limit.
+    pub const OBJECTS: u32 = 2;
+    /// Self-referring objects, half of them garbage, counted to the memory limit.
+    pub const CYCLIC: u32 = 3;
+    /// Plain recursion, counted to the stack limit.
+    pub const RECURSION: u32 = 4;
+    /// A loop of additions, counted to the gas budget.
+    pub const GAS_LOOP: u32 = 5;
+    /// Recursion through `Array.map`, counted to the stack limit.
+    pub const MAP_RECURSION: u32 = 6;
+}
+
+/// The Factory ran with no fault.
+pub const FENCE_RAN: u32 = 0;
+/// The Factory faulted with `FactoryError`, the reason a memory or stack limit gives.
+pub const FENCE_ERROR: u32 = 1;
+/// The Factory faulted with `FactoryTimeout`, the reason the gas fuse gives.
+pub const FENCE_TIMEOUT: u32 = 2;
+/// Any other fault, an unknown shape, or a runtime that wouldn't build.
+pub const FENCE_OTHER: u32 = 3;
+
+/// A gas budget no shape can spend, so a fault can only come from the limit under test. The native
+/// pins use the same value.
+pub const UNSPENDABLE_GAS: u64 = 1 << 40;
+
+/// The source of shape `shape` at size `n`, or `None` for an unknown shape number.
+#[must_use]
+pub fn fence_source(shape: u32, n: u64) -> Option<String> {
+    let make: fn(u64) -> String = match shape {
+        shape::ARRAYS => fence_shapes::arrays,
+        shape::STRINGS => fence_shapes::strings,
+        shape::OBJECTS => fence_shapes::objects,
+        shape::CYCLIC => fence_shapes::cyclic,
+        shape::RECURSION => fence_shapes::recursion,
+        shape::GAS_LOOP => fence_shapes::gas_loop,
+        shape::MAP_RECURSION => fence_shapes::map_recursion,
+        _ => return None,
+    };
+    Some(make(n))
+}
+
+/// Run shape `shape` at size `n` once, on a runtime built with these limits, as the native pins
+/// do. Returns one of the `FENCE_` statuses and the fault text, which is empty when it ran.
+#[must_use]
+pub fn fence(shape: u32, n: u64, gas: u64, mem_limit: u32, stack_limit: u32) -> (u32, String) {
+    let Some(source) = fence_source(shape, n) else {
+        return (FENCE_OTHER, format!("unknown shape {shape}"));
+    };
+    let mut factory = match FactoryRuntime::build(&source, gas, mem_limit, stack_limit) {
+        Ok(factory) => factory,
+        Err(error) => return (FENCE_OTHER, format!("build: {error:?}")),
+    };
+    let mut rng = SimRng::from_seed_u64(1);
+    let outcome = factory.run(b"1", b"{}", &mut rng);
+    let status = match outcome.fault {
+        None => FENCE_RAN,
+        Some(FaultReason::FactoryError) => FENCE_ERROR,
+        Some(FaultReason::FactoryTimeout) => FENCE_TIMEOUT,
+        Some(_) => FENCE_OTHER,
+    };
+    (status, String::from_utf8_lossy(&outcome.fault_message).into_owned())
+}
+
 thread_local! {
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
@@ -262,6 +342,38 @@ pub unsafe extern "C" fn fc_replay_scenario(ptr: *const u8, len: u32) -> u32 {
     // SAFETY: the caller promises the pointer and length describe valid bytes for this call.
     let bytes = unsafe { bytes_at(ptr, len) };
     finish(replay_scenario(bytes))
+}
+
+/// Run shape `shape` at size `n` once, with the fault text in the out buffer. A 0 for `gas` means a
+/// budget no shape can spend, and a 0 for `mem` or `stack` means this target's default. Returns one
+/// of the `FENCE_` statuses.
+#[unsafe(no_mangle)]
+pub extern "C" fn fc_fence(shape: u32, n: u32, gas: u32, mem: u32, stack: u32) -> u32 {
+    let gas = if gas == 0 { UNSPENDABLE_GAS } else { u64::from(gas) };
+    let mem = if mem == 0 { DEFAULT_MEM_LIMIT } else { mem };
+    let stack = if stack == 0 { DEFAULT_STACK_LIMIT } else { stack };
+    let (status, text) = fence(shape, u64::from(n), gas, mem, stack);
+    OUT.with(|out| *out.borrow_mut() = text.into_bytes());
+    status
+}
+
+/// This target's default memory limit in bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn fc_default_mem() -> u32 {
+    DEFAULT_MEM_LIMIT
+}
+
+/// This target's default stack limit in bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn fc_default_stack() -> u32 {
+    DEFAULT_STACK_LIMIT
+}
+
+/// This target's default gas budget. It fits a `u32`, and a budget that didn't would read as
+/// `u32::MAX`, which the report's equality rule then catches.
+#[unsafe(no_mangle)]
+pub extern "C" fn fc_default_gas() -> u32 {
+    u32::try_from(DEFAULT_GAS_BUDGET).unwrap_or(u32::MAX)
 }
 
 /// The out buffer's address, valid until the next export call.

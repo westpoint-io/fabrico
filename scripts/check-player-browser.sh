@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
 # Runs the built WebAssembly player in headless Chromium: the demo board from its data file, through
-# the same loader Node uses, to the end hash in examples/boards/hashes.manifest. Build the module
-# first with scripts/build-wasm.sh.
+# the same loader Node uses, to the end hash in examples/boards/hashes.manifest. It also runs the
+# stack fence spec on the corpus harness, which checks that a runaway recursion faults cleanly in
+# Node, on Chromium's main thread and in a Chromium Worker. Build both modules first with
+# scripts/build-wasm.sh.
 #
 # This script starts and stops Vite itself, as a child it kills by PID, because Playwright's own
 # server management dies at signal 16 in some restricted shells. CI runs the same script.
@@ -12,7 +14,7 @@
 #
 # EXIT CODES
 #   0  the spec passed.
-#   2  no check: the module is missing or empty, port 5181 is already answering, or Vite didn't
+#   2  no check: either module is missing or empty, port 5181 is already answering, or Vite didn't
 #      come up within 60 seconds.
 #   Any other non-zero code is Playwright's own.
 
@@ -21,11 +23,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 OUT="${FABRICO_WASM_OUT:-$ROOT/target/wasm-out}"
 WASM="$(cd "$OUT" 2>/dev/null && pwd -P)/fabrico_player.wasm" || WASM="$OUT/fabrico_player.wasm"
+CORPUS_WASM="$(dirname "$WASM")/fabrico_wasm_corpus.wasm"
 PORT=5181
 URL="http://127.0.0.1:$PORT/"
 
 if [ ! -s "$WASM" ]; then
   echo "check-player-browser: $WASM is missing or empty. Run scripts/build-wasm.sh first." >&2
+  exit 2
+fi
+if [ ! -s "$CORPUS_WASM" ]; then
+  echo "check-player-browser: $CORPUS_WASM is missing or empty. Run scripts/build-wasm.sh first." >&2
   exit 2
 fi
 
@@ -69,7 +76,7 @@ if ! curl -s -o /dev/null --max-time 2 "$URL"; then
 fi
 
 STATUS=0
-FABRICO_PLAYER_WASM="$WASM" npx playwright test --config=playwright.player.config.ts || STATUS=$?
+FABRICO_PLAYER_WASM="$WASM" FABRICO_CORPUS_WASM="$CORPUS_WASM" npx playwright test --config=playwright.player.config.ts || STATUS=$?
 stop_vite
 trap - EXIT
 exit "$STATUS"

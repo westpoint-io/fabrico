@@ -30,49 +30,10 @@ const PINNED_STRINGS: u64 = 7416;
 const PINNED_OBJECTS: u64 = 59434;
 const PINNED_CYCLIC: u64 = 62134;
 
-/// 1000-element arrays: each one is a block over QuickJS's 512-byte arena limit, so the
-/// allocator sees every allocation directly.
-fn arrays(n: u64) -> String {
-    format!(
-        "export default function(i, ctx) {{ const a = []; for (let k = 0; k < {n}; k++) \
-         a.push(new Array(1000).fill(k)); ctx.state = {{ n: a.length }}; }}"
-    )
-}
+#[path = "common/fence_shapes.rs"]
+mod fence_shapes;
 
-/// 1 KiB strings: also over the arena limit, and built by a different path through QuickJS.
-fn strings(n: u64) -> String {
-    format!(
-        "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
-         a.push('y'.repeat(1024) + k); ctx.state = {{ n: a.length }}; }}"
-    )
-}
-
-/// Small objects: these come from QuickJS's arena, so the allocator sees only its chunks.
-fn objects(n: u64) -> String {
-    format!(
-        "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
-         a.push({{k}}); ctx.state = {{ n: a.length }}; }}"
-    )
-}
-
-/// Each object refers to itself. One in two stays in the array and the other is dropped, so
-/// the dropped ones are garbage only the cycle collector can free. QuickJS's automatic collector
-/// decides when to run from a total that includes `MALLOC_OVERHEAD`, so this count moves with
-/// that constant unless the automatic collector is off.
-fn cyclic(n: u64) -> String {
-    format!(
-        "export default function(i, ctx) {{ const a=[]; for (let k = 0; k < {n}; k++) \
-         {{ const o = {{k}}; o.self = o; if (k % 2 === 0) a.push(o); }} \
-         ctx.state = {{ n: a.length }}; }}"
-    )
-}
-
-fn recursion(depth: u64) -> String {
-    format!(
-        "export default function(i, ctx) {{ function f(k) {{ return k === 0 ? 0 : 1 + f(k - 1); }} \
-         ctx.state = {{ d: f({depth}) }}; }}"
-    )
-}
+use fence_shapes::{arrays, cyclic, objects, recursion, strings};
 
 fn run_with_limits(src: &str, mem_limit: u32, stack_limit: u32) -> FactoryOutcome {
     let mut factory = FactoryRuntime::build(src, GAS, mem_limit, stack_limit).expect("builds");
