@@ -215,6 +215,60 @@ fn arrays_source(n: u64) -> String {
     )
 }
 
+/// Plain recursion to `depth`, then one emit.
+fn recursion_source(depth: u64) -> String {
+    format!(
+        "export default function (input, ctx) {{ function f(k) {{ return k === 0 ? 0 : 1 + f(k - 1); }} \
+         ctx.emit(0, {{ depth: f({depth}) }}); }}"
+    )
+}
+
+/// Recursion through `Array.map` to `depth`, then one emit.
+fn map_recursion_source(depth: u64) -> String {
+    format!(
+        "export default function (input, ctx) {{ function f(k) {{ return k === 0 ? 0 : [k - 1].map(f)[0] + 1; }} \
+         ctx.emit(0, {{ depth: f({depth}) }}); }}"
+    )
+}
+
+/// The folder of the test boards the lint has to reject. They sit here and not under
+/// `examples/boards/`, because the manifest check walks that folder and every board there needs a
+/// manifest line.
+const LINT_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/board_lint");
+
+/// One of the lint's test boards, by file stem.
+fn fixture(stem: &str) -> String {
+    let path = format!("{LINT_FIXTURES}/{stem}.board.ron");
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"))
+}
+
+/// Whether one of `problems` is the lint's rule `rule` ("R1" or "R2").
+fn has_rule(problems: &[String], rule: &str) -> bool {
+    problems.iter().any(|p| p.starts_with(&format!("{rule}: ")))
+}
+
+/// The number of 1000-element arrays at which the memory limit first faults through
+/// [`factory_board`] at [`LINT_MEM`]. Measured through a real board, on gcc and clang alike.
+const FIRST_FAULT_ARRAYS_AT_LINT_MEM: u64 = 233;
+
+/// The first count in `1..=hi` whose array board faults on a limit at the reduced limits.
+fn first_fault_arrays(hi: u64) -> Option<u64> {
+    let faults = |n: u64| run_at(&factory_board(&arrays_source(n)), Some(LINT_LIMITS)).expect("runs").limit_faults > 0;
+    if !faults(hi) {
+        return None;
+    }
+    let (mut low, mut high) = (1, hi);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if faults(middle) {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    Some(low)
+}
+
 #[test]
 fn the_lint_limits_are_half_the_memory_and_a_quarter_of_the_stack() {
     // Both divisions are exact at the defaults. A default that stops dividing evenly shows up here.
@@ -301,4 +355,89 @@ fn every_board_passes_the_lint() {
         shipped_boards().into_iter().map(|(path, text)| (path, lint_board(&text))).collect();
     let problems = walk_problems(&linted);
     assert!(problems.is_empty(), "the board lint found {} problem(s):\n{}", problems.len(), problems.join("\n"));
+}
+
+#[test]
+fn deep_recursion_is_rejected_for_a_limit_fault() {
+    let problems = lint_board(&fixture("deep_recursion"));
+    assert!(has_rule(&problems, "R2"), "{problems:?}");
+}
+
+#[test]
+fn near_memory_limit_is_rejected_for_a_limit_fault() {
+    let problems = lint_board(&fixture("near_memory_limit"));
+    assert!(has_rule(&problems, "R2"), "{problems:?}");
+}
+
+#[test]
+fn swallowed_overflow_is_rejected_by_its_hash_alone() {
+    let problems = lint_board(&fixture("swallowed_overflow"));
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].starts_with("R1: the hash after tick "), "{problems:?}");
+    let reduced = run_at(&fixture("swallowed_overflow"), Some(LINT_LIMITS)).expect("runs");
+    assert!(reduced.factory_fault_ticks.is_empty(), "the Factory catches its own overflow: {:?}", reduced.factory_fault_ticks);
+}
+
+#[test]
+fn the_memory_boards_run_clear_at_the_full_limits() {
+    // The allocator counts the bytes it hands out, so these two run the same on every operating
+    // system.
+    for stem in ["near_memory_limit", "swallowed_overflow"] {
+        let full = run_at(&fixture(stem), None).expect("runs");
+        assert_eq!(full.limit_faults, 0, "{stem}");
+        assert!(full.factory_fault_ticks.is_empty(), "{stem}: {:?}", full.factory_fault_ticks);
+    }
+}
+
+// Plain recursion at the 512 KiB default first faulted at depth 676 on CI's Ubuntu, 484 on its
+// macOS and 104 on its Windows, so depth 220 runs clear at the full limits everywhere but
+// Windows. Windows faults at both limits, and R2 rejects the board there too.
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn deep_recursion_runs_clear_at_the_full_limits() {
+    let full = run_at(&fixture("deep_recursion"), None).expect("runs");
+    assert_eq!(full.limit_faults, 0);
+    assert!(full.factory_fault_ticks.is_empty(), "{:?}", full.factory_fault_ticks);
+}
+
+#[test]
+fn the_memory_boundary_is_exact() {
+    let n = FIRST_FAULT_ARRAYS_AT_LINT_MEM;
+    let below = lint_board(&factory_board(&arrays_source(n - 1)));
+    let at = lint_board(&factory_board(&arrays_source(n)));
+    if !below.is_empty() || !has_rule(&at, "R2") {
+        panic!(
+            "the pinned first fault at {LINT_MEM} bytes is {n} arrays, and this build's is {:?}. \
+             At {}: {below:?}. At {n}: {at:?}.",
+            first_fault_arrays(2 * n),
+            n - 1,
+        );
+    }
+}
+
+#[test]
+fn a_deliberate_throw_on_each_item_passes() {
+    let board = factory_board_with_script(
+        r#"export default function (input, ctx) { throw new Error("rejected: always"); }"#,
+        "        At(tick: 50, input: Webhook(source: 0, body: \"{}\")),\n        \
+         At(tick: 60, input: Webhook(source: 0, body: \"{}\")),\n",
+    );
+    let problems = lint_board(&board);
+    assert!(problems.is_empty(), "{problems:?}");
+    let reduced = run_at(&board, Some(LINT_LIMITS)).expect("runs");
+    assert_eq!(reduced.factory_fault_ticks.len(), 3, "each of the 3 items throws: {:?}", reduced.factory_fault_ticks);
+}
+
+#[test]
+fn recursion_through_array_map_is_rejected() {
+    // Depth 100 clears plain recursion's first fault at the reduced stack limit on every compiler
+    // measured, and through Array.map it faults there: gcc at 30, clang at 50.
+    let problems = lint_board(&factory_board(&map_recursion_source(100)));
+    assert!(has_rule(&problems, "R2"), "{problems:?}");
+}
+
+#[test]
+fn the_test_boards_use_the_programs_these_tests_build() {
+    assert!(fixture("deep_recursion").contains(&recursion_source(220)));
+    assert!(fixture("near_memory_limit").contains(&arrays_source(300)));
 }
