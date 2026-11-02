@@ -3,6 +3,7 @@ import {
   type PlayerExports,
   PlayerError,
   PlayerTrapped,
+  decodePlayerEffects,
   loadPlayerModule,
   playerModuleFrom,
 } from './playerWasm.ts';
@@ -33,6 +34,8 @@ function stub(overrides: (setOut: (text: string) => number) => Partial<PlayerExp
       outLen = 0;
       return 0;
     },
+    fp_take_effects: () => setOut('\0'),
+    fp_restart: () => 0,
     fp_tick: () => 0n,
     fp_end_tick: () => 0n,
     fp_tick_hash: () => setOut('ab'),
@@ -75,6 +78,8 @@ describe('a trapped instance', () => {
       expect(() => board.step(1)).toThrow(PlayerTrapped);
       expect(() => board.tick()).toThrow(PlayerTrapped);
       expect(() => board.takePacket()).toThrow(PlayerTrapped);
+      expect(() => board.takeEffects()).toThrow(PlayerTrapped);
+      expect(() => board.restart()).toThrow(PlayerTrapped);
       expect(() => board.tickHash()).toThrow(PlayerTrapped);
       expect(() => board.destroy()).toThrow(PlayerTrapped);
       expect(() => module.createBoard('another board')).toThrow(PlayerTrapped);
@@ -218,6 +223,71 @@ describe('statuses', () => {
       expect(() => board.step(ticks)).toThrow(PlayerError);
     }
     expect(() => board.step(2 ** 32 - 1)).not.toThrow();
+  });
+});
+
+describe('effects', () => {
+  it('throws the out text when fp_take_effects returns 0, because an empty list is one byte', () => {
+    const board = playerModuleFrom(
+      stub((setOut) => ({
+        fp_take_effects: () => {
+          setOut('no player has handle 1');
+          return 0;
+        },
+      })),
+    ).createBoard('board');
+    expect(() => board.takeEffects()).toThrow('no player has handle 1');
+  });
+
+  it('throws the out text when a restart returns a status', () => {
+    const board = playerModuleFrom(
+      stub((setOut) => ({
+        fp_restart: () => {
+          setOut('a command was refused');
+          return 1;
+        },
+      })),
+    ).createBoard('board');
+    expect(() => board.restart()).toThrow('a command was refused');
+  });
+
+  it('decodes an empty list', () => {
+    expect(decodePlayerEffects(new Uint8Array([0]))).toEqual([]);
+  });
+
+  it('decodes each kind and each outcome in the order the Rust types declare them', () => {
+    const url = [...new TextEncoder().encode('u')];
+    const bytes = new Uint8Array([
+      4,
+      // tick 300 as a varint, Http, the url, Put, a 1-byte body, Reply after 40.
+      0xac, 0x02, 0, url.length, ...url, 2, 1, 9, 0, 40,
+      // tick 2, Debug with a 1-byte message, Error after 3.
+      2, 1, 1, 8, 1, 3,
+      // tick 3, Noop, Timeout.
+      3, 2, 2,
+      // tick 4, Reply to correlation 5 with a 1-byte payload, Reply after 1.
+      4, 3, 5, 1, 7, 0, 1,
+    ]);
+    expect(decodePlayerEffects(bytes)).toEqual([
+      {
+        tick: 300,
+        effect: { kind: 'Http', url: 'u', method: 'Put', body: new Uint8Array([9]) },
+        answer: { outcome: 'Reply', afterTicks: 40 },
+      },
+      { tick: 2, effect: { kind: 'Debug', message: new Uint8Array([8]) }, answer: { outcome: 'Error', afterTicks: 3 } },
+      { tick: 3, effect: { kind: 'Noop' }, answer: { outcome: 'Timeout' } },
+      {
+        tick: 4,
+        effect: { kind: 'Reply', correlation: 5, payload: new Uint8Array([7]) },
+        answer: { outcome: 'Reply', afterTicks: 1 },
+      },
+    ]);
+  });
+
+  it('refuses an unknown kind, an unknown verb and bytes left over', () => {
+    expect(() => decodePlayerEffects(new Uint8Array([1, 1, 9]))).toThrow(/PlayerEffectKind discriminant 9/);
+    expect(() => decodePlayerEffects(new Uint8Array([1, 1, 0, 0, 9]))).toThrow(/HttpMethod discriminant 9/);
+    expect(() => decodePlayerEffects(new Uint8Array([0, 0]))).toThrow(/left over/);
   });
 });
 

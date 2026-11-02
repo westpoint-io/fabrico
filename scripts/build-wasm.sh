@@ -5,20 +5,23 @@
 # The module it writes is the wasm-opt -Oz output, because that's what ships. Limit numbers for
 # wasm belong to this exact build, so don't measure them on anything else.
 #
+# It also builds the native dump_packets tool with the same compiler and copies it beside the
+# module, because scripts/check-wasm-player.sh compares the two builds byte for byte.
+#
 # OUTPUT, exactly one line on stdout after cargo's own output:
 #   WASM_BUILD player_raw=<bytes> player_opt=<bytes>
 #
 # ENVIRONMENT
 #   WASM_OPT          the wasm-opt binary, from scripts/install-wasm-opt.sh. Required.
-#   FABRICO_WASM_OUT  where the module goes. Defaults to target/wasm-out under the repo root.
+#   FABRICO_WASM_OUT  where the module and the tool go. Defaults to target/wasm-out under the repo root.
 #   CARGO_TARGET_DIR  cargo's build folder. Defaults to target under the repo root.
 #
 # EXIT CODES
 #   0  the module was built and the line was printed.
 #   2  no build: clang has no wasm32 backend, llvm-ar isn't on PATH, the compiler has no wasm
 #      standard library, or WASM_OPT isn't executable.
-#   Any other non-zero code is cargo's or wasm-opt's own. Either way the old module is gone, so a
-#   later check can't read a stale one.
+#   Any other non-zero code is cargo's or wasm-opt's own. Either way the old module and the old
+#   tool are gone, so a later check can't read a stale one.
 
 set -euo pipefail
 
@@ -58,13 +61,17 @@ export AR_wasm32_unknown_unknown=llvm-ar
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 OUT="${FABRICO_WASM_OUT:-$ROOT/target/wasm-out}"
 MODULE="$OUT/fabrico_player.wasm"
+DUMP_TOOL="$OUT/dump_packets"
 mkdir -p "$OUT"
-rm -f "$MODULE"
+rm -f "$MODULE" "$DUMP_TOOL"
 
 cargo build --locked -p fabrico-player --lib --target wasm32-unknown-unknown --profile wasm-player
 
 RAW="$TARGET_DIR/wasm32-unknown-unknown/wasm-player/fabrico_player.wasm"
 "$WASM_OPT" -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
   --enable-mutable-globals "$RAW" -o "$MODULE"
+
+cargo build --locked -p fabrico-player --example dump_packets
+cp "$TARGET_DIR/debug/examples/dump_packets" "$DUMP_TOOL"
 
 echo "WASM_BUILD player_raw=$(wc -c <"$RAW") player_opt=$(wc -c <"$MODULE")"

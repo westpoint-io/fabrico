@@ -8,6 +8,8 @@
 // A memory grow detaches every view of the old buffer, so each read here takes a fresh view of
 // `memory.buffer` after the export call that may have grown it.
 
+import { DecodeError, PostcardReader } from '../protocol/decode.ts';
+
 /** The one function the module may import. */
 const CLOCK_MODULE = 'env';
 const CLOCK_NAME = '__rquickjs_host_now_us';
@@ -35,12 +37,101 @@ export class PlayerTrapped extends Error {
   }
 }
 
+/** The HTTP verbs, in the order `HttpMethod` declares them in Rust, which is the wire format. */
+const HTTP_METHODS = ['Get', 'Post', 'Put', 'Patch', 'Delete'] as const;
+
+/** What a command asked the outside world to do. The player only records it. */
+export type PlayerEffectKind =
+  | { kind: 'Http'; url: string; method: (typeof HTTP_METHODS)[number]; body: Uint8Array }
+  | { kind: 'Debug'; message: Uint8Array }
+  | { kind: 'Noop' }
+  | { kind: 'Reply'; correlation: number; payload: Uint8Array };
+
+/** How the board's script answered a command. */
+export type PlayerEffectOutcome =
+  | { outcome: 'Reply'; afterTicks: number }
+  | { outcome: 'Error'; afterTicks: number }
+  | { outcome: 'Timeout' };
+
+/** One outbound command a board's run emitted, and its answer. */
+export interface PlayerEffect {
+  tick: number;
+  effect: PlayerEffectKind;
+  answer: PlayerEffectOutcome;
+}
+
+function readBytes(r: PostcardReader): Uint8Array {
+  return Uint8Array.from(r.vec(() => r.u8()));
+}
+
+function readEffectKind(r: PostcardReader): PlayerEffectKind {
+  const tag = r.varintU();
+  switch (tag) {
+    case 0: {
+      const url = r.str();
+      const methodTag = r.varintU();
+      const method = HTTP_METHODS[methodTag];
+      if (method === undefined) throw new DecodeError(`unknown HttpMethod discriminant ${methodTag}`);
+      return { kind: 'Http', url, method, body: readBytes(r) };
+    }
+    case 1:
+      return { kind: 'Debug', message: readBytes(r) };
+    case 2:
+      return { kind: 'Noop' };
+    case 3: {
+      const correlation = r.varintU();
+      return { kind: 'Reply', correlation, payload: readBytes(r) };
+    }
+    default:
+      throw new DecodeError(`unknown PlayerEffectKind discriminant ${tag}`);
+  }
+}
+
+function readEffectOutcome(r: PostcardReader): PlayerEffectOutcome {
+  const tag = r.varintU();
+  switch (tag) {
+    case 0:
+      return { outcome: 'Reply', afterTicks: r.varintU() };
+    case 1:
+      return { outcome: 'Error', afterTicks: r.varintU() };
+    case 2:
+      return { outcome: 'Timeout' };
+    default:
+      throw new DecodeError(`unknown PlayerEffectOutcome discriminant ${tag}`);
+  }
+}
+
+/**
+ * Decode what {@link BoardPlayer.takeEffects} returns, a postcard `Vec<PlayerEffect>`. The field and
+ * variant order mirrors the Rust types in the player crate. Bytes left over are a decode error.
+ */
+export function decodePlayerEffects(bytes: Uint8Array): PlayerEffect[] {
+  const r = new PostcardReader(bytes);
+  const effects = r.vec(() => {
+    const tick = r.varintU();
+    const effect = readEffectKind(r);
+    const answer = readEffectOutcome(r);
+    return { tick, effect, answer };
+  });
+  if (r.remaining() !== 0) {
+    throw new DecodeError(`${r.remaining()} bytes left over after the player's effects`);
+  }
+  return effects;
+}
+
 /** One running board on a loaded module. */
 export interface BoardPlayer {
   /** Run up to `ticks` ticks, stopping at the end tick. Each tick queues one packet. */
   step(ticks: number): void;
   /** A copy of the next queued packet's bytes, or null when the queue is empty. */
   takePacket(): Uint8Array | null;
+  /**
+   * The effects emitted since the last call, as bytes for {@link decodePlayerEffects}. With none,
+   * these are the bytes of an empty list.
+   */
+  takeEffects(): Uint8Array;
+  /** Boot the same board again from its text. The next packet is a keyframe. */
+  restart(): void;
   tick(): number;
   endTick(): number;
   /** The state hash at the current tick, as 64 hex characters. */
@@ -66,6 +157,8 @@ export interface PlayerExports {
   fp_destroy(handle: number): number;
   fp_step(handle: number, ticks: number): number;
   fp_take_packet(handle: number): number;
+  fp_take_effects(handle: number): number;
+  fp_restart(handle: number): number;
   fp_tick(handle: number): bigint;
   fp_end_tick(handle: number): bigint;
   fp_tick_hash(handle: number): number;
@@ -81,6 +174,8 @@ const EXPORT_NAMES: readonly (keyof PlayerExports)[] = [
   'fp_destroy',
   'fp_step',
   'fp_take_packet',
+  'fp_take_effects',
+  'fp_restart',
   'fp_tick',
   'fp_end_tick',
   'fp_tick_hash',
@@ -129,6 +224,8 @@ function guardExports(raw: PlayerExports): PlayerExports {
     fp_destroy: guard(raw.fp_destroy),
     fp_step: guard(raw.fp_step),
     fp_take_packet: guard(raw.fp_take_packet),
+    fp_take_effects: guard(raw.fp_take_effects),
+    fp_restart: guard(raw.fp_restart),
     fp_tick: guard(raw.fp_tick),
     fp_end_tick: guard(raw.fp_end_tick),
     fp_tick_hash: guard(raw.fp_tick_hash),
@@ -190,6 +287,14 @@ export function playerModuleFrom(rawExports: PlayerExports): PlayerModule {
             return null;
           }
           return readOut(len);
+        },
+        takeEffects() {
+          const len = exports.fp_take_effects(handle) >>> 0;
+          if (len === 0) throw new PlayerError(outText());
+          return readOut(len);
+        },
+        restart() {
+          checkStatus(exports.fp_restart(handle));
         },
         tick: () => safeNumber(exports.fp_tick(handle)),
         endTick: () => safeNumber(exports.fp_end_tick(handle)),

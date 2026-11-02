@@ -150,4 +150,8 @@
 NONE
 
 [source]
-NONE
+# The player gains effects, restart and its stack limit export, for the byte comparison with the
+# native build.
+crates/fabrico-player/src/lib.rs
+# The native side of that byte comparison.
+crates/fabrico-player/examples/dump_packets.rs
