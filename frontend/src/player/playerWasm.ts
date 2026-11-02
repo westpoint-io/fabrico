@@ -23,6 +23,18 @@ export class PlayerError extends Error {
   }
 }
 
+/**
+ * The wasm instance trapped: a wasm trap, or the JavaScript engine's own stack running out under
+ * it. QuickJS's state inside that instance can't be trusted after either, so every later call on
+ * the module throws this too. The caller has to load a new module.
+ */
+export class PlayerTrapped extends Error {
+  constructor(cause: unknown) {
+    super('the player instance trapped and can take no more calls, so load a new one', { cause });
+    this.name = 'PlayerTrapped';
+  }
+}
+
 /** One running board on a loaded module. */
 export interface BoardPlayer {
   /** Run up to `ticks` ticks, stopping at the end tick. Each tick queues one packet. */
@@ -94,8 +106,40 @@ function assertOnlyTheClockImport(descriptors: readonly WebAssembly.ModuleImport
   }
 }
 
+/** The same exports, each marking the whole module as trapped when a call traps. */
+function guardExports(raw: PlayerExports): PlayerExports {
+  let trap: { cause: unknown } | null = null;
+  const guard = <A extends unknown[], R>(call: (...args: A) => R) => (...args: A): R => {
+    if (trap !== null) throw new PlayerTrapped(trap.cause);
+    try {
+      return call(...args);
+    } catch (error) {
+      if (error instanceof WebAssembly.RuntimeError || error instanceof RangeError) {
+        trap = { cause: error };
+        throw new PlayerTrapped(error);
+      }
+      throw error;
+    }
+  };
+  return {
+    memory: raw.memory,
+    fp_alloc: guard(raw.fp_alloc),
+    fp_free: guard(raw.fp_free),
+    fp_create: guard(raw.fp_create),
+    fp_destroy: guard(raw.fp_destroy),
+    fp_step: guard(raw.fp_step),
+    fp_take_packet: guard(raw.fp_take_packet),
+    fp_tick: guard(raw.fp_tick),
+    fp_end_tick: guard(raw.fp_end_tick),
+    fp_tick_hash: guard(raw.fp_tick_hash),
+    fp_out_ptr: guard(raw.fp_out_ptr),
+    fp_out_len: guard(raw.fp_out_len),
+  };
+}
+
 /** Build the module API over a set of exports. */
-export function playerModuleFrom(exports: PlayerExports): PlayerModule {
+export function playerModuleFrom(rawExports: PlayerExports): PlayerModule {
+  const exports = guardExports(rawExports);
   const readOut = (len: number): Uint8Array => {
     const ptr = exports.fp_out_ptr() >>> 0;
     return new Uint8Array(exports.memory.buffer, ptr, len).slice();
