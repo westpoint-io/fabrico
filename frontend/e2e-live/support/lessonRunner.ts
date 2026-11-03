@@ -7,7 +7,6 @@ import { NUB_RING_R, NUB_RING_STROKE } from '../../src/protocol/ports';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import { lineDoorstep } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
-import { REAL_TABLES, phrasePlain } from '../../src/tutorial/phrase';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
 import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
@@ -757,11 +756,10 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   expect(sentence, `${label}: the app says the space is taken`).toBe(REFUSED_SENTENCE);
   console.log(`REFUSAL ${label}: "${sentence}"`);
 
-  // The card says why and how to try again: the refused stage's line for the tag, or with no line the
-  // band's own sentence. Kind and words are read together, so a lesson note in the slot can't pass.
-  const stage = lesson.steps[stepIndex]?.stages.find((s) => s.id === atStage);
-  const line = stage?.coach !== undefined && Object.hasOwn(stage.coach, lesson.refused.tag) ? stage.coach[lesson.refused.tag] : undefined;
-  const expected = line === undefined ? REFUSED_SENTENCE : phrasePlain(line, REAL_TABLES);
+  // The card says why and how to try again, in the words the walk table holds for this lesson. They
+  // aren't read from the lesson, so a coaching line deleted from it fails here. Kind and words are read
+  // together, so a lesson note in the slot can't pass.
+  const expected = state.walk.refusedCardNote;
   const note = page.locator('[data-fab-step-card] [data-fab-step-note]');
   let cardWords = '';
   await expect

@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCE } from '../../e2e-live/support/lessonWalks.ts';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
 import { LESSONS } from '../tutorial/lessons/index.ts';
-import { MAX_NOTE_CHARS } from '../tutorial/phrase.ts';
+import { MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
 import { stripComments } from './walkSpecSource';
 
@@ -144,6 +144,33 @@ export function auditRefusalTags(
   return findings;
 }
 
+/**
+ * The card words each walk expects for its lesson's refused gesture, checked against what the lesson
+ * data and the app's tables give: the refused stage's coaching line for the tag, or the band's own
+ * sentence with no line. The walk reads the transcription, so this is what keeps it from drifting.
+ */
+export function auditRefusedCardNotes(
+  lessons: readonly Lesson[],
+  walks: Readonly<Record<string, { refusedCardNote: string } | undefined>>,
+  hostCopy: Readonly<Record<string, string>>,
+  clientCopy: Readonly<Record<string, string>>,
+): string[] {
+  const findings: string[] = [];
+  for (const lesson of lessons) {
+    const walk = walks[lesson.id];
+    if (walk === undefined) continue;
+    const { atStep, atStage, tag } = lesson.refused;
+    const stage = lesson.steps.find((s) => s.id === atStep)?.stages.find((s) => s.id === atStage);
+    const line = stage?.coach !== undefined && Object.hasOwn(stage.coach, tag) ? stage.coach[tag] : undefined;
+    const band = Object.hasOwn(hostCopy, tag) ? hostCopy[tag] : Object.hasOwn(clientCopy, tag) ? clientCopy[tag] : undefined;
+    const expected = line === undefined ? band : phrasePlain(line, REAL_TABLES);
+    if (walk.refusedCardNote !== expected) {
+      findings.push(`${lesson.id}: the walk expects the card to say "${walk.refusedCardNote}" for the refused gesture, and the lesson data gives "${expected ?? '(nothing)'}"`);
+    }
+  }
+  return findings;
+}
+
 /** The same files Playwright's `testMatch` finds under `e2e-live/`, at any depth, plus the runner. */
 function readWalkFiles(): Record<string, string> {
   const names = readdirSync(E2E_LIVE_DIR, { recursive: true, encoding: 'utf8' }).map((name) => name.split('\\').join('/'));
@@ -197,6 +224,10 @@ describe('every lesson has a walk', () => {
 
   it('finds nothing in the real tree', () => {
     expect(auditLessonCoverage(REAL)).toEqual([]);
+  });
+
+  it("holds the card words each walk expects for its refused gesture to the lesson's own", () => {
+    expect(auditRefusedCardNotes(LESSONS, LESSON_WALKS, REFUSAL_COPY, CLIENT_REFUSAL_COPY)).toEqual([]);
   });
 
   it("keys every coaching line and refused gesture by one of the app's refusal tags", () => {
@@ -270,6 +301,13 @@ describe('every lesson has a walk', () => {
       const lesson = withStage((s) => ({ ...s, coach: { FootprintColision: ['That cell is taken.'] } }));
       expect(auditRefusalTags([lesson], REFUSAL_COPY, CLIENT_REFUSAL_COPY).join('\n')).toMatch(
         /your-first-line step place-source stage board-paused: its coaching line is keyed FootprintColision, which is no refusal tag/,
+      );
+    });
+
+    it("a coaching line deleted from the lesson the walk still expects", () => {
+      const steps = FIRST.steps.map((step) => ({ ...step, stages: step.stages.map((stage) => ({ ...stage, coach: undefined })) }));
+      expect(auditRefusedCardNotes([{ ...FIRST, steps }], LESSON_WALKS, REFUSAL_COPY, CLIENT_REFUSAL_COPY).join('\n')).toContain(
+        `the lesson data gives "${REFUSAL_COPY.FootprintCollision}"`,
       );
     });
 

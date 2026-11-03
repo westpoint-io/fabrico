@@ -17,6 +17,13 @@ export interface LessonWalk {
   dragFrom: { dx: number; dy: number };
   /** Where a drag lets go, inside its second ring. */
   dragTo: { dx: number; dy: number };
+  /**
+   * The words the card shows for the lesson's refused gesture: the refused stage's coaching line for
+   * the tag, or the band's own sentence when the lesson has no line for it. Transcribed, not read from
+   * the lesson, so a line deleted from the lesson data puts the band's sentence on the card and fails
+   * the walk. `lessonCoverage.source.test.ts` compares it with the lesson data and the app's tables.
+   */
+  refusedCardNote: string;
 }
 
 export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
@@ -25,6 +32,7 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
     floorOffset: { dx: 5, dy: -4 },
     dragFrom: { dx: 3, dy: -2 },
     dragTo: { dx: -2, dy: 3 },
+    refusedCardNote: "That cell is taken, so the Sink wasn't placed. Click a free cell, like the one in the ring.",
   },
 };
 
