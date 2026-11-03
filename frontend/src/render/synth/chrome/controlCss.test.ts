@@ -51,4 +51,12 @@ describe('controlCss', () => {
       expect(count(CHROME_CSS, text), `${name} appears once in CHROME_CSS`).toBe(1);
     }
   });
+
+  it('carries no nearest-neighbour rendering hint', () => {
+    // The chrome directory's own scan (`chrome/pixelatedRetirement.test.ts`) walks files
+    // under `chrome/` and so no longer reads these rules. The same pattern, applied here.
+    const HINT = /image-rendering\s*:\s*pixelated|imageRendering\s*:\s*'pixelated'/;
+    for (const [name, text] of GROUPS) expect(HINT.test(text), `${name} has the hint`).toBe(false);
+    expect(HINT.test('a { image-rendering: pixelated; }'), 'the pattern matches the hint').toBe(true);
+  });
 });

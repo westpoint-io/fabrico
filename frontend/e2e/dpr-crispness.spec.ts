@@ -159,9 +159,10 @@ interface PaddingSite {
 }
 
 /**
- * Every padding declaration under `src/chrome` whose value reaches `--fab-bezel-ring`.
+ * Every padding declaration under `src/chrome`, plus the shared control rules in
+ * `src/render/synth/chrome/controlCss.ts`, whose value reaches `--fab-bezel-ring`.
  *
- * Two shapes, because the sites live in two forms. `chromeCss.ts` carries real CSS text
+ * Two shapes, because the sites live in two forms. `chromeCss.ts` and `controlCss.ts` carry real CSS text
  * inside a template literal, terminated by `;`. The component modules carry React style
  * objects, whose value is a single-quoted string terminated by `,` - and two of them
  * (Toolbar, CameraCluster) put the value on the line AFTER the key, hence the optional
@@ -172,10 +173,21 @@ function readPaddingSites(): PaddingSite[] {
   // Resolved from the SPEC'S OWN path via `test.info().file` rather than from
   // `__dirname` (undefined under Playwright's ESM loader) or from `process.cwd()`
   // (whatever directory the run was launched in).
-  const dir = path.join(path.dirname(test.info().file), '..', 'src', 'chrome');
+  const src = path.join(path.dirname(test.info().file), '..', 'src');
+  const dir = path.join(src, 'chrome');
+  // The app's stylesheet spans two modules: `chromeCss.ts` keeps the app-only rules and
+  // interpolates the shared control groups from `render/synth/chrome/controlCss.ts`, which
+  // sits outside `chrome/` so a read-only board on a page can read it. Its padding sites are
+  // the app's padding sites, so the walk reads it by name beside the chrome directory.
+  const files = fs
+    .readdirSync(dir)
+    .filter((f) => /\.tsx?$/.test(f))
+    .sort()
+    .map((f) => ({ file: f, full: path.join(dir, f) }));
+  files.push({ file: 'controlCss.ts', full: path.join(src, 'render', 'synth', 'chrome', 'controlCss.ts') });
   const out: PaddingSite[] = [];
-  for (const file of fs.readdirSync(dir).filter((f) => /\.tsx?$/.test(f)).sort()) {
-    const text = fs.readFileSync(path.join(dir, file), 'utf8');
+  for (const { file, full } of files) {
+    const text = fs.readFileSync(full, 'utf8');
     for (const m of text.matchAll(/padding:\s*([^;'`]*--fab-bezel-ring[^;'`]*);/g)) {
       out.push({ file, kind: 'css', decl: m[1].trim() });
     }
