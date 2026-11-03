@@ -6,7 +6,9 @@
 // ticker (and this frame count) running while it draws nothing.
 
 import { CELL } from '../../shared/geometry';
-import { cellsOfFootprint } from '../protocol/footprint';
+import { effectiveBox } from '../protocol/footprint';
+import { uToPx } from '../render/layers/machineChassis';
+import { GAUGE_OUTSET_U, GAUGE_THICK_U, MAX_NUB_REACH_PX } from '../render/layers/machineState';
 import type { Point } from '../render/camera';
 import type { CameraSnapshot } from '../render/pixiApp';
 import type { Verdict } from './badge';
@@ -99,6 +101,13 @@ export function tickHashes(trace: readonly (readonly [number, string])[]): [numb
  */
 export const TILE_INSET = 0.2;
 
+/**
+ * How far a machine draws outside its footprint, in world px, plus 1 px for anti-aliasing: the
+ * larger of the port nubs' reach and the load gauge's outer edge (12 px). Both change with the
+ * machine's state, so a tile whose sampled part comes this close to a machine is left out.
+ */
+export const MACHINE_REACH_PX = Math.max(MAX_NUB_REACH_PX, uToPx(GAUGE_OUTSET_U + GAUGE_THICK_U)) + 1;
+
 interface Cell {
   cell_x: number;
   cell_y: number;
@@ -126,8 +135,9 @@ const overlaps = (a: ProbeRect, b: ProbeRect): boolean =>
  * The inner part of every belt tile, in viewport CSS px, for a render check to sample.
  *
  * Items move along a board's belts, so these pixels change while the board carries items. Other
- * things that change are kept out: a cell under a machine footprint (its glyph and state colours) or
- * on a cable's path (its pulse) is skipped, and so is a tile that touches any of `cutouts`, the
+ * things that change are kept out: a tile whose inner part comes within {@link MACHINE_REACH_PX} of
+ * a machine footprint (its glyph, nubs, gauge and state colours) or that lies on a cable's path (its
+ * pulse) is skipped, and so is a tile that touches any of `cutouts`, the
  * overlay elements drawn over the canvas. Each tile is inset by {@link TILE_INSET} of its size on
  * every side and clipped to the part of `canvas` inside `view` (the viewport, so a screenshot can
  * see every tile); a tile with less than 2 px left is skipped. Belts go in handle order and tiles
@@ -146,12 +156,20 @@ export function beltTiles(
     right: Math.min(canvas.right, view.right),
     bottom: Math.min(canvas.bottom, view.bottom),
   };
+  // Each machine's footprint grown by MACHINE_REACH_PX, in world px.
+  const machines: ProbeRect[] = [...scene.nodes.values()].map((n) => {
+    const { ew, eh } = effectiveBox(n.w, n.h, n.rot);
+    return {
+      x: n.cell_x * CELL - MACHINE_REACH_PX,
+      y: n.cell_y * CELL - MACHINE_REACH_PX,
+      width: ew * CELL + 2 * MACHINE_REACH_PX,
+      height: eh * CELL + 2 * MACHINE_REACH_PX,
+    };
+  });
   const blocked = new Set<string>();
   const key = (x: number, y: number): string => `${x},${y}`;
-  for (const n of scene.nodes.values()) {
-    for (const [x, y] of cellsOfFootprint(n.cell_x, n.cell_y, n.w, n.h, n.rot)) blocked.add(key(x, y));
-  }
   for (const w of scene.wires.values()) for (const t of w.path) blocked.add(key(t.cell_x, t.cell_y));
+  const inner = CELL * TILE_INSET;
 
   const out: BeltTile[] = [];
   const ids = [...scene.belts.keys()].sort((a, b) => a - b);
@@ -160,6 +178,13 @@ export function beltTiles(
       const k = key(t.cell_x, t.cell_y);
       if (blocked.has(k)) continue;
       blocked.add(k);
+      const sampled: ProbeRect = {
+        x: t.cell_x * CELL + inner,
+        y: t.cell_y * CELL + inner,
+        width: CELL - 2 * inner,
+        height: CELL - 2 * inner,
+      };
+      if (machines.some((m) => overlaps(sampled, m))) continue;
       const a = worldToScreen(t.cell_x * CELL, t.cell_y * CELL);
       const b = worldToScreen((t.cell_x + 1) * CELL, (t.cell_y + 1) * CELL);
       const whole: ProbeRect = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beltTiles, TILE_INSET, type BeltTile, type CanvasBox, type ProbeRect, type TileScene } from './probe';
+import { beltTiles, MACHINE_REACH_PX, TILE_INSET, type BeltTile, type CanvasBox, type ProbeRect, type TileScene } from './probe';
 
 // World px to screen px at scale 0.5 with the board's origin at (10, 20) on the canvas, so a 32 px
 // cell is 16 screen px.
@@ -54,13 +54,18 @@ describe('beltTiles', () => {
     expect(round(beltTiles(s, toScreen, CANVAS, VIEW, []))).toEqual(round([tile(1, 0), tile(2, 0), tile(3, 0), tile(5, 2), tile(6, 2)]));
   });
 
-  it('leaves out cells under a machine footprint, with a rotated footprint swapping its sides', () => {
+  it('leaves out cells under a machine footprint and the cells beside it, with a rotated footprint swapping its sides', () => {
     const s = scene({
-      belts: new Map([[1, { tiles: row(4, [0, 1, 2, 3, 4, 5]) }]]),
-      // 1 wide and 2 tall at rot 1 covers cells (1,4) and (2,4).
-      nodes: new Map([[2, { cell_x: 1, cell_y: 4, w: 1, h: 2, rot: 1 }]]),
+      belts: new Map([[1, { tiles: row(4, [0, 1, 2, 3, 4, 5, 6]) }]]),
+      // 1 wide and 2 tall at rot 1 covers cells (2,4) and (3,4). Cells 1 and 4 touch it, and a
+      // nub or the load gauge reaches 12 px into them, past the 6.4 px inset.
+      nodes: new Map([[2, { cell_x: 2, cell_y: 4, w: 1, h: 2, rot: 1 }]]),
     });
-    expect(round(beltTiles(s, toScreen, CANVAS, VIEW, []))).toEqual(round([tile(0, 4), tile(3, 4), tile(4, 4), tile(5, 4)]));
+    expect(round(beltTiles(s, toScreen, CANVAS, VIEW, []))).toEqual(round([tile(0, 4), tile(5, 4), tile(6, 4)]));
+  });
+
+  it('reaches as far as the load gauge, 12 px, plus 1', () => {
+    expect(MACHINE_REACH_PX).toBe(13);
   });
 
   it("leaves out cells on a cable's path", () => {
