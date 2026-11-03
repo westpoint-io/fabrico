@@ -101,7 +101,10 @@ for (const id of IDS) {
     await autoContinueCaptions(page);
     await page.goto(FILE_URL);
 
-    await page.locator(`#${LIST_ID} a[href="#${id}"]`).click();
+    // A board left out of the file fails here, at once, rather than when the test times out.
+    const link = page.locator(`#${LIST_ID} a[href="#${id}"]`);
+    await expect(link, `${id}: the list links to it`).toHaveCount(1, { timeout: 5_000 });
+    await link.click();
     await expect(page).toHaveURL(`${FILE_URL}#${id}`);
     const section = page.locator(`section[id="${id}"]`);
     await expect(section.locator('h2'), `${id}: its heading is on screen after the link`).toBeInViewport();
