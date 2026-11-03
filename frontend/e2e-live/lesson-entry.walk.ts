@@ -287,3 +287,45 @@ test('Undo goes back and a swap pauses', async ({ page }) => {
   await expectRenderLoopAlive(page, 'after the swap');
   errors.assertNone('during Undo and the swap');
 });
+
+test('a corrupt stored value boots to an empty list, and a start and a reset are stored', async ({ page }) => {
+  const errors = watchPageErrors(page);
+  const KEY = 'fab.tutorial.v1';
+  const stored = (): Promise<string | null> => page.evaluate((k) => localStorage.getItem(k), KEY);
+  await fromDemo(page);
+
+  // Through the page, as a user's own script could, and never by editing WebKit's storage file.
+  await page.evaluate((k) => localStorage.setItem(k, 'not json'), KEY);
+  await page.reload();
+  await waitForAppReady(page);
+  await expectRenderLoopAlive(page, 'after a reload on a corrupt value');
+  errors.assertNone('booting on a corrupt value');
+  expect(await stored(), 'the corrupt value is still there, so the boot read it').toBe('not json');
+  await openLessonsFromHelp(page);
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
+
+  // A Start is stored, and a reload reads it with no run to resume.
+  await startLesson(page, LESSON);
+  const inProgress = JSON.stringify({ version: 1, lessons: { [LESSON.id]: 'inProgress' } });
+  await expect.poll(stored, { message: 'Start stored In progress', timeout: frameBudgetMs(STAGE_FRAMES) }).toBe(inProgress);
+  await page.reload();
+  await waitForAppReady(page);
+  await openLessonsFromHelp(page);
+  await expectLessonRow(page, LESSON, 'In progress', [RESTART]);
+
+  // A reset is stored too.
+  const footer = page.locator(`${PANEL} [data-fab-lessons-footer]`);
+  await footer.getByRole('button', { name: 'Reset progress', exact: true }).click();
+  await expect(footer.getByRole('button', { name: 'Keep progress', exact: true }), 'the question focuses Keep progress').toBeFocused();
+  await footer.getByRole('button', { name: 'Clear progress', exact: true }).click();
+  await expect(footer.locator('[aria-live="polite"]')).toHaveText('Progress cleared.');
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
+  expect(await stored(), 'Clear progress removed the key').toBeNull();
+  await page.reload();
+  await waitForAppReady(page);
+  await openLessonsFromHelp(page);
+  await expectLessonRow(page, LESSON, 'Not started', [START]);
+
+  await expectRenderLoopAlive(page, 'after the reset and a reload');
+  errors.assertNone('during the corrupt value, the start and the reset');
+});

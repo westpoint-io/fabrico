@@ -42,11 +42,11 @@
 
 set -u
 
-# The walk held 24 tests when this floor was set: lesson-entry 5, lesson-hints 4, lesson-variants 11,
+# The walk held 25 tests when this floor was set: lesson-entry 6, lesson-hints 4, lesson-variants 11,
 # lessons 1 and parity 3. A report below it is a partial run or a walk file that went missing. Raise it
 # when tests are added, with FLOOR in scripts/prove-walk-report-bites.sh. Lowering it is a decision to
 # stop walking something.
-MIN_TESTS=24
+MIN_TESTS=25
 
 total=0
 passed=0
