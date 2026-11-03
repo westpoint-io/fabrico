@@ -213,6 +213,10 @@ describe('no keyboard handler reads a key outside the table (review WR-C03)', ()
     'chrome/ExamplesPopover.tsx': { keys: ['Escape'], reason: 'its own Escape closes the popover and nothing behind it' },
     'chrome/LoadRefusedCard.tsx': { keys: ['Escape'], reason: 'Escape dismisses the card; it is not a modal, so Tab stays free' },
     'chrome/tutorial/LessonPanel.tsx': { keys: ['Escape'], reason: 'its own Escape closes the lesson list and nothing behind it' },
+    'embed/codeView.ts': {
+      keys: ['ArrowLeft', 'ArrowRight'],
+      reason: "the read-only board's code tabs: the arrow keys move between tabs while one has focus, the ARIA tab pattern",
+    },
   };
   const files = shipped(SRC);
   const owners = files.filter((f) => {
