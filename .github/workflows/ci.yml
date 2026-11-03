@@ -1137,7 +1137,8 @@ jobs:
   # every listed test passed. When wasm-player fails, this job still
   # starts under the gate and fails at the download, so a broken player can't leave it skipped.
   # The artifact upload drops file modes, so a step that runs a native tool from the artifact has
-  # to set the executable bit itself. No step here does.
+  # to set the executable bit itself. scripts/check-embed.sh runs the native dump_packets tool from
+  # the artifact as its per-tick oracle, and sets that bit before it does.
   #
   # TIME LIMIT. 15 minutes is a first estimate, to be set again from this job's first real run.
   # Locally the embed build took about 10 seconds and its check about 20, and the setup steps are

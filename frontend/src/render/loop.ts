@@ -185,6 +185,15 @@ export interface RenderLoop {
    * render path.
    */
   setTreadAppearanceOverride(pxPerTick: number | null): void;
+  /**
+   * The render clock's pace for a read-only board on a page that plays at 0.25x to 4x. The
+   * clock advances `deltaMs / (SIM_TICK_MS / speed)` tick-units per frame, so at 4x it keeps up
+   * with a scene that moves 4 ticks a frame instead of falling behind and snapping forward, and
+   * at 0.25x it glides instead of waiting three frames in four. It writes ONLY a render-side
+   * number the clock reads; never `scene.tick`, a GridCommand or the event log. Defaults to 1,
+   * and the app never calls it, so the app's motion is unchanged.
+   */
+  setRenderPace(speed: number): void;
   stop(): void;
 }
 
@@ -234,6 +243,8 @@ export function startRenderLoop(
   // deliberately WITHOUT a figure of its own (see setTreadAppearanceOverride).
   let treadAppearanceOverride: number | null = null;
   let seeded = false;
+  // The render clock's step in ms. SIM_TICK_MS at 1x; only a page's read-only board changes it.
+  let tickMs = SIM_TICK_MS;
 
   const tick = (): void => {
     const scene = getScene();
@@ -248,7 +259,7 @@ export function startRenderLoop(
     } else if (scene.tick - clock > RESYNC_GAP_TICKS) {
       clock = scene.tick - LAG_TICKS; // snap forward to track the live sim
     } else {
-      clock = advanceRenderClock(clock, scene.tick, deltaMs, SIM_TICK_MS);
+      clock = advanceRenderClock(clock, scene.tick, deltaMs, tickMs);
     }
     const nowMs = performance.now();
     // MOTION-04: the EFFECTIVE clock is the pin when set, else the live clock. It
@@ -335,6 +346,10 @@ export function startRenderLoop(
     },
     setTreadAppearanceOverride: (pxPerTick: number | null): void => {
       treadAppearanceOverride = pxPerTick;
+    },
+    setRenderPace: (speed: number): void => {
+      if (!Number.isFinite(speed) || speed <= 0) throw new RangeError(`render pace must be above 0, not ${speed}`);
+      tickMs = SIM_TICK_MS / speed;
     },
     stop: (): void => {
       app.ticker.remove(tick);

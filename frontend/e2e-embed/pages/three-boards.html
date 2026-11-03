@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Three boards</title>
+<style>
+  html, body { margin: 0; background: #1b1f27; color: #b0bacb; }
+  body { font-family: 'Martian Mono', monospace; font-size: 12px; line-height: 1.4; }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+  section { margin: 0 0 48px; }
+  h2 { font-family: 'Sono', monospace; font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin: 0 0 24px; }
+  .col { box-sizing: border-box; }
+  .col-960 { width: 960px; }
+  .col-600 { width: 600px; }
+  .col-420 { width: 420px; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>Demo scene</h2>
+    <div class="col col-960" data-col="demo_scene"><fabrico-board name="demo_scene"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>Order processing</h2>
+    <div class="col col-600" data-col="order_processing"><fabrico-board name="order_processing"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>Advanced</h2>
+    <div class="col col-420" data-col="advanced"><fabrico-board name="advanced"></fabrico-board></div>
+  </section>
+</main>
+<!-- fabrico:bundle -->
+</body>
+</html>

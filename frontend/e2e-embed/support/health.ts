@@ -8,6 +8,9 @@
 // go down on unmount whether or not the context was freed.
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 import type { BoardProbe } from '../../src/embed/probe.ts';
 import { watchPageErrors } from '../../e2e-live/support/oracle.ts';
@@ -160,4 +163,102 @@ export async function expectBoardDrawing(page: Page, name: string, context: stri
     await page.waitForTimeout(POLL_MS);
   }
   throw new Error(`${context}: ${name}'s belt region showed the same pixels in ${samples} screenshots over ${BUDGET_MS} ms`);
+}
+
+// --- Board files, the manifest and the native per-tick oracle ---
+
+const repoPath = (path: string): string => fileURLToPath(new URL(`../../../${path}`, import.meta.url));
+
+/** A built test page's file:// URL. */
+export function pageUrl(name: string): string {
+  return pathToFileURL(fileURLToPath(new URL(`../../dist-embed/pages/${name}`, import.meta.url))).href;
+}
+
+/** `demo_scene` to `examples/boards/demo_scene.board.ron`; `docs-x` to `examples/boards/docs/x.board.ron`. */
+export function boardPathOf(id: string): string {
+  const parts = id.split('-');
+  const nested = parts[0] === 'docs' && parts.length > 1;
+  return nested ? `examples/boards/docs/${parts.slice(1).join('-')}.board.ron` : `examples/boards/${id}.board.ron`;
+}
+
+/** The board's line in hashes.manifest, read at run time. */
+export function manifestLine(id: string): { endTick: number; hash: string } {
+  const path = boardPathOf(id);
+  const line = readFileSync(repoPath('examples/boards/hashes.manifest'), 'utf8')
+    .split('\n')
+    .find((candidate) => candidate.startsWith(`${path} `));
+  if (line === undefined) throw new Error(`hashes.manifest has no line for ${path}`);
+  const [, endTick, hash] = line.split(' ');
+  return { endTick: Number(endTick), hash };
+}
+
+/**
+ * The native engine's hash at every tick of a board, from the dump `scripts/check-embed.sh` writes
+ * into FABRICO_PLAYER_NATIVE_DUMP: `<path with / turned into _>.hashes`, one `<tick> <hash>` a line.
+ */
+export function nativeHashes(id: string): [number, string][] {
+  const dir = process.env.FABRICO_PLAYER_NATIVE_DUMP;
+  if (dir === undefined || dir === '') {
+    throw new Error('FABRICO_PLAYER_NATIVE_DUMP is unset. Run the embed specs through scripts/check-embed.sh.');
+  }
+  const file = path.join(dir, `${boardPathOf(id).replace(/\//g, '_')}.hashes`);
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => {
+      const [tick, hash] = line.split(' ');
+      return [Number(tick), hash];
+    });
+}
+
+/**
+ * Compare a page's trace with the native dump, tick by tick, from the native file's first tick.
+ * Fails naming the first tick that differs or is missing. Returns how many ticks matched.
+ */
+export function expectTraceMatchesNative(id: string, trace: [number, string][], ticks: number | 'all'): number {
+  const native = nativeHashes(id);
+  const want = ticks === 'all' ? native : native.slice(0, ticks + 1);
+  if (ticks === 'all') {
+    expect(trace.length, `${id}: the page traced ${trace.length} ticks and the native dump has ${native.length}`).toBe(
+      native.length,
+    );
+  } else {
+    expect(trace.length, `${id}: the page traced at least ${want.length} ticks`).toBeGreaterThanOrEqual(want.length);
+  }
+  for (let i = 0; i < want.length; i++) {
+    const [nativeTick, nativeHash] = want[i];
+    const got = trace[i];
+    expect(got?.[0], `${id}: trace entry ${i} is tick ${nativeTick} (a tick was skipped or repeated)`).toBe(nativeTick);
+    expect(got?.[1], `${id} at tick ${nativeTick}: the page's hash equals the native engine's`).toBe(nativeHash);
+  }
+  return want.length;
+}
+
+/** A board's trace: every tick and hash since boot or its last restart. Needs the trace init script. */
+export async function readTrace(page: Page, name: string): Promise<[number, string][]> {
+  return page.evaluate((n) => {
+    const el = document.querySelector(`fabrico-board[name="${n}"]`) as
+      | (Element & { fabricoTickHashes?: () => [number, string][] })
+      | null;
+    if (el === null || typeof el.fabricoTickHashes !== 'function') throw new Error(`no fabrico-board named ${n}`);
+    return el.fabricoTickHashes();
+  }, name);
+}
+
+/** Ask the page for per-tick hashes. Call before `page.goto`. */
+export async function enableTrace(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    (globalThis as { __FABRICO_EMBED_TRACE__?: boolean }).__FABRICO_EMBED_TRACE__ = true;
+  });
+}
+
+/** The text of a shadow-root element of a board. */
+export async function shadowText(page: Page, name: string, selector: string): Promise<string> {
+  return page.evaluate(
+    ([n, sel]) => {
+      const el = document.querySelector(`fabrico-board[name="${n}"]`);
+      return el?.shadowRoot?.querySelector(sel)?.textContent ?? '';
+    },
+    [name, selector] as const,
+  );
 }

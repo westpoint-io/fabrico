@@ -184,6 +184,12 @@ export interface SceneHandle {
    * hook. Nothing returned is live, so it can't become a write path into the camera.
    */
   cameraSnapshot(): CameraSnapshot;
+  /**
+   * The render clock's pace, pass-through of `RenderLoop.setRenderPace`. A page's read-only
+   * board calls it on every speed change so the belts and items keep up at 4x and glide at
+   * 0.25x. Render-only, defaults to 1, and the app never calls it.
+   */
+  setRenderPace(speed: number): void;
   /** Stop the render loop + detach camera listeners. */
   stop(): void;
 }
@@ -413,6 +419,7 @@ export async function bootPixi(container: HTMLElement, opts: BootOptions): Promi
     // define-gated sitting panel.
     setTreadAppearanceOverride: (pxPerTick: number | null): void =>
       loop.setTreadAppearanceOverride(pxPerTick),
+    setRenderPace: (speed: number): void => loop.setRenderPace(speed),
     stop: (): void => {
       loop.stop();
       // Cancel any pending grid re-tile so it never fires on a renderer torn down by

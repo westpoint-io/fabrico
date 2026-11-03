@@ -7,7 +7,9 @@
 
 import { CELL } from '../../shared/geometry';
 import type { Camera } from '../render/camera';
+import type { CameraSnapshot } from '../render/pixiApp';
 import type { SceneState } from '../render/sceneState';
+import type { Verdict } from './badge';
 
 /** A rectangle in CSS pixels relative to the viewport. */
 export interface ProbeRect {
@@ -17,16 +19,37 @@ export interface ProbeRect {
   height: number;
 }
 
+/** What the stage shows: the loading line, the running board, or an error card. */
+export type ProbeState = 'loading' | 'running' | 'error';
+
 export interface BoardProbe {
   id: string;
   mounted: boolean;
+  state: ProbeState;
   tick: number;
   endTick: number;
+  /** The tick the player reported right after create (or after the last restart). */
+  bootTick: number;
   playing: boolean;
   frames: number;
   endHash: string | null;
+  /** The selected speed, 0.25 to 4. */
+  speed: number;
+  /** The badge's verdict once the board has reached its end tick, else null. */
+  verdict: Verdict | null;
+  /** The hash badge's text, as a reader sees it. */
+  badgeText: string;
+  /** A copy of this board's camera, or null with no renderer. */
+  cameraSnapshot: CameraSnapshot | null;
   /** The longest belt's tiles, projected through this board's camera, or null with no belt. */
   beltRegion: ProbeRect | null;
+  /** The error card's heading and body, or null when no card shows. */
+  error: { heading: string; body: string } | null;
+}
+
+/** A copy of a trace: every tick and its hash, as plain pairs. */
+export function tickHashes(trace: readonly (readonly [number, string])[]): [number, string][] {
+  return trace.map(([tick, hash]) => [tick, hash]);
 }
 
 /**
