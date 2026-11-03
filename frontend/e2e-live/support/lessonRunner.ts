@@ -343,6 +343,17 @@ async function expectRingPainted(
   if (kind === undefined || state.ringsRead.has(kind)) return;
   const colour = await focusColour(page);
   const reads: string[] = [];
+  // Which pulse the paint runs, and its opacity, as the captures start: the record that the read below
+  // saw the ring with the pulse running, at whatever point of the fade the capture caught.
+  const pulse = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-fab-hint] > div, [data-fab-hint-to] > div')]
+      .filter((el) => (el.parentElement as HTMLElement).style.visibility === 'visible')
+      .map((el) => {
+        const names = el.getAnimations().filter((a) => a.playState === 'running').map((a) => (a as CSSAnimation).animationName);
+        return `${names.join('+') || 'none'}@${Number(getComputedStyle(el).opacity).toFixed(2)}`;
+      })
+      .join(' '),
+  );
   for (const rect of rects) {
     const clip = {
       x: Math.floor(rect.x),
@@ -357,7 +368,7 @@ async function expectRingPainted(
     expect(read.seen, `${label}: the ring's border shows on every side in the focus colour, around (${clip.x},${clip.y}), side ink ${read.sideInk.join(',')} against ${read.sideFloor.map(Math.round).join(',')}`).toBe(true);
   }
   state.ringsRead.add(kind);
-  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')}`);
+  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')} pulse=${pulse} captures=${rects.length}`);
 }
 
 /**
