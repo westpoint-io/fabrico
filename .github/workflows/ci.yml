@@ -1140,15 +1140,24 @@ jobs:
   # to set the executable bit itself. scripts/check-embed.sh runs the native dump_packets tool from
   # the artifact as its per-tick oracle, and sets that bit before it does.
   #
-  # TIME LIMIT. 15 minutes is a first estimate, to be set again from this job's first real run.
-  # Locally the embed build took about 10 seconds and its check about 20, and the setup steps are
-  # the same as wasm-player's Node and Playwright steps.
+  # THE OFFLINE FILE. build-embed.sh also writes frontend/dist-examples/fabrico-examples.html, the
+  # one file that runs every example board from disk, and scripts/check-offline-browsers.sh opens
+  # it in three browsers: Chromium and Firefox through Playwright (Firefox with its stock file://
+  # policy, proven by a canary first), and WebKitGTK through python gi under Xvfb. The WebKitGTK
+  # leg runs on the runner's own /usr/bin/python3, because the gi bindings come from the apt
+  # packages, so this job has no setup-python step. libgl1-mesa-dri is listed so Mesa's software
+  # GL, which WebGL needs under Xvfb, doesn't depend on what the other packages pull in.
+  #
+  # TIME LIMIT. 25 minutes is a first estimate, to be set again from this job's first real run.
+  # Locally the embed build took about 10 seconds, its check about 20 and the three-browser offline
+  # check about 2.5 minutes; the apt and Firefox installs come on top of the Node and Playwright
+  # steps wasm-player also has.
   embed:
     name: the read-only board embed runs from disk in a browser
     needs: [changes, wasm-player]
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
     steps:
@@ -1166,9 +1175,14 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Install Playwright chromium
+      - name: Install Playwright chromium and firefox
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Install WebKitGTK and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb python3-gi python3-gi-cairo gir1.2-webkit2-4.1 libgl1-mesa-dri
 
       - name: Take the player module wasm-player built
         uses: actions/download-artifact@v4
@@ -1181,6 +1195,9 @@ jobs:
 
       - name: Run the embed pages from disk in headless Chromium
         run: bash scripts/check-embed.sh
+
+      - name: Open the offline examples file in Chromium, strict Firefox and WebKitGTK
+        run: bash scripts/check-offline-browsers.sh
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand

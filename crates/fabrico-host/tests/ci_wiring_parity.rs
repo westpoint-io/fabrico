@@ -681,10 +681,12 @@ fn the_wasm_player_job_builds_and_checks_the_player() {
 
 /// The job that runs the read-only board embed from disk, on the module `wasm-player` built.
 const EMBED_JOB: &str = "embed";
-/// The exact lines that build the embed's pages and check them. No other job runs either script.
-const EMBED_RUN_LINES: [&str; 2] = [
+/// The exact lines that build the embed's pages and the offline file, check the pages, and open
+/// the offline file in three browsers. No other job runs any of these scripts.
+const EMBED_RUN_LINES: [&str; 3] = [
     "run: bash scripts/build-embed.sh",
     "run: bash scripts/check-embed.sh",
+    "run: bash scripts/check-offline-browsers.sh",
 ];
 /// The artifact that carries the module from `wasm-player` to `EMBED_JOB`, as its `name:` line.
 const PLAYER_ARTIFACT: &str = "name: fabrico-player-wasm";
@@ -791,15 +793,17 @@ fn embed_job_wrong(yml: &str) -> Vec<String> {
         ));
     }
 
-    // The pages are checked after they are built.
+    // The pages and the offline file are checked after they are built.
     let build = embed.iter().position(|l| *l == EMBED_RUN_LINES[0]);
-    let check = embed.iter().position(|l| *l == EMBED_RUN_LINES[1]);
-    if let (Some(b), Some(c)) = (build, check)
-        && b > c
-    {
-        wrong.push(format!(
-            "job `{EMBED_JOB}` checks the pages before it builds them."
-        ));
+    for check_line in &EMBED_RUN_LINES[1..] {
+        let check = embed.iter().position(|l| l == check_line);
+        if let (Some(b), Some(c)) = (build, check)
+            && b > c
+        {
+            wrong.push(format!(
+                "job `{EMBED_JOB}` runs `{check_line}` before it builds what that checks."
+            ));
+        }
     }
     wrong
 }
