@@ -693,8 +693,115 @@ const PLAYER_ARTIFACT_PATH: &str = "path: target/wasm-out";
 
 /// Everything wrong with how `yml` wires the embed job and the module it takes. Empty means right.
 fn embed_job_wrong(yml: &str) -> Vec<String> {
-    let _ = yml;
-    Vec::new()
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let code: Vec<&str> = yml
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let job_lines = |job: &str| -> Vec<&str> {
+        blocks
+            .iter()
+            .find(|(id, _)| *id == job)
+            .map(|(_, lines)| lines.clone())
+            .unwrap_or_default()
+    };
+    let wasm = job_lines(WASM_JOB);
+    let embed = job_lines(EMBED_JOB);
+
+    for line in EMBED_RUN_LINES {
+        let in_job = embed.iter().filter(|l| **l == line).count();
+        let in_file = code.iter().filter(|l| **l == line).count();
+        if in_job != 1 || in_file != 1 {
+            wrong.push(format!(
+                "`{line}` appears {in_job} time(s) in job `{EMBED_JOB}` and {in_file} time(s) in \
+                 the workflow, expected 1 and 1."
+            ));
+        }
+    }
+
+    // The artifact: uploaded once by wasm-player after the build, taken once by embed before the
+    // build, from and to the same folder.
+    for (job, lines, uses, before, after) in [
+        (
+            WASM_JOB,
+            &wasm,
+            "uses: actions/upload-artifact@v4",
+            Some(WASM_RUN_LINES[0]),
+            None,
+        ),
+        (
+            EMBED_JOB,
+            &embed,
+            "uses: actions/download-artifact@v4",
+            None,
+            Some(EMBED_RUN_LINES[0]),
+        ),
+    ] {
+        let at: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| **l == PLAYER_ARTIFACT)
+            .map(|(i, _)| i)
+            .collect();
+        let [at] = at.as_slice() else {
+            wrong.push(format!(
+                "`{PLAYER_ARTIFACT}` appears {} time(s) in job `{job}`, expected 1. Without it \
+                 the embed job has no module, or not the one CI built.",
+                at.len()
+            ));
+            continue;
+        };
+        let step = step_around(lines, *at);
+        let mut expected = vec![uses, PLAYER_ARTIFACT_PATH];
+        if job == WASM_JOB {
+            expected.extend(["retention-days: 1", "if-no-files-found: error"]);
+        }
+        for key in expected {
+            if !step.contains(&key) {
+                wrong.push(format!(
+                    "the step carrying `{PLAYER_ARTIFACT}` in job `{job}` has no `{key}` line."
+                ));
+            }
+        }
+        let position = |needle: &str| lines.iter().position(|l| *l == needle);
+        if let Some(build) = before.and_then(position)
+            && build > *at
+        {
+            wrong.push(format!(
+                "job `{job}` uploads the artifact before `{}` builds the module.",
+                WASM_RUN_LINES[0]
+            ));
+        }
+        if let Some(build) = after.and_then(position)
+            && build < *at
+        {
+            wrong.push(format!(
+                "job `{job}` runs `{}` before it takes the artifact.",
+                EMBED_RUN_LINES[0]
+            ));
+        }
+    }
+    let in_file = code.iter().filter(|l| **l == PLAYER_ARTIFACT).count();
+    if in_file != 2 {
+        wrong.push(format!(
+            "`{PLAYER_ARTIFACT}` appears {in_file} time(s) in the workflow, expected 2: the upload \
+             in `{WASM_JOB}` and the download in `{EMBED_JOB}`."
+        ));
+    }
+
+    // The pages are checked after they are built.
+    let build = embed.iter().position(|l| *l == EMBED_RUN_LINES[0]);
+    let check = embed.iter().position(|l| *l == EMBED_RUN_LINES[1]);
+    if let (Some(b), Some(c)) = (build, check)
+        && b > c
+    {
+        wrong.push(format!(
+            "job `{EMBED_JOB}` checks the pages before it builds them."
+        ));
+    }
+    wrong
 }
 
 /// The embed job builds its pages from the module CI built in `wasm-player`, and checks them.
@@ -717,8 +824,33 @@ fn the_embed_job_builds_and_checks_the_embed() {
 /// one of `needles`, each named. Either one can leave the job green with that check switched off:
 /// a condition skips the step, and `continue-on-error` swallows its failure. Empty means right.
 fn step_guards_wrong(yml: &str, job: &str, needles: &[&str]) -> Vec<String> {
-    let _ = (yml, job, needles);
-    Vec::new()
+    let blocks = job_blocks_in(yml);
+    let Some((_, lines)) = blocks.iter().find(|(id, _)| *id == job) else {
+        return vec![format!("there is no job `{job}` under `jobs:`.")];
+    };
+    let mut wrong: Vec<String> = Vec::new();
+    for line in lines
+        .iter()
+        .filter(|line| step_key(line).starts_with("continue-on-error"))
+    {
+        wrong.push(format!(
+            "job `{job}` carries `{}`, so a failed check there would leave the job green.",
+            step_key(line)
+        ));
+    }
+    for needle in needles {
+        for line in step_of(lines, needle)
+            .iter()
+            .filter(|line| step_key(line).starts_with("if:"))
+        {
+            wrong.push(format!(
+                "the step that runs `{needle}` in job `{job}` carries `{}`. A condition can skip \
+                 it while the job stays green.",
+                step_key(line)
+            ));
+        }
+    }
+    wrong
 }
 
 /// Neither wasm job can be switched off one step at a time. The run-line pins above match each
@@ -780,7 +912,9 @@ fn the_wasm_job_checks_name_each_way_of_switching_them_off() {
     let mut check = |what: String, yml: String, named: String, must_name: &str| {
         assert_ne!(yml, CI_YML, "{what}: the plant landed");
         if !named.contains(must_name) {
-            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+            missed.push(format!(
+                "{what}: expected `{must_name}` named, got: {named:?}"
+            ));
         }
     };
 
@@ -839,7 +973,10 @@ fn the_wasm_job_checks_name_each_way_of_switching_them_off() {
     }
 
     // The embed job's needs line changed either way.
-    for to in ["    needs: changes\n", "    needs: [changes, wasm-player, e2e]\n"] {
+    for to in [
+        "    needs: changes\n",
+        "    needs: [changes, wasm-player, e2e]\n",
+    ] {
         let yml = CI_YML.replace(&format!("    {EMBED_NEEDS}\n"), to);
         let named = job_classes_wrong(&yml).join("\n");
         check(
@@ -867,7 +1004,10 @@ fn the_wasm_job_checks_name_each_way_of_switching_them_off() {
 
     // An embed run line swallowed.
     for line in EMBED_RUN_LINES {
-        let yml = CI_YML.replace(&format!("        {line}\n"), &format!("        {line} || true\n"));
+        let yml = CI_YML.replace(
+            &format!("        {line}\n"),
+            &format!("        {line} || true\n"),
+        );
         let named = embed_job_wrong(&yml).join("\n");
         check(
             format!("`{line}` with `|| true`"),
@@ -1459,14 +1599,20 @@ fn step_of<'a>(job_lines: &[&'a str], needle: &str) -> Vec<&'a str> {
     else {
         return Vec::new();
     };
-    let start = job_lines[..=run_at]
+    step_around(job_lines, run_at)
+}
+
+/// The trimmed lines of the step in `job_lines` that holds line `at`: from the step's own `- `
+/// line to the line before the next step's.
+fn step_around<'a>(job_lines: &[&'a str], at: usize) -> Vec<&'a str> {
+    let start = job_lines[..=at]
         .iter()
         .rposition(|l| l.starts_with("- "))
-        .unwrap_or(run_at);
-    let end = job_lines[run_at + 1..]
+        .unwrap_or(at);
+    let end = job_lines[at + 1..]
         .iter()
         .position(|l| l.starts_with("- "))
-        .map_or(job_lines.len(), |k| run_at + 1 + k);
+        .map_or(job_lines.len(), |k| at + 1 + k);
     job_lines[start..end].to_vec()
 }
 
