@@ -58,6 +58,8 @@ export interface BoardProbe {
   effectRows: { cells: string[]; title: string }[];
   /** How far the effect log well is scrolled, in CSS px. */
   logScrollTop: number;
+  /** The order strip's text, or null when the element has no `order` attribute. */
+  orderStrip: string | null;
 }
 
 /** A copy of a trace: every tick and its hash, as plain pairs. */

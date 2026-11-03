@@ -12,6 +12,12 @@
 // hides it. The stage holds its size while loading, behind an error card and after the engine
 // stops. Over the canvas sit the caption ring and the label overlay (name chips and label words).
 //
+// `order="forward"` or `order="reversed"`, read at connect, loads the board with its same-tick
+// inputs in file order or turned round, and shows a one-line order strip at the top of the frame.
+// Any other value is treated as absent. Two boards on one page, one of each, are the "run it
+// twice" pair: a board whose run doesn't depend on arrival order shows the same hash on both at
+// every tick.
+//
 // States: `loading` until the player has booted the board (the stage says "Loading board" and
 // every control is disabled), then `running`. A name with no board, an old board format or a
 // board the player refuses puts an error card in the stage and leaves the controls disabled. An
@@ -41,6 +47,19 @@ import { createWasmPacketSource } from './wasmPacketSource';
 /** The padding, in CSS px, between the board's machines and the stage edge. */
 const FIT_INSET = 24;
 
+type BoardOrder = 'forward' | 'reversed';
+
+/** The order strip's words for each `order` value. */
+const ORDER_STRIP: Record<BoardOrder, string> = {
+  forward: 'same-tick events in file order',
+  reversed: 'same-tick events in reverse order',
+};
+
+/** `forward` or `reversed`; any other value, or none, is null. */
+function orderOf(value: string | null): BoardOrder | null {
+  return value === 'forward' || value === 'reversed' ? value : null;
+}
+
 /** Did the page ask for per-tick hashes before the bundle ran? */
 function traceRequested(): boolean {
   return (globalThis as { __FABRICO_EMBED_TRACE__?: unknown }).__FABRICO_EMBED_TRACE__ === true;
@@ -69,6 +88,9 @@ export class FabricoBoardElement extends HTMLElement {
   readonly #frame: HTMLDivElement;
   readonly #code: CodeView;
   readonly #log: EffectLog;
+  readonly #orderStrip: HTMLParagraphElement;
+  /** The order the board was loaded in, read at connect, or null without the attribute. */
+  #order: BoardOrder | null = null;
   /** The board's Factories and Handlers, once it has booted. */
   #factories: BoardFactory[] = [];
   #mounted: Mounted | null = null;
@@ -111,10 +133,13 @@ export class FabricoBoardElement extends HTMLElement {
     // The stage and the code column share a row when the element is wide; when it's narrow the
     // row's box drops out of the layout (`display: contents`) and the code column moves under the
     // control bar by its flex order.
+    this.#orderStrip = document.createElement('p');
+    this.#orderStrip.className = 'order-strip';
+    this.#orderStrip.hidden = true;
     const main = document.createElement('div');
     main.className = 'main';
     main.append(this.#stage, this.#code.root);
-    frame.append(main, this.#captions.root, this.#bar.root, this.#log.root);
+    frame.append(this.#orderStrip, main, this.#captions.root, this.#bar.root, this.#log.root);
     root.append(style, frame);
     this.#applyHeight();
     this.#showLoading();
@@ -122,6 +147,9 @@ export class FabricoBoardElement extends HTMLElement {
 
   connectedCallback(): void {
     injectFonts();
+    this.#order = orderOf(this.getAttribute('order'));
+    this.#orderStrip.hidden = this.#order === null;
+    this.#orderStrip.textContent = this.#order === null ? '' : ORDER_STRIP[this.#order];
     const generation = ++this.#generation;
     this.#state = 'loading';
     this.#showLoading();
@@ -163,6 +191,7 @@ export class FabricoBoardElement extends HTMLElement {
         title: (row as HTMLElement).title,
       })),
       logScrollTop: this.#log.well.scrollTop,
+      orderStrip: this.#orderStrip.hidden ? null : this.#orderStrip.textContent,
     };
     if (m === null) {
       return {
@@ -332,7 +361,7 @@ export class FabricoBoardElement extends HTMLElement {
     }
     let player: BoardPlayer;
     try {
-      player = module.createBoard(text);
+      player = module.createBoard(text, { order: this.#order ?? 'forward' });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#showError(errorCopy(classifyPlayerError(message, 'create'), { message, tick: 0 }), 'error');

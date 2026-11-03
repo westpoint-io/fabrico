@@ -44,6 +44,14 @@ export const LAYOUT_CSS = `
    the frame: stage, caption strip, control bar, code column, effect log. */
 .order-strip { order: 0; }
 .main { display: contents; }
+.order-strip {
+  margin: 0;
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1;
+  color: var(--fab-ink);
+}
+.order-strip[hidden] { display: none; }
 .main > .stage { order: 1; }
 .captions { order: 2; }
 .bar { order: 3; }

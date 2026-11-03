@@ -136,9 +136,14 @@ const POLL_MS = 250;
  * longest belt's region, taken by the browser's compositor, changes within the budget.
  */
 export async function expectBoardDrawing(page: Page, name: string, context: string): Promise<void> {
-  const before = (await readProbe(page, name)).frames;
+  await expectBoardDrawingAt(page, `fabrico-board[name="${name}"]`, context, name);
+}
+
+/** {@link expectBoardDrawing} for the board a CSS selector finds, for pages with two of one name. */
+export async function expectBoardDrawingAt(page: Page, selector: string, context: string, name = selector): Promise<void> {
+  const before = (await readProbeAt(page, selector)).frames;
   await expect
-    .poll(async () => (await readProbe(page, name)).frames - before, {
+    .poll(async () => (await readProbeAt(page, selector)).frames - before, {
       message: `${context}: ${name}'s frame count rises`,
       timeout: BUDGET_MS,
       intervals: [POLL_MS],
@@ -149,7 +154,7 @@ export async function expectBoardDrawing(page: Page, name: string, context: stri
   let first: string | null = null;
   let samples = 0;
   while (Date.now() < deadline) {
-    const region = (await readProbe(page, name)).beltRegion;
+    const region = (await readProbeAt(page, selector)).beltRegion;
     expect(region, `${context}: ${name} reports a belt region on screen`).not.toBeNull();
     if (region === null) return;
     const png = await page.screenshot({ clip: region, animations: 'allow' });
@@ -371,4 +376,13 @@ export async function expectDrawsAfter(page: Page, name: string, action: () => P
     await page.waitForTimeout(50);
   }
   throw new Error(`${context}: ${name}'s belt region kept its held picture in ${samples} screenshots over ${BUDGET_MS} ms`);
+}
+
+/** A board's trace, by a CSS selector for the element. Needs the trace init script. */
+export async function readTraceAt(page: Page, selector: string): Promise<[number, string][]> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel) as (Element & { fabricoTickHashes?: () => [number, string][] }) | null;
+    if (el === null || typeof el.fabricoTickHashes !== 'function') throw new Error(`no fabrico-board at ${sel}`);
+    return el.fabricoTickHashes();
+  }, selector);
 }

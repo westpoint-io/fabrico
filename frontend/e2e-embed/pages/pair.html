@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Run it twice</title>
+<style>
+  html, body { margin: 0; background: #1b1f27; color: #b0bacb; }
+  body { font-family: 'Martian Mono', monospace; font-size: 12px; line-height: 1.4; }
+  main { max-width: 1280px; margin: 0 auto; padding: 48px 24px; box-sizing: border-box; }
+  h2 { font-family: 'Sono', monospace; font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin: 0 0 24px; }
+  p { margin: 0 0 24px; max-width: 72ch; }
+  /* The pair sits side by side when its wrapper is 960 px or wider and stacks below that. */
+  .pair-wrap { container-type: inline-size; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @container (min-width: 960px) {
+    .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h2>Run it twice</h2>
+  <p>The same board twice. The second one is fed the inputs that share a tick in reverse order. Its run doesn't depend on that order, so both boards hold the same state at every tick and end on the same hash.</p>
+  <div class="pair-wrap">
+    <div class="pair">
+      <fabrico-board id="forward" name="docs-arrival-order" order="forward"></fabrico-board>
+      <fabrico-board id="reversed" name="docs-arrival-order" order="reversed"></fabrico-board>
+    </div>
+  </div>
+</main>
+<!-- fabrico:bundle -->
+</body>
+</html>
