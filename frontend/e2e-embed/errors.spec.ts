@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   autoContinueCaptions,
   expectBoardDrawing,
+  glCounts,
   installGlCounter,
   pageUrl,
   readProbe,
@@ -125,4 +126,63 @@ test('each error shows its card inside a stage the size of a running board', asy
   errors.assertNone('on the error page');
   expect(consoleErrors).toEqual([]);
   expect(requests).toEqual([PAGE]);
+});
+
+test('a browser that cannot start the engine shows ENGINE DID NOT START over each board poster', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchPageErrors(page);
+  const requests = recordRequests(page);
+  await installGlCounter(page);
+  // The player module never compiles on this page.
+  await page.addInitScript(() => {
+    (WebAssembly as unknown as { compile: () => Promise<never> }).compile = () =>
+      Promise.reject(new Error('compile refused by this test'));
+  });
+  const url = pageUrl('three-boards.html');
+  await page.goto(url);
+
+  for (const name of ['demo_scene', 'order_processing', 'advanced']) {
+    await expect.poll(async () => (await readProbe(page, name)).state, { timeout: 20_000 }).toBe('error');
+    const read = await readStage(page, name);
+    expect(read.heading, `${name}: the heading`).toBe('ENGINE DID NOT START');
+    expect(read.body, `${name}: the body`).toBe(
+      "This browser couldn't start the board's engine (compile refused by this test). Reload the page. Until then, the picture shows the board at its last tick.",
+    );
+    expect(read.cardInStage, `${name}: the card sits inside the stage`).toBe(true);
+    expect(
+      { restart: read.restart, play: read.play, step: read.step, speed: read.speed },
+      `${name}: every control is disabled`,
+    ).toEqual({ restart: false, play: false, step: false, speed: false });
+    const probe = await readProbe(page, name);
+    expect(probe.mounted, `${name}: no renderer`).toBe(false);
+    expect(probe.posterShown, `${name}: the poster shows behind the card`).toBe(true);
+    const poster = await page.evaluate((n) => {
+      const root = (document.querySelector(`fabrico-board[name="${n}"]`) as HTMLElement).shadowRoot as ShadowRoot;
+      const img = root.querySelector('.stage img') as HTMLImageElement;
+      const card = root.querySelector('.card') as HTMLElement;
+      return {
+        naturalWidth: img.naturalWidth,
+        alt: img.alt,
+        canvases: root.querySelectorAll('canvas').length,
+        // The card paints above the poster: the topmost element at the card's centre is in the card.
+        cardOnTop: (() => {
+          const r = card.getBoundingClientRect();
+          const hit = root.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return hit !== null && card.contains(hit);
+        })(),
+      };
+    }, name);
+    await expect
+      .poll(async () => page.evaluate((n) => {
+        const root = (document.querySelector(`fabrico-board[name="${n}"]`) as HTMLElement).shadowRoot as ShadowRoot;
+        return (root.querySelector('.stage img') as HTMLImageElement).naturalWidth;
+      }, name), { message: `${name}: the poster decodes` })
+      .toBe(960);
+    expect(poster.canvases, `${name}: no canvas`).toBe(0);
+    expect(poster.cardOnTop, `${name}: the card is drawn over the poster`).toBe(true);
+    expect(poster.alt.length, `${name}: the poster has alt text`).toBeGreaterThan(0);
+  }
+  expect((await glCounts(page)).live, 'no board holds a WebGL context').toBe(0);
+  errors.assertNone('with the engine refused');
+  expect(requests).toEqual([url]);
 });

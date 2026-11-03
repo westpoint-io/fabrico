@@ -1,6 +1,6 @@
 // The error cards a read-only board shows inside its stage: a board name the bundle doesn't know,
-// a board file in an old format, a board file the player refused for another reason, and an
-// engine that stopped mid-run. The stage keeps its size behind every card.
+// a board file in an old format, a board file the player refused for another reason, an engine
+// that stopped mid-run, and an engine the browser couldn't start. The stage keeps its size behind every card.
 //
 // Every word is set with `textContent`. A board's name comes from the page and a player error can
 // quote the board file, and both are untrusted text on a docs page.
@@ -40,6 +40,14 @@ export function unknownBoardCopy(name: string): ErrorCopy {
   return {
     heading: 'BOARD DID NOT LOAD',
     body: `There's no board named "${name}" in this bundle. Check the name attribute against the files in examples/boards/.`,
+  };
+}
+
+/** The card for a browser that couldn't compile or start the player module. The poster shows behind it. */
+export function engineDidNotStartCopy(reason: string): ErrorCopy {
+  return {
+    heading: 'ENGINE DID NOT START',
+    body: `This browser couldn't start the board's engine (${reason}). Reload the page. Until then, the picture shows the board at its last tick.`,
   };
 }
 

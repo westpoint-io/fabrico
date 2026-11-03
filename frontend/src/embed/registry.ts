@@ -5,7 +5,7 @@
 // `window.FabricoEmbed.registerBoard`). A registered board has no manifest line, so its badge reads
 // "not pinned", and it can't take a bundled board's id, so it can't borrow that board's pin.
 
-import { BOARD_INFO, BOARDS, MANIFEST_TEXT, PLAYER_WASM_BASE64 } from 'virtual:fabrico-embed-data';
+import { BOARD_INFO, BOARDS, MANIFEST_TEXT, PLAYER_WASM_BASE64, POSTERS } from 'virtual:fabrico-embed-data';
 import { compilePlayer, type BoardInfo } from '../player/playerWasm';
 
 /** A board's line in `hashes.manifest`: the tick it ends on and its state hash there. */
@@ -44,6 +44,28 @@ export function boardText(id: string): string | null {
 export function bundledInfo(id: string): BoardInfo | null {
   if (!BOARDS.some((b) => b.id === id)) return null;
   return BOARD_INFO[id] ?? null;
+}
+
+/**
+ * A bundled board's poster, a PNG of its end tick taken from the real renderer when the bundle was
+ * built, as a `data:` URL. Null for a registered board, an unknown id, or a bundle built without
+ * posters.
+ */
+export function posterFor(id: string): string | null {
+  if (!BOARDS.some((b) => b.id === id)) return null;
+  const png = POSTERS[id];
+  return png === undefined ? null : `data:image/png;base64,${png}`;
+}
+
+/**
+ * The poster's alt text: the board's first caption, or `{title}, a Fabrico board, at its last tick`
+ * for a board with none. The title falls back to the board's name.
+ */
+export function posterAlt(info: { title: string; captions: readonly { text: string }[] } | null, name: string): string {
+  const first = info?.captions[0]?.text;
+  if (first !== undefined && first !== '') return first;
+  const title = info === null || info.title === '' ? name : info.title;
+  return `${title}, a Fabrico board, at its last tick`;
 }
 
 /** Was this id added by the page rather than carried by the bundle? */

@@ -15,6 +15,7 @@ import {
   shadowText,
   watchPageErrors,
   WHOLE_PAGE_VIEWPORT,
+  fileCaptions,
 } from './support/health.ts';
 
 // Three boards on one page (three-boards.html), each in a column of its own width, each drawn by
@@ -111,6 +112,12 @@ test('pause stops the counter, play resumes it, step advances one tick, restart 
   test.setTimeout(120_000);
   const finish = await openPage(page);
   for (const name of BOARDS) {
+    // A caption pauses the board by itself and the page presses Continue for it, so either can
+    // land between this test's clicks. Start once the board is past its last caption.
+    const lastCaption = Math.max(0, ...fileCaptions(name).map((c) => c.tick));
+    await expect
+      .poll(async () => (await readProbe(page, name)).tick, { timeout: 30_000, message: `${name} passes its last caption` })
+      .toBeGreaterThan(lastCaption + 5);
     const probe0 = await readProbe(page, name);
     if (!probe0.playing) await control(page, name, 'play').click();
     await expect.poll(async () => (await readProbe(page, name)).playing).toBe(true);

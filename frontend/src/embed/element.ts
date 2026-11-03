@@ -37,6 +37,12 @@
 // A bundled board's info (title, captions, code) is in the bundle from build time, so the code
 // column and the caption strip are laid out at connect and the stage keeps its width when the
 // player finishes loading.
+//
+// POSTERS. Each bundled board carries a PNG of its end tick, taken from the real renderer when the
+// bundle was built. Without WebGL (`webgl.ts` checks before booting and again after) the poster
+// fills the stage with its alt text, the line "This browser can't run WebGL..." takes the control
+// bar's place, and the caption strip and effect log go, since nothing runs. When the browser can't
+// compile or start the player module, the ENGINE DID NOT START card sits over the poster.
 
 import { createPacketPipeline } from '../render/packetPipeline';
 import { createSceneState, type SceneState } from '../render/sceneState';
@@ -49,13 +55,21 @@ import { createCodeView, type CodeView } from './codeView';
 import { createEffectLog, rowsFromBytes, type EffectLog } from './effectLog';
 import { createBoardClock, type BoardClock, type Speed } from './controller';
 import { createControlBar, type BarState, type ControlBar } from './controls';
-import { buildErrorCard, classifyPlayerError, errorCopy, unknownBoardCopy, type ErrorCopy } from './errors';
+import {
+  buildErrorCard,
+  classifyPlayerError,
+  engineDidNotStartCopy,
+  errorCopy,
+  unknownBoardCopy,
+  type ErrorCopy,
+} from './errors';
 import { createLabelOverlay, type LabelOverlay } from './labelOverlay';
 import { beltRegion, tickHashes, type BoardProbe } from './probe';
-import { boardText, bundledInfo, compiledPlayer, manifestEntry, onBoardRegistered } from './registry';
+import { boardText, bundledInfo, compiledPlayer, manifestEntry, onBoardRegistered, posterAlt, posterFor } from './registry';
 import { pageScheduler, type ScheduledBoard } from './scheduler';
 import { boardStylesheet, injectFonts } from './styles';
 import { createWasmPacketSource } from './wasmPacketSource';
+import { hasWebGL, isWebGLRenderer } from './webgl';
 
 /** The padding, in CSS px, between the board's machines and the stage edge. */
 const FIT_INSET = 24;
@@ -67,6 +81,11 @@ const ORDER_STRIP: Record<BoardOrder, string> = {
   forward: 'same-tick events in file order',
   reversed: 'same-tick events in reverse order',
 };
+
+/** The line that takes the control bar's place when the browser has no WebGL. */
+export const NO_WEBGL_TEXT = "This browser can't run WebGL, so this is a still picture of the board at its last tick.";
+/** The same line for a board the page registered, which has no poster to show. */
+export const NO_WEBGL_NO_POSTER_TEXT = "This browser can't run WebGL, so this board can't be shown here.";
 
 /** `forward` or `reversed`; any other value, or none, is null. */
 function orderOf(value: string | null): BoardOrder | null {
@@ -112,6 +131,17 @@ export class FabricoBoardElement extends HTMLElement {
   readonly #code: CodeView;
   readonly #log: EffectLog;
   readonly #orderStrip: HTMLParagraphElement;
+  /** The poster and the band of words over it, above the canvas and below the status layer. */
+  readonly #posterLayer: HTMLDivElement;
+  /** Made the first time a poster shows, so a running board carries no img element. */
+  #poster: HTMLImageElement | null = null;
+  readonly #posterBand: HTMLParagraphElement;
+  /** The line in the control bar's place when there's no WebGL. */
+  readonly #noWebGLLine: HTMLParagraphElement;
+  /** No WebGL here: the poster stands in for the board and nothing runs. */
+  #noWebGL = false;
+  /** The browser couldn't compile or start the player: its card over the poster. */
+  #engineFailed = false;
   /** The order the board was loaded in, read at connect, or null without the attribute. */
   #order: BoardOrder | null = null;
   /** The board's Factories and Handlers, once it has booted. */
@@ -152,7 +182,14 @@ export class FabricoBoardElement extends HTMLElement {
     this.#stage.className = 'stage';
     this.#status = document.createElement('div');
     this.#status.className = 'status';
-    this.#stage.append(this.#status);
+    this.#posterLayer = document.createElement('div');
+    this.#posterLayer.className = 'poster-layer';
+    this.#posterLayer.hidden = true;
+    this.#posterBand = document.createElement('p');
+    this.#posterBand.className = 'poster-band';
+    this.#posterBand.hidden = true;
+    this.#posterLayer.append(this.#posterBand);
+    this.#stage.append(this.#posterLayer, this.#status);
     this.#bar = createControlBar({
       onRestart: () => this.#restart(),
       onPlayPause: () => {
@@ -167,6 +204,9 @@ export class FabricoBoardElement extends HTMLElement {
     this.#captions = createCaptionStrip();
     this.#code = createCodeView();
     this.#log = createEffectLog();
+    this.#noWebGLLine = document.createElement('p');
+    this.#noWebGLLine.className = 'no-webgl';
+    this.#noWebGLLine.hidden = true;
     // The stage and the code column share a row when the element is wide; when it's narrow the
     // row's box drops out of the layout (`display: contents`) and the code column moves under the
     // control bar by its flex order.
@@ -176,7 +216,7 @@ export class FabricoBoardElement extends HTMLElement {
     const main = document.createElement('div');
     main.className = 'main';
     main.append(this.#stage, this.#code.root);
-    frame.append(this.#orderStrip, main, this.#captions.root, this.#bar.root, this.#log.root);
+    frame.append(this.#orderStrip, main, this.#captions.root, this.#bar.root, this.#noWebGLLine, this.#log.root);
     root.append(style, frame);
     this.#applyHeight();
     this.#showLoading();
@@ -189,10 +229,17 @@ export class FabricoBoardElement extends HTMLElement {
     this.#orderStrip.textContent = this.#order === null ? '' : ORDER_STRIP[this.#order];
     this.#generation += 1;
     this.#wasPlaying = null;
+    this.#engineFailed = false;
+    this.#frame.classList.remove('no-engine');
+    this.#setNoWebGL(false);
     this.#state = 'loading';
     this.#layOut(bundledInfo(this.#name()));
     this.#showLoading();
     this.#refresh();
+    if (!hasWebGL()) {
+      this.#showNoWebGL();
+      return;
+    }
     pageScheduler().add(this.#slot);
   }
 
@@ -236,6 +283,9 @@ export class FabricoBoardElement extends HTMLElement {
       orderStrip: this.#orderStrip.hidden ? null : this.#orderStrip.textContent,
       mounted: v !== null,
       wasPlaying: this.#wasPlaying,
+      noWebGL: this.#noWebGL,
+      posterShown: !this.#posterLayer.hidden && this.#poster !== null && !this.#poster.hidden,
+      posterAlt: this.#posterLayer.hidden || this.#poster === null || this.#poster.hidden ? null : this.#poster.alt,
       frames: b?.frames.n ?? 0,
       cameraSnapshot: v?.handle.cameraSnapshot() ?? null,
       beltRegion: v === null ? null : beltRegion(v.handle.sceneState, v.handle.cam, v.handle.app.canvas),
@@ -285,6 +335,51 @@ export class FabricoBoardElement extends HTMLElement {
   /** The board, when it has a view to play on. Controls act only then. */
   #live(): Board | null {
     return this.#view === null ? null : this.#board;
+  }
+
+  /** Show the poster layer when the board can't run (or isn't running) here, else hide it. */
+  #syncPoster(): void {
+    const show = this.#noWebGL || this.#engineFailed;
+    const name = this.#name();
+    const src = posterFor(name);
+    this.#posterLayer.hidden = !show;
+    if (!show) return;
+    if (src === null) {
+      if (this.#poster !== null) this.#poster.hidden = true;
+    } else {
+      if (this.#poster === null) {
+        this.#poster = document.createElement('img');
+        this.#poster.className = 'poster';
+        this.#poster.decoding = 'async';
+        this.#posterLayer.prepend(this.#poster);
+      }
+      if (this.#poster.getAttribute('src') !== src) this.#poster.src = src;
+      this.#poster.alt = posterAlt(this.#board?.info ?? bundledInfo(name), name);
+      this.#poster.hidden = false;
+    }
+    this.#posterBand.hidden = true;
+  }
+
+  /** Swap the running layout for the still one: no bar, strip or log, the WebGL line instead. */
+  #setNoWebGL(on: boolean): void {
+    this.#noWebGL = on;
+    this.#frame.classList.toggle('is-still', on);
+    this.#noWebGLLine.hidden = !on;
+    this.#noWebGLLine.textContent = posterFor(this.#name()) === null ? NO_WEBGL_NO_POSTER_TEXT : NO_WEBGL_TEXT;
+    this.#syncPoster();
+  }
+
+  /** No WebGL: the poster stands in for the board. The board leaves the scheduler for good. */
+  #showNoWebGL(): void {
+    pageScheduler().remove(this.#slot);
+    this.#inSlot = false;
+    this.#run += 1;
+    this.#teardownView();
+    this.#dropBoard();
+    this.#hideStatus();
+    this.#state = 'error';
+    this.#setNoWebGL(true);
+    this.#refresh();
   }
 
   /** Move the effects the player recorded since the last call into the log. */
@@ -430,7 +525,21 @@ export class FabricoBoardElement extends HTMLElement {
    */
   async #loadBoard(generation: number): Promise<Board | null> {
     if (this.#board !== null) return this.#board;
-    const module = await instantiatePlayer(await compiledPlayer());
+    let module: Awaited<ReturnType<typeof instantiatePlayer>>;
+    try {
+      module = await instantiatePlayer(await compiledPlayer());
+    } catch (error) {
+      if (generation !== this.#generation) return null;
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`fabrico-board "${this.#name()}" engine did not start`, error);
+      pageScheduler().remove(this.#slot);
+      this.#engineFailed = true;
+      // Nothing will run, so the caption strip's opening line and the empty log would mislead.
+      this.#frame.classList.add('no-engine');
+      this.#syncPoster();
+      this.#showError(engineDidNotStartCopy(reason), 'error');
+      return null;
+    }
     if (generation !== this.#generation) return null;
     if (this.#board !== null) return this.#board;
     // Looked up after the awaits, so a page script that registers a board right after the
@@ -481,11 +590,25 @@ export class FabricoBoardElement extends HTMLElement {
   async #mountView(generation: number, run: number): Promise<void> {
     const board = await this.#loadBoard(generation);
     if (board === null || !this.#current(generation, run) || this.#view !== null) return;
+    // Pixi falls back to WebGPU or a canvas renderer rather than failing, so ask first.
+    if (!hasWebGL()) {
+      this.#showNoWebGL();
+      return;
+    }
     const handle = await bootPixi(this.#stage, { interactive: false, resizeTo: this.#stage, scene: board.scene });
-    if (!this.#current(generation, run) || this.#view !== null) {
+    const dispose = (): void => {
       handle.app.canvas.setAttribute('data-fab-teardown', '');
       handle.stop();
       handle.app.destroy(true);
+    };
+    if (!this.#current(generation, run) || this.#view !== null) {
+      dispose();
+      return;
+    }
+    // And check what Pixi picked: a board on any renderer other than WebGL shows its poster.
+    if (!isWebGLRenderer(handle.app)) {
+      dispose();
+      this.#showNoWebGL();
       return;
     }
     const title = board.info.title || this.#name();
@@ -515,8 +638,9 @@ export class FabricoBoardElement extends HTMLElement {
     // The ring layer sits under the labels, so a name chip stays readable over the ring's edge.
     const ring = createCaptionRing(this.#stage, handle, board.info.captions, () => board.clock.caption());
     const labels = createLabelOverlay(this.#stage, handle);
-    // The status layer (loading line, error cards) stays above the canvas and the labels.
-    this.#stage.append(this.#status);
+    // The poster layer and the status layer (loading line, error cards) stay above the canvas and
+    // the labels.
+    this.#stage.append(this.#posterLayer, this.#status);
     this.#view = { handle, resize, labels, ring };
     if (this.#state === 'loading') {
       this.#state = 'running';

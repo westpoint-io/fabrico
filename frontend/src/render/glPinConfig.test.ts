@@ -84,6 +84,77 @@ function extractAllLaunchArgs(source: string): Array<readonly string[]> {
   );
 }
 
+/**
+ * The one project allowed to launch with more than the pinned arguments: the embed config's
+ * `chromium-nowebgl`, which turns WebGL off to check the poster a board shows without it. It may
+ * add `--disable-webgl` after the pin and nothing else.
+ */
+const NO_WEBGL_PROJECT = {
+  config: 'playwright.embed.config.ts',
+  name: 'chromium-nowebgl',
+  args: [...PINNED_ARGS, '--disable-webgl'],
+} as const;
+
+/**
+ * Check one config's launch arguments. Returns what is wrong, or an empty list.
+ *
+ * The first `launchOptions.args` is the top-level pin and must equal it. A config may carry one
+ * more only if it is the no-WebGL project's config, the extra array equals the pin plus
+ * `--disable-webgl`, and the nearest project name before it is that project's.
+ */
+function launchArgProblems(name: string, source: string): string[] {
+  const all = extractAllLaunchArgs(source);
+  const problems: string[] = [];
+  if (all.length === 0) return [`${name}: no use.launchOptions.args, so the pin is missing`];
+  if (JSON.stringify(all[0]) !== JSON.stringify(PINNED_ARGS)) {
+    problems.push(`${name}: the first launch args are ${JSON.stringify(all[0])}, not the pin`);
+  }
+  const extras = all.slice(1);
+  if (extras.length === 0) return problems;
+  if (name !== NO_WEBGL_PROJECT.config || extras.length > 1) {
+    problems.push(
+      `${name}: ${extras.length} more launchOptions.args after the pin; only ${NO_WEBGL_PROJECT.config}'s ` +
+        `${NO_WEBGL_PROJECT.name} project may carry one`,
+    );
+    return problems;
+  }
+  if (JSON.stringify(extras[0]) !== JSON.stringify(NO_WEBGL_PROJECT.args)) {
+    problems.push(`${name}: the extra launch args are ${JSON.stringify(extras[0])}, not ${JSON.stringify(NO_WEBGL_PROJECT.args)}`);
+  }
+  const matches = [...source.matchAll(/launchOptions:\s*\{\s*args:/g)];
+  const at = matches[1]?.index ?? 0;
+  const names = [...source.slice(0, at).matchAll(/name:\s*['"]([^'"]+)['"]/g)];
+  const owner = names[names.length - 1]?.[1];
+  if (owner !== NO_WEBGL_PROJECT.name) {
+    problems.push(`${name}: the extra launch args belong to project ${String(owner)}, not ${NO_WEBGL_PROJECT.name}`);
+  }
+  return problems;
+}
+
+describe('the no-WebGL project is the one allowed extra', () => {
+  const pin = `'--use-gl=angle', '--use-angle=swiftshader'`;
+  const shape = (extra: string, project = 'chromium-nowebgl'): string =>
+    `use: { launchOptions: { args: [${pin}] } },\n  projects: [{ name: 'chromium' }, { name: '${project}', use: { launchOptions: { args: [${pin}${extra}] } } }],`;
+
+  it('accepts the pin plus --disable-webgl on the chromium-nowebgl project of the embed config', () => {
+    expect(launchArgProblems('playwright.embed.config.ts', shape(`, '--disable-webgl'`))).toEqual([]);
+  });
+
+  it('refuses a second extra argument', () => {
+    expect(launchArgProblems('playwright.embed.config.ts', shape(`, '--disable-webgl', '--use-gl=swiftshader'`))).toHaveLength(1);
+  });
+
+  it('refuses the extra arguments on another project or in another config', () => {
+    expect(launchArgProblems('playwright.embed.config.ts', shape(`, '--disable-webgl'`, 'chromium-2'))).toHaveLength(1);
+    expect(launchArgProblems('playwright.config.ts', shape(`, '--disable-webgl'`))).toHaveLength(1);
+  });
+
+  it('refuses a project that drops the pin while adding --disable-webgl', () => {
+    const source = `use: { launchOptions: { args: [${pin}] } },\n  projects: [{ name: 'chromium-nowebgl', use: { launchOptions: { args: ['--disable-webgl'] } } }],`;
+    expect(launchArgProblems('playwright.embed.config.ts', source)).toHaveLength(1);
+  });
+});
+
 describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () => {
   it('checks exactly 7 configs (a shrinking list cannot pass vacuously)', () => {
     expect(CONFIG_FILES).toHaveLength(7);
@@ -91,7 +162,10 @@ describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () =>
 
   for (const name of CONFIG_FILES) {
     it(`${name} declares the GL pin exactly ONCE, and it is the pinned array`, () => {
-      const all = extractAllLaunchArgs(readFileSync(configPath(name), 'utf8'));
+      const source = readFileSync(configPath(name), 'utf8');
+      expect(launchArgProblems(name, source), `${name}: launch args`).toEqual([]);
+      // The no-WebGL project's own array is checked by launchArgProblems; the pin itself is the first.
+      const all = extractAllLaunchArgs(source).slice(0, name === NO_WEBGL_PROJECT.config ? 1 : undefined);
       // EXACTLY one. Zero means the pin is missing. More than one means some
       // occurrence is not being asserted - and since Playwright resolves project
       // `use` over top-level `use` by replacement, the one this gate would have
@@ -110,7 +184,8 @@ describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () =>
   it('all 7 configs carry a byte-identical arg array', () => {
     const extracted = CONFIG_FILES.map((name) => ({
       name,
-      all: extractAllLaunchArgs(readFileSync(configPath(name), 'utf8')),
+      // The pin is the first array; the embed config's no-WebGL project is checked above.
+      all: extractAllLaunchArgs(readFileSync(configPath(name), 'utf8')).slice(0, name === NO_WEBGL_PROJECT.config ? 1 : undefined),
     }));
     // Assert the whole shape at once so the failure message names WHICH config
     // diverged and what it carries, rather than only that a comparison failed.

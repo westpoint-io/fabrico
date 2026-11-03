@@ -29,6 +29,12 @@ export interface BoardProbe {
   mounted: boolean;
   /** Whether the board was playing when it last left the margin, or null if it never left. */
   wasPlaying: boolean | null;
+  /** True when this browser gave the board no WebGL renderer, so its poster stands in for it. */
+  noWebGL: boolean;
+  /** True while the stage shows the board's poster image. */
+  posterShown: boolean;
+  /** The poster's alt text while the poster layer shows, else null. */
+  posterAlt: string | null;
   state: ProbeState;
   tick: number;
   endTick: number;

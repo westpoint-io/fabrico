@@ -14,5 +14,18 @@ export default defineConfig({
     launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader'] },
     trace: 'off',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: 'nowebgl.spec.ts' },
+    // The same Chromium with WebGL turned off, for the poster state. Playwright replaces a
+    // project's launchOptions whole, so the pinned GL arguments are spelled out again, and
+    // glPinConfig.test.ts allows this one project to add --disable-webgl and nothing else.
+    {
+      name: 'chromium-nowebgl',
+      testMatch: 'nowebgl.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--disable-webgl'] },
+      },
+    },
+  ],
 });

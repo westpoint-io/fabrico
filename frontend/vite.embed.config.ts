@@ -62,6 +62,37 @@ async function buildBoardInfo(wasm: Uint8Array<ArrayBuffer>, boards: readonly { 
   return out;
 }
 
+/**
+ * The posters `scripts/capture-posters.ts` wrote, `<board id>.png` in the folder
+ * FABRICO_EMBED_POSTERS names, as base64 keyed by board id. With FABRICO_EMBED_REQUIRE_POSTERS=1
+ * the build fails naming every board without one, so a release bundle can't ship a board whose
+ * no-WebGL state is an empty stage. Without the folder variable there are no posters, which is
+ * how the first of the two builds runs.
+ */
+function readPosters(ids: readonly string[]): Record<string, string> {
+  const dir = process.env.FABRICO_EMBED_POSTERS;
+  const required = process.env.FABRICO_EMBED_REQUIRE_POSTERS === '1';
+  const out: Record<string, string> = {};
+  if (dir !== undefined && dir !== '') {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      throw new Error(`fab-embed-data: FABRICO_EMBED_POSTERS is ${dir}, which is not a folder`);
+    }
+    for (const id of ids) {
+      const file = path.join(dir, `${id}.png`);
+      if (fs.existsSync(file) && fs.statSync(file).size > 0) out[id] = fs.readFileSync(file).toString('base64');
+    }
+  }
+  if (required) {
+    const missing = ids.filter((id) => out[id] === undefined);
+    if (missing.length > 0) {
+      throw new Error(
+        `fab-embed-data: FABRICO_EMBED_REQUIRE_POSTERS is 1 and these boards have no poster in ${dir ?? '(FABRICO_EMBED_POSTERS unset)'}: ${missing.join(', ')}`,
+      );
+    }
+  }
+  return out;
+}
+
 function embedDataPlugin(): Plugin {
   return {
     name: 'fab-embed-data',
@@ -96,6 +127,7 @@ function embedDataPlugin(): Plugin {
         `export const PLAYER_WASM_BASE64 = ${JSON.stringify(wasm)};`,
         `export const BOARDS = ${JSON.stringify(boards)};`,
         `export const BOARD_INFO = ${JSON.stringify(info)};`,
+        `export const POSTERS = ${JSON.stringify(readPosters(boards.map((b) => b.id)))};`,
         `export const MANIFEST_TEXT = ${JSON.stringify(manifest)};`,
       ].join('\n');
     },

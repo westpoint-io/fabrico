@@ -18,4 +18,9 @@ declare module 'virtual:fabrico-embed-data' {
    * the player refused has no entry.
    */
   export const BOARD_INFO: Readonly<Record<string, import('../src/player/playerWasm').BoardInfo>>;
+  /**
+   * Each board's poster, a PNG of its end tick, as base64 keyed by board id. Empty when the bundle
+   * was built without `FABRICO_EMBED_POSTERS`.
+   */
+  export const POSTERS: Readonly<Record<string, string>>;
 }

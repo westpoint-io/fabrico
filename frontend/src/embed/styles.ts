@@ -229,6 +229,59 @@ export const LAYOUT_CSS = `
   line-height: 1;
   color: var(--fab-ink);
 }
+/* The poster: a PNG of the board's end tick, over the canvas and under the status layer. It fills
+   the stage at the board's own proportions, on the substrate. The band carries a line of words
+   across its middle when the board is waiting or its graphics were taken. */
+.poster-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--fab-substrate);
+}
+.poster-layer[hidden] { display: none; }
+.poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.poster[hidden] { display: none; }
+.poster-band {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: var(--fab-space-sm) var(--fab-space-lg);
+  background-color: var(--fab-substrate);
+  border-top: 1px solid var(--fab-edge-lit);
+  border-bottom: 1px solid var(--fab-edge-lit);
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1.4;
+  color: var(--fab-ink);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.poster-band[hidden] { display: none; }
+/* No WebGL: nothing runs, so the caption strip, the bar and the effect log give way to one line. */
+.no-webgl {
+  order: 3;
+  margin: 0;
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1.4;
+  color: var(--fab-ink);
+}
+.no-webgl[hidden] { display: none; }
+.frame.is-still .bar,
+.frame.is-still .captions,
+.frame.is-still .effect-log { display: none; }
+/* The engine didn't start: the card says so, the disabled bar stays, and the strip and log go. */
+.frame.no-engine .captions,
+.frame.no-engine .effect-log { display: none; }
 .card {
   box-sizing: border-box;
   max-width: 420px;

@@ -64,7 +64,18 @@ function buildPages(templatesDir: string, outDir: string): number {
   return names.length;
 }
 
-if ((import.meta as ImportMeta & { main?: boolean }).main === true) {
+/**
+ * Is this file the script Node was asked to run, rather than a module another script imported?
+ * `import.meta.main` answers that on Node 24; on a Node without it, compare the script path.
+ */
+function isMain(): boolean {
+  const main = (import.meta as ImportMeta & { main?: boolean }).main;
+  if (typeof main === 'boolean') return main;
+  const script = process.argv[1];
+  return script !== undefined && path.resolve(script) === fileURLToPath(import.meta.url);
+}
+
+if (isMain()) {
   const [mode, templatesDir, outDir] = process.argv.slice(2);
   if (mode !== '--pages' || templatesDir === undefined || outDir === undefined) {
     console.error('usage: node scripts/build-offline.ts --pages <templates-dir> <out-dir>');
