@@ -422,7 +422,10 @@ pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>
 /// in gives the same hash at every tick either way.
 #[must_use]
 pub fn reverse_same_tick_runs(script: &[ScriptEntry]) -> Vec<ScriptEntry> {
-    script.to_vec()
+    script
+        .chunk_by(|a, b| a.tick == b.tick)
+        .flat_map(|run| run.iter().rev().cloned())
+        .collect()
 }
 
 /// Refuse a caption whose handle isn't a machine on the booted board. Only the handles the

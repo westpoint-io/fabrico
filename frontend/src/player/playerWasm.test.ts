@@ -29,6 +29,7 @@ function stub(overrides: (setOut: (text: string) => number) => Partial<PlayerExp
     fp_alloc: () => 16,
     fp_free: () => {},
     fp_create: () => 1,
+    fp_create_reversed: () => 1,
     fp_destroy: () => 0,
     fp_step: () => 0,
     fp_take_packet: () => {
@@ -225,6 +226,33 @@ describe('statuses', () => {
       expect(() => board.step(ticks)).toThrow(PlayerError);
     }
     expect(() => board.step(2 ** 32 - 1)).not.toThrow();
+  });
+});
+
+describe('script order', () => {
+  it('calls fp_create by default and fp_create_reversed for the reversed order', () => {
+    const calls: string[] = [];
+    const module = playerModuleFrom(
+      stub(() => ({
+        fp_create: () => {
+          calls.push('forward');
+          return 1;
+        },
+        fp_create_reversed: () => {
+          calls.push('reversed');
+          return 2;
+        },
+      })),
+    );
+    module.createBoard('board');
+    module.createBoard('board', { order: 'forward' });
+    module.createBoard('board', { order: 'reversed' });
+    expect(calls).toEqual(['forward', 'forward', 'reversed']);
+  });
+
+  it('refuses an order it does not know', () => {
+    const module = playerModuleFrom(stub());
+    expect(() => module.createBoard('board', { order: 'sideways' as 'forward' })).toThrow(PlayerError);
   });
 });
 

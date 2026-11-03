@@ -147,7 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-NONE
+# One new line for examples/boards/docs/arrival-order.board.ron, written by the generator. The four
+# older lines are unchanged.
+examples/boards/hashes.manifest 3487302d0cadaea128a10e8e6084da25fdc123657a6b4aa216a025383e9d89e3
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the
@@ -193,3 +195,6 @@ crates/fabrico-engine/tests/board_outcomes.rs
 # The arrival-order board played as written and with its same-tick webhooks reversed, compared at
 # every tick, with a same-Source variant that has to differ.
 crates/fabrico-engine/tests/board_arrival_order.rs
+# The board floor goes from 4 to 5 for the arrival-order board, and the check's own tests use five
+# made-up boards to match.
+crates/fabrico-engine/tests/board_manifest.rs

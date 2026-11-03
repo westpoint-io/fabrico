@@ -28,9 +28,9 @@ const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const BOARDS_DIR: &str = "examples/boards";
 const MANIFEST_PATH: &str = "examples/boards/hashes.manifest";
 
-/// The 3 shipped boards and the docs test board. A walk that finds fewer is broken, and an empty
-/// walk would otherwise pass.
-const BOARD_FLOOR: usize = 4;
+/// The 3 shipped boards and the 2 docs boards. A walk that finds fewer is broken, and an empty walk
+/// would otherwise pass.
+const BOARD_FLOOR: usize = 5;
 
 /// The comment header the generator writes above the board lines.
 const MANIFEST_HEADER: &str = "\
@@ -262,20 +262,22 @@ fn walked(path: &str, tick: u64, hash: &str) -> Walked {
     Walked { path: path.to_string(), outcome: Ok(BoardEnd { tick, hash: hash.to_string() }) }
 }
 
-fn four_boards() -> Vec<Walked> {
+fn five_boards() -> Vec<Walked> {
     vec![
         walked("examples/boards/a.board.ron", 100, HASH_A),
         walked("examples/boards/b.board.ron", 200, HASH_B),
         walked("examples/boards/docs/c.board.ron", 300, HASH_C),
         walked("examples/boards/d.board.ron", 400, HASH_A),
+        walked("examples/boards/docs/e.board.ron", 500, HASH_B),
     ]
 }
 
-const FOUR_LINES: &str = "\
+const FIVE_LINES: &str = "\
 examples/boards/a.board.ron 100 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 examples/boards/b.board.ron 200 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 examples/boards/d.board.ron 400 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 examples/boards/docs/c.board.ron 300 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+examples/boards/docs/e.board.ron 500 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ";
 
 /// Assert one problem mentions all of `needles`, and show all the problems if none does.
@@ -289,45 +291,45 @@ fn assert_named(problems: &[String], needles: &[&str]) {
 
 #[test]
 fn a_matching_set_has_no_problems() {
-    let problems = compare(&four_boards(), FOUR_LINES);
+    let problems = compare(&five_boards(), FIVE_LINES);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 #[test]
 fn comments_and_blank_lines_are_skipped() {
-    let manifest = format!("# a comment\n\n{FOUR_LINES}\n# another\n");
-    let problems = compare(&four_boards(), &manifest);
+    let manifest = format!("# a comment\n\n{FIVE_LINES}\n# another\n");
+    let problems = compare(&five_boards(), &manifest);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 #[test]
 fn a_board_with_no_line_is_named() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards.push(walked("examples/boards/new.board.ron", 500, HASH_B));
-    assert_named(&compare(&boards, FOUR_LINES), &["examples/boards/new.board.ron", "no manifest line"]);
+    assert_named(&compare(&boards, FIVE_LINES), &["examples/boards/new.board.ron", "no manifest line"]);
 }
 
 #[test]
 fn a_line_with_no_board_is_named() {
-    let boards = four_boards();
+    let boards = five_boards();
     let manifest = format!(
-        "{FOUR_LINES}examples/boards/gone.board.ron 500 {HASH_B}\n"
+        "{FIVE_LINES}examples/boards/gone.board.ron 500 {HASH_B}\n"
     );
-    assert_named(&compare(&boards, &manifest), &["line 5", "examples/boards/gone.board.ron", "no such board"]);
+    assert_named(&compare(&boards, &manifest), &["line 6", "examples/boards/gone.board.ron", "no such board"]);
 }
 
 #[test]
 fn a_wrong_hash_names_the_board_and_both_values() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards[0] = walked("examples/boards/a.board.ron", 100, HASH_C);
-    assert_named(&compare(&boards, FOUR_LINES), &["examples/boards/a.board.ron", "hash", HASH_C, HASH_A]);
+    assert_named(&compare(&boards, FIVE_LINES), &["examples/boards/a.board.ron", "hash", HASH_C, HASH_A]);
 }
 
 #[test]
 fn a_wrong_end_tick_names_the_board_and_both_values() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards[1] = walked("examples/boards/b.board.ron", 201, HASH_B);
-    assert_named(&compare(&boards, FOUR_LINES), &["examples/boards/b.board.ron", "end tick", "201", "200"]);
+    assert_named(&compare(&boards, FIVE_LINES), &["examples/boards/b.board.ron", "end tick", "201", "200"]);
 }
 
 #[test]
@@ -338,7 +340,7 @@ fn an_unsorted_manifest_names_the_line() {
          examples/boards/d.board.ron 400 {HASH_A}\n\
          examples/boards/docs/c.board.ron 300 {HASH_C}\n"
     );
-    assert_named(&compare(&four_boards(), &manifest), &["line 2", "examples/boards/a.board.ron", "order"]);
+    assert_named(&compare(&five_boards(), &manifest), &["line 2", "examples/boards/a.board.ron", "order"]);
 }
 
 #[test]
@@ -350,7 +352,7 @@ fn a_path_listed_twice_names_the_line_even_when_the_copies_are_not_adjacent() {
          examples/boards/d.board.ron 400 {HASH_A}\n\
          examples/boards/docs/c.board.ron 300 {HASH_C}\n"
     );
-    assert_named(&compare(&four_boards(), &manifest), &["line 3", "examples/boards/a.board.ron", "twice"]);
+    assert_named(&compare(&five_boards(), &manifest), &["line 3", "examples/boards/a.board.ron", "twice"]);
 }
 
 #[test]
@@ -372,25 +374,25 @@ fn malformed_lines_are_named() {
         "   ".to_string(),
     ];
     for bad in &bad_lines {
-        let manifest = format!("{FOUR_LINES}{bad}\n");
-        assert_named(&compare(&four_boards(), &manifest), &["line 5", "malformed"]);
+        let manifest = format!("{FIVE_LINES}{bad}\n");
+        assert_named(&compare(&five_boards(), &manifest), &["line 6", "malformed"]);
     }
 }
 
 #[test]
 fn an_empty_walk_fails() {
-    assert_named(&compare(&[], FOUR_LINES), &["found 0 boards", "4"]);
+    assert_named(&compare(&[], FIVE_LINES), &["found 0 boards", "5"]);
 }
 
 #[test]
 fn fewer_than_the_floor_of_boards_fails() {
-    let boards = &four_boards()[..3];
-    assert_named(&compare(boards, FOUR_LINES), &["found 3 boards", "4"]);
+    let boards = &five_boards()[..4];
+    assert_named(&compare(boards, FIVE_LINES), &["found 4 boards", "5"]);
 }
 
 #[test]
 fn a_header_only_manifest_fails() {
-    let problems = compare(&four_boards(), MANIFEST_HEADER);
+    let problems = compare(&five_boards(), MANIFEST_HEADER);
     assert_named(&problems, &["no board lines"]);
     assert_named(&problems, &["examples/boards/a.board.ron", "no manifest line"]);
 }
@@ -405,44 +407,44 @@ fn an_empty_walk_and_a_header_only_manifest_fail_together() {
 #[test]
 fn two_boards_with_the_same_hash_each_keep_their_own_line() {
     // a and d share HASH_A in the fixtures above, so both lines have to survive and match.
-    assert!(compare(&four_boards(), FOUR_LINES).is_empty());
-    let text = render_manifest(&four_boards()).expect("render");
+    assert!(compare(&five_boards(), FIVE_LINES).is_empty());
+    let text = render_manifest(&five_boards()).expect("render");
     assert!(text.contains(&format!("examples/boards/a.board.ron 100 {HASH_A}\n")), "{text}");
     assert!(text.contains(&format!("examples/boards/d.board.ron 400 {HASH_A}\n")), "{text}");
 
     // Dropping one line names that board, so the other's matching hash can't stand in for it.
-    let without_d: String = FOUR_LINES.lines().filter(|l| !l.contains("/d.board.ron")).map(|l| format!("{l}\n")).collect();
-    let problems = compare(&four_boards(), &without_d);
+    let without_d: String = FIVE_LINES.lines().filter(|l| !l.contains("/d.board.ron")).map(|l| format!("{l}\n")).collect();
+    let problems = compare(&five_boards(), &without_d);
     assert_named(&problems, &["examples/boards/d.board.ron", "no manifest line"]);
     assert_eq!(problems.len(), 1, "{}", problems.join("\n"));
 }
 
 #[test]
 fn one_run_names_every_problem() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards[0] = walked("examples/boards/a.board.ron", 100, HASH_C);
     boards.push(walked("examples/boards/new.board.ron", 500, HASH_B));
-    let manifest = format!("{FOUR_LINES}examples/boards/gone.board.ron 500 {HASH_B}\nnot a line at all here\n");
+    let manifest = format!("{FIVE_LINES}examples/boards/gone.board.ron 500 {HASH_B}\nnot a line at all here\n");
     let problems = compare(&boards, &manifest);
     assert_named(&problems, &["examples/boards/a.board.ron", "hash"]);
     assert_named(&problems, &["examples/boards/new.board.ron", "no manifest line"]);
     assert_named(&problems, &["examples/boards/gone.board.ron", "no such board"]);
-    assert_named(&problems, &["line 6", "malformed"]);
+    assert_named(&problems, &["line 7", "malformed"]);
 }
 
 #[test]
 fn a_board_that_could_not_run_is_named_with_its_reason() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards[2] = Walked {
         path: "examples/boards/docs/c.board.ron".to_string(),
         outcome: Err("parse: unexpected token".to_string()),
     };
-    assert_named(&compare(&boards, FOUR_LINES), &["examples/boards/docs/c.board.ron", "parse: unexpected token"]);
+    assert_named(&compare(&boards, FIVE_LINES), &["examples/boards/docs/c.board.ron", "parse: unexpected token"]);
 }
 
 #[test]
 fn the_generator_sorts_byte_wise_by_path_whatever_order_it_is_given() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards.push(walked("examples/boards/Z.board.ron", 500, HASH_B));
     let sorted = render_manifest(&boards).expect("render");
     boards.reverse();
@@ -461,23 +463,24 @@ fn the_generator_sorts_byte_wise_by_path_whatever_order_it_is_given() {
             "examples/boards/b.board.ron",
             "examples/boards/d.board.ron",
             "examples/boards/docs/c.board.ron",
+            "examples/boards/docs/e.board.ron",
         ]
     );
 }
 
 #[test]
 fn the_generator_output_passes_the_comparison_and_ends_in_a_newline() {
-    let text = render_manifest(&four_boards()).expect("render");
+    let text = render_manifest(&five_boards()).expect("render");
     assert!(text.starts_with(MANIFEST_HEADER), "{text}");
     assert!(text.ends_with('\n'), "{text}");
-    assert!(text.ends_with(&format!("{HASH_C}\n")), "{text}");
-    let problems = compare(&four_boards(), &text);
+    assert!(text.ends_with(&format!("examples/boards/docs/e.board.ron 500 {HASH_B}\n")), "{text}");
+    let problems = compare(&five_boards(), &text);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 #[test]
 fn the_generator_refuses_a_board_that_could_not_run() {
-    let mut boards = four_boards();
+    let mut boards = five_boards();
     boards[0] = Walked {
         path: "examples/boards/a.board.ron".to_string(),
         outcome: Err("run: refused".to_string()),
@@ -488,8 +491,8 @@ fn the_generator_refuses_a_board_that_could_not_run() {
 
 #[test]
 fn the_generator_refuses_a_walk_below_the_floor() {
-    let refusal = render_manifest(&four_boards()[..3]).expect_err("a short walk must stop the generator");
-    assert!(refusal.contains("found 3 boards"), "{refusal}");
+    let refusal = render_manifest(&five_boards()[..4]).expect_err("a short walk must stop the generator");
+    assert!(refusal.contains("found 4 boards"), "{refusal}");
 }
 
 /// The one way to write the manifest. Run it by hand, as a stated act, after a change you mean to

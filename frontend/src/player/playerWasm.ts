@@ -192,7 +192,7 @@ export interface BoardPlayer {
    * these are the bytes of an empty list.
    */
   takeEffects(): Uint8Array;
-  /** Boot the same board again from its text. The next packet is a keyframe. */
+  /** Boot the same board again from its text, in the same order. The next packet is a keyframe. */
   restart(): void;
   tick(): number;
   endTick(): number;
@@ -203,10 +203,20 @@ export interface BoardPlayer {
   destroy(): void;
 }
 
+/** How a board is loaded. */
+export interface CreateBoardOptions {
+  /**
+   * The order the inputs that share a tick are fed in. `reversed` turns each same-tick run of the
+   * board's script round, so a run that doesn't depend on arrival order matches the forward run at
+   * every tick. A restart keeps the order. Defaults to `forward`.
+   */
+  order?: 'forward' | 'reversed';
+}
+
 /** A loaded module, which can run any number of boards. */
 export interface PlayerModule {
   /** Load a board from its file text. A board the player refuses throws {@link PlayerError}. */
-  createBoard(text: string): BoardPlayer;
+  createBoard(text: string, options?: CreateBoardOptions): BoardPlayer;
 }
 
 /**
@@ -218,6 +228,7 @@ export interface PlayerExports {
   fp_alloc(len: number): number;
   fp_free(ptr: number, len: number): void;
   fp_create(ptr: number, len: number): number;
+  fp_create_reversed(ptr: number, len: number): number;
   fp_destroy(handle: number): number;
   fp_step(handle: number, ticks: number): number;
   fp_take_packet(handle: number): number;
@@ -236,6 +247,7 @@ const EXPORT_NAMES: readonly (keyof PlayerExports)[] = [
   'fp_alloc',
   'fp_free',
   'fp_create',
+  'fp_create_reversed',
   'fp_destroy',
   'fp_step',
   'fp_take_packet',
@@ -287,6 +299,7 @@ function guardExports(raw: PlayerExports): PlayerExports {
     fp_alloc: guard(raw.fp_alloc),
     fp_free: guard(raw.fp_free),
     fp_create: guard(raw.fp_create),
+    fp_create_reversed: guard(raw.fp_create_reversed),
     fp_destroy: guard(raw.fp_destroy),
     fp_step: guard(raw.fp_step),
     fp_take_packet: guard(raw.fp_take_packet),
@@ -324,7 +337,12 @@ export function playerModuleFrom(rawExports: PlayerExports): PlayerModule {
   };
 
   return {
-    createBoard(text) {
+    createBoard(text, options = {}) {
+      const order = options.order ?? 'forward';
+      if (order !== 'forward' && order !== 'reversed') {
+        throw new PlayerError(`order is 'forward' or 'reversed', not ${String(order)}`);
+      }
+      const create = order === 'reversed' ? exports.fp_create_reversed : exports.fp_create;
       const bytes = new TextEncoder().encode(text);
       const ptr = exports.fp_alloc(bytes.length) >>> 0;
       if (ptr === 0 && bytes.length > 0) {
@@ -333,7 +351,7 @@ export function playerModuleFrom(rawExports: PlayerExports): PlayerModule {
       let handle: number;
       try {
         if (bytes.length > 0) new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
-        handle = exports.fp_create(ptr, bytes.length) >>> 0;
+        handle = create(ptr, bytes.length) >>> 0;
         if (handle === 0) throw new PlayerError(outText());
       } finally {
         exports.fp_free(ptr, bytes.length);

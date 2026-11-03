@@ -27,7 +27,7 @@ use std::fmt;
 
 use fabrico_core::factory::DEFAULT_STACK_LIMIT;
 use fabrico_core::state::{HttpMethod, Node};
-use fabrico_engine::board::{BoardError, OutboundOutcome, parse_board};
+use fabrico_engine::board::{BoardError, OutboundOutcome, parse_board, reverse_same_tick_runs};
 use fabrico_engine::gesture::kind_byte;
 use fabrico_engine::render_packet::RenderPacketBuilder;
 use fabrico_engine::scripted::{BoardRun, EffectRecord, EffectSummary};
@@ -236,11 +236,24 @@ fn board_info(run: &BoardRun, builder: &RenderPacketBuilder) -> BoardInfo {
     }
 }
 
+/// The order a player feeds the inputs that share a tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptOrder {
+    /// As the board file lists them.
+    Forward,
+    /// Each same-tick run reversed, through
+    /// [`reverse_same_tick_runs`](fabrico_engine::board::reverse_same_tick_runs). A run that
+    /// doesn't depend on arrival order gives the same hash at every tick either way.
+    Reversed,
+}
+
 /// One board running from its data file.
 ///
 /// A player keeps everything in this value, so two players on one module can't affect each other.
 pub struct Player {
     board_text: String,
+    /// Kept, so a restart reverses the script again.
+    order: ScriptOrder,
     run: BoardRun,
     end_tick: u64,
     builder: RenderPacketBuilder,
@@ -257,7 +270,18 @@ impl Player {
     /// # Errors
     /// [`PlayerError::Board`] if the text isn't a valid board or a command in it is refused.
     pub fn new(board_text: &str) -> Result<Self, PlayerError> {
-        let board = parse_board(board_text)?;
+        Self::with_order(board_text, ScriptOrder::Forward)
+    }
+
+    /// Load a board as [`Player::new`] does, feeding the inputs that share a tick in `order`.
+    ///
+    /// # Errors
+    /// The same as [`Player::new`].
+    pub fn with_order(board_text: &str, order: ScriptOrder) -> Result<Self, PlayerError> {
+        let mut board = parse_board(board_text)?;
+        if order == ScriptOrder::Reversed {
+            board.script = reverse_same_tick_runs(&board.script);
+        }
         let end_tick = board.end_tick;
         let run = BoardRun::boot(board)?;
 
@@ -272,7 +296,7 @@ impl Player {
 
         let mut packets = VecDeque::new();
         packets.push_back(encode(&keyframe)?);
-        Ok(Self { board_text: board_text.to_owned(), run, end_tick, builder, packets, effects_taken: 0, info })
+        Ok(Self { board_text: board_text.to_owned(), order, run, end_tick, builder, packets, effects_taken: 0, info })
     }
 
     /// Run up to `ticks` ticks, stopping at the board's end tick, and queue one packet per tick. A
@@ -311,15 +335,21 @@ impl Player {
         Ok(bytes)
     }
 
-    /// Boot the same board again from its text. The queue and the builder start over, so the next
-    /// packet is a keyframe, and the effects start over too. If the boot fails, this player is
-    /// left as it was.
+    /// Boot the same board again from its text, in the same order. The queue and the builder
+    /// start over, so the next packet is a keyframe, and the effects start over too. If the boot
+    /// fails, this player is left as it was.
     ///
     /// # Errors
     /// [`PlayerError::Board`] if a command in the board is refused.
     pub fn restart(&mut self) -> Result<(), PlayerError> {
-        *self = Self::new(&self.board_text)?;
+        *self = Self::with_order(&self.board_text, self.order)?;
         Ok(())
+    }
+
+    /// The order this player feeds the inputs that share a tick.
+    #[must_use]
+    pub fn order(&self) -> ScriptOrder {
+        self.order
     }
 
     /// The core's current tick.
@@ -429,6 +459,24 @@ pub unsafe extern "C" fn fp_free(ptr: *mut u8, len: u32) {
 /// When `len` is above 0, `ptr` must point to `len` readable bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_create(ptr: *const u8, len: u32) -> u32 {
+    // SAFETY: the caller's promise is passed on unchanged.
+    unsafe { create_in_order(ptr, len, ScriptOrder::Forward) }
+}
+
+/// Load a board as [`fp_create`] does, with the inputs inside each tick fed in reverse order. A
+/// restart keeps the order.
+///
+/// # Safety
+/// When `len` is above 0, `ptr` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_create_reversed(ptr: *const u8, len: u32) -> u32 {
+    // SAFETY: the caller's promise is passed on unchanged.
+    unsafe { create_in_order(ptr, len, ScriptOrder::Reversed) }
+}
+
+/// # Safety
+/// When `len` is above 0, `ptr` must point to `len` readable bytes.
+unsafe fn create_in_order(ptr: *const u8, len: u32, order: ScriptOrder) -> u32 {
     let bytes: &[u8] = if len == 0 || ptr.is_null() {
         &[]
     } else {
@@ -437,7 +485,7 @@ pub unsafe extern "C" fn fp_create(ptr: *const u8, len: u32) -> u32 {
         unsafe { std::slice::from_raw_parts(ptr, len as usize) }
     };
     let loaded = match std::str::from_utf8(bytes) {
-        Ok(text) => Player::new(text).map_err(|error| error.to_string()),
+        Ok(text) => Player::with_order(text, order).map_err(|error| error.to_string()),
         Err(error) => Err(format!("the board text is not UTF-8: {error}")),
     };
     with_exports(|exports| {
@@ -885,6 +933,69 @@ mod tests {
         assert_eq!(fp_destroy(handle), FP_OK);
         assert_eq!(fp_board_info(handle), 0);
         assert!(out_text().contains("no player has handle"), "got: {}", out_text());
+    }
+
+    const ARRIVAL_BOARD: &str = include_str!("../../../examples/boards/docs/arrival-order.board.ron");
+
+    /// The first tick whose hash differs between two players stepped together, or `None`.
+    fn first_differing_tick(one: &mut Player, two: &mut Player) -> Option<u64> {
+        loop {
+            if one.tick_hash() != two.tick_hash() {
+                return Some(one.tick());
+            }
+            if one.tick() >= one.end_tick() {
+                return None;
+            }
+            one.step(1).expect("it steps");
+            two.step(1).expect("it steps");
+        }
+    }
+
+    #[test]
+    fn the_arrival_order_board_matches_its_reversed_copy_at_every_tick() {
+        let mut forward = Player::new(ARRIVAL_BOARD).expect("the board loads");
+        let mut reversed = Player::with_order(ARRIVAL_BOARD, ScriptOrder::Reversed).expect("the board loads");
+        assert_eq!(first_differing_tick(&mut forward, &mut reversed), None);
+    }
+
+    #[test]
+    fn script_outcomes_reversed_differs_from_forward_at_some_tick() {
+        let mut forward = Player::new(OUTCOMES_BOARD).expect("the board loads");
+        let mut reversed = Player::with_order(OUTCOMES_BOARD, ScriptOrder::Reversed).expect("the board loads");
+        assert!(first_differing_tick(&mut forward, &mut reversed).is_some());
+    }
+
+    #[test]
+    fn a_reversed_player_that_restarts_is_still_reversed() {
+        let mut forward = Player::new(OUTCOMES_BOARD).expect("the board loads");
+        let mut reversed = Player::with_order(OUTCOMES_BOARD, ScriptOrder::Reversed).expect("the board loads");
+        let tick = first_differing_tick(&mut forward, &mut reversed).expect("the two orders differ somewhere");
+        let reversed_hash = reversed.tick_hash();
+
+        reversed.step(50).expect("it steps");
+        reversed.restart().expect("it boots again");
+        assert_eq!(reversed.order(), ScriptOrder::Reversed);
+        let start = reversed.tick();
+        reversed.step(u32::try_from(tick - start).expect("a short run")).expect("it steps");
+        assert_eq!(reversed.tick(), tick);
+        assert_eq!(reversed.tick_hash(), reversed_hash, "the restarted player at tick {tick}");
+        assert_ne!(forward.tick_hash(), reversed_hash, "tick {tick} is one the two orders disagree on");
+    }
+
+    #[test]
+    fn fp_create_reversed_loads_a_reversed_player() {
+        let len = len_u32(OUTCOMES_BOARD.len());
+        let ptr = fp_alloc(len);
+        // SAFETY: `fp_alloc(len)` returned room for `len` bytes.
+        unsafe { std::ptr::copy_nonoverlapping(OUTCOMES_BOARD.as_ptr(), ptr, OUTCOMES_BOARD.len()) };
+        // SAFETY: `ptr` holds `len` readable bytes.
+        let handle = unsafe { fp_create_reversed(ptr, len) };
+        // SAFETY: `ptr` came from `fp_alloc(len)` above and this is its only free.
+        unsafe { fp_free(ptr, len) };
+        assert!(handle > 0, "got: {}", out_text());
+        let order = with_exports(|exports| exports.players.get(&handle).map(Player::order));
+        assert_eq!(order, Some(ScriptOrder::Reversed));
+        assert_eq!(fp_destroy(handle), FP_OK);
     }
 
     #[test]

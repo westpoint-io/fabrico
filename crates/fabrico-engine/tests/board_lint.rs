@@ -33,9 +33,9 @@ use fabrico_scenario::tick_hash;
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const BOARDS_DIR: &str = "examples/boards";
 
-/// The 3 shipped boards and the docs test board. A walk that finds fewer is broken, and an empty
-/// walk would otherwise pass.
-const BOARD_FLOOR: usize = 4;
+/// The 3 shipped boards and the 2 docs boards. A walk that finds fewer is broken, and an empty walk
+/// would otherwise pass.
+const BOARD_FLOOR: usize = 5;
 
 /// Half the default memory limit.
 const LINT_MEM: u32 = DEFAULT_MEM_LIMIT / 2;
@@ -343,12 +343,12 @@ fn a_cloned_core_keeps_its_limits_and_starts_with_no_engines() {
 
 #[test]
 fn the_walk_fails_on_fewer_boards_than_the_floor() {
-    let three: Vec<(String, Vec<String>)> = (0..3).map(|i| (format!("b{i}"), Vec::new())).collect();
-    let problems = walk_problems(&three);
-    assert_eq!(problems.len(), 1, "{problems:?}");
-    assert!(problems[0].contains("found 3 board(s)"), "{problems:?}");
     let four: Vec<(String, Vec<String>)> = (0..4).map(|i| (format!("b{i}"), Vec::new())).collect();
-    assert!(walk_problems(&four).is_empty());
+    let problems = walk_problems(&four);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].contains("found 4 board(s)"), "{problems:?}");
+    let five: Vec<(String, Vec<String>)> = (0..5).map(|i| (format!("b{i}"), Vec::new())).collect();
+    assert!(walk_problems(&five).is_empty());
 }
 
 #[test]

@@ -20,9 +20,10 @@ const BOARDS_DIR = 'examples/boards';
 const DEMO = `${BOARDS_DIR}/demo_scene.board.ron`;
 const ORDER = `${BOARDS_DIR}/order_processing.board.ron`;
 const OUTCOMES = `${BOARDS_DIR}/docs/script-outcomes.board.ron`;
+const ARRIVAL = `${BOARDS_DIR}/docs/arrival-order.board.ron`;
 
 /** The walk has to find at least this many, so an emptied folder can't pass. */
-const BOARD_FLOOR = 4;
+const BOARD_FLOOR = 5;
 /** A whole board at one tick per call, hashed and compared at each tick. */
 const BOARD_TIMEOUT_MS = 120_000;
 
@@ -490,6 +491,16 @@ describe('the board info in wasm under Node', () => {
     for (const factory of info.factories) {
       expect(nodeKinds.get(factory.renderHandle), `${DEMO}: the program's node kind`).toBe(factory.kind);
     }
+    // Handle 1 is the Factory and handle 5 the Rejects sink, so a caption naming either one has to
+    // land on that machine's node and not a neighbour's.
+    for (const caption of info.captions) {
+      if (caption.highlight === 1) {
+        expect(caption.renderHandle, `${DEMO}: caption ${caption.tick} on the Factory`).toBe(info.factories[0].renderHandle);
+      }
+      if (caption.highlight === 5) {
+        expect(nodeKinds.get(caption.renderHandle as number), `${DEMO}: caption ${caption.tick} on a Sink`).toBe(7);
+      }
+    }
     expect(info.factories[0].source).toContain('rejected: no delivery address');
     expect(info.callsOut).toBe(true);
 
@@ -513,6 +524,61 @@ describe('the board info in wasm under Node', () => {
     expect(info.callsOut).toBe(true);
     board.destroy();
   });
+});
+
+describe('the run-it-twice pair in wasm under Node', () => {
+  let module: PlayerModule;
+
+  beforeAll(async () => {
+    module = await loadFresh();
+  });
+
+  /** Step two boards together and return the first tick whose hash differs, or null. */
+  function firstDifferingTick(one: BoardPlayer, two: BoardPlayer): number | null {
+    for (;;) {
+      if (one.tickHash() !== two.tickHash()) return one.tick();
+      if (one.tick() >= one.endTick()) return null;
+      one.step(1);
+      two.step(1);
+      drainPackets(one);
+      drainPackets(two);
+    }
+  }
+
+  it(
+    'runs the arrival-order board and its reversed copy to the same hash at every tick',
+    () => {
+      const forward = module.createBoard(repoFile(ARRIVAL));
+      const reversed = module.createBoard(repoFile(ARRIVAL), { order: 'reversed' });
+      expect(firstDifferingTick(forward, reversed), `${ARRIVAL}: the first tick that differs`).toBeNull();
+      expect(reversed.tick()).toBe(manifestLine(ARRIVAL).endTick);
+      expect(reversed.tickHash(), `${ARRIVAL}: the reversed run's end hash`).toBe(manifestLine(ARRIVAL).hash);
+      forward.destroy();
+      reversed.destroy();
+    },
+    BOARD_TIMEOUT_MS,
+  );
+
+  it(
+    'finds a tick where script-outcomes reversed differs from forward, and keeps the order through a restart',
+    () => {
+      const forward = module.createBoard(repoFile(OUTCOMES));
+      const reversed = module.createBoard(repoFile(OUTCOMES), { order: 'reversed' });
+      const tick = firstDifferingTick(forward, reversed);
+      if (tick === null) expect.fail(`${OUTCOMES}: reversed matched forward at every tick`);
+      const reversedHash = reversed.tickHash();
+
+      reversed.restart();
+      drainPackets(reversed);
+      reversed.step(tick - reversed.tick());
+      expect(reversed.tick()).toBe(tick);
+      expect(reversed.tickHash(), `${OUTCOMES} at tick ${tick} after a restart`).toBe(reversedHash);
+      expect(forward.tickHash(), `${OUTCOMES} at tick ${tick}`).not.toBe(reversedHash);
+      forward.destroy();
+      reversed.destroy();
+    },
+    BOARD_TIMEOUT_MS,
+  );
 });
 
 describe('the shipped module', () => {
