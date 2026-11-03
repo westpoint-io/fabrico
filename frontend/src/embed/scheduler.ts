@@ -9,6 +9,11 @@
 //
 // The slot list is plain logic (`createSlots`), so a unit test can drive it. The browser part only
 // turns observer entries into `want` and `release` calls and tells each board what to do.
+//
+// The scheduler also holds the page's one `visibilitychange` listener. A hidden tab pauses every
+// board; showing the tab again resumes the ones that were playing when it was hidden. Each board
+// remembers that for itself. And `prefersReducedMotion()` is the one place the embed reads the
+// reader's motion setting: with `prefers-reduced-motion: reduce` a board loads paused.
 
 /** The most boards on one page that hold a WebGL context at once. */
 export const MAX_LIVE_BOARDS = 8;
@@ -76,6 +81,8 @@ export interface ScheduledBoard {
   unmount(): void;
   /** True while the board waits on the page cap, false once it doesn't. */
   setCapped(capped: boolean): void;
+  /** The tab went into the background (true) or came back (false). */
+  setPageHidden(hidden: boolean): void;
 }
 
 export interface Scheduler {
@@ -91,6 +98,8 @@ export interface Scheduler {
 export function createScheduler(cap = MAX_LIVE_BOARDS): Scheduler & {
   /** Feed one batch of reports: each board and whether it is within the margin now. */
   report(entries: readonly { board: ScheduledBoard; near: boolean }[]): void;
+  /** Tell every watched board the tab was hidden or shown. */
+  pageHidden(hidden: boolean): void;
 } {
   const slots = createSlots<ScheduledBoard>(cap);
   const watched = new Set<ScheduledBoard>();
@@ -132,6 +141,9 @@ export function createScheduler(cap = MAX_LIVE_BOARDS): Scheduler & {
       grant(slots.release(board));
     },
     isLive: (board) => slots.isLive(board),
+    pageHidden(hidden) {
+      for (const board of watched) board.setPageHidden(hidden);
+    },
     report(entries) {
       // The last report per board in a batch is the current one. Leaves go first, so a fast
       // scroll frees slots before the boards coming into view ask for them.
@@ -161,6 +173,7 @@ export function pageScheduler(): Scheduler {
     },
     { rootMargin: MOUNT_MARGIN },
   );
+  document.addEventListener('visibilitychange', () => core.pageHidden(document.visibilityState === 'hidden'));
   page = {
     add(board) {
       byElement.set(board.element, board);
@@ -175,4 +188,14 @@ export function pageScheduler(): Scheduler {
     isLive: (board) => core.isLive(board),
   };
   return page;
+}
+
+/** Is the tab in the background now? */
+export function pageIsHidden(): boolean {
+  return document.visibilityState === 'hidden';
+}
+
+/** Does the reader ask for reduced motion? Read when a board connects. */
+export function prefersReducedMotion(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }

@@ -91,6 +91,7 @@ function fakeBoard(name: string, log: string[]): ScheduledBoard {
     mount: () => log.push(`${name} mount`),
     unmount: () => log.push(`${name} unmount`),
     setCapped: (capped) => log.push(`${name} capped=${capped}`),
+    setPageHidden: (hidden) => log.push(`${name} hidden=${hidden}`),
   };
 }
 
@@ -175,5 +176,20 @@ describe('createScheduler', () => {
     s.report([{ board: a, near: true }]);
     s.report([{ board: a, near: true }]);
     expect(log).toEqual(['a mount']);
+  });
+
+  it('tells every watched board when the tab is hidden and shown, mounted or not', () => {
+    const log: string[] = [];
+    const s = createScheduler(1);
+    const [a, b, gone] = ['a', 'b', 'gone'].map((n) => fakeBoard(n, log));
+    s.add(a);
+    s.add(b);
+    s.add(gone);
+    s.remove(gone);
+    s.report([{ board: a, near: true }]);
+    log.length = 0;
+    s.pageHidden(true);
+    s.pageHidden(false);
+    expect(log).toEqual(['a hidden=true', 'b hidden=true', 'a hidden=false', 'b hidden=false']);
   });
 });

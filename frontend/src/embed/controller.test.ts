@@ -282,6 +282,25 @@ describe('createBoardClock', () => {
     expect(clock.endHash()).toBeNull();
   });
 
+  it('Restart with play false returns to the boot tick and stays paused, for reduced motion', () => {
+    const { clock, frames, player } = setup();
+    clock.play();
+    frames.run(0);
+    frames.run(100);
+    expect(player.tick()).toBeGreaterThan(10);
+    clock.restart(false);
+    expect(player.restarts).toBe(1);
+    expect(player.tick()).toBe(10);
+    expect(clock.playing()).toBe(false);
+    expect(frames.pending()).toBe(0);
+    frames.run(200);
+    expect(player.tick(), 'no frame steps a board that restarted paused').toBe(10);
+    clock.play();
+    frames.run(300);
+    frames.run(400);
+    expect(player.tick()).toBeGreaterThan(10);
+  });
+
   it('Play at the end tick restarts from the boot tick and plays', () => {
     const { clock, frames, player } = setup(10, 15);
     clock.play();

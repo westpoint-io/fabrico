@@ -31,6 +31,10 @@ export interface BoardProbe {
   wasPlaying: boolean | null;
   /** True when this browser gave the board no WebGL renderer, so its poster stands in for it. */
   noWebGL: boolean;
+  /** True while the board waits for one of the page's 8 renderer slots. */
+  capped: boolean;
+  /** True while the stage shows the lost-context line over the poster. */
+  lostShown: boolean;
   /** True while the stage shows the board's poster image. */
   posterShown: boolean;
   /** The poster's alt text while the poster layer shows, else null. */

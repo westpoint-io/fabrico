@@ -59,8 +59,11 @@ export interface BoardClock {
   pause(): void;
   /** Pause if playing, then advance exactly one tick. Does nothing at the end tick. */
   stepOne(): void;
-  /** Back to the boot tick, keeping the speed, and play. */
-  restart(): void;
+  /**
+   * Back to the boot tick, keeping the speed, and play. With `play` false it stays paused there,
+   * which is what Restart does for a reader who prefers reduced motion.
+   */
+  restart(play?: boolean): void;
   setSpeed(speed: Speed): void;
   speed(): Speed;
   /** Pause and drop the pending frame, for teardown. */
@@ -245,7 +248,7 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
     raf = frames.request(frame);
   };
 
-  const restart = (): void => {
+  const restart = (play = true): void => {
     cancelFrame();
     playing = false;
     endHash = null;
@@ -267,7 +270,7 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
       changed();
       return;
     }
-    startFrames();
+    if (play) startFrames();
     changed();
   };
 
@@ -308,7 +311,7 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
       if (!atEnd()) advance(1);
       changed();
     },
-    restart,
+    restart: (play?: boolean): void => restart(play ?? true),
     setSpeed(next: Speed): void {
       if (!SPEEDS.includes(next)) throw new RangeError(`speed is one of ${SPEEDS.join(', ')}, not ${String(next)}`);
       speed = next;

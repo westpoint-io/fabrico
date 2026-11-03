@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ten boards at once</title>
+<style>
+  html, body { margin: 0; background: #1b1f27; color: #b0bacb; }
+  body { font-family: 'Martian Mono', monospace; font-size: 12px; line-height: 1.4; }
+  main { padding: 24px; }
+  .row { display: flex; gap: 16px; align-items: flex-start; margin: 0 0 16px; }
+  .col { width: 360px; flex: none; }
+  /* Room below, so the first row can scroll out of view while the rest stay near it. */
+  .tail { height: 2400px; }
+</style>
+</head>
+<body>
+<main>
+  <!-- Ten boards, small enough that all ten are within 200 px of a 1920 x 1500 viewport. A page
+       holds at most 8 running boards, so the last two in page order wait. -->
+  <section class="row" id="first">
+    <div class="col" data-slot="b0"><fabrico-board name="order_processing" height="240" no-code></fabrico-board></div>
+  </section>
+  <section class="row">
+    <div class="col" data-slot="b1"><fabrico-board name="demo_scene" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b2"><fabrico-board name="advanced" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b3"><fabrico-board name="docs-script-outcomes" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b4"><fabrico-board name="docs-arrival-order" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b5"><fabrico-board name="order_processing" height="240" no-code></fabrico-board></div>
+  </section>
+  <section class="row">
+    <div class="col" data-slot="b6"><fabrico-board name="docs-script-outcomes" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b7"><fabrico-board name="docs-arrival-order" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b8"><fabrico-board name="demo_scene" height="240" no-code></fabrico-board></div>
+    <div class="col" data-slot="b9"><fabrico-board name="advanced" height="240" no-code></fabrico-board></div>
+  </section>
+  <div class="tail"></div>
+</main>
+<!-- fabrico:bundle -->
+</body>
+</html>

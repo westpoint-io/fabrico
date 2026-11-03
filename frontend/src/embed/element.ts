@@ -28,15 +28,25 @@
 // The board part (its player, its scene, its tick clock) lives from connect to disconnect. The
 // view part (one Pixi Application, so one WebGL context, plus the label and ring layers) lives
 // only while the board holds a slot. Leaving pauses the clock, remembers whether it was playing,
-// and tears the view down with `handle.stop()` then `handle.app.destroy(true)`: Pixi frees the
-// context itself in `destroy`, and only removing the canvas would leave the context alive and
-// counted against the browser's per-page limit. Coming back boots a new Pixi app on the kept
+// and tears the view down with `handle.stop()` then `handle.app.destroy({ removeView: true })`:
+// Pixi frees the context itself in `destroy`, and only removing the canvas would leave the
+// context alive and counted against the browser's per-page limit. Not `destroy(true)`: `true`
+// also clears Pixi's page-wide pools, which the other boards' renderers are still using, and the
+// next board to draw from them throws (`Cannot read properties of null (reading 'clear')`). Coming back boots a new Pixi app on the kept
 // scene (the player sends a keyframe only at create and restart) and plays on from the same tick
 // if the board was playing.
 //
 // A bundled board's info (title, captions, code) is in the bundle from build time, so the code
 // column and the caption strip are laid out at connect and the stage keeps its width when the
 // player finishes loading.
+//
+// WAITING, LOST, HIDDEN, REDUCED MOTION. A board that comes near while all 8 slots are taken
+// shows its poster with the page-cap line and mounts when another board leaves. When the browser
+// takes back a mounted board's context (`webglcontextlost` on a canvas not marked for teardown),
+// the board tears its renderer down, shows its poster with the lost-context line, and Play (or
+// Restart or Step) boots a new renderer on the kept scene. A hidden tab pauses every playing
+// board, and showing the tab resumes those. With `prefers-reduced-motion: reduce`, read at
+// connect, a board loads paused with Play showing, and Restart leaves it paused.
 //
 // POSTERS. Each bundled board carries a PNG of its end tick, taken from the real renderer when the
 // bundle was built. Without WebGL (`webgl.ts` checks before booting and again after) the poster
@@ -66,7 +76,7 @@ import {
 import { createLabelOverlay, type LabelOverlay } from './labelOverlay';
 import { beltRegion, tickHashes, type BoardProbe } from './probe';
 import { boardText, bundledInfo, compiledPlayer, manifestEntry, onBoardRegistered, posterAlt, posterFor } from './registry';
-import { pageScheduler, type ScheduledBoard } from './scheduler';
+import { pageIsHidden, pageScheduler, prefersReducedMotion, type ScheduledBoard } from './scheduler';
 import { boardStylesheet, injectFonts } from './styles';
 import { createWasmPacketSource } from './wasmPacketSource';
 import { hasWebGL, isWebGLRenderer } from './webgl';
@@ -84,8 +94,24 @@ const ORDER_STRIP: Record<BoardOrder, string> = {
 
 /** The line that takes the control bar's place when the browser has no WebGL. */
 export const NO_WEBGL_TEXT = "This browser can't run WebGL, so this is a still picture of the board at its last tick.";
+/** The band over the poster while the board waits for one of the page's 8 slots. */
+export const CAPPED_TEXT = 'Paused to save graphics memory. Scroll the boards above or below out of view to run this one.';
+/** The band over the poster after the browser took the board's WebGL context. */
+export const LOST_TEXT = "The browser took back this board's graphics. Press Play to redraw it.";
 /** The same line for a board the page registered, which has no poster to show. */
 export const NO_WEBGL_NO_POSTER_TEXT = "This browser can't run WebGL, so this board can't be shown here.";
+
+/**
+ * Free a board's Pixi app and its WebGL context. The canvas is marked first: tests count live
+ * contexts from outside the page, and the mark tells a context freed on purpose from one the
+ * browser took. `removeView` without Pixi's global release: the page's other boards share Pixi's
+ * pools.
+ */
+function destroyRenderer(handle: SceneHandle): void {
+  handle.app.canvas.setAttribute('data-fab-teardown', '');
+  handle.stop();
+  handle.app.destroy({ removeView: true });
+}
 
 /** `forward` or `reversed`; any other value, or none, is null. */
 function orderOf(value: string | null): BoardOrder | null {
@@ -142,6 +168,16 @@ export class FabricoBoardElement extends HTMLElement {
   #noWebGL = false;
   /** The browser couldn't compile or start the player: its card over the poster. */
   #engineFailed = false;
+  /** Waiting for one of the page's slots: the poster with the page-cap line. */
+  #capped = false;
+  /** The browser took this board's context: the poster with the lost-context line until Play. */
+  #lost = false;
+  /** Paused because the tab went into the background while it played; resumes when it's back. */
+  #resumeOnShow = false;
+  /** The reader prefers reduced motion, read at connect: load paused, and Restart stays paused. */
+  #reducedMotion = false;
+  /** What a control pressed on a lost board does once the new renderer is up. */
+  #afterRedraw: ((board: Board) => void) | null = null;
   /** The order the board was loaded in, read at connect, or null without the attribute. */
   #order: BoardOrder | null = null;
   /** The board's Factories and Handlers, once it has booted. */
@@ -159,7 +195,8 @@ export class FabricoBoardElement extends HTMLElement {
     element: this,
     mount: () => this.#onSlot(),
     unmount: () => this.#onLeave(),
-    setCapped: () => {},
+    setCapped: (capped) => this.#setCapped(capped),
+    setPageHidden: (hidden) => this.#setPageHidden(hidden),
   };
   #state: BarState = 'loading';
   #speed: Speed = 1;
@@ -191,14 +228,24 @@ export class FabricoBoardElement extends HTMLElement {
     this.#posterLayer.append(this.#posterBand);
     this.#stage.append(this.#posterLayer, this.#status);
     this.#bar = createControlBar({
-      onRestart: () => this.#restart(),
+      onRestart: () => {
+        if (this.#lost) this.#redraw((b) => this.#restartBoard(b));
+        else this.#restart();
+      },
       onPlayPause: () => {
+        if (this.#lost) {
+          this.#redraw((b) => b.clock.play());
+          return;
+        }
         const clock = this.#live()?.clock;
         if (clock === undefined) return;
         if (clock.playing()) clock.pause();
         else clock.play();
       },
-      onStep: () => this.#live()?.clock.stepOne(),
+      onStep: () => {
+        if (this.#lost) this.#redraw((b) => b.clock.stepOne());
+        else this.#live()?.clock.stepOne();
+      },
       onSpeed: (speed) => this.#setSpeed(speed),
     });
     this.#captions = createCaptionStrip();
@@ -229,6 +276,11 @@ export class FabricoBoardElement extends HTMLElement {
     this.#orderStrip.textContent = this.#order === null ? '' : ORDER_STRIP[this.#order];
     this.#generation += 1;
     this.#wasPlaying = null;
+    this.#capped = false;
+    this.#lost = false;
+    this.#resumeOnShow = false;
+    this.#afterRedraw = null;
+    this.#reducedMotion = prefersReducedMotion();
     this.#engineFailed = false;
     this.#frame.classList.remove('no-engine');
     this.#setNoWebGL(false);
@@ -284,6 +336,8 @@ export class FabricoBoardElement extends HTMLElement {
       mounted: v !== null,
       wasPlaying: this.#wasPlaying,
       noWebGL: this.#noWebGL,
+      capped: this.#capped,
+      lostShown: this.#lost && !this.#posterLayer.hidden,
       posterShown: !this.#posterLayer.hidden && this.#poster !== null && !this.#poster.hidden,
       posterAlt: this.#posterLayer.hidden || this.#poster === null || this.#poster.hidden ? null : this.#poster.alt,
       frames: b?.frames.n ?? 0,
@@ -339,7 +393,7 @@ export class FabricoBoardElement extends HTMLElement {
 
   /** Show the poster layer when the board can't run (or isn't running) here, else hide it. */
   #syncPoster(): void {
-    const show = this.#noWebGL || this.#engineFailed;
+    const show = this.#noWebGL || this.#engineFailed || this.#capped || this.#lost;
     const name = this.#name();
     const src = posterFor(name);
     this.#posterLayer.hidden = !show;
@@ -357,7 +411,10 @@ export class FabricoBoardElement extends HTMLElement {
       this.#poster.alt = posterAlt(this.#board?.info ?? bundledInfo(name), name);
       this.#poster.hidden = false;
     }
-    this.#posterBand.hidden = true;
+    // The band explains a poster that stands in for a board that can run here.
+    const band = this.#noWebGL || this.#engineFailed ? null : this.#capped ? CAPPED_TEXT : this.#lost ? LOST_TEXT : null;
+    this.#posterBand.hidden = band === null;
+    this.#posterBand.textContent = band ?? '';
   }
 
   /** Swap the running layout for the still one: no bar, strip or log, the WebGL line instead. */
@@ -437,11 +494,76 @@ export class FabricoBoardElement extends HTMLElement {
   #restart(): void {
     const b = this.#live();
     if (b === null) return;
+    this.#restartBoard(b);
+  }
+
+  /** Restart a board with a view: it plays again, unless the reader prefers reduced motion. */
+  #restartBoard(b: Board): void {
     if (this.#state === 'stopped') {
       this.#hideStatus();
       this.#state = 'running';
     }
-    b.clock.restart();
+    b.clock.restart(!this.#reducedMotion);
+  }
+
+  /** Waiting on the page cap, or not any more. */
+  #setCapped(capped: boolean): void {
+    if (this.#capped === capped) return;
+    this.#capped = capped;
+    // The band says why the board waits; the loading line would only repeat it.
+    if (this.#state === 'loading') {
+      if (capped) this.#hideStatus();
+      else this.#showLoading();
+    }
+    this.#syncPoster();
+    this.#refresh();
+  }
+
+  /** The tab went into the background, or came back. */
+  #setPageHidden(hidden: boolean): void {
+    const b = this.#board;
+    if (hidden) {
+      if (b !== null && this.#view !== null && b.clock.playing()) {
+        this.#resumeOnShow = true;
+        b.clock.pause();
+      }
+      return;
+    }
+    if (!this.#resumeOnShow) return;
+    this.#resumeOnShow = false;
+    if (b !== null && this.#view !== null && !b.clock.playing()) b.clock.play();
+  }
+
+  /** Play the board unless the tab is in the background; then play it when the tab comes back. */
+  #playOrWait(b: Board): void {
+    if (pageIsHidden()) this.#resumeOnShow = true;
+    else b.clock.play();
+  }
+
+  /** The browser took this board's context while it was mounted. */
+  #onLost(): void {
+    const b = this.#board;
+    if (this.#view === null || b === null) return;
+    this.#wasPlaying = b.clock.playing() || this.#resumeOnShow;
+    this.#resumeOnShow = false;
+    b.clock.pause();
+    this.#teardownView();
+    this.#lost = true;
+    this.#syncPoster();
+    this.#refresh();
+  }
+
+  /** Boot a new renderer for a lost board, then do what the pressed control asked. */
+  #redraw(then: (board: Board) => void): void {
+    if (!this.#inSlot || this.#view !== null) return;
+    this.#lost = false;
+    this.#afterRedraw = then;
+    this.#syncPoster();
+    const generation = this.#generation;
+    const run = ++this.#run;
+    void this.#mountView(generation, run).catch((error: unknown) => {
+      console.error(`fabrico-board "${this.#name()}" failed to redraw`, error);
+    });
   }
 
   /** Wait for the page to register this name, then mount again. */
@@ -476,7 +598,9 @@ export class FabricoBoardElement extends HTMLElement {
   #refresh(): void {
     const b = this.#board;
     // Controls act only on a board with a view; while it loads, or sits out of view, they wait.
-    const state = b !== null && this.#view === null && this.#state === 'running' ? 'loading' : this.#state;
+    // A lost board keeps its controls: pressing one draws it again.
+    const waiting = b !== null && this.#view === null && this.#state === 'running' && !this.#lost;
+    const state = waiting ? 'loading' : this.#state;
     this.#bar.update({
       state,
       tick: b?.player.tick() ?? 0,
@@ -506,9 +630,16 @@ export class FabricoBoardElement extends HTMLElement {
   #onLeave(): void {
     this.#inSlot = false;
     this.#run += 1;
+    this.#afterRedraw = null;
+    if (this.#lost) {
+      // It comes back with a new renderer anyway, playing if it was when the context went.
+      this.#lost = false;
+      this.#syncPoster();
+    }
     const b = this.#board;
     if (this.#view === null || b === null) return;
-    this.#wasPlaying = b.clock.playing();
+    this.#wasPlaying = b.clock.playing() || this.#resumeOnShow;
+    this.#resumeOnShow = false;
     b.clock.pause();
     this.#teardownView();
     this.#refresh();
@@ -596,11 +727,7 @@ export class FabricoBoardElement extends HTMLElement {
       return;
     }
     const handle = await bootPixi(this.#stage, { interactive: false, resizeTo: this.#stage, scene: board.scene });
-    const dispose = (): void => {
-      handle.app.canvas.setAttribute('data-fab-teardown', '');
-      handle.stop();
-      handle.app.destroy(true);
-    };
+    const dispose = (): void => destroyRenderer(handle);
     if (!this.#current(generation, run) || this.#view !== null) {
       dispose();
       return;
@@ -637,6 +764,12 @@ export class FabricoBoardElement extends HTMLElement {
     handle.setRenderPace(this.#speed);
     // The ring layer sits under the labels, so a name chip stays readable over the ring's edge.
     const ring = createCaptionRing(this.#stage, handle, board.info.captions, () => board.clock.caption());
+    // A context the browser takes: the teardown marker tells it apart from one this board frees.
+    handle.app.canvas.addEventListener('webglcontextlost', (event) => {
+      const canvas = event.target as HTMLCanvasElement;
+      if (canvas.hasAttribute('data-fab-teardown') || this.#view?.handle !== handle) return;
+      this.#onLost();
+    });
     const labels = createLabelOverlay(this.#stage, handle);
     // The poster layer and the status layer (loading line, error cards) stay above the canvas and
     // the labels.
@@ -646,12 +779,19 @@ export class FabricoBoardElement extends HTMLElement {
       this.#state = 'running';
       this.#hideStatus();
     }
-    if (!board.started) {
+    const after = this.#afterRedraw;
+    this.#afterRedraw = null;
+    if (after !== null) {
+      // A control pressed on a lost board: its action, now that the board draws again.
+      after(board);
+    } else if (!board.started) {
       board.started = true;
-      board.clock.play();
+      // A reader who prefers reduced motion starts each board with Play.
+      if (!this.#reducedMotion) this.#playOrWait(board);
     } else if (this.#wasPlaying === true) {
-      board.clock.play();
+      this.#playOrWait(board);
     }
+    board.started = true;
     this.#refresh();
   }
 
@@ -661,11 +801,7 @@ export class FabricoBoardElement extends HTMLElement {
     if (v === null) return;
     this.#view = null;
     v.resize.disconnect();
-    // Tests count live WebGL contexts from outside the page; this marks a canvas being torn
-    // down on purpose, so its context loss is not read as a fault.
-    v.handle.app.canvas.setAttribute('data-fab-teardown', '');
-    v.handle.stop();
-    v.handle.app.destroy(true);
+    destroyRenderer(v.handle);
     v.labels.root.remove();
     v.ring.root.remove();
   }
