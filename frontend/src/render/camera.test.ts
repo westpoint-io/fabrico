@@ -36,7 +36,7 @@ vi.mock('pixi.js', () => {
   return { Container };
 });
 
-import { computeFitTransform, computeInspectorNudge, createCamera, MAX_ZOOM, MIN_ZOOM } from './camera.ts';
+import { computeFitTransform, computeInspectorNudge, createCamera, CURSOR_PAN_IDLE, MAX_ZOOM, MIN_ZOOM } from './camera.ts';
 import { CELL } from '../../shared/geometry.ts';
 
 // ---- Fakes --------------------------------------------------------------
@@ -586,5 +586,39 @@ describe('computeInspectorNudge, the inspector nudge distance (CHROME-07)', () =
         expect(Number.isFinite(d)).toBe(true);
       }
     }
+  });
+});
+
+describe('camera input modes', () => {
+  const build = (opts?: { interactive: boolean }): { canvas: FakeCanvas; cam: ReturnType<typeof createCamera> } => {
+    const canvas = makeCanvas();
+    const app = makeApp(canvas);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cam = opts === undefined ? createCamera(app as any, vi.fn()) : createCamera(app as any, vi.fn(), opts);
+    return { canvas, cam };
+  };
+
+  it('by default attaches the five pointer and wheel listeners and sets the pan cursor', () => {
+    const { canvas } = build();
+    expect([...canvas.handlers.keys()].sort()).toEqual([
+      'pointercancel',
+      'pointerdown',
+      'pointermove',
+      'pointerup',
+      'wheel',
+    ]);
+    expect(canvas.style.cursor).toBe(CURSOR_PAN_IDLE);
+  });
+
+  it('with interactive false attaches no listener and leaves the cursor unset', () => {
+    const { canvas, cam } = build({ interactive: false });
+    expect([...canvas.handlers.keys()]).toEqual([]);
+    expect(canvas.style.cursor).toBe('');
+    // The transform still works for a caller that fits the board itself.
+    cam.setCamera(2, 10, 20);
+    expect(cam.worldScale()).toBe(2);
+    expect(cam.container.x).toBe(10);
+    cam.destroy();
+    expect([...canvas.handlers.keys()]).toEqual([]);
   });
 });
