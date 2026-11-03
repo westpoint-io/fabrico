@@ -329,19 +329,26 @@ const PEAK_LEAD_MS = 100;
  * Resolve on the first frame where the ring paint under `selector` is within PEAK_LEAD_MS of the top of
  * its pulse, so the capture that follows lands while the ring is at full strength. A capture of a ring
  * mid-fade can miss the focus colour, most of all at a fractional device scale, where the walk measured
- * reads that needed the ring at its peak. A paint with no running animation resolves at once, and the
- * wait gives up after one period, so a missing ring is still read and fails on its own terms.
+ * reads that needed the ring at its peak. A paint with no running animation resolves at once. The wait
+ * is bounded by the animation's own clock, one period of it, not by wall time: a slow page takes longer
+ * to play a period, and the test's limit grows by one period's frame budget to cover that.
  */
 async function waitForPulsePeak(page: Page, selector: string): Promise<void> {
+  addWaitBudget(frameBudgetMs(0, PULSE_PERIOD_MS), 'the wait for the top of the ring pulse');
   await page.evaluate(
     ([sel, period, lead]) =>
       new Promise<void>((done) => {
-        const start = performance.now();
+        let first: number | null = null;
         const check = (): void => {
           const el = document.querySelector(sel);
-          const anims = el === null ? [] : el.getAnimations().filter((a) => a.playState === 'running');
-          const near = anims.every((a) => Number(a.currentTime ?? 0) % period >= period - lead);
-          if (near || performance.now() - start > period) done();
+          const anim = el === null ? undefined : el.getAnimations().find((a) => a.playState === 'running');
+          if (anim === undefined) {
+            done();
+            return;
+          }
+          const t = Number(anim.currentTime ?? 0);
+          first ??= t;
+          if (t % period >= period - lead || t - first >= period) done();
           else requestAnimationFrame(check);
         };
         check();
