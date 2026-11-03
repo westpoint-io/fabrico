@@ -218,18 +218,17 @@ export function nativeHashes(id: string): [number, string][] {
 export function expectTraceMatchesNative(id: string, trace: [number, string][], ticks: number | 'all'): number {
   const native = nativeHashes(id);
   const want = ticks === 'all' ? native : native.slice(0, ticks + 1);
-  if (ticks === 'all') {
-    expect(trace.length, `${id}: the page traced ${trace.length} ticks and the native dump has ${native.length}`).toBe(
-      native.length,
-    );
-  } else {
-    expect(trace.length, `${id}: the page traced at least ${want.length} ticks`).toBeGreaterThanOrEqual(want.length);
-  }
+  // Tick by tick first, so a skipped, repeated or different tick is named by its number.
   for (let i = 0; i < want.length; i++) {
     const [nativeTick, nativeHash] = want[i];
     const got = trace[i];
     expect(got?.[0], `${id}: trace entry ${i} is tick ${nativeTick} (a tick was skipped or repeated)`).toBe(nativeTick);
     expect(got?.[1], `${id} at tick ${nativeTick}: the page's hash equals the native engine's`).toBe(nativeHash);
+  }
+  if (ticks === 'all') {
+    expect(trace.length, `${id}: the page traced ${trace.length} ticks and the native dump has ${native.length}`).toBe(
+      native.length,
+    );
   }
   return want.length;
 }
