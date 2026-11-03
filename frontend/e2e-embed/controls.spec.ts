@@ -175,11 +175,12 @@ test('at 4x the whole run equals the native engine and each board ends on its ma
     const end = await readProbe(page, name);
     expect(end.speed).toBe(4);
     expect(end.tick, `${name}: the end tick`).toBe(pinned.endTick);
-    const matched = expectTraceMatchesNative(name, await readTrace(page, name), 'all');
-    expect(end.endHash, `${name}: the end hash`).toBe(pinned.hash);
-    expect(end.verdict).toBe('match');
+    // What the reader sees first: the badge, then the hash behind it, then every tick.
     const badge = (await shadowText(page, name, '.badge')).trim();
-    expect(badge).toBe(`final state ${pinned.hash.slice(0, 8)} match`);
+    expect(badge, `${name}: the hash badge`).toBe(`final state ${pinned.hash.slice(0, 8)} match`);
+    expect(end.verdict, `${name}: the badge verdict`).toBe('match');
+    expect(end.endHash, `${name}: the end hash`).toBe(pinned.hash);
+    const matched = expectTraceMatchesNative(name, await readTrace(page, name), 'all');
     const counter = await shadowText(page, name, '.counter');
     expect(counter).toMatch(/^tick [\d,]+ \/ [\d,]+$/);
     expect(counter).toBe(`tick ${pinned.endTick.toLocaleString('en-US')} / ${pinned.endTick.toLocaleString('en-US')}`);
