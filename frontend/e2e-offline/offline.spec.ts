@@ -48,6 +48,17 @@ function boardIdsOnDisk(): string[] {
 
 const IDS = boardIdsOnDisk();
 
+/**
+ * The page asked for nothing but the file. Chromium reports the file's own navigation, so there
+ * the list must be exactly the file. Playwright's Firefox reports no request for a file:// URL at
+ * all, so there the check is that nothing else was asked for: a request to any other place (an
+ * http or https URL, say) still shows up in both.
+ */
+function expectOnlyTheFile(requests: readonly string[], browserName: string): void {
+  expect(requests.filter((url) => url !== FILE_URL), 'requests other than the file itself').toEqual([]);
+  if (browserName === 'chromium') expect(requests, 'Chromium reports the file itself').toEqual([FILE_URL]);
+}
+
 test('the file carries no source map reference and no build machine path', () => {
   const text = readFileSync(FILE, 'utf8');
   expect(text.includes('sourceMappingURL'), 'a sourceMappingURL comment in the file').toBe(false);
@@ -55,7 +66,7 @@ test('the file carries no source map reference and no build machine path', () =>
   expect(text.includes(REPO), `the repo path ${REPO} in the file`).toBe(false);
 });
 
-test('one section and one link per board file, in path order', async ({ page }) => {
+test('one section and one link per board file, in path order', async ({ page, browserName }) => {
   const errors = watchPageErrors(page);
   const requests = recordRequests(page);
   expect(IDS.length, 'board files under examples/boards/').toBeGreaterThan(0);
@@ -76,11 +87,11 @@ test('one section and one link per board file, in path order', async ({ page }) 
     await expect(page.locator(`#${LIST_ID} a[href="#${id}"]`), `${id}: the list names it by its heading`).toHaveText(heading);
   }
   errors.assertNone('on the offline file');
-  expect(requests).toEqual([FILE_URL]);
+  expectOnlyTheFile(requests, browserName);
 });
 
 for (const id of IDS) {
-  test(`${id}: its link scrolls to it, it draws, ends on its pinned hash, and links back`, async ({ page }) => {
+  test(`${id}: its link scrolls to it, it draws, ends on its pinned hash, and links back`, async ({ page, browserName }) => {
     test.setTimeout(180_000);
     const errors = watchPageErrors(page);
     const consoleErrors = recordConsoleErrors(page);
@@ -101,8 +112,11 @@ for (const id of IDS) {
         return p.state === 'running' && p.mounted;
       }, { message: `${id} mounts and runs`, timeout: 30_000 })
       .toBe(true);
-    // Restart first, so the belts move now whichever tick the board had reached on its own.
+    // Restart first, so the belts move now whichever tick the board had reached on its own, and at
+    // a quarter speed: some boards carry a single item over their longest belt for well under a
+    // second at 1x, and the slower run keeps it in view for several screenshots.
     const board = section.locator('fabrico-board');
+    await board.locator('select').selectOption({ label: '0.25x' });
     await board.locator('button[data-control="restart"]').click();
     await expectBoardDrawing(page, id, `${id} after its link`);
 
@@ -131,6 +145,6 @@ for (const id of IDS) {
     expect(counts.live, `${id}: live WebGL contexts`).toBeLessThanOrEqual(8);
     errors.assertNone(`on the offline file, board ${id}`);
     expect(consoleErrors).toEqual([]);
-    expect(requests).toEqual([FILE_URL]);
+    expectOnlyTheFile(requests, browserName);
   });
 }

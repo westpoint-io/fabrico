@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>File policy canary</title>
+</head>
+<body>
+<p>This page asks for two files beside it. A browser with its stock file:// policy blocks both.</p>
+<script>
+  // Each flag is true once its file loaded, false once the browser refused it.
+  window.__canaryParts = { module: null, fetch: null };
+  function canaryDone() {
+    var parts = window.__canaryParts;
+    if (parts.module !== null && parts.fetch !== null) {
+      window.__canary = { module: parts.module, fetch: parts.fetch };
+    }
+  }
+  fetch('./canary-data.json')
+    .then(function (response) { return response.json(); })
+    .then(function (data) { window.__canaryParts.fetch = data.loaded === true; canaryDone(); })
+    .catch(function () { window.__canaryParts.fetch = false; canaryDone(); });
+</script>
+<script type="module" src="./canary-module.js"
+  onload="window.__canaryParts.module = window.__canaryModuleRan === true; canaryDone();"
+  onerror="window.__canaryParts.module = false; canaryDone();"></script>
+</body>
+</html>
