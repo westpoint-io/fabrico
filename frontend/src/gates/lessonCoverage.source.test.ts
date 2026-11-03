@@ -17,8 +17,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCE } from '../../e2e-live/support/lessonWalks.ts';
-import { REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
+import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
 import { LESSONS } from '../tutorial/lessons/index.ts';
+import { MAX_NOTE_CHARS } from '../tutorial/phrase.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
 import { stripComments } from './walkSpecSource';
 
@@ -115,6 +116,34 @@ export function auditLessonCoverage(args: CoverageArgs): string[] {
   return findings;
 }
 
+/**
+ * The refusal tags lesson data names, each checked against the app's own tables. Lesson data keys its
+ * coaching lines by plain strings, because `src/tutorial/` can't import the transport's tag type, so a
+ * misspelt key would never match a refusal and the card would quietly fall back to the band's sentence.
+ * Takes the tables as arguments, so its mutation cases run without touching the real tree.
+ */
+export function auditRefusalTags(
+  lessons: readonly Lesson[],
+  hostCopy: Readonly<Record<string, string>>,
+  clientCopy: Readonly<Record<string, string>>,
+): string[] {
+  const known = (tag: string): boolean => Object.hasOwn(hostCopy, tag) || Object.hasOwn(clientCopy, tag);
+  const findings: string[] = [];
+  for (const lesson of lessons) {
+    for (const step of lesson.steps) {
+      for (const stage of step.stages) {
+        for (const key of Object.keys(stage.coach ?? {})) {
+          if (!known(key)) findings.push(`${lesson.id} step ${step.id} stage ${stage.id}: its coaching line is keyed ${key}, which is no refusal tag the app has`);
+        }
+      }
+    }
+    if (!known(lesson.refused.tag)) {
+      findings.push(`${lesson.id} step ${lesson.refused.atStep} stage ${lesson.refused.atStage}: its refused gesture names the tag ${lesson.refused.tag}, which is no refusal tag the app has`);
+    }
+  }
+  return findings;
+}
+
 /** The same files Playwright's `testMatch` finds under `e2e-live/`, at any depth, plus the runner. */
 function readWalkFiles(): Record<string, string> {
   const names = readdirSync(E2E_LIVE_DIR, { recursive: true, encoding: 'utf8' }).map((name) => name.split('\\').join('/'));
@@ -170,6 +199,18 @@ describe('every lesson has a walk', () => {
     expect(auditLessonCoverage(REAL)).toEqual([]);
   });
 
+  it("keys every coaching line and refused gesture by one of the app's refusal tags", () => {
+    expect(auditRefusalTags(LESSONS, REFUSAL_COPY, CLIENT_REFUSAL_COPY)).toEqual([]);
+  });
+
+  it(`holds every band sentence to the card's ${MAX_NOTE_CHARS}-character note budget, since a tag with no lesson line shows it there`, () => {
+    const sentences = Object.entries({ ...REFUSAL_COPY, ...CLIENT_REFUSAL_COPY });
+    expect(sentences.length).toBe(Object.keys(REFUSAL_COPY).length + Object.keys(CLIENT_REFUSAL_COPY).length);
+    for (const [tag, sentence] of sentences) {
+      expect(sentence.length, `${tag}: "${sentence}"`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+    }
+  });
+
   describe('fails on', () => {
     it('a lesson with no walk entry', () => {
       const second: Lesson = { ...FIRST, id: 'a-second-lesson' as LessonId };
@@ -223,6 +264,20 @@ describe('every lesson has a walk', () => {
     it('a refused stage that does not exist', () => {
       const lesson: Lesson = { ...FIRST, refused: { ...FIRST.refused, atStage: 'no-such-stage' } };
       expect(audit({ lessons: [lesson] })).toMatch(/your-first-line: its refused gesture names the stage no-such-stage/);
+    });
+
+    it('a coaching line keyed by a misspelt tag', () => {
+      const lesson = withStage((s) => ({ ...s, coach: { FootprintColision: ['That cell is taken.'] } }));
+      expect(auditRefusalTags([lesson], REFUSAL_COPY, CLIENT_REFUSAL_COPY).join('\n')).toMatch(
+        /your-first-line step place-source stage board-paused: its coaching line is keyed FootprintColision, which is no refusal tag/,
+      );
+    });
+
+    it('a refused gesture naming a tag the app has none of', () => {
+      const lesson: Lesson = { ...FIRST, refused: { ...FIRST.refused, tag: 'NoSuchRefusal' } };
+      expect(auditRefusalTags([lesson], REFUSAL_COPY, CLIENT_REFUSAL_COPY).join('\n')).toMatch(
+        /your-first-line step place-sink stage sink-floor: its refused gesture names the tag NoSuchRefusal/,
+      );
     });
 
     it('a walk file that does not loop over LESSON_WALKS', () => {
