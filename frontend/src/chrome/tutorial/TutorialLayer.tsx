@@ -11,7 +11,7 @@ import { sceneSnapshot } from '../../render/sceneState';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
-import type { BindingName, BoardFacts, ChromeFacts, LessonId, Stage } from '../../tutorial/types';
+import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
 import type { ArmedTool } from '../Palette';
 import { readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
@@ -124,15 +124,34 @@ function readFreeArea(): ChromeFacts['view']['freeArea'] {
   };
 }
 
+/**
+ * A refusal the app showed while a stage was on the card: its tag, and the `stageKey` of the stage it
+ * landed on. It stays until that stage or step changes or the next refusal replaces it, with no timer.
+ */
+export interface RefusalRecord {
+  tag: string;
+  at: string;
+}
+
+/** The stage's coaching line for a refusal tag. Own keys only, so a tag can't match an inherited name. */
+function coachLine(stage: Stage, tag: string): readonly PhraseToken[] | null {
+  const coach = stage.coach;
+  if (coach === undefined || !Object.hasOwn(coach, tag)) return null;
+  return coach[tag] ?? null;
+}
+
 /** What the card shows, or null when it has nothing to show. */
-function cardViewOf(s: TutorialState, stage: Stage | null): StepCardView | null {
+function cardViewOf(s: TutorialState, stage: Stage | null, refusal: RefusalRecord | null): StepCardView | null {
   if (s.card === 'starting') return { state: 'starting' };
   if (s.card === 'swapped') return { state: 'swapped' };
   const lesson = LESSONS.find((l) => l.id === s.lessonId);
   if (s.card === 'finished' && lesson !== undefined) return { state: 'finished', text: lesson.closing };
   if (s.card !== 'running' || stage === null) return null;
-  const note = s.note === null ? null : noteTokens(s.note);
-  return { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, note, text: stage.text };
+  const running = { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, text: stage.text } as const;
+  const coached = refusal !== null && refusal.at === stageKey(s.stepIndex, stage.id) ? coachLine(stage, refusal.tag) : null;
+  if (coached !== null) return { ...running, note: coached, noteKind: 'refusal' };
+  if (s.note === null) return { ...running, note: null, noteKind: '' };
+  return { ...running, note: noteTokens(s.note), noteKind: s.note.kind };
 }
 
 /** A store over this browser's `localStorage`, which a locked-down webview can refuse just by being read. */
@@ -185,6 +204,11 @@ export interface TutorialLayerProps {
   /** New, behind the same unsaved-work question. `onSent` runs only if New really went out. */
   doNewThen: (onSent?: () => void) => void;
   probeRef: MutableRefObject<() => TutorialProbe>;
+  /**
+   * App calls this with the tag of each host refusal it shows, so the card can say why the gesture was
+   * refused. The layer fills it while mounted. It only reads the tag: nothing goes back to the host.
+   */
+  refusalRef: MutableRefObject<((tag: string) => void) | null>;
   /** Tells App a lesson is on screen, so the empty-floor text stands down. */
   onActiveChange: (active: boolean) => void;
   /** False on a stopped or disconnected simulation: the ring hides, and the card keeps its text. */
@@ -204,6 +228,7 @@ export function TutorialLayer({
   onLessonsOpenChange,
   doNewThen,
   probeRef,
+  refusalRef,
   onActiveChange,
   boardLive,
   simStopped,
@@ -217,6 +242,9 @@ export function TutorialLayer({
   // arms. The stages are constants, so setting the same one each frame costs no render.
   const [stage, setStage] = useState<Stage | null>(null);
   const factsRef = useRef<FrameFacts | null>(null);
+  // The last refusal shown on a stage. The ref is what the frame loop compares; the state renders it.
+  const refusalRecordRef = useRef<RefusalRecord | null>(null);
+  const [refusal, setRefusal] = useState<RefusalRecord | null>(null);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
   // The host's last answer about the bound Source's trigger. The frame loop reads only this.
@@ -266,6 +294,29 @@ export function TutorialLayer({
     };
   }, [probeRef]);
 
+  const clearRefusal = useCallback((): void => {
+    if (refusalRecordRef.current === null) return;
+    refusalRecordRef.current = null;
+    setRefusal(null);
+  }, []);
+
+  // A refusal counts only while a running card shows a stage, and it is pinned to that stage.
+  useLayoutEffect(() => {
+    refusalRef.current = (tag: string): void => {
+      const s = stateRef.current;
+      const facts = factsRef.current;
+      if (s.card !== 'running' || facts === null) return;
+      const shown = currentStage(s, facts.board, facts.chrome, LESSONS);
+      if (shown === null) return;
+      const record = { tag, at: stageKey(s.stepIndex, shown.id) };
+      refusalRecordRef.current = record;
+      setRefusal(record);
+    };
+    return () => {
+      refusalRef.current = null;
+    };
+  }, [refusalRef]);
+
   const active = state.card !== 'none';
   useLayoutEffect(() => {
     onActiveChange(active);
@@ -304,6 +355,11 @@ export function TutorialLayer({
         }
         const shown = currentStage(next, board, chrome, LESSONS);
         setStage(shown);
+        // The clearing rule: the card stops running, or the stage or step the refusal landed on changes.
+        const held = refusalRecordRef.current;
+        if (held !== null && (next.card !== 'running' || shown === null || held.at !== stageKey(next.stepIndex, shown.id))) {
+          clearRefusal();
+        }
         targetRef.current =
           shown === null || !boardLiveRef.current
             ? null
@@ -313,16 +369,21 @@ export function TutorialLayer({
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [active, handleRef, progress]);
+  }, [active, clearRefusal, handleRef, progress]);
 
   /** One step of the state that a press caused, as opposed to a frame. */
-  const dispatch = useCallback((e: TutorialEvent): void => {
-    const next = reduce(stateRef.current, e, LESSONS);
-    stateRef.current = next;
-    setState(next);
-    // So the ring can't paint this run's last target before the next frame works out a new one.
-    targetRef.current = null;
-  }, []);
+  const dispatch = useCallback(
+    (e: TutorialEvent): void => {
+      const next = reduce(stateRef.current, e, LESSONS);
+      stateRef.current = next;
+      setState(next);
+      // So the ring can't paint this run's last target before the next frame works out a new one.
+      targetRef.current = null;
+      // A start, leave, resume or close begins a new sitting, so an old refusal has nothing to say.
+      clearRefusal();
+    },
+    [clearRefusal],
+  );
 
   const start = useCallback(
     (lessonId: LessonId): void => {
@@ -379,7 +440,7 @@ export function TutorialLayer({
     [resume, start],
   );
 
-  const view = cardViewOf(state, stage);
+  const view = cardViewOf(state, stage, refusal);
   // Read at render, which App's 10 Hz re-render keeps fresh enough for a list a person is reading.
   const rows = lessonsOpen
     ? rowViews({

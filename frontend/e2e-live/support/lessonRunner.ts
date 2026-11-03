@@ -7,6 +7,7 @@ import { NUB_RING_R, NUB_RING_STROKE } from '../../src/protocol/ports';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import { lineDoorstep } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
+import { REAL_TABLES, phrasePlain } from '../../src/tutorial/phrase';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
 import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
@@ -60,6 +61,8 @@ const ARRIVAL_TICKS = 200;
 /** How long the poll on the toolbar's tick may wait: two rises of the counter. */
 const TOOLBAR_TICKS = 4;
 const TOOLBAR_FRAMES = 8;
+/** Drawn frames for the card's note to follow the band: both come from one refusal, a render apart. */
+const CARD_NOTE_FRAMES = 20;
 /** Drawn frames for the Lessons list to show a row's buttons after it opens. */
 const ROW_FRAMES = 20;
 /**
@@ -753,6 +756,28 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   const sentence = await captureRefusalText(page, `${label}: the app says why it refused`);
   expect(sentence, `${label}: the app says the space is taken`).toBe(REFUSED_SENTENCE);
   console.log(`REFUSAL ${label}: "${sentence}"`);
+
+  // The card says why and how to try again: the refused stage's line for the tag, or with no line the
+  // band's own sentence. Kind and words are read together, so a lesson note in the slot can't pass.
+  const stage = lesson.steps[stepIndex]?.stages.find((s) => s.id === atStage);
+  const line = stage?.coach !== undefined && Object.hasOwn(stage.coach, lesson.refused.tag) ? stage.coach[lesson.refused.tag] : undefined;
+  const expected = line === undefined ? REFUSED_SENTENCE : phrasePlain(line, REAL_TABLES);
+  const note = page.locator('[data-fab-step-card] [data-fab-step-note]');
+  let cardWords = '';
+  await expect
+    .poll(
+      async () => {
+        if ((await note.count()) === 0) return '(no note)';
+        cardWords = ((await note.first().textContent()) ?? '').trim();
+        return `${(await note.first().getAttribute('data-fab-step-note')) ?? ''}: ${cardWords}`;
+      },
+      {
+        message: `${label}: the card says how to try again`,
+        timeout: addWaitBudget(frameBudgetMs(CARD_NOTE_FRAMES), `${label}: the card's refusal note`),
+      },
+    )
+    .toBe(`refusal: ${expected}`);
+  console.log(`REFUSAL-CARD ${label}: "${cardWords}"`);
 
   await expect
     .poll(async () => (await rejectFlashCellsSeen(page)).length, {

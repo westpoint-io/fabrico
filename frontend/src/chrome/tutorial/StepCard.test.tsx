@@ -40,6 +40,7 @@ const RUNNING: StepCardView = {
   stepNumber: 1,
   stepCount: 6,
   note: null,
+  noteKind: '',
   text: ['A ', { kind: 0 }, ' makes items.'],
 };
 
@@ -111,6 +112,22 @@ describe('StepCard', () => {
     const text = textOf(StepCard({ view: { ...RUNNING, note: ['Step 1 was already done.'] }, ...NOOPS }));
     expect(text.indexOf('Step 1 was already done.')).toBeGreaterThanOrEqual(0);
     expect(text.indexOf('Step 1 was already done.')).toBeLessThan(text.indexOf('Step 1 of 6'));
+  });
+
+  it('marks a refusal note with its kind, around the note words', () => {
+    const note = ['That cell is taken, so the ', { kind: 7 }, " wasn't placed. Click a free cell, like the one in the ring."];
+    const view: StepCardView = { ...RUNNING, note, noteKind: 'refusal' };
+    const marked = render(view).filter((el) => el.props['data-fab-step-note'] !== undefined);
+    expect(marked, 'one note wrapper').toHaveLength(1);
+    expect(marked[0]?.props['data-fab-step-note']).toBe('refusal');
+    expect(textOf(marked[0])).toBe("That cell is taken, so the Sink wasn't placed. Click a free cell, like the one in the ring.");
+    expect(textOf(StepCard({ view, ...NOOPS })).indexOf('That cell is taken')).toBeLessThan(
+      textOf(StepCard({ view, ...NOOPS })).indexOf('Step 1 of 6'),
+    );
+  });
+
+  it('renders no note wrapper when there is no note', () => {
+    expect(render(RUNNING).filter((el) => el.props['data-fab-step-note'] !== undefined)).toEqual([]);
   });
 
   it('reads Clearing the board with no step counter while a new board is on its way', () => {

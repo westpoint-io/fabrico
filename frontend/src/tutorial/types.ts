@@ -119,6 +119,13 @@ export interface Stage {
   hint: HintAnchor | null;
   gesture: Gesture;
   text: readonly PhraseToken[];
+  /**
+   * What the card says when the app refuses a gesture while this stage is shown, keyed by the
+   * refusal's tag. The keys are plain strings because this folder can't import the transport's tag
+   * type (the purity gate keeps `transport/` out of `src/tutorial/`); a source gate pins them to the
+   * app's own tags.
+   */
+  coach?: Readonly<Record<string, readonly PhraseToken[]>>;
 }
 
 export interface Step {
@@ -137,5 +144,11 @@ export interface Lesson {
    * The one gesture this lesson's walk makes that the app should refuse. It's required, so a lesson
    * can't compile without saying where its walk checks that a refusal leaves the step alone.
    */
-  refused: { atStep: string; atStage: string; press: { on: 'machine'; of: BindingName } };
+  refused: {
+    atStep: string;
+    atStage: string;
+    press: { on: 'machine'; of: BindingName };
+    /** The refusal tag the press draws from the app, so the walk knows which coaching line to expect. */
+    tag: string;
+  };
 }

@@ -15,7 +15,15 @@ import { SIM_STOPPED_COPY } from '../SimStoppedCard';
 export type StepCardView =
   | { state: 'starting' }
   | { state: 'swapped' }
-  | { state: 'running'; stepNumber: number; stepCount: number; note: readonly PhraseToken[] | null; text: readonly PhraseToken[] }
+  | {
+      state: 'running';
+      stepNumber: number;
+      stepCount: number;
+      note: readonly PhraseToken[] | null;
+      /** What the note is: `refusal`, a lesson note's kind, or empty with no note. The walk reads it. */
+      noteKind: string;
+      text: readonly PhraseToken[];
+    }
   | { state: 'finished'; text: readonly PhraseToken[] };
 
 export interface StepCardProps {
@@ -139,7 +147,12 @@ export function StepCard(props: StepCardProps): JSX.Element {
         )}
         {view.state === 'running' && (
           <>
-            {view.note !== null && <Words tokens={view.note} />}
+            {/* No wrapper without a note, so the column's gap doesn't grow the card. */}
+            {view.note !== null && (
+              <div data-fab-step-note={view.noteKind}>
+                <Words tokens={view.note} />
+              </div>
+            )}
             <p style={{ ...textStyle, fontWeight: 700 }}>{`Step ${view.stepNumber} of ${view.stepCount}`}</p>
             <Words tokens={view.text} />
           </>

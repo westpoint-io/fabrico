@@ -68,6 +68,13 @@ export const YOUR_FIRST_LINE: Lesson = {
           hint: { on: 'floor', spot: 'sink' },
           gesture: { do: 'pressHint' },
           text: [PLACE_ON_THE_FLOOR],
+          coach: {
+            FootprintCollision: [
+              'That cell is taken, so the ',
+              { kind: SINK_KIND },
+              " wasn't placed. Click a free cell, like the one in the ring.",
+            ],
+          },
         },
       ],
       done: { is: 'nodeAppeared', kind: SINK_KIND, bind: 'sink' },
@@ -197,5 +204,10 @@ export const YOUR_FIRST_LINE: Lesson = {
     ' takes them in. The board is yours, so keep building.',
   ],
   // A Sink pressed on the Source's own cell, which the host refuses as a collision.
-  refused: { atStep: 'place-sink', atStage: 'sink-floor', press: { on: 'machine', of: 'source' } },
+  refused: {
+    atStep: 'place-sink',
+    atStage: 'sink-floor',
+    press: { on: 'machine', of: 'source' },
+    tag: 'FootprintCollision',
+  },
 };

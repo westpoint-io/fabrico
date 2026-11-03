@@ -2388,6 +2388,7 @@ export function App() {
   const helpOpen = topRightPanel === 'help';
   const lessonsOpen = topRightPanel === 'lessons';
   const tutorialProbeRef = useRef<() => TutorialProbe>(idleTutorialProbe);
+  const tutorialRefusalRef = useRef<((tag: string) => void) | null>(null);
   const [lessonActive, setLessonActive] = useState(false);
   // Plan 74.1-31 (PAUSE-TOOLBAR): WHERE THE TOOLBAR'S STATUS STRIP MAY HANG. The strip
   // (the status readout and the Unsaved badge, out of the button row) is right-aligned
@@ -2820,6 +2821,8 @@ export function App() {
       //
       // `lastShownSeq` is deliberately NOT advanced here: only the branch that writes
       // the text moves it.
+      // The lesson card hears every refusal past the stale drop, a repeat of one tag too.
+      tutorialRefusalRef.current?.(verdict.tag);
       if (shownTagRef.current === verdict.tag) return;
 
       // Otherwise write the sentence. ONE SLOT, LAST WINS, never a queue: a queue would
@@ -4906,6 +4909,7 @@ export function App() {
             onLessonsOpenChange={(open) => setTopRightPanel(open ? 'lessons' : null)}
             doNewThen={doNewThen}
             probeRef={tutorialProbeRef}
+            refusalRef={tutorialRefusalRef}
             onActiveChange={setLessonActive}
             boardLive={simFatalReason === null && status.kind !== 'disconnected'}
             simStopped={simFatalReason !== null}

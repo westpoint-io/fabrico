@@ -44,7 +44,7 @@ function lessonWith(text: readonly PhraseToken[], closing: readonly PhraseToken[
     id: 'your-first-line',
     title: 'A fixture lesson',
     closing,
-    refused: { atStep: 'fixture-step', atStage: 'fixture-stage', press: { on: 'machine', of: 'source' } },
+    refused: { atStep: 'fixture-step', atStage: 'fixture-stage', press: { on: 'machine', of: 'source' }, tag: 'FootprintCollision' },
     steps: [
       {
         id: 'fixture-step',
