@@ -319,6 +319,9 @@ export async function captureWithGhostGone(
   return captureClip(page, clip);
 }
 
+/** One period of the ring's pulse (`.fab-hint` in `chromeCss.ts`). */
+const PULSE_PERIOD_MS = 1600;
+
 /** The focus colour the ring's stylesheet paints with, as the page resolves it. */
 async function focusColour(page: Page): Promise<number> {
   const hex = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fab-focus').trim());
@@ -330,6 +333,7 @@ async function focusColour(page: Page): Promise<number> {
  * `elementFromPoint` passes through a ring that takes no press, so this reads a capture of the ring's
  * own border. It runs once per kind of ring in a walk, because a capture is slow on a CI runner. A read
  * that a fresh probe says outlived its stage judges nothing, and the next stage of that kind reads it.
+ * The ring pulses, so a read may take several captures across one pulse period; the log says how many.
  */
 async function expectRingPainted(
   page: Page,
@@ -354,6 +358,7 @@ async function expectRingPainted(
       })
       .join(' '),
   );
+  let captures = 0;
   for (const rect of rects) {
     const clip = {
       x: Math.floor(rect.x),
@@ -361,14 +366,24 @@ async function expectRingPainted(
       width: Math.ceil(rect.x + rect.width) - Math.floor(rect.x),
       height: Math.ceil(rect.y + rect.height) - Math.floor(rect.y),
     };
-    const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
-    if ((await probeAtStage(page, stepIndex, stage.id)) === null) return;
-    const read = ringOnCanvas(img, rect.shape, colour, img.width / clip.width);
+    // A capture can land at the faint end of the pulse, where the border is too far from the focus colour to
+    // read. The pulse returns to full opacity once a period, so the read captures again until the border reads
+    // or one period has gone by. The tolerance stays as it is: a wider one would also pass a ring painted in
+    // the wrong colour.
+    const deadline = Date.now() + addWaitBudget(frameBudgetMs(0, PULSE_PERIOD_MS), `${label}: the ring read across one pulse period`);
+    let read: ReturnType<typeof ringOnCanvas>;
+    for (;;) {
+      const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
+      captures += 1;
+      if ((await probeAtStage(page, stepIndex, stage.id)) === null) return;
+      read = ringOnCanvas(img, rect.shape, colour, img.width / clip.width);
+      if (read.seen || Date.now() >= deadline) break;
+    }
     reads.push(`${read.ink}/${Math.round(read.floor)} sides ${read.sideInk.join(',')}`);
     expect(read.seen, `${label}: the ring's border shows on every side in the focus colour, around (${clip.x},${clip.y}), side ink ${read.sideInk.join(',')} against ${read.sideFloor.map(Math.round).join(',')}`).toBe(true);
   }
   state.ringsRead.add(kind);
-  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')} pulse=${pulse} captures=${rects.length}`);
+  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')} pulse=${pulse} captures=${captures}`);
 }
 
 /**
