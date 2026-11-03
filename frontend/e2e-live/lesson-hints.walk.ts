@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import { CELL } from '../shared/geometry';
-import type { HintRect } from '../src/chrome/tutorial/TutorialLayer';
+import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
 import { doorstepCell, dropHitRadiusWorld, unitDelta } from '../src/protocol/ports';
 import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
 import type { Stage } from '../src/tutorial/types';
+import { MAX_ZOOM } from '../src/render/camera';
 import {
   dragByHand,
   hintsForStage,
@@ -20,6 +21,8 @@ import {
 import {
   cameraOf,
   expectRenderLoopAlive,
+  handPath,
+  pointerTravel,
   readScene,
   resetToDemo,
   restoreHostAfterFailedTest,
@@ -40,6 +43,11 @@ import {
 // The outside drop never lands on the Sink's In doorstep tile, because a release whose head is on that
 // tile docks by auto-dock wherever the hand is. It goes into the Sink's body first and sideways only
 // when that point breaks a rule, and each run logs the side it used.
+//
+// The last two tests are the off-screen flag and Show me on the real host (HINT-03). A ring outside the
+// free area makes the card say so, and Show me moves the camera and nothing else. Each reads the board
+// and the toolbar's Undo and Redo buttons before the press and checks them over the ticks after it,
+// before it looks at the camera or the rings, so a Show me that changes the board fails there.
 
 /** The device scale a 1080p laptop panel at 118% gives, where a CSS px is not a whole device px. */
 const DPR = 1.18;
@@ -62,6 +70,7 @@ const INSIDE_MARGIN_PX = 1;
 const TOLERANCE_PX = 1;
 
 const DRAW_BELT = LESSON.steps.findIndex((s) => s.id === 'draw-belt');
+const PLACE_SINK = LESSON.steps.findIndex((s) => s.id === 'place-sink');
 
 test.use({ deviceScaleFactor: DPR });
 
@@ -69,9 +78,9 @@ test.afterEach(async ({ page }, testInfo) => {
   await restoreHostAfterFailedTest(page, testInfo);
 });
 
-function stageNamed(id: string): Stage {
-  const stage = LESSON.steps[DRAW_BELT]?.stages.find((s) => s.id === id);
-  if (stage === undefined) throw new Error(`draw-belt has no stage ${id}`);
+function stageNamed(id: string, stepIndex = DRAW_BELT): Stage {
+  const stage = LESSON.steps[stepIndex]?.stages.find((s) => s.id === id);
+  if (stage === undefined) throw new Error(`${LESSON.steps[stepIndex]?.id} has no stage ${id}`);
   return stage;
 }
 
@@ -311,4 +320,304 @@ test('the drop disc docks inside and not outside, zoom at or below 1', async ({ 
 
 test('the drop disc docks inside and not outside, zoom near 2', async ({ page }) => {
   await dropTest(page, 1.9, 2.1);
+});
+
+// --- HINT-03 on the real host: the off-screen flag and Show me ---
+
+const CARD = '[data-fab-step-card]';
+const ROW = `${CARD} [data-fab-offscreen-row]`;
+const SHOW_ME = `${ROW} button`;
+/** Sim ticks the board is watched for after Show me. An Undo's answer comes back well inside this. */
+const HOLD_TICKS = 30;
+/** The `machine_kind` byte that `KIND_NAMES` calls Sink. */
+const SINK_KIND = 7;
+
+type Free = { left: number; right: number; top: number; bottom: number };
+
+/**
+ * The free area by the rule `readFreeArea` in TutorialLayer.tsx uses, worked out again from the page:
+ * right of the palette dock, left of the window less 24 and the inspector's reserve of
+ * `min(420, 33vw) + 52`, under 116 px, and above the card.
+ */
+async function freeAreaOf(page: Page): Promise<Free> {
+  return page.evaluate(() => {
+    const dock = document.querySelector('[data-fab-left-dock]');
+    const card = document.querySelector('[data-fab-step-card]');
+    return {
+      left: dock === null ? 0 : dock.getBoundingClientRect().right,
+      right: window.innerWidth - 24 - (Math.min(420, 0.33 * window.innerWidth) + 2 * 22 + 8),
+      top: 116,
+      bottom: card === null ? window.innerHeight : card.getBoundingClientRect().top,
+    };
+  });
+}
+
+const insideFree = (r: HintRect, f: Free): boolean => r.x >= f.left && r.x + r.width <= f.right && r.y >= f.top && r.y + r.height <= f.bottom;
+const sharesFree = (r: HintRect, f: Free): boolean =>
+  Math.min(r.x + r.width, f.right) > Math.max(r.x, f.left) && Math.min(r.y + r.height, f.bottom) > Math.max(r.y, f.top);
+
+/**
+ * The board's layout and history as the scene holds it: machines, belts with their docks, wires, and
+ * whether Undo and Redo have anything. The tick, item counts and machine states move on their own on a
+ * running board, so they are left out; an Undo, a placement or a dock changes what is kept.
+ */
+function layoutOf(scene: SceneFacts): string {
+  return JSON.stringify({
+    canUndo: scene.canUndo,
+    canRedo: scene.canRedo,
+    nodes: scene.nodes.map((n) => ({ id: n.id, kind: n.kind, cells: n.cells, ports: n.ports, label: n.label })),
+    belts: scene.belts.map((b) => ({ id: b.id, tiles: b.tiles, docks: b.docks })),
+    wires: scene.wires.map((w) => ({ id: w.id, from: w.from, to: w.to, path: w.path })),
+  });
+}
+
+/** The toolbar's Undo and Redo buttons as a person sees them: enabled or not, and the title. */
+async function undoButtonsOf(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    JSON.stringify(
+      ['Undo', 'Redo'].map((name) => {
+        const b = document.querySelector<HTMLButtonElement>(`header button[aria-label="${name}"]`);
+        return b === null ? null : { name, disabled: b.disabled, title: b.title };
+      }),
+    ),
+  );
+}
+
+/**
+ * Press Show me by hand, then check the board and the Undo and Redo buttons stay as they were for
+ * `HOLD_TICKS` ticks. Nothing about the camera or the rings is read here, so a Show me that changes
+ * the board fails on this check whatever else it does.
+ */
+async function pressShowMeAndHoldBoard(page: Page, what: string): Promise<void> {
+  const box = await page.locator(SHOW_ME).boundingBox();
+  if (box === null) throw new Error(`${what}: Show me has no box on screen`);
+  const before = await readScene(page);
+  const layout = layoutOf(before);
+  const buttons = await undoButtonsOf(page);
+  await pressPointByHand(page, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  let changed: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const now = await readScene(page);
+        const was = layoutOf(now);
+        if (was !== layout) {
+          changed = was;
+          return 'changed';
+        }
+        return now.tick >= before.tick + HOLD_TICKS ? 'held' : 'watching';
+      },
+      { message: `${what}: the board ran ${HOLD_TICKS} ticks after Show me`, timeout: tickBudgetMs(HOLD_TICKS) + frameBudgetMs(STAGE_FRAMES) },
+    )
+    .not.toBe('watching');
+  expect(changed ?? layout, `${what}: the board and its Undo history are as they were before Show me`).toBe(layout);
+  expect(await undoButtonsOf(page), `${what}: the toolbar's Undo and Redo buttons are as they were before Show me`).toBe(buttons);
+}
+
+/** The card's flag, the row and its line, read together until they agree on `on`. */
+async function expectCardFlag(page: Page, on: boolean, what: string): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const card = document.querySelector('[data-fab-step-card]');
+          const row = card?.querySelector<HTMLElement>('[data-fab-offscreen-row]') ?? null;
+          return {
+            flag: card?.getAttribute('data-fab-offscreen') ?? null,
+            row: row === null ? null : getComputedStyle(row).visibility,
+            line: row?.textContent?.includes('The ring is out of view.') ?? false,
+          };
+        }),
+      { message: `${what}: the card's data-fab-offscreen, the row's visibility and its line`, timeout: frameBudgetMs(STAGE_FRAMES) },
+    )
+    .toEqual({ flag: on ? 'true' : 'false', row: on ? 'visible' : 'hidden', line: true });
+}
+
+/**
+ * The probe's rings for `stageId` once they are painted under the camera as it stands: two drawn
+ * frames inside one read, with the camera the same before and after them.
+ */
+async function ringsUnderCamera(page: Page, stepIndex: number, stageId: string): Promise<{ hint: HintRect; hintTo: HintRect | null; scale: number }> {
+  let held: { hint: HintRect; hintTo: HintRect | null; scale: number } | null = null;
+  await expect
+    .poll(
+      async () => {
+        const read = await page.evaluate(async () => {
+          const hook = (window as unknown as { __fabrico: { tutorial(): TutorialProbe; camera(): { x: number; y: number; scale: number } } }).__fabrico;
+          const cam = hook.camera();
+          for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+          return { probe: hook.tutorial(), cam, now: hook.camera() };
+        });
+        if (read.probe.stepIndex !== stepIndex || read.probe.stageId !== stageId) return 'left';
+        if (read.cam.x !== read.now.x || read.cam.y !== read.now.y || read.cam.scale !== read.now.scale) return 'moving';
+        if (read.probe.hint === null) return 'moving';
+        held = { hint: read.probe.hint, hintTo: read.probe.hintTo, scale: read.now.scale };
+        return 'held';
+      },
+      { message: `the ${stageId} rings painted under a still camera`, timeout: frameBudgetMs(STAGE_FRAMES) },
+    )
+    .toBe('held');
+  return held as unknown as { hint: HintRect; hintTo: HintRect | null; scale: number };
+}
+
+/** A middle-button drag on the board by `(dx, dy)` from `from`, the way a hand pans. */
+async function panByHand(page: Page, from: Pt, dx: number, dy: number): Promise<void> {
+  const tag = await page.evaluate((p) => document.elementFromPoint(p.x, p.y)?.tagName ?? null, from);
+  expect(tag, 'the pan starts on the board, not on a panel').toBe('CANVAS');
+  const before = await cameraOf(page);
+  await pointerTravel(page, from.x, from.y);
+  await page.mouse.down({ button: 'middle' });
+  for (const p of handPath(from, { x: from.x + dx, y: from.y + dy })) await pointerTravel(page, p.x, p.y);
+  await page.mouse.up({ button: 'middle' });
+  await expect
+    .poll(
+      async () => {
+        const cam = await cameraOf(page);
+        return Math.max(Math.abs(cam.x - before.x - dx), Math.abs(cam.y - before.y - dy));
+      },
+      { message: `the middle drag panned the board by (${dx}, ${dy})`, timeout: frameBudgetMs(STAGE_FRAMES) },
+    )
+    .toBeLessThanOrEqual(TOLERANCE_PX);
+}
+
+async function toLesson(page: Page, until: string): Promise<ReturnType<typeof watchPageErrors>> {
+  const errors = watchPageErrors(page);
+  await page.goto('/');
+  await waitForAppReady(page);
+  expect(await page.evaluate(() => window.devicePixelRatio), 'the page runs at device scale 1.18').toBeCloseTo(DPR, 5);
+  await resetToDemo(page);
+  await openLessonsFromHelp(page);
+  await startLesson(page, LESSON);
+  await walkLesson(page, LESSON, { until });
+  return errors;
+}
+
+test('a Sink spot under the palette reads out of view, and Show me brings it back', async ({ page }) => {
+  const errors = await toLesson(page, 'place-sink');
+
+  // 1. Zoom to about 2 at the Source, while the Sink tool is still in the palette, so the Sink's spot
+  // is worked out at this zoom. Six cells east is past the free area's right edge there, so it goes
+  // six cells west, under the palette.
+  const tool = await hintsForStage(page, LESSON, PLACE_SINK, stageNamed('sink-tool', PLACE_SINK));
+  if (tool === null) throw new Error('place-sink: the app left the sink-tool stage');
+  const { bound } = await readProbe(page);
+  const source = (await readScene(page)).nodes.find((n) => n.id === bound.source);
+  if (source === undefined) throw new Error('the bound Source is not on the board');
+  const [sc] = source.cells;
+  if (sc === undefined) throw new Error('the Source has no cell');
+  const scale = await zoomInto(page, await screenCellCentre(page, sc[0], sc[1]), 1.9, 2.1);
+  await pressPointByHand(page, pointInRect(tool.hint, { x: -6, y: 3 }));
+
+  // 2. The floor ring, out of the free area. If it lands inside, pan it out to the left by hand.
+  let ring = (await ringsUnderCamera(page, PLACE_SINK, 'sink-floor')).hint;
+  let free = await freeAreaOf(page);
+  let how = 'under-palette';
+  if (sharesFree(ring, free)) {
+    how = 'panned';
+    const from = { x: (free.left + free.right) / 2, y: free.top + 0.75 * (free.bottom - free.top) };
+    await panByHand(page, from, Math.round(free.left - (ring.x + ring.width) - 20), 0);
+    ring = (await ringsUnderCamera(page, PLACE_SINK, 'sink-floor')).hint;
+    free = await freeAreaOf(page);
+  }
+  console.log(`MEASURE showme-floor zoom=${scale.toFixed(3)} ring-x=${ring.x.toFixed(1)} free-left=${free.left.toFixed(1)} how=${how}`);
+  expect(sharesFree(ring, free), 'the Sink floor ring is out of the free area').toBe(false);
+  await expectCardFlag(page, true, 'with the Sink floor ring out of view');
+
+  // 3. Show me by hand: the board and the Undo buttons first, then the ring and the row.
+  await pressShowMeAndHoldBoard(page, 'the floor stage');
+  const after = await ringsUnderCamera(page, PLACE_SINK, 'sink-floor');
+  free = await freeAreaOf(page);
+  expect(insideFree(after.hint, free), 'after Show me the Sink floor ring is inside the free area').toBe(true);
+  await expectCardFlag(page, false, 'after Show me');
+
+  // 4. The ring pressed by hand places the Sink, and the step moves on.
+  const sinks = (await readScene(page)).nodes.filter((n) => n.kind === SINK_KIND).length;
+  await pressPointByHand(page, pointInRect(after.hint, { x: -6, y: 3 }));
+  await expect
+    .poll(async () => (await readScene(page)).nodes.filter((n) => n.kind === SINK_KIND).length, {
+      message: 'the press on the floor ring placed a Sink',
+      timeout: tickBudgetMs(DOCK_TICKS) + frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(sinks + 1);
+  await expect
+    .poll(async () => (await readProbe(page)).stepIndex, { message: 'the placed Sink moved the lesson past place-sink', timeout: frameBudgetMs(STAGE_FRAMES) })
+    .toBeGreaterThan(PLACE_SINK);
+
+  await expectRenderLoopAlive(page, 'after Show me on the floor stage');
+  errors.assertNone('during Show me on the floor stage');
+});
+
+test('after Show me zooms out, the next drop on the disc docks', async ({ page }) => {
+  const errors = await toLesson(page, 'draw-belt');
+  await reachStage(page, 'belt-tool');
+  const { sink, out, into } = await boundMachines(page);
+  const door = doorstepCell(out);
+  const inDoor = doorstepCell(into);
+
+  // 1. Zoom to about 1 between the machines, so the start is the same whatever zoom the walk left,
+  // then to 4 at the free area's corner farthest from them, which carries both rings out of it.
+  const doorAt = await screenCellCentre(page, door[0], door[1]);
+  const inDoorAt = await screenCellCentre(page, inDoor[0], inDoor[1]);
+  // The wheel keeps the point under the pointer still, so the machines' midpoint stays where it was.
+  const mid = { x: (doorAt.x + inDoorAt.x) / 2, y: (doorAt.y + inDoorAt.y) / 2 };
+  await zoomInto(page, mid, 0.9, 1.1);
+  const free = await freeAreaOf(page);
+  const corners = [
+    { x: free.left + 12, y: free.top + 12 },
+    { x: free.right - 12, y: free.top + 12 },
+    { x: free.left + 12, y: free.bottom - 12 },
+    { x: free.right - 12, y: free.bottom - 12 },
+  ];
+  const far = corners.reduce((a, b) => (Math.hypot(b.x - mid.x, b.y - mid.y) > Math.hypot(a.x - mid.x, a.y - mid.y) ? b : a));
+  const before = await zoomInto(page, far, 3.9, MAX_ZOOM);
+
+  // 2. The Belt's palette ring, so the belt-draw stage begins at zoom 4 with both rings out of view.
+  const tool = await ringsAt(page, 'belt-tool');
+  await pressPointByHand(page, pointInRect(tool.hint, { x: -6, y: 3 }));
+  await reachStage(page, 'belt-draw');
+  const out4 = await ringsUnderCamera(page, DRAW_BELT, 'belt-draw');
+  if (out4.hintTo === null) throw new Error('belt-draw reported no drop ring');
+  const free4 = await freeAreaOf(page);
+  expect(out4.scale, 'the belt-draw stage began at zoom 4').toBe(before);
+  expect(sharesFree(out4.hint, free4), 'the doorstep square is out of the free area').toBe(false);
+  expect(sharesFree(out4.hintTo, free4), 'the drop disc is out of the free area').toBe(false);
+  await expectCardFlag(page, true, 'with both belt-draw rings out of view at zoom 4');
+
+  // 3. Show me by hand: the board and the Undo buttons first, then the camera and the rings.
+  await pressShowMeAndHoldBoard(page, 'the belt-draw stage at zoom 4');
+  const shown = await ringsUnderCamera(page, DRAW_BELT, 'belt-draw');
+  console.log(`MEASURE showme zoom-before=${before.toFixed(3)} zoom-after=${shown.scale.toFixed(3)}`);
+  expect(shown.scale, 'Show me zoomed out from 4').toBeLessThan(before);
+  const freeNow = await freeAreaOf(page);
+  const disc = shown.hintTo;
+  if (disc === null || disc.hitCentre === undefined || disc.hitRadiusPx === undefined) throw new Error('the drop disc reports no hit circle after Show me');
+  expect(insideFree(shown.hint, freeNow), 'after Show me the doorstep square is inside the free area').toBe(true);
+  expect(insideFree(disc, freeNow), 'after Show me the drop disc is inside the free area').toBe(true);
+  await expectCardFlag(page, false, 'after Show me at the belt-draw stage');
+  expect(
+    Math.abs(disc.hitRadiusPx - dropHitRadiusWorld(shown.scale) * shown.scale),
+    `the disc's hit radius after Show me is the release's at zoom ${shown.scale.toFixed(3)}, in CSS px`,
+  ).toBeLessThanOrEqual(TOLERANCE_PX);
+
+  // 4. Straight away, a drop 1 px inside the hit circle on the Sink's body side docks on the Sink's In.
+  const step = CELL * shown.scale;
+  const body: [number, number] = [-unitDelta(into.side)[0], -unitDelta(into.side)[1]];
+  const inside = along(disc.hitCentre, body, disc.hitRadiusPx - INSIDE_MARGIN_PX);
+  expect(inRect(inside, await cellRect(page, inDoor)), 'the inside drop is off the doorstep tile').toBe(false);
+  const pressAt = await screenCellCentre(page, door[0], door[1]);
+  const start = { x: pressAt.x + 0.2 * step, y: pressAt.y - 0.15 * step };
+  expect(inRect(start, await cellRect(page, door)), 'the press lands inside the doorstep cell').toBe(true);
+  await dragByHand(page, start, inside);
+  await expect
+    .poll(async () => dockedOnIn(await readScene(page), sink.id, into.index), {
+      message: `a drop ${(disc.hitRadiusPx - INSIDE_MARGIN_PX).toFixed(1)} px from the dot after Show me docked a belt on the Sink's In`,
+      timeout: tickBudgetMs(DOCK_TICKS) + frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(true);
+  await expect
+    .poll(async () => (await readProbe(page)).stepIndex, { message: 'the docked belt moved the lesson past draw-belt', timeout: frameBudgetMs(STAGE_FRAMES) })
+    .toBeGreaterThan(DRAW_BELT);
+
+  await expectRenderLoopAlive(page, 'after Show me and the drop');
+  errors.assertNone('during Show me and the drop');
 });
