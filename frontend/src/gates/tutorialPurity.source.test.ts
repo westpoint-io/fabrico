@@ -39,7 +39,7 @@ interface SourceFile {
 const PURE_DIR = 'src/tutorial/';
 const LAYER_DIR = 'src/chrome/tutorial/';
 const RENDER_DIR = 'src/render/';
-/** The one file allowed to read the camera, so a second reader can't drift from it. */
+/** The one file allowed to read the camera, and to write it for Show me, so a second one can't drift from it. */
 const CAMERA_READER = 'src/chrome/tutorial/cameraRead.ts';
 /** The one file allowed to hold a host bridge, for the one read a lesson needs. */
 const HOST_READER = 'src/chrome/tutorial/triggerRead.ts';
@@ -91,6 +91,8 @@ const HOST_BRIDGES = /\b(?:tauriInvoke|devWsInvoke)\b/;
 const THROUGH_HOST_MODULE = /(?:^|\/)(?:transport(?:\/|$)|ConfigPanel(?:\.tsx?)?$)/;
 
 const CAMERA_CALL = /\.camera\s*(?:\?\.)?\(\s*\)/;
+/** The camera's one write. A tutorial file holding it elsewhere could move the view behind a lesson's back. */
+const CAMERA_WRITE = /\.setCamera\s*(?:\?\.)?\(/;
 const IMPORT_FORMS: readonly RegExp[] = [
   /^[ \t]*import\b[^'";]*['"]([^'"]+)['"]/gm,
   /^[ \t]*export\b[^'";=]*\bfrom\s*['"]([^'"]+)['"]/gm,
@@ -194,6 +196,13 @@ export function auditTutorialSources(files: readonly SourceFile[]): string[] {
       if (hit !== null) {
         const line = stripped.slice(0, hit.index).split('\n').length;
         findings.push(`${path}:${line}: calls .camera(), and only ${CAMERA_READER} reads the camera`);
+      }
+    }
+    if ((pure || layer) && path !== CAMERA_READER) {
+      const hit = CAMERA_WRITE.exec(stripped);
+      if (hit !== null) {
+        const line = stripped.slice(0, hit.index).split('\n').length;
+        findings.push(`${path}:${line}: calls .setCamera(), and only ${CAMERA_READER} moves the camera`);
       }
     }
     if (path.startsWith(RENDER_DIR)) {
@@ -398,6 +407,13 @@ describe('the tutorial stays a reader of the app', () => {
       expect(auditTutorialSources([layerFile('const c = hook?.camera?.();')]).join('\n')).toContain('calls .camera()');
     });
 
+    it('.setCamera() outside cameraRead.ts, in the layer or a pure file', () => {
+      expect(auditTutorialSources([layerFile('handle.cam.setCamera(1, 0, 0);')]).join('\n')).toMatch(/TutorialLayer\.tsx:1: calls \.setCamera\(\)/);
+      expect(auditTutorialSources([layerFile('handle?.cam?.setCamera?.(1, 0, 0);')]).join('\n')).toContain('calls .setCamera()');
+      expect(auditTutorialSources([layerFile('cam.setCamera (2, x, y);')]).join('\n')).toContain('calls .setCamera()');
+      expect(auditTutorialSources([pureFile('view.cam.setCamera(1, 0, 0);')]).join('\n')).toContain('calls .setCamera()');
+    });
+
     it('a tutorial import in a file under render/', () => {
       const file = { path: 'src/render/fixture.ts', source: "import { reduce } from '../tutorial/machine';\n" };
       expect(auditTutorialSources([file]).join('\n')).toMatch(/fixture\.ts:1: imports \.\.\/tutorial\/machine/);
@@ -452,6 +468,7 @@ describe('the tutorial stays a reader of the app', () => {
 
     it('.camera() in cameraRead.ts, and DOM reads in the layer', () => {
       expect(auditTutorialSources([{ path: CAMERA_READER, source: 'window.__fabrico?.camera();' }])).toEqual([]);
+      expect(auditTutorialSources([{ path: CAMERA_READER, source: 'handle.cam.setCamera(to.scale, to.x, to.y);' }])).toEqual([]);
       expect(auditTutorialSources([layerFile("import { useRef } from 'react'; document.querySelector('a');")])).toEqual([]);
       expect(auditTutorialSources([layerFile("getComputedStyle(el); matchMedia('(min-width: 1px)'); location.href;")])).toEqual([]);
     });

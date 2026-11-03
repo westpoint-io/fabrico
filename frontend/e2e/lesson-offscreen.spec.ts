@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
-import { CELL, buildPacket, cameraOf, type CameraSnapshot } from './support/wire';
+import { MIN_ZOOM } from '../src/render/camera';
+import { CELL, buildPacket, cameraOf, type CameraSnapshot, type Harness } from './support/wire';
 import {
   CARD,
   armSourceForFloor,
@@ -25,6 +26,10 @@ import {
 // reserve, under the toolbar and above the card. A panel target never counts. Each case reads the
 // probe's `offScreen`, the card's `data-fab-offscreen` and the row's visibility, at a floor, a machine
 // and a port stage with the flag both on and off. The real-host checks are plan 103-05's.
+//
+// Show me moves the camera and nothing else. Each Show me case reads what the app has sent before the
+// press and checks those counts first, then the board, and only then the camera and the ring, so a
+// Show me that sends anything fails on the count whatever else it does.
 
 const TOLERANCE = 1;
 const ROW = `${CARD} [data-fab-offscreen-row]`;
@@ -291,5 +296,142 @@ test.describe('flag', () => {
     expect(moved.x + moved.width, 'inside the window').toBeLessThan(1280);
     expect(moved.x, 'and right of the inspector reserve').toBeGreaterThan(free.right);
     await expectFlag(page, true, 'right of the inspector reserve');
+  });
+});
+
+const SHOW_ME = `${ROW} button`;
+
+/** The board as the app's scene holds it, for a before-and-after comparison. */
+async function sceneOf(page: Page): Promise<string> {
+  return page.evaluate(() => JSON.stringify((window as unknown as { __fabrico: { scene(): unknown } }).__fabrico.scene()));
+}
+
+/**
+ * Press Show me through `press`, then check in this order: nothing sent (binary commands and control
+ * frames alike), the board unchanged. Waits for the camera to move first without asserting it, plus a
+ * quiet spell for any frame the page might still send, so the counts are read after the press has
+ * done everything it does.
+ */
+async function showMeSendsNothing(page: Page, h: Harness, press: () => Promise<void>): Promise<void> {
+  const sent = h.sent.length;
+  const controls = h.controls.length;
+  const scene = await sceneOf(page);
+  const cam = await cameraOf(page);
+  await press();
+  for (let i = 0; i < 40; i++) {
+    const now = await cameraOf(page);
+    if (now.x !== cam.x || now.y !== cam.y || now.scale !== cam.scale) break;
+    await page.waitForTimeout(25);
+  }
+  await page.waitForTimeout(250);
+  expect(h.sent.length, 'Show me sent no command').toBe(sent);
+  expect(h.controls.length, 'Show me sent no control frame').toBe(controls);
+  expect(await sceneOf(page), 'the board is as it was').toBe(scene);
+}
+
+/** After Show me: the zoom as given, every ring of the stage inside the free area, and the row hidden. */
+async function expectFramed(page: Page, stageId: string, scale: number | null, what: string): Promise<CameraSnapshot> {
+  const cam = await cameraOf(page);
+  if (scale !== null) expect(cam.scale, `${what}: Show me kept the zoom`).toBe(scale);
+  await ringAfterMove(page, stageId, cam);
+  const probe = await readProbe(page);
+  const free = await freeAreaOf(page);
+  expect(inside(probe.hint!, free), `${what}: the ring is inside the free area`).toBe(true);
+  if (probe.hintTo !== null) expect(inside(probe.hintTo, free), `${what}: the far ring is inside the free area`).toBe(true);
+  await expectFlag(page, false, `${what}, after Show me`);
+  return cam;
+}
+
+test.describe('show me', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('a floor stage: Show me brings the Sink spot into view at the same zoom and sends nothing', async ({ page }) => {
+    const h = await boot(page);
+    await toSinkFloorAtZoom2(page, h);
+    await expectFlag(page, true, 'with the Sink spot under the palette');
+    const { scale } = await cameraOf(page);
+    await showMeSendsNothing(page, h, () => page.locator(SHOW_ME).click());
+    await expectFramed(page, 'sink-floor', scale, 'the floor stage');
+  });
+
+  test('a machine stage: Show me brings the Source back and sends nothing', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await placeBoth(page, h);
+    await ringAt(page, 'tool-down');
+    await page.keyboard.press('Escape');
+    const ring = await ringAt(page, 'select-source');
+    const free = await freeAreaOf(page);
+    await panBy(page, Math.round(free.left - (ring.x + ring.width) - 20), 0);
+    await expectFlag(page, true, 'with the Source panned out');
+    const { scale } = await cameraOf(page);
+    await showMeSendsNothing(page, h, () => page.locator(SHOW_ME).click());
+    await expectFramed(page, 'select-source', scale, 'the machine stage');
+  });
+
+  test('a port stage: Show me frames both belt-draw rings and sends nothing', async ({ page }) => {
+    const { h } = await toBeltDrawWithSinkOut(page);
+    await expectFlag(page, true, "with the Sink's In disc out of view");
+    const { scale } = await cameraOf(page);
+    await showMeSendsNothing(page, h, () => page.locator(SHOW_ME).click());
+    await expectFramed(page, 'belt-draw', scale, 'the port stage');
+  });
+
+  test('at zoom 4 with both belt-draw rings out of view, Show me zooms out until both fit, not below the floor', async ({ page }) => {
+    const { h } = await toBeltDrawAtZoom1(page);
+    await zoomInto(page, PAN_FROM, 3.6, 4);
+    const zoomed = await cameraOf(page);
+    const probe = await ringAfterMove(page, 'belt-draw', zoomed).then(() => readProbe(page));
+    const free = await freeAreaOf(page);
+    // Lift both rings above the free area's top, so neither is in view.
+    const lowest = Math.max(probe.hint!.y + probe.hint!.height, probe.hintTo!.y + probe.hintTo!.height);
+    await panBy(page, 0, Math.round(free.top - lowest - 20));
+    const out = await readProbe(page);
+    expect(sharesArea(out.hint!, free), 'the doorstep square is out of view').toBe(false);
+    expect(sharesArea(out.hintTo!, free), 'the In disc is out of view').toBe(false);
+    await expectFlag(page, true, 'with both rings out of view at zoom 4');
+    const span = Math.max(out.hint!.x + out.hint!.width, out.hintTo!.x + out.hintTo!.width) - Math.min(out.hint!.x, out.hintTo!.x);
+    expect(span + 96, 'the two rings and the margin are wider than the free area at this zoom').toBeGreaterThan(free.right - free.left);
+
+    await showMeSendsNothing(page, h, () => page.locator(SHOW_ME).click());
+    const cam = await expectFramed(page, 'belt-draw', null, 'zoom 4');
+    expect(cam.scale, 'Show me zoomed out').toBeLessThan(zoomed.scale);
+    expect(cam.scale, 'and not below the camera floor').toBeGreaterThanOrEqual(MIN_ZOOM);
+  });
+
+  test('Show me is disabled with its title while a belt draw is held, and enabled after Escape', async ({ page }) => {
+    await toBeltDrawWithSinkOut(page);
+    await expectFlag(page, true, "with the Sink's In disc out of view");
+    const button = page.locator(SHOW_ME);
+    await expect(button, 'enabled before the draw').toBeEnabled();
+    const from = (await readProbe(page)).hint!;
+    const at = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + CELL / 2, at.y, { steps: 3 });
+    await page.mouse.move(at.x + CELL, at.y, { steps: 3 });
+    await expect(button, 'disabled while the draw is held').toBeDisabled();
+    await expect(button).toHaveAttribute('title', 'Finish or cancel the belt first.');
+    await page.keyboard.press('Escape');
+    await expect(button, 'enabled once Escape ended the draw').toBeEnabled();
+    await expect(button, 'with no title').not.toHaveAttribute('title', /./);
+    await page.mouse.up();
+  });
+
+  test('a keyboard Show me hands focus back to the board, so Space toggles play', async ({ page }) => {
+    const h = await boot(page);
+    await toSinkFloorAtZoom2(page, h);
+    await expectFlag(page, true, 'with the Sink spot under the palette');
+    // focus() stands in for the Tab presses that reach the card after the toolbar and the palette.
+    await page.locator(SHOW_ME).focus();
+    expect(await page.evaluate(() => document.activeElement?.textContent), 'Show me has focus').toBe('Show me');
+    const { scale } = await cameraOf(page);
+    await showMeSendsNothing(page, h, () => page.keyboard.press('Enter'));
+    await expectFramed(page, 'sink-floor', scale, 'after a keyboard Show me');
+    expect(await page.evaluate(() => document.activeElement === document.body), 'focus went back to the page').toBe(true);
+    const controls = h.controls.length;
+    await page.keyboard.press('Space');
+    await expect.poll(() => h.controls.length, { message: 'Space reached the board and toggled play' }).toBe(controls + 1);
+    expect(['pause', 'resume'], 'the frame Space sent').toContain(h.controls[controls]);
   });
 });

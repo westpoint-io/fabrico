@@ -460,6 +460,12 @@ export interface GestureController {
    * diagnostics.
    */
   waiting(): { placements: number; belts: number; docks: number };
+  /**
+   * Is a belt draw held: a belt path, an output-dot press or drag, or a belt-end or handle press or
+   * drag? A read with no effect. The lesson card disables Show me with it, so the camera can't move
+   * under a held draw.
+   */
+  beltDrawInFlight(): boolean;
   /** Detach all listeners + clear affordances. */
   destroy(): void;
 }
@@ -6421,6 +6427,7 @@ export function createGestureController(deps: GestureDeps): GestureController {
     onResume,
     onSwap,
     waiting: () => ({ placements: pendingPlacements.length, belts: beltFollowUps.length, docks: dockOwners.size }),
+    beltDrawInFlight: () => drawnCells !== null || outPress !== null || outDrag !== null || endPress !== null || handleDrag !== null,
     beginRouterPreset,
     armBeltDraw,
     armWireDraw,

@@ -6,6 +6,7 @@
 // through a `ProgressStore` and stays on this machine.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react';
+import { MIN_ZOOM } from '../../render/camera';
 import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
 import { LESSONS } from '../../tutorial/lessons';
@@ -14,10 +15,10 @@ import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
-import { offScreen as rectOffScreen } from '../../tutorial/view';
+import { frameTarget, offScreen as rectOffScreen } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
-import { readCamera } from './cameraRead';
+import { moveCamera, readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
 import { LESSONS_PANEL_ID, LessonPanel, focusListClose } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
@@ -306,6 +307,8 @@ export interface TutorialLayerProps {
   simStopped: boolean;
   /** Has the app sent a draw or a dock the board doesn't show yet, or does it still owe one? */
   readEditsInFlight: () => boolean;
+  /** Is a belt draw held? Show me waits for it to end. A read with no effect. */
+  readBeltDrawInFlight: () => boolean;
 }
 
 export function TutorialLayer({
@@ -322,6 +325,7 @@ export function TutorialLayer({
   boardLive,
   simStopped,
   readEditsInFlight,
+  readBeltDrawInFlight,
 }: TutorialLayerProps): JSX.Element {
   // The ref is the truth, and the probe reads it, so a test sees every value `reduce` returns.
   // React state follows only so the panel and the ring can mount and unmount.
@@ -338,6 +342,9 @@ export function TutorialLayer({
   // only when it flips, so a pan costs no render until the ring crosses the free area's edge.
   const offScreenRef = useRef(false);
   const [offScreen, setOffScreen] = useState(false);
+  // Is a belt draw held? The same pattern: read each frame, state only on a flip.
+  const drawingRef = useRef(false);
+  const [drawing, setDrawing] = useState(false);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
   // The host's last answer about the bound Source's trigger. The frame loop reads only this.
@@ -347,6 +354,8 @@ export function TutorialLayer({
   chromeRef.current = { armed, selectedNode, playing };
   const readEditsInFlightRef = useRef(readEditsInFlight);
   readEditsInFlightRef.current = readEditsInFlight;
+  const readBeltDrawInFlightRef = useRef(readBeltDrawInFlight);
+  readBeltDrawInFlightRef.current = readBeltDrawInFlight;
   const boardLiveRef = useRef(boardLive);
   boardLiveRef.current = boardLive;
   const progressRef = useRef<ProgressStore | null>(null);
@@ -468,6 +477,15 @@ export function TutorialLayer({
         if (out !== offScreenRef.current) {
           offScreenRef.current = out;
           setOffScreen(out);
+          // The row hides, and a hidden button holding focus would keep Space and Escape off the
+          // board, so focus goes back to the page.
+          const focused = document.activeElement;
+          if (!out && focused instanceof HTMLElement && focused.closest('[data-fab-offscreen-row]') !== null) focused.blur();
+        }
+        const drawNow = readBeltDrawInFlightRef.current();
+        if (drawNow !== drawingRef.current) {
+          drawingRef.current = drawNow;
+          setDrawing(drawNow);
         }
       }
       raf = requestAnimationFrame(frame);
@@ -475,6 +493,34 @@ export function TutorialLayer({
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
   }, [active, clearRefusal, handleRef, progress]);
+
+  /**
+   * Show me: frame the shown stage's rings (both, for a drag) in the free area, at the user's zoom if
+   * they fit. One camera write through `cameraRead.ts`, and nothing goes to the host, so the board,
+   * the event log and Undo are as they were.
+   */
+  const showMe = useCallback((): void => {
+    const s = stateRef.current;
+    const facts = factsRef.current;
+    const camera = readCamera();
+    if (s.card !== 'running' || facts === null || camera === null || drawingRef.current) return;
+    const shown = currentStage(s, facts.board, facts.chrome, LESSONS);
+    if (shown === null) return;
+    const rects = boardRingRects(shown, stageKey(s.stepIndex, shown.id));
+    if (rects === null) return;
+    const left = Math.min(...rects.map((r) => r.left));
+    const top = Math.min(...rects.map((r) => r.top));
+    const right = Math.max(...rects.map((r) => r.right));
+    const bottom = Math.max(...rects.map((r) => r.bottom));
+    // Screen to world: world = (screen - pan) / scale.
+    const box = {
+      x: (left - camera.x) / camera.scale,
+      y: (top - camera.y) / camera.scale,
+      w: (right - left) / camera.scale,
+      h: (bottom - top) / camera.scale,
+    };
+    moveCamera(handleRef.current, frameTarget(box, readFreeArea(), camera, MIN_ZOOM));
+  }, [handleRef]);
 
   /** One step of the state that a press caused, as opposed to a frame. */
   const dispatch = useCallback(
@@ -545,7 +591,7 @@ export function TutorialLayer({
     [resume, start],
   );
 
-  const view = cardViewOf(state, stage, refusal, offScreen, false);
+  const view = cardViewOf(state, stage, refusal, offScreen, drawing);
   // Read at render, which App's 10 Hz re-render keeps fresh enough for a list a person is reading.
   const rows = lessonsOpen
     ? rowViews({
@@ -580,6 +626,7 @@ export function TutorialLayer({
           onLeave={leave}
           onBackToLessons={backToLessons}
           onKeepBuilding={keepBuilding}
+          onShowMe={showMe}
           simStopped={simStopped}
           {...(lessonId === null ? {} : { onRestart: () => start(lessonId) })}
         />
