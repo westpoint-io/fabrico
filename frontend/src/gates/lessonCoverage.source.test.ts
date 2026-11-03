@@ -28,7 +28,14 @@ const E2E_LIVE_DIR = new URL('../../e2e-live/', import.meta.url);
 const LESSON_WALK_FILE = 'e2e-live/lessons.walk.ts';
 const WALK_RUNNER = 'e2e-live/support/lessonRunner.ts';
 /** Each holds walk tests or the runner they share. A test count can't say which of these went missing. */
-const NEEDED_WALK_FILES = ['e2e-live/lesson-entry.walk.ts', 'e2e-live/lesson-variants.walk.ts', LESSON_WALK_FILE, 'e2e-live/parity.walk.ts', WALK_RUNNER];
+const NEEDED_WALK_FILES = [
+  'e2e-live/lesson-entry.walk.ts',
+  'e2e-live/lesson-hints.walk.ts',
+  'e2e-live/lesson-variants.walk.ts',
+  LESSON_WALK_FILE,
+  'e2e-live/parity.walk.ts',
+  WALK_RUNNER,
+];
 
 export interface CoverageArgs {
   lessons: readonly Lesson[];
