@@ -50,6 +50,14 @@ export interface BoardProbe {
   caption: CaptionProbe | null;
   /** True once a held caption named a machine the scene didn't have, so no ring could show. */
   captionWithoutRing: boolean;
+  /** The code view's tab labels, in order; empty with one machine or no code column. */
+  codeTabs: string[];
+  /** The source the code view shows, or null when the column is hidden. */
+  codeText: string | null;
+  /** Each effect log row: its four cells (tick, method, target, outcome) and its title. */
+  effectRows: { cells: string[]; title: string }[];
+  /** How far the effect log well is scrolled, in CSS px. */
+  logScrollTop: number;
 }
 
 /** A copy of a trace: every tick and its hash, as plain pairs. */

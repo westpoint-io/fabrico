@@ -40,6 +40,155 @@ export const LAYOUT_CSS = `
   gap: var(--fab-space-sm);
   padding: calc(var(--fab-space-sm) + var(--fab-bezel-ring));
 }
+/* Row order in the narrow layout, where .main's box drops out and its two children are rows of
+   the frame: stage, caption strip, control bar, code column, effect log. */
+.order-strip { order: 0; }
+.main { display: contents; }
+.main > .stage { order: 1; }
+.captions { order: 2; }
+.bar { order: 3; }
+.code-column { order: 4; }
+.effect-log { order: 5; }
+
+/* The code column. Narrow: under the control bar, 240 px tall. Wide (720 px and up, see the
+   container query below): beside the stage, 60/40, at least 280 px, as tall as the stage. Its
+   contents sit in an absolutely placed box, so a long file never makes the row taller. */
+.code-column {
+  position: relative;
+  min-width: 0;
+  height: 240px;
+}
+.code-column[hidden] { display: none; }
+.code-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fab-space-sm);
+  min-width: 0;
+}
+.panel-heading {
+  margin: 0;
+  font-family: var(--fab-font-title);
+  font-size: var(--fab-font-size-base);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--fab-ink);
+}
+.code-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fab-space-sm);
+  flex: none;
+}
+.code-tabs[hidden] { display: none; }
+.code-tab {
+  padding: var(--fab-bezel-ring) calc(var(--fab-space-sm) + var(--fab-bezel-ring));
+  white-space: nowrap;
+}
+.code-well {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  box-sizing: border-box;
+  background-color: var(--fab-substrate);
+  border: 1px solid var(--fab-edge-lit);
+}
+.code-well:focus-visible,
+.log-well:focus-visible {
+  outline: 2px solid var(--fab-focus);
+  outline-offset: -2px;
+}
+.code {
+  margin: 0;
+  padding: var(--fab-space-sm);
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1.4;
+  white-space: pre;
+  tab-size: 2;
+  color: var(--fab-ink);
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+.tok-keyword { color: var(--fab-focus); }
+.tok-string { color: var(--fab-accent-working); }
+.tok-number { color: var(--fab-accent-item); }
+.tok-comment { color: var(--fab-edge-lit); }
+
+@container (min-width: 720px) {
+  .frame.has-code .main {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--fab-space-sm);
+  }
+  .frame.has-code .main > .stage {
+    flex: 3 1 0;
+    min-width: 0;
+  }
+  .frame.has-code .code-column {
+    flex: 2 1 0;
+    min-width: 280px;
+    height: auto;
+    align-self: stretch;
+  }
+}
+
+/* The effect log: a heading row on the panel fill, then a substrate well of rows. */
+.effect-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fab-space-sm);
+  min-width: 0;
+}
+.log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--fab-space-md);
+}
+.log-aside {
+  margin: 0;
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1;
+  color: var(--fab-ink);
+  text-align: right;
+}
+.log-well {
+  box-sizing: border-box;
+  min-height: calc(1.4 * var(--fab-font-size-base) + 2 * var(--fab-space-xs) + 2px);
+  max-height: 160px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background-color: var(--fab-substrate);
+  border: 1px solid var(--fab-edge-lit);
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1.4;
+  color: var(--fab-ink);
+}
+.log-well .note {
+  margin: 0;
+  padding: var(--fab-space-xs) var(--fab-space-sm);
+}
+.log-well .row {
+  display: grid;
+  grid-template-columns: 6ch 6ch minmax(0, 1fr) auto;
+  column-gap: var(--fab-space-sm);
+  padding: var(--fab-space-xs) var(--fab-space-sm);
+  white-space: nowrap;
+}
+.row .tick { text-align: right; font-variant-numeric: tabular-nums; }
+.row .target { overflow: hidden; text-overflow: ellipsis; }
+.row .outcome { text-align: right; }
+.row .outcome.is-failure { color: var(--fab-destructive); }
+/* A Debug row is a note, not a call: muted, on the label stone token (6.1:1 on the substrate). */
+.row.is-debug { color: var(--fab-label-stone); }
 .stage {
   position: relative;
   width: 100%;

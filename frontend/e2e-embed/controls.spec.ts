@@ -73,20 +73,29 @@ test('three boards draw with the app renderer, each stage sized to its own colum
       const col = el.parentElement as HTMLElement;
       const frame = el.shadowRoot?.querySelector('.frame') as HTMLElement;
       const stage = el.shadowRoot?.querySelector('.stage') as HTMLElement;
+      const code = el.shadowRoot?.querySelector('.code-column') as HTMLElement;
       const cs = getComputedStyle(frame);
       const s = stage.getBoundingClientRect();
+      const c = code.getBoundingClientRect();
+      // The code column shares the stage's row when it sits beside it (720 px and wider).
+      const beside = getComputedStyle(code).display !== 'none' && Math.abs(c.top - s.top) < 1;
       return {
         column: col.clientWidth,
         element: el.getBoundingClientRect().width,
         frameContent: frame.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
         stageWidth: s.width,
         stageHeight: s.height,
+        besideWidth: beside ? c.right - s.right : 0,
       };
     }, name);
     console.log(`${name}: column ${box.column}, stage ${box.stageWidth} x ${box.stageHeight}`);
     expect(box.column, `${name}: the column width`).toBe(COLUMN_PX[name]);
     expect(box.element, `${name}: the element fills its column`).toBe(box.column);
-    expect(box.stageWidth, `${name}: the stage fills the frame's content width`).toBeCloseTo(box.frameContent, 0);
+    expect(box.besideWidth > 0, `${name}: the code column sits beside the stage only at 720 px and wider`).toBe(box.column >= 720);
+    expect(box.stageWidth + box.besideWidth, `${name}: the stage and any code column beside it fill the frame's content width`).toBeCloseTo(
+      box.frameContent,
+      0,
+    );
     const want = Math.min(560, Math.max(240, (box.stageWidth * 10) / 16));
     expect(Math.abs(box.stageHeight - want), `${name}: stage height ${box.stageHeight} follows 16:10 in 240..560`).toBeLessThanOrEqual(1);
   }

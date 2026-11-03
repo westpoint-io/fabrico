@@ -4,10 +4,13 @@
 // no key. The reader's only levers are the control bar's buttons and speed select, which reach the
 // player through the tick clock: `step`, `restart` and read exports, nothing else.
 //
-// Layout, top to bottom inside a panel frame: the stage (the canvas, sized 16:10 to the element's
-// width and clamped to 240 to 560 px, or to the `height` attribute) and the control bar. The stage
-// holds its size while loading, behind an error card and after the engine stops, so the page never
-// shifts. Over the canvas sits the label overlay (machine name chips and label words).
+// Layout, top to bottom inside a panel frame: the stage (the canvas, sized 16:10 to its column's
+// width and clamped to 240 to 560 px, or to the `height` attribute), the caption strip (only on a
+// board with captions), the control bar, and the effect log. A board with a Factory or an HTTP
+// Handler also gets the code column: beside the stage (60/40, at least 280 px) when the element is
+// 720 px or wider, and under the control bar at 240 px when it's narrower. The `no-code` attribute
+// hides it. The stage holds its size while loading, behind an error card and after the engine
+// stops. Over the canvas sit the caption ring and the label overlay (name chips and label words).
 //
 // States: `loading` until the player has booted the board (the stage says "Loading board" and
 // every control is disabled), then `running`. A name with no board, an old board format or a
@@ -21,9 +24,11 @@
 import { createPacketPipeline } from '../render/packetPipeline';
 import { fitToFactory } from '../render/camera';
 import { bootPixi, type SceneHandle } from '../render/pixiApp';
-import { instantiatePlayer, type BoardPlayer } from '../player/playerWasm';
+import { instantiatePlayer, type BoardFactory, type BoardPlayer } from '../player/playerWasm';
 import { verdictOf, type BadgeState } from './badge';
 import { createCaptionRing, createCaptionStrip, type CaptionRing, type CaptionStrip } from './captions';
+import { createCodeView, type CodeView } from './codeView';
+import { createEffectLog, rowsFromBytes, type EffectLog } from './effectLog';
 import { createBoardClock, type BoardClock, type Speed } from './controller';
 import { createControlBar, type BarState, type ControlBar } from './controls';
 import { buildErrorCard, classifyPlayerError, errorCopy, unknownBoardCopy, type ErrorCopy } from './errors';
@@ -54,13 +59,18 @@ interface Mounted {
 
 export class FabricoBoardElement extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ['height'];
+    return ['height', 'no-code'];
   }
 
   readonly #stage: HTMLDivElement;
   readonly #status: HTMLDivElement;
   readonly #bar: ControlBar;
   readonly #captions: CaptionStrip;
+  readonly #frame: HTMLDivElement;
+  readonly #code: CodeView;
+  readonly #log: EffectLog;
+  /** The board's Factories and Handlers, once it has booted. */
+  #factories: BoardFactory[] = [];
   #mounted: Mounted | null = null;
   #state: BarState = 'loading';
   #speed: Speed = 1;
@@ -78,6 +88,7 @@ export class FabricoBoardElement extends HTMLElement {
     style.textContent = boardStylesheet(window.devicePixelRatio || 1);
     const frame = document.createElement('div');
     frame.className = 'frame fab-panel';
+    this.#frame = frame;
     this.#stage = document.createElement('div');
     this.#stage.className = 'stage';
     this.#status = document.createElement('div');
@@ -95,7 +106,15 @@ export class FabricoBoardElement extends HTMLElement {
       onSpeed: (speed) => this.#setSpeed(speed),
     });
     this.#captions = createCaptionStrip();
-    frame.append(this.#stage, this.#captions.root, this.#bar.root);
+    this.#code = createCodeView();
+    this.#log = createEffectLog();
+    // The stage and the code column share a row when the element is wide; when it's narrow the
+    // row's box drops out of the layout (`display: contents`) and the code column moves under the
+    // control bar by its flex order.
+    const main = document.createElement('div');
+    main.className = 'main';
+    main.append(this.#stage, this.#code.root);
+    frame.append(main, this.#captions.root, this.#bar.root, this.#log.root);
     root.append(style, frame);
     this.#applyHeight();
     this.#showLoading();
@@ -121,6 +140,7 @@ export class FabricoBoardElement extends HTMLElement {
 
   attributeChangedCallback(name: string): void {
     if (name === 'height') this.#applyHeight();
+    if (name === 'no-code') this.#applyCode();
   }
 
   /** A plain-data snapshot for tests. */
@@ -136,6 +156,13 @@ export class FabricoBoardElement extends HTMLElement {
       error: this.#error === null ? null : { ...this.#error },
       caption: this.#mounted?.ring.probe() ?? null,
       captionWithoutRing: this.#mounted?.ring.missedRing() ?? false,
+      codeTabs: this.#code.root.hidden ? [] : this.#code.labels(),
+      codeText: this.#code.root.hidden ? null : this.#code.text(),
+      effectRows: [...this.#log.well.querySelectorAll('.row')].map((row) => ({
+        cells: [...row.children].map((c) => c.textContent ?? ''),
+        title: (row as HTMLElement).title,
+      })),
+      logScrollTop: this.#log.well.scrollTop,
     };
     if (m === null) {
       return {
@@ -172,6 +199,18 @@ export class FabricoBoardElement extends HTMLElement {
 
   #name(): string {
     return this.getAttribute('name') ?? '';
+  }
+
+  /** Show the code column for a board with a Factory or Handler, unless `no-code` is set. */
+  #applyCode(): void {
+    const show = this.#factories.length > 0 && !this.hasAttribute('no-code');
+    this.#code.setFactories(show ? this.#factories : []);
+    this.#frame.classList.toggle('has-code', show);
+  }
+
+  /** Move the effects the player recorded since the last call into the log. */
+  #drainEffects(player: BoardPlayer): void {
+    this.#log.append(rowsFromBytes(player.takeEffects()));
   }
 
   #applyHeight(): void {
@@ -322,6 +361,11 @@ export class FabricoBoardElement extends HTMLElement {
     source.onPacket((bytes) => pipeline.handle(bytes));
     // The keyframe the player queued at create.
     source.drain();
+    this.#factories = info.factories;
+    this.#applyCode();
+    this.#log.clear();
+    this.#log.setCallsOut(info.callsOut);
+    this.#drainEffects(player);
 
     const fit = (): void => {
       const { width, height } = handle.app.screen;
@@ -349,7 +393,9 @@ export class FabricoBoardElement extends HTMLElement {
       player,
       drain: () => {
         source.drain();
+        this.#drainEffects(player);
       },
+      onRestart: () => this.#log.clear(),
       onChange: () => this.#refresh(),
       onFault: (error) => this.#onFault(name, error),
       trace: traceRequested(),
