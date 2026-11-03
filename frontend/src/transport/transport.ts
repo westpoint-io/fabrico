@@ -10,6 +10,7 @@
 
 import { makeDevWebSocketTransport } from './devWebSocket.ts';
 import { makeTauriChannelTransport } from './tauriChannel.ts';
+import type { IPacketSource } from './packetSource.ts';
 
 /**
  * The control intents the toolbar / gesture layer drives on the host. These are
@@ -427,11 +428,11 @@ export function refusalSubject(frame: { cmd?: unknown; node?: unknown }): { cmd?
 
 /**
  * The single seam between the renderer and the byte source. Both transports
- * deliver and accept the SAME postcard bytes.
+ * deliver and accept the SAME postcard bytes. Receiving packets is
+ * {@link IPacketSource}'s `onPacket`, the one interface a read-only board's
+ * source implements too; everything below it sends or listens for host answers.
  */
-export interface ITransport {
-  /** Register the callback that receives each inbound render-packet's bytes. */
-  onPacket(cb: (bytes: Uint8Array) => void): void;
+export interface ITransport extends IPacketSource {
   /**
    * Send one framed gesture (`encodeGestureFrame`: the phase 88 header, then the encoded
    * GridCommand) to the host and RETURN. It carries no verdict and hands back nothing to
