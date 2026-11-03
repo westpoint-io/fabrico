@@ -322,6 +322,34 @@ export async function captureWithGhostGone(
 /** One period of the ring's pulse (`.fab-hint` in `chromeCss.ts`). */
 const PULSE_PERIOD_MS = 1600;
 
+/** How far before the top of its fade a ring's capture may start: the fade is flat there, above 0.98. */
+const PEAK_LEAD_MS = 100;
+
+/**
+ * Resolve on the first frame where the ring paint under `selector` is within PEAK_LEAD_MS of the top of
+ * its pulse, so the capture that follows lands while the ring is at full strength. A capture of a ring
+ * mid-fade can miss the focus colour, most of all at a fractional device scale, where the walk measured
+ * reads that needed the ring at its peak. A paint with no running animation resolves at once, and the
+ * wait gives up after one period, so a missing ring is still read and fails on its own terms.
+ */
+async function waitForPulsePeak(page: Page, selector: string): Promise<void> {
+  await page.evaluate(
+    ([sel, period, lead]) =>
+      new Promise<void>((done) => {
+        const start = performance.now();
+        const check = (): void => {
+          const el = document.querySelector(sel);
+          const anims = el === null ? [] : el.getAnimations().filter((a) => a.playState === 'running');
+          const near = anims.every((a) => Number(a.currentTime ?? 0) % period >= period - lead);
+          if (near || performance.now() - start > period) done();
+          else requestAnimationFrame(check);
+        };
+        check();
+      }),
+    [selector, PULSE_PERIOD_MS, PEAK_LEAD_MS] as const,
+  );
+}
+
 /** The focus colour the ring's stylesheet paints with, as the page resolves it. */
 async function focusColour(page: Page): Promise<number> {
   const hex = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fab-focus').trim());
@@ -359,20 +387,23 @@ async function expectRingPainted(
       .join(' '),
   );
   let captures = 0;
-  for (const rect of rects) {
+  for (const [index, rect] of rects.entries()) {
+    // The rects come in the probe's order: the main ring, then the ring where a drag ends.
+    const paint = index === 0 ? '[data-fab-hint] > div' : '[data-fab-hint-to] > div';
     const clip = {
       x: Math.floor(rect.x),
       y: Math.floor(rect.y),
       width: Math.ceil(rect.x + rect.width) - Math.floor(rect.x),
       height: Math.ceil(rect.y + rect.height) - Math.floor(rect.y),
     };
-    // A capture can land at the faint end of the pulse, where the border is too far from the focus colour to
-    // read. The pulse returns to full opacity once a period, so the read captures again until the border reads
-    // or one period has gone by. The tolerance stays as it is: a wider one would also pass a ring painted in
+    // A capture can still land past the top of the pulse, where the border is too far from the focus colour
+    // to read. The pulse returns to full opacity once a period, so the read captures again until the border
+    // reads or one period has gone by. The tolerance stays as it is: a wider one would also pass a ring painted in
     // the wrong colour.
     const deadline = Date.now() + addWaitBudget(frameBudgetMs(0, PULSE_PERIOD_MS), `${label}: the ring read across one pulse period`);
     let read: ReturnType<typeof ringOnCanvas>;
     for (;;) {
+      await waitForPulsePeak(page, paint);
       const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
       captures += 1;
       if ((await probeAtStage(page, stepIndex, stage.id)) === null) return;
