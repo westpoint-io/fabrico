@@ -23,6 +23,7 @@ import { fitToFactory } from '../render/camera';
 import { bootPixi, type SceneHandle } from '../render/pixiApp';
 import { instantiatePlayer, type BoardPlayer } from '../player/playerWasm';
 import { verdictOf, type BadgeState } from './badge';
+import { createCaptionRing, createCaptionStrip, type CaptionRing, type CaptionStrip } from './captions';
 import { createBoardClock, type BoardClock, type Speed } from './controller';
 import { createControlBar, type BarState, type ControlBar } from './controls';
 import { buildErrorCard, classifyPlayerError, errorCopy, unknownBoardCopy, type ErrorCopy } from './errors';
@@ -48,6 +49,7 @@ interface Mounted {
   resize: ResizeObserver;
   frames: { n: number };
   labels: LabelOverlay;
+  ring: CaptionRing;
 }
 
 export class FabricoBoardElement extends HTMLElement {
@@ -58,6 +60,7 @@ export class FabricoBoardElement extends HTMLElement {
   readonly #stage: HTMLDivElement;
   readonly #status: HTMLDivElement;
   readonly #bar: ControlBar;
+  readonly #captions: CaptionStrip;
   #mounted: Mounted | null = null;
   #state: BarState = 'loading';
   #speed: Speed = 1;
@@ -91,7 +94,8 @@ export class FabricoBoardElement extends HTMLElement {
       onStep: () => this.#mounted?.clock.stepOne(),
       onSpeed: (speed) => this.#setSpeed(speed),
     });
-    frame.append(this.#stage, this.#bar.root);
+    this.#captions = createCaptionStrip();
+    frame.append(this.#stage, this.#captions.root, this.#bar.root);
     root.append(style, frame);
     this.#applyHeight();
     this.#showLoading();
@@ -130,6 +134,8 @@ export class FabricoBoardElement extends HTMLElement {
       verdict: badge.verdict,
       badgeText: this.#bar.badge.textContent ?? '',
       error: this.#error === null ? null : { ...this.#error },
+      caption: this.#mounted?.ring.probe() ?? null,
+      captionWithoutRing: this.#mounted?.ring.missedRing() ?? false,
     };
     if (m === null) {
       return {
@@ -265,10 +271,12 @@ export class FabricoBoardElement extends HTMLElement {
       endTick: m?.player.endTick() ?? 0,
       bootTick: m?.clock.bootTick() ?? 0,
       playing: m?.clock.playing() ?? false,
+      holding: (m?.clock.caption() ?? null) !== null,
       speed: this.#speed,
       badge: this.#badgeState(),
       entry: manifestEntry(this.#name()),
     });
+    if (m !== undefined && m !== null) this.#captions.update({ held: m.clock.caption(), last: m.clock.lastCaption() });
   }
 
   async #mount(generation: number): Promise<void> {
@@ -304,7 +312,8 @@ export class FabricoBoardElement extends HTMLElement {
       player.destroy();
       return;
     }
-    const title = player.boardInfo().title || name;
+    const info = player.boardInfo();
+    const title = info.title || name;
     handle.app.canvas.setAttribute('role', 'img');
     handle.app.canvas.setAttribute('aria-label', `${title}, a running Fabrico board`);
 
@@ -347,10 +356,13 @@ export class FabricoBoardElement extends HTMLElement {
     });
     clock.setSpeed(this.#speed);
     handle.setRenderPace(this.#speed);
+    // The ring layer sits under the labels, so a name chip stays readable over the ring's edge.
+    const ring = createCaptionRing(this.#stage, handle, info.captions, () => clock.caption());
     const labels = createLabelOverlay(this.#stage, handle);
+    this.#captions.setCaptions(info.captions);
     // The status layer (loading line, error cards) stays above the canvas and the labels.
     this.#stage.append(this.#status);
-    this.#mounted = { handle, player, clock, resize, frames, labels };
+    this.#mounted = { handle, player, clock, resize, frames, labels, ring };
     this.#state = 'running';
     this.#hideStatus();
     this.#refresh();
@@ -369,6 +381,7 @@ export class FabricoBoardElement extends HTMLElement {
     m.handle.stop();
     m.handle.app.destroy(true);
     m.labels.root.remove();
+    m.ring.root.remove();
     try {
       m.player.destroy();
     } catch {

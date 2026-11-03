@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  autoContinueCaptions,
   enableTrace,
   expectBoardDrawing,
   expectTraceMatchesNative,
@@ -30,6 +31,8 @@ async function openPage(page: Page): Promise<() => Promise<void>> {
   const requests = recordRequests(page);
   await installGlCounter(page);
   await enableTrace(page);
+  // A board stops at each caption it has; press Continue at once, as a reader would.
+  await autoContinueCaptions(page);
   await page.goto(PAGE);
   for (const name of BOARDS) {
     await expect.poll(async () => (await readProbe(page, name)).state, { timeout: 20_000 }).toBe('running');

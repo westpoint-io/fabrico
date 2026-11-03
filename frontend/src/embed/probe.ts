@@ -10,6 +10,7 @@ import type { Camera } from '../render/camera';
 import type { CameraSnapshot } from '../render/pixiApp';
 import type { SceneState } from '../render/sceneState';
 import type { Verdict } from './badge';
+import type { CaptionProbe } from './captions';
 
 /** A rectangle in CSS pixels relative to the viewport. */
 export interface ProbeRect {
@@ -45,6 +46,10 @@ export interface BoardProbe {
   beltRegion: ProbeRect | null;
   /** The error card's heading and body, or null when no card shows. */
   error: { heading: string; body: string } | null;
+  /** The caption holding the board, with its ring and the machine's footprint on screen, or null. */
+  caption: CaptionProbe | null;
+  /** True once a held caption named a machine the scene didn't have, so no ring could show. */
+  captionWithoutRing: boolean;
 }
 
 /** A copy of a trace: every tick and its hash, as plain pairs. */

@@ -261,3 +261,114 @@ export async function shadowText(page: Page, name: string, selector: string): Pr
     [name, selector] as const,
   );
 }
+
+// --- Captions ---
+
+/**
+ * Press Continue whenever a caption holds a board, the way a reader who reads each note at once
+ * would. Specs whose subject isn't captions install this before `page.goto`, so a demo board run
+ * to its end isn't left waiting on a note. It clicks the play button only while its accessible
+ * name reads "Continue", which the element sets only while a caption holds the board.
+ */
+export async function autoContinueCaptions(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    setInterval(() => {
+      for (const board of document.querySelectorAll('fabrico-board')) {
+        const play = board.shadowRoot?.querySelector('button[data-control="play"][aria-label="Continue"]');
+        if (play instanceof HTMLButtonElement && !play.disabled) play.click();
+      }
+    }, 50);
+  });
+}
+
+/** A caption as the board file states it. */
+export interface FileCaption {
+  tick: number;
+  highlight: number;
+  text: string;
+}
+
+/** A board file's text, by board id. */
+export function boardFileText(id: string): string {
+  return readFileSync(repoPath(boardPathOf(id)), 'utf8');
+}
+
+/** The captions list of a board file, read with a pattern rather than the player. */
+export function fileCaptions(id: string): FileCaption[] {
+  const out: FileCaption[] = [];
+  const re = /Caption\(tick: (\d+), highlight: (\d+), text: "((?:[^"\\]|\\.)*)"\)/g;
+  for (const m of boardFileText(id).matchAll(re)) {
+    out.push({ tick: Number(m[1]), highlight: Number(m[2]), text: m[3].replace(/\\(.)/g, '$1') });
+  }
+  return out;
+}
+
+/**
+ * The cell a board file places the machine with this dense handle on. Handles mint in command
+ * order: a Place or a DrawBelt mints one and a DrawWire two; the other commands mint none.
+ * Read from the file, so it doesn't share code with the element under test.
+ */
+export function placedCell(id: string, handle: number): { kind: number; cellX: number; cellY: number } {
+  const text = boardFileText(id);
+  const start = text.indexOf('commands: [');
+  const end = text.indexOf('\n    script: [');
+  if (start < 0 || end < 0) throw new Error(`${id}: no commands list`);
+  let next = 0;
+  for (const line of text.slice(start, end).split('\n')) {
+    const m = /^\s+(Place|DrawBelt|DrawWire)\(/.exec(line);
+    if (m === null) continue;
+    if (m[1] === 'Place') {
+      if (next === handle) {
+        const p = /Place\(kind: (\d+), cell_x: (-?\d+), cell_y: (-?\d+)\)/.exec(line);
+        if (p === null) throw new Error(`${id}: can't read the Place for handle ${handle}: ${line}`);
+        return { kind: Number(p[1]), cellX: Number(p[2]), cellY: Number(p[3]) };
+      }
+      next += 1;
+    } else {
+      if (next === handle) throw new Error(`${id}: handle ${handle} is a ${m[1]}, not a machine`);
+      next += m[1] === 'DrawWire' ? 2 : 1;
+    }
+  }
+  throw new Error(`${id}: no command mints handle ${handle}`);
+}
+
+/** A board's probe snapshot, by a CSS selector for the element. */
+export async function readProbeAt(page: Page, selector: string): Promise<BoardProbe> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel) as (Element & { fabricoProbe?: () => unknown }) | null;
+    if (el === null || typeof el.fabricoProbe !== 'function') throw new Error(`no fabrico-board at ${sel}`);
+    return el.fabricoProbe();
+  }, selector) as Promise<BoardProbe>;
+}
+
+/**
+ * Render health across an action that starts a held board moving, such as Continue. The board is
+ * paused before the action, so its belt region holds still; this takes that picture first, runs
+ * the action, and passes once the frame count has risen by 2 and a compositor screenshot of the
+ * same region differs from the held one. A board whose canvas stopped drawing shows the held
+ * picture (or a blank one) forever and fails.
+ */
+export async function expectDrawsAfter(page: Page, name: string, action: () => Promise<void>, context: string): Promise<void> {
+  const held = await readProbe(page, name);
+  const region = held.beltRegion;
+  expect(region, `${context}: ${name} reports a belt region on screen`).not.toBeNull();
+  if (region === null) return;
+  const before = createHash('sha256').update(await page.screenshot({ clip: region, animations: 'allow' })).digest('hex');
+  await action();
+  await expect
+    .poll(async () => (await readProbe(page, name)).frames - held.frames, {
+      message: `${context}: ${name}'s frame count rises`,
+      timeout: BUDGET_MS,
+      intervals: [50],
+    })
+    .toBeGreaterThanOrEqual(2);
+  const deadline = Date.now() + BUDGET_MS;
+  let samples = 0;
+  while (Date.now() < deadline) {
+    const png = await page.screenshot({ clip: region, animations: 'allow' });
+    samples += 1;
+    if (createHash('sha256').update(png).digest('hex') !== before) return;
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`${context}: ${name}'s belt region kept its held picture in ${samples} screenshots over ${BUDGET_MS} ms`);
+}

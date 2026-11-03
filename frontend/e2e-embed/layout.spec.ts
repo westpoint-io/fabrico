@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installGlCounter, pageUrl, recordConsoleErrors, recordRequests, watchPageErrors } from './support/health.ts';
+import { autoContinueCaptions, installGlCounter, pageUrl, recordConsoleErrors, recordRequests, watchPageErrors } from './support/health.ts';
 
 // The demo board at element widths of 360, 600 and 1024 px (layout.html). The control bar wraps
 // when its two groups don't fit on one line, no control leaves the frame, every button and the
@@ -116,6 +116,8 @@ test('the bar wraps, nothing leaves the frame and every target is 44 px, at 360,
   const consoleErrors = recordConsoleErrors(page);
   const requests = recordRequests(page);
   await installGlCounter(page);
+  // A board stops at each caption it has; press Continue at once, as a reader would.
+  await autoContinueCaptions(page);
   await page.goto(PAGE);
   for (const w of WIDTHS) {
     await expect.poll(async () => (await readLayout(page, w)).state, { timeout: 20_000 }).toBe('running');
@@ -163,6 +165,8 @@ test('before the player is ready, the stage says Loading board and every control
       return original(...args);
     };
   });
+  // A board stops at each caption it has; press Continue at once, as a reader would.
+  await autoContinueCaptions(page);
   await page.goto(PAGE);
   await page.waitForTimeout(1000);
   for (const w of WIDTHS) {

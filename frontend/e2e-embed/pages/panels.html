@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Board panels</title>
+<style>
+  html, body { margin: 0; background: #1b1f27; color: #b0bacb; }
+  body { font-family: 'Martian Mono', monospace; font-size: 12px; line-height: 1.4; }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+  section { margin: 0 0 48px; }
+  h2 { font-family: 'Sono', monospace; font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin: 0 0 24px; }
+  .wide { width: 960px; }
+  .narrow { width: 600px; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>Demo factory</h2>
+    <div class="narrow" data-col="demo_scene"><fabrico-board name="demo_scene"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>Scripted call outcomes</h2>
+    <div class="wide" data-col="docs-script-outcomes"><fabrico-board name="docs-script-outcomes"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>Arrival order</h2>
+    <div class="wide" data-col="docs-arrival-order"><fabrico-board name="docs-arrival-order"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>One Factory</h2>
+    <div class="narrow" data-col="one-factory"><fabrico-board name="one-factory"></fabrico-board></div>
+  </section>
+</main>
+<!-- One Source, one Factory and one Sink, taken from the first row of docs/script-outcomes. The
+     Factory passes items through, and its source holds a line longer than any code well and a
+     string with markup in it. The Sink's URL is long enough to be cut in the effect log. -->
+<script type="text/x-fabrico-board" id="one-factory">
+Board(
+    format: 2,
+    title: "One Factory",
+    seed: 93,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),
+        Place(kind: 2, cell_x: 5, cell_y: 1),
+        Place(kind: 7, cell_x: 11, cell_y: 2),
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 2, config: Sink(target: Http(url: "https://example.com/orders/archive/2026/november/first-week/incoming/accepted/by-region/europe/west", method: Post))),
+        Configure(node: 1, config: Factory(source: r#"// pass each item on unchanged; this comment line is long on purpose, so the code well has to scroll sideways to show the end of it
+export default function (input, ctx) {
+  const note = "<img src=x onerror=alert(1)>";
+  ctx.emit(0, input);
+}"#)),
+    ],
+    script: [
+        At(tick: 60, input: Webhook(source: 0, body: "{}")),
+    ],
+    captions: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/orders", outcome: Reply(after_ticks: 40)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 300,
+)
+</script>
+<!-- fabrico:bundle -->
+<script>
+  window.FabricoEmbed.registerBoard('one-factory', document.getElementById('one-factory').textContent);
+</script>
+</body>
+</html>

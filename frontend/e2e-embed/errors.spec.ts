@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  autoContinueCaptions,
   expectBoardDrawing,
   installGlCounter,
   pageUrl,
@@ -58,6 +59,8 @@ test('each error shows its card inside a stage the size of a running board', asy
   const consoleErrors = recordConsoleErrors(page);
   const requests = recordRequests(page);
   await installGlCounter(page);
+  // A board stops at each caption it has; press Continue at once, as a reader would.
+  await autoContinueCaptions(page);
   await page.goto(PAGE);
 
   await expect.poll(async () => (await readProbe(page, 'demo_scene')).state, { timeout: 20_000 }).toBe('running');

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  autoContinueCaptions,
   enableTrace,
   expectBoardDrawing,
   expectTraceMatchesNative,
@@ -56,6 +57,8 @@ test('clicks, drags, keys and wheel turns leave every tick, the end hash and the
   const requests = recordRequests(page);
   await installGlCounter(page);
   await enableTrace(page);
+  // A board stops at each caption it has; press Continue at once, as a reader would.
+  await autoContinueCaptions(page);
   await page.goto(PAGE);
   await expect.poll(async () => (await readProbe(page, BOARD)).state, { timeout: 20_000 }).toBe('running');
   const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);

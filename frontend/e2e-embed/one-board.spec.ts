@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import {
+  autoContinueCaptions,
   expectBoardDrawing,
   glCounts,
   installGlCounter,
@@ -35,6 +36,8 @@ test(`${BOARD} draws on a file:// page and ends on its manifest hash`, async ({ 
   const consoleErrors = recordConsoleErrors(page);
   const requests = recordRequests(page);
   await installGlCounter(page);
+  // A board stops at each caption it has; press Continue at once, as a reader would.
+  await autoContinueCaptions(page);
 
   await page.goto(PAGE_URL);
   await expect.poll(async () => (await readProbe(page, BOARD)).mounted, { timeout: 20_000 }).toBe(true);

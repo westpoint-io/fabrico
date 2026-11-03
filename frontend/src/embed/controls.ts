@@ -65,6 +65,8 @@ export interface BarView {
   endTick: number;
   bootTick: number;
   playing: boolean;
+  /** A caption holds the board, so Play reads Continue. */
+  holding: boolean;
   speed: Speed;
   badge: BadgeState;
   /** The board's manifest line, for the mismatch title. */
@@ -196,6 +198,11 @@ export function createControlBar(handlers: BarHandlers): ControlBar {
       setAttr(play, 'title', 'Pause');
       play.classList.add('is-pressed');
       if (play.firstChild !== pauseGlyph) play.replaceChildren(pauseGlyph);
+    } else if (live && view.holding) {
+      setAttr(play, 'aria-label', 'Continue');
+      setAttr(play, 'title', 'Continue');
+      play.classList.remove('is-pressed');
+      if (play.firstChild !== playGlyph) play.replaceChildren(playGlyph);
     } else {
       setAttr(play, 'aria-label', 'Play');
       setAttr(play, 'title', atEnd ? `Play again from tick ${formatTick(view.bootTick)}` : 'Play');

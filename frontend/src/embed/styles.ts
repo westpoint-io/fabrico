@@ -136,6 +136,44 @@ export const LAYOUT_CSS = `
   will-change: transform;
 }
 
+/* The caption ring: the app's .fab-hint look, placed by captions.ts in stage px. */
+.caption-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.caption-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.caption-ring[hidden] { display: none; }
+
+/* The caption strip, under the stage. The 3 px rail shows while a caption holds the board. The
+   minimum height fits the heading and two lines of text, so the rows below don't jump at each note. */
+.captions {
+  box-sizing: border-box;
+  min-height: calc(var(--fab-font-size-base) + var(--fab-space-xs) + 2 * 1.4 * var(--fab-font-size-base) + 2 * var(--fab-space-xs));
+  padding: var(--fab-space-xs) var(--fab-space-sm) var(--fab-space-xs) calc(var(--fab-space-sm) + 3px);
+  box-shadow: inset 3px 0 0 transparent;
+  font-family: var(--fab-font);
+  font-size: var(--fab-font-size-base);
+  line-height: 1.4;
+  color: var(--fab-ink);
+}
+.captions[hidden] { display: none; }
+.captions.is-holding { box-shadow: inset 3px 0 0 var(--fab-focus); }
+.captions p { margin: 0; overflow-wrap: anywhere; }
+.captions .caption-heading {
+  font-family: var(--fab-font-title);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1;
+  margin-bottom: var(--fab-space-xs);
+}
+
 /* The control bar: the transport group (restart, play, step, counter) and the readout group
    (speed, hash badge). 8 px between controls, 16 px between groups.
 

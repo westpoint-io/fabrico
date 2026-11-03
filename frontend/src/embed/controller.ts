@@ -2,10 +2,17 @@
 // a tick does, so the per-tick hashes are the ones the native engine produces at any speed.
 //
 // Each animation frame adds `elapsedMs * 60 * speed / 1000` to a count of ticks due, steps the
-// whole part (at most 16 in one frame, and never past the end tick), and hands every packet the
-// player queued to the packet pipeline in order. Catch-up beyond 16 ticks is dropped, so a tab that
+// whole part (at most 16 in one frame, never past the next caption tick and never past the end
+// tick), and hands every packet the player queued to the packet pipeline in order. Catch-up beyond 16 ticks is dropped, so a tab that
 // wakes after an hour doesn't try to run an hour of ticks in one frame. At the end tick the clock
 // stops and reads the board's state hash once.
+//
+// CAPTIONS. The caption ticks come from the player's `boardInfo()` once, at create; the player
+// fixes the board info at boot, so a restart doesn't change them. When a step lands on a caption
+// tick, by playing or by Step, the clock pauses and holds that caption. `play()` from a hold is
+// Continue: it drops the hold and plays on. A multi-tick frame never steps over a caption tick,
+// so the board stops on the same tick at 0.25x and at 4x. Restart drops the hold and forgets
+// which captions were shown.
 //
 // The clock calls only `step`, `restart` and the read exports on the player. Play, pause, Step,
 // Restart and the speed are the reader's only levers, and none of them reaches inside a tick.
@@ -30,6 +37,8 @@ export interface ClockPlayer {
   tick(): number;
   endTick(): number;
   tickHash(): string;
+  /** The board's captions, in tick order. Read once, at create. */
+  boardInfo(): { captions: readonly { tick: number }[] };
 }
 
 /** Where the clock gets its frames. The page's `requestAnimationFrame` unless a test swaps it. */
@@ -65,6 +74,10 @@ export interface BoardClock {
   fault(): ClockFault | null;
   /** Every tick and its hash since boot or the last restart, in trace mode; empty otherwise. */
   tickHashes(): [number, string][];
+  /** The index of the caption holding the board, or null. `play()` drops the hold. */
+  caption(): number | null;
+  /** The index of the last caption the board reached since boot or Restart, or null. */
+  lastCaption(): number | null;
 }
 
 export interface BoardClockOptions {
@@ -75,6 +88,8 @@ export interface BoardClockOptions {
   onChange?: () => void;
   /** Called once when stepping throws. The clock has already stopped. */
   onFault?: (error: unknown) => void;
+  /** Called right after the player restarts, before its keyframe is drained. */
+  onRestart?: () => void;
   /** Step one tick at a time and record each tick's hash. */
   trace?: boolean;
   frames?: FrameClock;
@@ -86,10 +101,14 @@ export function ticksThisFrame(
   elapsedMs: number,
   speed: number,
   ticksToEnd: number,
+  ticksToNextCaption = Infinity,
 ): { step: number; due: number } {
   const total = due + (elapsedMs * TICKS_PER_SECOND * speed) / 1000;
   const whole = Math.floor(total);
-  return { step: Math.max(0, Math.min(whole, ticksToEnd, MAX_STEP_PER_FRAME)), due: total - whole };
+  return {
+    step: Math.max(0, Math.min(whole, ticksToNextCaption, ticksToEnd, MAX_STEP_PER_FRAME)),
+    due: total - whole,
+  };
 }
 
 const ANIMATION_FRAMES: FrameClock = {
@@ -116,6 +135,26 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
   let fault: ClockFault | null = null;
   let bootTick = player.tick();
   let hashes: [number, string][] = [];
+  const captionTicks = player.boardInfo().captions.map((c) => c.tick);
+  let held: number | null = null;
+  let lastShown: number | null = null;
+
+  /** Ticks from here to the next caption tick, or Infinity with none ahead. */
+  const ticksToNextCaption = (): number => {
+    const now = player.tick();
+    for (const t of captionTicks) if (t > now) return t - now;
+    return Infinity;
+  };
+  /** Hold the caption on this tick, if there is one. Returns whether it did. */
+  const holdIfCaption = (): boolean => {
+    const at = captionTicks.indexOf(player.tick());
+    if (at < 0) return false;
+    held = at;
+    lastShown = at;
+    playing = false;
+    cancelFrame();
+    return true;
+  };
 
   const record = (): void => {
     if (trace) hashes.push([player.tick(), player.tickHash()]);
@@ -157,6 +196,7 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
       }
       drain();
       if (atEnd()) finish();
+      holdIfCaption();
       return true;
     } catch (error) {
       // Whatever the player queued before it stopped still belongs on screen.
@@ -178,9 +218,13 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
     if (!playing) return;
     const elapsed = last === null ? 0 : Math.max(0, now - last);
     last = now;
-    const next = ticksThisFrame(due, elapsed, speed, player.endTick() - player.tick());
+    const next = ticksThisFrame(due, elapsed, speed, player.endTick() - player.tick(), ticksToNextCaption());
     due = next.due;
     if (next.step > 0 && !advance(next.step)) {
+      changed();
+      return;
+    }
+    if (held !== null) {
       changed();
       return;
     }
@@ -208,8 +252,11 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
     fault = null;
     due = 0;
     hashes = [];
+    held = null;
+    lastShown = null;
     try {
       player.restart();
+      opts.onRestart?.();
       bootTick = player.tick();
       record();
       // The restart queued a keyframe, which resets the scene.
@@ -227,6 +274,17 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
   return {
     play(): void {
       if (fault !== null || playing) return;
+      if (held !== null) {
+        // Continue. A caption on the end tick leaves the board at its end.
+        held = null;
+        if (atEnd()) {
+          changed();
+          return;
+        }
+        startFrames();
+        changed();
+        return;
+      }
       if (atEnd()) {
         restart();
         return;
@@ -246,6 +304,7 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
         playing = false;
         cancelFrame();
       }
+      held = null;
       if (!atEnd()) advance(1);
       changed();
     },
@@ -265,5 +324,7 @@ export function createBoardClock(opts: BoardClockOptions): BoardClock {
     endHash: (): string | null => endHash,
     fault: (): ClockFault | null => (fault === null ? null : { ...fault }),
     tickHashes: (): [number, string][] => hashes.map(([t, h]) => [t, h]),
+    caption: (): number | null => held,
+    lastCaption: (): number | null => lastShown,
   };
 }
