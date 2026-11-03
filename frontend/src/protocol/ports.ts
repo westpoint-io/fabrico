@@ -858,6 +858,18 @@ export function nubHitRadiusWorld(scale: number): number {
 }
 
 /**
+ * The radius, in WORLD px, a belt release docks within: a released head whose point is this
+ * close to an In port's dot is judged against that port (`headInAt` in `gestures.ts`). It is
+ * {@link nubHitRadiusWorld} under a name of its own, because the lesson hint draws its drop
+ * disc from it (`dropDiscBox` in `HintPointer.tsx`): the disc's inner edge is this circle. Both
+ * readers name this function, so one grep finds the two, and a source check in
+ * `HintPointer.test.ts` fails if either stops calling it.
+ */
+export function dropHitRadiusWorld(scale: number): number {
+  return nubHitRadiusWorld(scale);
+}
+
+/**
  * Wire-tool nub hit radius in WORLD px: `(MIN_TARGET_PX / 2) / min(1, scale)`.
  *
  * THE RULE, AND BOTH HALVES ARE DERIVED. The canvas equivalent of a 44px minimum

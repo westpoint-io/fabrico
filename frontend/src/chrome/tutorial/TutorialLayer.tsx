@@ -13,7 +13,7 @@ import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, ty
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
-import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
+import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
 import type { ArmedTool } from '../Palette';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { readCamera } from './cameraRead';
@@ -28,6 +28,10 @@ export interface HintRect {
   width: number;
   height: number;
   shape: 'square' | 'circle';
+  /** A disc only: the centre of the hit circle its inner edge sits on, in window px. */
+  hitCentre?: { x: number; y: number };
+  /** A disc only: that circle's radius in CSS px, as the ring painted it this frame. */
+  hitRadiusPx?: number;
 }
 
 /** What `window.__fabrico.tutorial()` answers: a fresh plain object per call, with nothing live in it. */
@@ -53,6 +57,23 @@ interface FrameFacts {
   chrome: ChromeFacts;
 }
 
+/** A ring's shape, by the rule HintPointer paints with: a disc on an In port, a square on anything else. */
+function shapeOf(role: PortRoleName | null): HintRect['shape'] {
+  return role === 'in' ? 'circle' : 'square';
+}
+
+/** A ring element's rect, and for a disc the hit circle it was painted around. */
+function rectOf(el: HTMLElement, shape: HintRect['shape']): HintRect {
+  const r = el.getBoundingClientRect();
+  const rect: HintRect = { x: r.x, y: r.y, width: r.width, height: r.height, shape };
+  const hitR = el.getAttribute('data-fab-hit-r');
+  if (shape === 'circle' && hitR !== null) {
+    rect.hitCentre = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    rect.hitRadiusPx = Number(hitR);
+  }
+  return rect;
+}
+
 /**
  * The ring's rect, only if the ring was last placed for `key`. A stage change reaches the ring a
  * frame after the state, and until then its rect belongs to the old stage, so a rect in a probe read
@@ -61,17 +82,15 @@ interface FrameFacts {
 function ringRectFor(key: string, shape: HintRect['shape']): HintRect | null {
   const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
   if (ring === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
-  const r = ring.getBoundingClientRect();
-  return { x: r.x, y: r.y, width: r.width, height: r.height, shape };
+  return rectOf(ring, shape);
 }
 
 /** The drag's far ring, under the same comparison: the ring records the stage both were written for. */
-function ringToRectFor(key: string): HintRect | null {
+function ringToRectFor(key: string, shape: HintRect['shape']): HintRect | null {
   const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
   const to = document.querySelector<HTMLElement>('[data-fab-hint-to]');
   if (ring === null || to === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
-  const r = to.getBoundingClientRect();
-  return { x: r.x, y: r.y, width: r.width, height: r.height, shape: 'circle' };
+  return rectOf(to, shape);
 }
 
 function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRecord | null): TutorialProbe {
@@ -89,8 +108,11 @@ function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRec
     stepCount: lesson?.steps.length ?? 0,
     stepId: lesson?.steps[s.stepIndex]?.id ?? null,
     stageId: stage?.id ?? null,
-    hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id), stage.hint?.on === 'port' ? 'circle' : 'square'),
-    hintTo: stage?.hint?.on === 'port' && stage.hint.to !== undefined ? ringToRectFor(stageKey(s.stepIndex, stage.id)) : null,
+    hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id), shapeOf(stage.hint?.on === 'port' ? stage.hint.role : null)),
+    hintTo:
+      stage?.hint?.on === 'port' && stage.hint.to !== undefined
+        ? ringToRectFor(stageKey(s.stepIndex, stage.id), shapeOf(stage.hint.to.role))
+        : null,
     bound,
     noteKind: slot?.kind ?? '',
     noteText: slot === null || slot.hidden ? '' : phrasePlain(slot.tokens),

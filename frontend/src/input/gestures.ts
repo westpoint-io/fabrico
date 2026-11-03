@@ -61,6 +61,7 @@ import {
   type DockTargetShape,
   MACHINE_TARGET,
   doorstepCell,
+  dropHitRadiusWorld,
   FAULT_PORT,
   MEDIUM_ELECTRICAL,
   MEDIUM_MECHANICAL,
@@ -2953,7 +2954,7 @@ export function createGestureController(deps: GestureDeps): GestureController {
     const hits =
       w === null
         ? []
-        : nubsInRadius(w, nubHitRadiusWorld(camScale()), 'ports+belt-ends').filter((h) => h.port.role === PORT_ROLE.IN);
+        : nubsInRadius(w, dropHitRadiusWorld(camScale()), 'ports+belt-ends').filter((h) => h.port.role === PORT_ROLE.IN);
     const judge = (h: NubHit) => {
       const mechanical = mediumsCompatible(h.port.medium, MEDIUM_MECHANICAL);
       // A wrong-medium In appends nothing (the path the player saw is the path that emits).

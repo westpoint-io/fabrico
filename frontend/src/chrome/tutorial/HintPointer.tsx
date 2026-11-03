@@ -11,12 +11,20 @@
 //
 // A DRAG HAS TWO RINGS, and one paint call writes both with that attribute. If either target resolves
 // to nothing, both hide and the attribute goes, so a drag stage never shows half its rings.
+//
+// A PORT RING IS THE SIZE OF THE SPOT THE GESTURE ACCEPTS, and its shape follows the port's role. An
+// In port is where a drag ends, so its ring is a disc whose inner edge is the belt release's hit
+// circle (`dropHitRadiusWorld`, the radius `headInAt` passes). An Out port is where a drag starts,
+// and the press check accepts its whole doorstep cell, so its ring is a square around that cell.
+// A disc's moving element carries `data-fab-hit-r`, the hit radius in CSS px as painted this frame.
 
 import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObject } from 'react';
 import { CELL, nubAnchor } from '../../../shared/geometry';
 import { KIND_NAMES } from '../../../shared/kindNames';
+import type { PortView } from '../../protocol/decode';
 import { effectiveBox } from '../../protocol/footprint';
 import { machine_kind } from '../../protocol/kinds';
+import { doorstepCell, dropHitRadiusWorld } from '../../protocol/ports';
 import type { SceneHandle } from '../../render/pixiApp';
 import type { BoundNode, TutorialState } from '../../tutorial/machine';
 import type { BindingName, HintAnchor, PanelTarget, PortRoleName } from '../../tutorial/types';
@@ -36,17 +44,63 @@ const OUTSET_PX = 4;
 const PANEL_TARGET_Z = '4';
 /** With the name chips: a ring on the board is cut off by a panel it pans under. */
 const BOARD_TARGET_Z = '1';
-/** A port ring's diameter, fixed on screen: `--fab-space-xl`. A later plan sizes it to the exact hit area. */
-const PORT_RING_PX = 32;
+/** The ring's border width (`.fab-hint`). A disc's border draws outside the hit circle. */
+const BORDER_PX = 2;
 /** The wire's port roles (`NodeView.ports[].role`): In=0, Out=1, Fault=2. A Sink's fault dot is never a target. */
 const PORT_ROLE: Readonly<Record<PortRoleName, number>> = { in: 0, out: 1 };
 
-interface RingBox {
+/** A box in the layer's coordinates, which are the window's for a board target. */
+export interface Box {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+/** The camera as `readCamera` gives it: pan in CSS px and the scale. */
+export interface Cam {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+/** A drop disc: its border box, plus the hit circle its inner edge sits on, in CSS px. */
+export interface DiscBox extends Box {
+  hitRadiusPx: number;
+  hitCentre: { x: number; y: number };
+}
+
+interface RingBox extends Box {
   zIndex: string;
+  /** Set for a disc only: the hit radius in CSS px, written to `data-fab-hit-r`. */
+  hitRadiusPx?: number;
+}
+
+/**
+ * The ring where a drag ends, on an In port's dot at `anchor` (world px): a disc whose inner edge is
+ * the belt release's hit circle. Its border box is `2r + 4` across, so the 2 px border draws outside.
+ */
+export function dropDiscBox(anchor: { x: number; y: number }, cam: Cam): DiscBox {
+  const r = dropHitRadiusWorld(cam.scale) * cam.scale;
+  const d = 2 * r + 2 * BORDER_PX;
+  const cx = anchor.x * cam.scale + cam.x;
+  const cy = anchor.y * cam.scale + cam.y;
+  return { x: cx - d / 2, y: cy - d / 2, width: d, height: d, hitRadiusPx: r, hitCentre: { x: cx, y: cy } };
+}
+
+/**
+ * The ring where a drag starts, on an Out port: a square around the port's doorstep cell plus the
+ * outset each side, because the press check accepts a press anywhere on that cell.
+ */
+export function doorstepSquareBox(port: Pick<PortView, 'cell_x' | 'cell_y' | 'side'>, cam: Cam): Box {
+  const [cx, cy] = doorstepCell(port);
+  const size = CELL * cam.scale;
+  return {
+    x: cx * size + cam.x - OUTSET_PX,
+    y: cy * size + cam.y - OUTSET_PX,
+    width: size + 2 * OUTSET_PX,
+    height: size + 2 * OUTSET_PX,
+  };
 }
 
 /** The first button under `root` whose whole text reads `word`. */
@@ -86,7 +140,7 @@ function boundNode(nodes: SceneNodes | undefined, bound: BoundNode | undefined) 
   return node;
 }
 
-/** A 32 px circle centred on a bound machine's port dot, through the camera. */
+/** A bound machine's port ring through the camera: a disc on an In port's dot, a square on an Out port's doorstep. */
 function portBox(
   nodes: SceneNodes | undefined,
   bindings: TutorialState['bindings'],
@@ -98,14 +152,14 @@ function portBox(
   if (node === null || cam === null) return null;
   const port = node.ports.find((p) => p.role === PORT_ROLE[role]);
   if (port === undefined) return null;
-  const anchor = nubAnchor(port.cell_x, port.cell_y, port.side);
-  return {
-    x: anchor.x * cam.scale + cam.x - PORT_RING_PX / 2,
-    y: anchor.y * cam.scale + cam.y - PORT_RING_PX / 2,
-    width: PORT_RING_PX,
-    height: PORT_RING_PX,
-    zIndex: BOARD_TARGET_Z,
-  };
+  if (role === 'out') return { ...doorstepSquareBox(port, cam), zIndex: BOARD_TARGET_Z };
+  const disc = dropDiscBox(nubAnchor(port.cell_x, port.cell_y, port.side), cam);
+  return { x: disc.x, y: disc.y, width: disc.width, height: disc.height, zIndex: BOARD_TARGET_Z, hitRadiusPx: disc.hitRadiusPx };
+}
+
+/** The paint class for a ring: the disc's for a port ring on an In port, the square's for anything else. */
+function paintClass(role: PortRoleName | null): string {
+  return role === 'in' ? 'fab-hint fab-hint--port' : 'fab-hint';
 }
 
 /**
@@ -188,6 +242,8 @@ function writeRing(ring: HTMLElement, box: RingBox): void {
   ring.style.transform = `translate(${box.x}px, ${box.y}px)`;
   ring.style.width = `${box.width}px`;
   ring.style.height = `${box.height}px`;
+  if (box.hitRadiusPx === undefined) ring.removeAttribute('data-fab-hit-r');
+  else ring.setAttribute('data-fab-hit-r', String(box.hitRadiusPx));
   ring.style.visibility = 'visible';
 }
 
@@ -196,6 +252,7 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
   const ringRef = useRef<HTMLDivElement | null>(null);
   const ringToRef = useRef<HTMLDivElement | null>(null);
   const paintElRef = useRef<HTMLDivElement | null>(null);
+  const paintToElRef = useRef<HTMLDivElement | null>(null);
   const lastStageRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
@@ -222,7 +279,8 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       writeRing(ring, box);
       if (toBox === null) ringTo.style.visibility = 'hidden';
       else writeRing(ringTo, toBox);
-      if (paintElRef.current !== null) paintElRef.current.className = hint?.on === 'port' ? 'fab-hint fab-hint--port' : 'fab-hint';
+      if (paintElRef.current !== null) paintElRef.current.className = paintClass(hint?.on === 'port' ? hint.role : null);
+      if (paintToElRef.current !== null) paintToElRef.current.className = paintClass(to?.role ?? null);
       ring.setAttribute('data-fab-hint-stage', target.stageKey);
     };
     project();
@@ -248,13 +306,13 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
         {/* The paint, apart from the moving element, so a later pulse never touches the transform. */}
         <div ref={paintElRef} className="fab-hint" />
       </div>
-      {/* Where a drag ends. Only a port is ever a drag's far end, so its paint is always the circle. */}
+      {/* Where a drag ends. Its paint follows the far port's role, the same rule as the main ring. */}
       <div
         ref={ringToRef}
         data-fab-hint-to=""
         style={{ position: 'absolute', top: 0, left: 0, willChange: 'transform', visibility: 'hidden' }}
       >
-        <div className="fab-hint fab-hint--port" />
+        <div ref={paintToElRef} className="fab-hint fab-hint--port" />
       </div>
     </div>
   );
