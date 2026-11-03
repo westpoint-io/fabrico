@@ -32,7 +32,7 @@ import {
 
 // lesson-keys.spec.ts - the step card and the keyboard, on a mock host.
 //
-// Escape (phase 103, Mark's rule): one press does the first of ending a belt or source draw, putting the tool
+// Escape (phase 103's rule): one press does the first of ending a belt or source draw, putting the tool
 // down, clearing the selection, dismissing the welcome card, closing an open lesson list, and only then closing
 // a finished card (as Keep building) or a swapped card (as Leave). A running card never closes on Escape,
 // because lesson 1 asks for Esc to put the tool down. Every case reads what each press changed: the armed

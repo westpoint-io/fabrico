@@ -597,7 +597,7 @@ export function TutorialLayer({
     handFocusBackFromList(stateRef.current.card !== 'none');
   }, [onLessonsOpenChange]);
 
-  // MARK'S ESCAPE RULE: a running card ignores Escape. Lesson 1's tool-down step asks the user to press Esc to put
+  // THE ESCAPE RULE: a running card ignores Escape. Lesson 1's tool-down step asks the user to press Esc to put
   // the tool away, and a second press on the next step would otherwise drop the lesson, so a running lesson ends
   // only on Leave. A finished card closes as Keep building and a swapped one as Leave, and an open list goes first.
   // The card itself owns no key listener: this is the last row of App's Escape chain.

@@ -4226,7 +4226,7 @@ export function App() {
         // nothing selected). Each row stops the chain: the first-run welcome card
         // if it is still showing (read live via the ref), then the lesson layer,
         // which closes an open lesson list, then a finished or swapped card, and
-        // never a running one (phase 103, Mark's Escape rule).
+        // never a running one (the phase 103 Escape rule).
         onEscapeFallback: () => {
           if (!welcomeSeenRef.current) {
             dismissWelcome();

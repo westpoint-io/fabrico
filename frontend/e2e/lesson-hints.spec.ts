@@ -173,6 +173,8 @@ test.describe('disc', () => {
 
 /** One read per animation frame of the main ring's paint and the element the frame loop moves. */
 interface PulseSample {
+  /** Milliseconds since the first sample. */
+  t: number;
   opacity: number;
   running: string[];
   className: string;
@@ -194,6 +196,7 @@ async function samplePulse(page: Page): Promise<PulseSample[]> {
           if (ring && paint) {
             const r = ring.getBoundingClientRect();
             out.push({
+              t: performance.now() - start,
               opacity: Number(getComputedStyle(paint).opacity),
               running: paint
                 .getAnimations()
@@ -224,6 +227,15 @@ async function sampleBothRings(page: Page): Promise<{ panel: PulseSample[]; boar
   return { panel, board };
 }
 
+/**
+ * The sampler ran across a whole period. It counts time, not frames: a page under a full suite's load
+ * draws fewer frames, and 8 reads spread over 1600 ms still find the fade.
+ */
+function expectSpan(samples: readonly PulseSample[], what: string): void {
+  expect(samples.length, `${what}: reads taken`).toBeGreaterThanOrEqual(8);
+  expect(samples[samples.length - 1]!.t, `${what}: the reads span one ${PULSE_MS} ms period`).toBeGreaterThanOrEqual(PULSE_MS);
+}
+
 /** The moving element's box at every sample, against the first, within half a pixel. */
 function expectStill(samples: readonly PulseSample[], what: string): void {
   const first = samples[0]!.box;
@@ -243,7 +255,7 @@ test.describe('pulse', () => {
       ['the panel ring', still.panel, 'fab-hint fab-hint--panel'],
       ['the board ring', still.board, 'fab-hint'],
     ] as const) {
-      expect(samples.length, `${what}: the sampler ran across ${SAMPLE_MS} ms`).toBeGreaterThan(20);
+      expectSpan(samples, what);
       expect(samples[0]!.className, `${what}: its paint class`).toBe(cls);
       expect([...new Set(samples.flatMap((s) => s.running))], `${what}: no animation runs under reduced motion`).toEqual([]);
       expect([...new Set(samples.map((s) => s.opacity))], `${what}: opacity stays 1`).toEqual([1]);
@@ -253,12 +265,15 @@ test.describe('pulse', () => {
     // The same lesson on a fresh page with no motion preference.
     // It shares the first page's storage, where Start left the lesson In progress, so the row would offer
     // Restart. Clear that before the app reads it.
+    // The first page closes, so the second is the one page drawing frames.
     const second = await page.context().newPage();
+    await page.close();
+    await second.bringToFront();
     await second.addInitScript(() => localStorage.removeItem('fab.tutorial.v1'));
     await second.emulateMedia({ reducedMotion: 'no-preference' });
     const live = await sampleBothRings(second);
-    expect(live.panel.length).toBeGreaterThan(20);
-    expect(live.board.length).toBeGreaterThan(20);
+    expectSpan(live.panel, 'the pulsing panel ring');
+    expectSpan(live.board, 'the pulsing board ring');
     expect([...new Set(live.panel.flatMap((s) => s.running))], 'the panel ring runs the shallow pulse').toEqual(['fab-hint-pulse-panel']);
     expect([...new Set(live.board.flatMap((s) => s.running))], 'the board ring runs the deep pulse').toEqual(['fab-hint-pulse']);
     const low = (s: readonly PulseSample[]): number => Math.min(...s.map((x) => x.opacity));
