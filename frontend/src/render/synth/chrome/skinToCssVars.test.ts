@@ -436,3 +436,20 @@ describe('skinToCssVars (strict sync-guard vs style-bible section 6)', () => {
     expect(pick(hi, 'fab-font-size-hud')).toBe('12px');
   });
 });
+
+// A read-only board on a page renders into a shadow root, where `:root` matches nothing, so
+// it asks for the same tokens under `:host`. The app keeps the default.
+describe('skinToCssVars selector', () => {
+  it('defaults to :root, so the app output is the explicit :root output', () => {
+    expect(skinToCssVars(LOCKED_SKIN)).toBe(skinToCssVars(LOCKED_SKIN, 1, ':root'));
+    expect(skinToCssVars(LOCKED_SKIN).startsWith(':root{')).toBe(true);
+  });
+
+  it('emits the same declarations under :host, differing only in the selector', () => {
+    const root = skinToCssVars(LOCKED_SKIN, 1, ':root');
+    const host = skinToCssVars(LOCKED_SKIN, 1, ':host');
+    expect(host).not.toBe(root);
+    expect(host.startsWith(':host{')).toBe(true);
+    expect(host.slice(':host'.length)).toBe(root.slice(':root'.length));
+  });
+});
