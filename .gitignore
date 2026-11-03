@@ -4,6 +4,9 @@
 # Frontend (Phase 07, Vite app — NOT a cargo member)
 frontend/node_modules
 frontend/dist
+# The read-only board bundle, its test pages and the offline examples file (build outputs).
+frontend/dist-embed/
+frontend/dist-examples/
 
 # ts-rs generated TS bindings (07-01 export target; regenerated on `cargo test`)
 crates/fabrico-protocol/bindings/

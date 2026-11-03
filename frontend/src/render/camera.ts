@@ -98,6 +98,15 @@ export interface Camera {
   destroy(): void;
 }
 
+/** How a camera takes input. */
+export interface CameraOptions {
+  /**
+   * True for the app: drag pans, the wheel zooms or pans, the cursor shows 'grab'.
+   * False for a read-only board: no pointer or wheel listener and no cursor.
+   */
+  interactive: boolean;
+}
+
 /** Chrome insets (px) that shrink the usable fit viewport (toolbar/palette/cluster). */
 export interface Insets {
   top: number;
@@ -126,8 +135,18 @@ function clamp(v: number, lo: number, hi: number): number {
  *
  * @param onChange invoked after every pan/zoom so the grid layer can re-tile to
  *                 cover the newly-visible world rectangle.
+ * @param opts     `interactive: false` attaches none of the five pointer and wheel
+ *                 listeners and leaves the canvas cursor alone. A read-only board on a
+ *                 page uses it, so a wheel over the board scrolls the page instead of
+ *                 zooming the board (no listener means nothing calls preventDefault).
+ *                 `container`, `worldScale()` and `setCamera` work the same either way.
  */
-export function createCamera(app: Application, onChange: () => void): Camera {
+export function createCamera(
+  app: Application,
+  onChange: () => void,
+  opts: CameraOptions = { interactive: true },
+): Camera {
+  const interactive = opts.interactive;
   const container = new Container();
   app.stage.addChild(container);
 
@@ -156,8 +175,9 @@ export function createCamera(app: Application, onChange: () => void): Camera {
   // move together and the hand comes back to the cell it left.
   let chordPan = false;
 
-  // Resting affordance: the empty floor is pannable, so signal 'grab' on boot.
-  canvas.style.cursor = CURSOR_PAN_IDLE;
+  // Resting affordance: the empty floor is pannable, so signal 'grab' on boot. A
+  // read-only board can't be panned, so it keeps the page's cursor.
+  if (interactive) canvas.style.cursor = CURSOR_PAN_IDLE;
 
   const localPoint = (e: PointerEvent | WheelEvent): Point => {
     const r = canvas.getBoundingClientRect();
@@ -344,11 +364,13 @@ export function createCamera(app: Application, onChange: () => void): Camera {
     onChange();
   };
 
-  canvas.addEventListener('pointerdown', onPointerDown);
-  canvas.addEventListener('pointermove', onPointerMove);
-  canvas.addEventListener('pointerup', onPointerUp);
-  canvas.addEventListener('pointercancel', onPointerUp);
-  canvas.addEventListener('wheel', onWheel, { passive: false });
+  if (interactive) {
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+  }
 
   return {
     container,
@@ -377,6 +399,8 @@ export function createCamera(app: Application, onChange: () => void): Camera {
       onChange();
     },
     destroy: (): void => {
+      // Remove only what was attached: a read-only camera attached nothing.
+      if (!interactive) return;
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);

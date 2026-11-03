@@ -54,7 +54,9 @@
     "e2e-live",
     "player-tests",
     "e2e-player",
+    "e2e-embed",
     "vite.config.ts",
+    "vite.embed.config.ts",
     "vitest.config.ts",
     "vitest.player.config.ts",
     "playwright.config.ts",
@@ -62,6 +64,7 @@
     "playwright.live.reuse.config.ts",
     "playwright.mock.reuse.config.ts",
     "playwright.player.config.ts",
-    "playwright.walk.config.ts"
+    "playwright.walk.config.ts",
+    "playwright.embed.config.ts"
   ]
 }

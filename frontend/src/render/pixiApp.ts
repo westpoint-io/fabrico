@@ -184,17 +184,39 @@ export interface SceneHandle {
 /** Backward-compatible alias (App.tsx imports `PixiScene`). */
 export type PixiScene = SceneHandle;
 
+/** What {@link bootPixi} needs from its caller. */
+export interface BootOptions {
+  /**
+   * True for the app (drag pans, the wheel zooms). False for a read-only board on a page:
+   * the camera attaches no pointer or wheel listener, so the page keeps its scroll.
+   */
+  interactive: boolean;
+  /**
+   * What the canvas sizes itself to. Pixi only re-reads it on a window `resize` event, so a
+   * caller passing an element that changes size on its own has to call `app.resize()` itself
+   * (a `ResizeObserver` on that element does it).
+   */
+  resizeTo: Window | HTMLElement;
+  /**
+   * A scene to draw instead of a fresh one. A board that comes back after its renderer was
+   * destroyed passes the scene it kept, because the player only sends a keyframe at the start.
+   */
+  scene?: SceneState;
+}
+
 /**
- * Boot ONE Pixi v8 Application and build the layered camera scene + Ticker loop.
+ * Boot ONE Pixi v8 Application, build the layered camera scene + Ticker loop, and append
+ * the canvas to `container` as the last step.
  *
- * v8 init is async (`await app.init`). The caller (App.tsx) mounts `app.canvas`
- * OUTSIDE React's reconciler and guards StrictMode double-invoke with a
- * `disposed` flag (Pattern 1 / Pitfall 5).
+ * v8 init is async (`await app.init`). The app passes its host div, which React renders
+ * but never reconciles children into, and guards the StrictMode double-invoke with a
+ * `disposed` flag (Pattern 1 / Pitfall 5): a disposed boot calls `app.destroy(true)`,
+ * which removes the canvas again.
  */
-export async function bootPixi(): Promise<SceneHandle> {
+export async function bootPixi(container: HTMLElement, opts: BootOptions): Promise<SceneHandle> {
   const app = new Application();
   await app.init({
-    resizeTo: window,
+    resizeTo: opts.resizeTo,
     // The canvas background reads the darkest ramp step (index 0) of the ONE locked
     // skin, so the void behind the floor belongs to the same data-driven world.
     background: LOCKED_SKIN.palette.ramp[0],
@@ -212,7 +234,7 @@ export async function bootPixi(): Promise<SceneHandle> {
     resolution: window.devicePixelRatio || 1,
   });
 
-  const sceneState = createSceneState();
+  const sceneState = opts.scene ?? createSceneState();
   const getScene = (): SceneState => sceneState;
 
   // Grid re-tiles on every camera change; create it after the camera via a
@@ -223,7 +245,7 @@ export async function bootPixi(): Promise<SceneHandle> {
   // re-tiles at most once per animation frame. Hoisted like `redrawGrid` for late
   // binding, since the camera is created before the grid.
   let scheduleGridRedraw = (): void => {};
-  const cam = createCamera(app, () => scheduleGridRedraw());
+  const cam = createCamera(app, () => scheduleGridRedraw(), { interactive: opts.interactive });
 
   const grid = createGridLayer();
   // FLOW-03/06/07: thread the LIVE camera zoom into the belt layer twice - `scale`
@@ -332,6 +354,8 @@ export async function bootPixi(): Promise<SceneHandle> {
   drawScene();
 
   const loop = startRenderLoop(app, getScene, machines, belts, items, wires, overlay);
+
+  container.appendChild(app.canvas);
 
   return {
     app,

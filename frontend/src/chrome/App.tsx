@@ -3281,7 +3281,12 @@ export function App() {
     let onHomeKey: ((e: KeyboardEvent) => void) | null = null;
 
     void (async () => {
-      const handle = await bootPixi();
+      const host = hostRef.current;
+      if (host === null) {
+        console.error('the canvas host div is missing, so the board has nowhere to draw');
+        return;
+      }
+      const handle = await bootPixi(host, { interactive: true, resizeTo: window });
       if (disposed) {
         // StrictMode cleanup already ran before init resolved — tear down.
         handle.app.destroy(true);
@@ -3290,7 +3295,6 @@ export function App() {
       handleRef.current = handle;
       // Plan 88-07 (D-09): every occupancy reader receives this scene, so the claims ride on it.
       handle.sceneState.queuedClaims = queuedClaimsRef.current;
-      hostRef.current?.appendChild(handle.app.canvas);
 
       // Install the read-only introspection hook (REND-02). Reassigned on each
       // mount so a StrictMode double-boot always points `scene()` at the LIVE

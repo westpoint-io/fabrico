@@ -311,10 +311,19 @@ export function playerModuleFrom(rawExports: PlayerExports): PlayerModule {
   };
 }
 
-/** Compile and instantiate the player from its bytes, refusing a module with any other import. */
-export async function loadPlayerModule(bytes: BufferSource): Promise<PlayerModule> {
+/**
+ * Compile the player from its bytes, refusing a module with any other import. A page compiles
+ * once and instantiates once per board, so a trap in one board's instance leaves the others
+ * running.
+ */
+export async function compilePlayer(bytes: BufferSource): Promise<WebAssembly.Module> {
   const module = await WebAssembly.compile(bytes);
   assertOnlyTheClockImport(WebAssembly.Module.imports(module));
+  return module;
+}
+
+/** Make one fresh instance of a compiled player, with its own memory and its own boards. */
+export async function instantiatePlayer(module: WebAssembly.Module): Promise<PlayerModule> {
   const instance = await WebAssembly.instantiate(module, {
     [CLOCK_MODULE]: { [CLOCK_NAME]: () => 0 },
   });
@@ -323,4 +332,9 @@ export async function loadPlayerModule(bytes: BufferSource): Promise<PlayerModul
     throw new PlayerError(`this module has no ${missing.join(', ')}`);
   }
   return playerModuleFrom(instance.exports as unknown as PlayerExports);
+}
+
+/** Compile and instantiate the player from its bytes, refusing a module with any other import. */
+export async function loadPlayerModule(bytes: BufferSource): Promise<PlayerModule> {
+  return instantiatePlayer(await compilePlayer(bytes));
 }
