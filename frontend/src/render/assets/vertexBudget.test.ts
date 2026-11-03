@@ -137,7 +137,9 @@ const EXPECTED_ASSET_COUNT = 9;
 // 15 -> 16 in phase 76 (plan 76-01), by hand, in the commit that authors `label.svg`.
 // 16 -> 15 in plan 91-03 on 2026-10-24, by hand (the Graphics trigger's fader glyph deleted
 // with the Graphics panel, D-04).
-const EXPECTED_CHROME_ASSET_COUNT = 15;
+// 15 -> 16 by hand, in the commit that authors `restart.svg` (the read-only board's Restart
+// button; the app does not draw it).
+const EXPECTED_CHROME_ASSET_COUNT = 16;
 
 /**
  * The SAME non-recursive `.svg` discovery plan 56-04's lint walker uses
@@ -575,6 +577,7 @@ describe('the chrome asset directory is DISCOVERED here, and deliberately not ME
       'pause.svg',
       'play.svg',
       'redo.svg',
+      'restart.svg',
       'save.svg',
       'step.svg',
       'trash.svg',

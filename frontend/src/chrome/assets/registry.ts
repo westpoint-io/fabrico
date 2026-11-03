@@ -49,6 +49,7 @@ import NEW_SVG_RAW from './new.svg?raw';
 import PAUSE_SVG_RAW from './pause.svg?raw';
 import PLAY_SVG_RAW from './play.svg?raw';
 import REDO_SVG_RAW from './redo.svg?raw';
+import RESTART_SVG_RAW from './restart.svg?raw';
 import SAVE_SVG_RAW from './save.svg?raw';
 import STEP_SVG_RAW from './step.svg?raw';
 import TRASH_SVG_RAW from './trash.svg?raw';
@@ -57,7 +58,9 @@ import WARNING_SVG_RAW from './warning.svg?raw';
 import WIRE_SVG_RAW from './wire.svg?raw';
 
 /**
- * Every chrome-only vector asset, by name. FIFTEEN ROWS as of plan 91-03 (the Graphics
+ * Every chrome-only vector asset, by name. SIXTEEN ROWS since `restart` was added for the
+ * read-only board's control bar (both count pins moved 15 -> 16 BY HAND in the same commit;
+ * the app itself does not draw it). FIFTEEN ROWS as of plan 91-03 (the Graphics
  * trigger's fader glyph deleted with the Graphics panel, CHROME-03, both count pins moved
  * 16 -> 15 BY HAND in the same commit). SIXTEEN ROWS as of phase 76 (plan 76-01 adds
  * `label`, the Palette Label row's glyph, and moves both count pins 15 -> 16 BY HAND in the
@@ -103,6 +106,7 @@ export const CHROME_ASSET_SOURCES = {
   pause: PAUSE_SVG_RAW,
   play: PLAY_SVG_RAW,
   redo: REDO_SVG_RAW,
+  restart: RESTART_SVG_RAW,
   save: SAVE_SVG_RAW,
   step: STEP_SVG_RAW,
   trash: TRASH_SVG_RAW,

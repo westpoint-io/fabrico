@@ -13,7 +13,7 @@
 // a later cut is added to the same directory, and a literal that reddens on correct work is how
 // an executor learns to edit assertions instead of artefacts. This phase's floor lives HERE, in
 // this phase's own spec, and NOT in `lintSvg.test.ts`: that file holds
-// `EXPECTED_CHROME_ASSET_COUNT = 15` (D-01), one of the two hand-maintained literals this phase
+// `EXPECTED_CHROME_ASSET_COUNT` (15 at the time, D-01), one of the two hand-maintained literals this phase
 // must not move, and every walker over `chrome/assets/` is non-recursive so `docs/brand/`
 // growing cannot move it. Putting the floor here gets the same property with none of that risk.
 //

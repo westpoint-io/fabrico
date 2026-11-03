@@ -200,10 +200,13 @@ function bezelBandPx(dpr: number): string {
  * @param skin  A validated Skin (in production always LOCKED_SKIN).
  * @param dpr   devicePixelRatio (1 when omitted). Its ONE remaining consumer is the ring
  *              band snap: the ring THICKNESS is constant at every DPR by design.
+ * @param selector  The rule the tokens are declared on, `:root` when omitted (the app).
+ *              A read-only board inside a shadow root passes `:host`, where `:root`
+ *              matches nothing. The declarations are the same for any selector.
  */
-export function skinToCssVars(skin: Skin, dpr = 1): string {
+export function skinToCssVars(skin: Skin, dpr = 1, selector = ':root'): string {
   const ramp = bakeRamp(skin);
-  return `:root{
+  return `${selector}{
 --fab-substrate:${hex(skin.palette.ramp[0])};
 --fab-panel-fill:${hex(ramp.fill)};
 --fab-edge-lit:${hex(ramp.tlLight)};
