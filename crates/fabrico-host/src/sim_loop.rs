@@ -7419,7 +7419,7 @@ mod tests {
         /// Source on a timer, one belt, HTTP Sink, built through the path a real board takes.
         fn timer_board_with_http_sink(dir: &std::path::Path, url: &str) -> Host {
             let board = format!(
-                r#"Board(format: 1, seed: 1, commands: [
+                r#"Board(format: 2, title: "A test board", seed: 1, commands: [
                     Place(kind: 0, cell_x: 1, cell_y: 6),
                     Place(kind: 7, cell_x: 5, cell_y: 6),
                     DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),
@@ -7429,6 +7429,7 @@ mod tests {
                     Configure(node: 1, config: Sink(target: Http(url: "{url}", method: Post))),
                 ],
                 script: [],
+                captions: [],
                 executor: Executor(default: Reply(after_ticks: 1), rules: []),
                 view: View(fit: Board),
                 end_tick: 1200)"#
@@ -7989,7 +7990,7 @@ mod tests {
             url: &str,
         ) -> (SimLoop, GestureTx, UnboundedSender<ControlMsg>) {
             let board = format!(
-                r#"Board(format: 1, seed: 1, commands: [
+                r#"Board(format: 2, title: "A test board", seed: 1, commands: [
                     Place(kind: 0, cell_x: 1, cell_y: 6),
                     Place(kind: 7, cell_x: 5, cell_y: 6),
                     Place(kind: 7, cell_x: 7, cell_y: 9),
@@ -8004,6 +8005,7 @@ mod tests {
                     Configure(node: 2, config: Sink(target: Http(url: "{url}", method: Post))),
                 ],
                 script: [],
+                captions: [],
                 executor: Executor(default: Reply(after_ticks: 1), rules: []),
                 view: View(fit: Board),
                 end_tick: 1500)"#

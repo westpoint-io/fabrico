@@ -26,8 +26,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
 use fabrico_core::factory::DEFAULT_STACK_LIMIT;
-use fabrico_core::state::HttpMethod;
+use fabrico_core::state::{HttpMethod, Node};
 use fabrico_engine::board::{BoardError, OutboundOutcome, parse_board};
+use fabrico_engine::gesture::kind_byte;
 use fabrico_engine::render_packet::RenderPacketBuilder;
 use fabrico_engine::scripted::{BoardRun, EffectRecord, EffectSummary};
 use serde::Serialize;
@@ -155,6 +156,86 @@ impl From<&EffectRecord> for PlayerEffect {
     }
 }
 
+/// What a page needs about a board that its render packets don't carry. The field order is the wire
+/// format, and `decodeBoardInfo` in the frontend's loader reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoardInfo {
+    /// The board's name, from its file.
+    pub title: String,
+    /// The tick the board's run stops at.
+    pub end_tick: u64,
+    /// The board's captions, in file order.
+    pub captions: Vec<CaptionInfo>,
+    /// Every Factory and HTTP Handler the board's commands mint, in handle order.
+    pub factories: Vec<FactoryInfo>,
+    /// Whether the board makes calls a real host would send out. The player only records them.
+    pub calls_out: bool,
+}
+
+/// One caption, with the render handle of the machine it highlights.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CaptionInfo {
+    /// The core tick a viewer pauses on.
+    pub tick: u64,
+    /// The machine's dense handle in the board file.
+    pub highlight: u64,
+    /// The machine's id in the render packets, which is what a page draws by. `None` only if the
+    /// keyframe never named the machine.
+    pub render_handle: Option<u64>,
+    /// The sentence to show.
+    pub text: String,
+}
+
+/// The program one Factory or HTTP Handler runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FactoryInfo {
+    /// The machine's id in the render packets.
+    pub render_handle: u64,
+    /// The machine kind byte: 2 for a Factory, 10 for an HTTP Handler.
+    pub kind: u8,
+    /// The JavaScript the machine runs on the booted board. A Factory the board never configures
+    /// shows the pass-through it really runs.
+    pub source: String,
+}
+
+/// Build the board info from a booted run and the builder that made its keyframe.
+fn board_info(run: &BoardRun, builder: &RenderPacketBuilder) -> BoardInfo {
+    let board = run.board();
+    let minted = run.minted();
+    let captions = board
+        .captions
+        .iter()
+        .map(|caption| CaptionInfo {
+            tick: caption.tick,
+            highlight: caption.highlight,
+            render_handle: minted
+                .get(caption.highlight as usize)
+                .and_then(|&id| builder.handle_for_node(id)),
+            text: caption.text.clone(),
+        })
+        .collect();
+    let state = &run.engine().core().state;
+    let factories = minted
+        .iter()
+        .filter_map(|&id| {
+            let node = state.node(id)?;
+            let Node::Factory(factory) = node else { return None };
+            Some(FactoryInfo {
+                render_handle: builder.handle_for_node(id)?,
+                kind: kind_byte(node, state.ports_of(id)),
+                source: factory.source.clone(),
+            })
+        })
+        .collect();
+    BoardInfo {
+        title: board.title.clone(),
+        end_tick: board.end_tick,
+        captions,
+        factories,
+        calls_out: board.calls_out(),
+    }
+}
+
 /// One board running from its data file.
 ///
 /// A player keeps everything in this value, so two players on one module can't affect each other.
@@ -166,6 +247,8 @@ pub struct Player {
     packets: VecDeque<Vec<u8>>,
     /// How many of the run's effects `take_effects` has handed out.
     effects_taken: u32,
+    /// Read once at boot, so the answer doesn't change as the run goes on.
+    info: BoardInfo,
 }
 
 impl Player {
@@ -184,10 +267,12 @@ impl Player {
         let mut builder = RenderPacketBuilder::new();
         let _baseline = builder.build(run.engine());
         let keyframe = builder.build_keyframe(run.engine());
+        // After the keyframe, which gives every machine on the booted board its render handle.
+        let info = board_info(&run, &builder);
 
         let mut packets = VecDeque::new();
         packets.push_back(encode(&keyframe)?);
-        Ok(Self { board_text: board_text.to_owned(), run, end_tick, builder, packets, effects_taken: 0 })
+        Ok(Self { board_text: board_text.to_owned(), run, end_tick, builder, packets, effects_taken: 0, info })
     }
 
     /// Run up to `ticks` ticks, stopping at the board's end tick, and queue one packet per tick. A
@@ -259,6 +344,12 @@ impl Player {
     #[must_use]
     pub fn board_text(&self) -> &str {
         &self.board_text
+    }
+
+    /// The title, captions and Factory programs, as the board booted.
+    #[must_use]
+    pub fn board_info(&self) -> &BoardInfo {
+        &self.info
     }
 }
 
@@ -444,6 +535,31 @@ pub extern "C" fn fp_take_effects(handle: u32) -> u32 {
     })
 }
 
+/// Put the board info in the out buffer, as postcard bytes of [`BoardInfo`], and return the byte
+/// length. A board info is never empty, so 0 means the error text for a stale handle or a failed
+/// encode is in the out buffer.
+#[unsafe(no_mangle)]
+pub extern "C" fn fp_board_info(handle: u32) -> u32 {
+    with_exports(|exports| {
+        exports.out.clear();
+        let Some(player) = exports.players.get(&handle) else {
+            exports.no_such_handle(handle);
+            return 0;
+        };
+        match encode(player.board_info()) {
+            Ok(bytes) => {
+                let len = len_u32(bytes.len());
+                exports.out = bytes;
+                len
+            }
+            Err(error) => {
+                exports.set_error(error);
+                0
+            }
+        }
+    })
+}
+
 /// Boot the player's board again from its text, so the next packet is a keyframe. Returns a
 /// status.
 #[unsafe(no_mangle)]
@@ -531,6 +647,7 @@ mod tests {
 
     const DEMO_BOARD: &str = include_str!("../../../examples/boards/demo_scene.board.ron");
     const MANIFEST: &str = include_str!("../../../examples/boards/hashes.manifest");
+    const OUTCOMES_BOARD: &str = include_str!("../../../examples/boards/docs/script-outcomes.board.ron");
 
     fn out_text() -> String {
         with_exports(|exports| String::from_utf8_lossy(&exports.out).into_owned())
@@ -635,7 +752,8 @@ mod tests {
 
     /// A board whose Sink makes one HTTP call, after its Source gets a webhook on tick 20.
     const ONE_CALL_BOARD: &str = r#"Board(
-        format: 1,
+        format: 2,
+        title: "One call",
         seed: 7,
         commands: [
             Place(kind: 0, cell_x: 1, cell_y: 2),
@@ -646,6 +764,7 @@ mod tests {
             Configure(node: 1, config: Sink(target: Http(url: "https://example.com/a", method: Put))),
         ],
         script: [At(tick: 20, input: Webhook(source: 0, body: "{}"))],
+        captions: [],
         executor: Executor(default: Reply(after_ticks: 5), rules: []),
         view: View(fit: Board),
         end_tick: 200,
@@ -704,6 +823,67 @@ mod tests {
         assert!(out_text().contains("no player has handle"), "got: {}", out_text());
 
         assert_eq!(fp_take_effects(handle), 0);
+        assert!(out_text().contains("no player has handle"), "got: {}", out_text());
+    }
+
+    /// Each caption's render handle leads back through the builder to the node its board handle
+    /// minted, so a page highlights the machine the board file names.
+    #[test]
+    fn each_demo_caption_names_the_render_handle_of_the_machine_it_highlights() {
+        let player = Player::new(DEMO_BOARD).expect("the demo board loads");
+        let info = player.board_info();
+        assert_eq!(info.title, "Demo factory");
+        assert_eq!(info.end_tick, 1200);
+        assert!(info.captions.len() >= 2, "the demo board has {} captions", info.captions.len());
+        for caption in &info.captions {
+            let render_handle = caption.render_handle.expect("the keyframe names every machine");
+            assert_eq!(
+                player.builder.node_for_handle(render_handle),
+                Some(player.run.minted()[caption.highlight as usize]),
+                "the caption at tick {}",
+                caption.tick
+            );
+        }
+    }
+
+    #[test]
+    fn the_demo_board_info_lists_its_factory_and_its_handler_in_handle_order() {
+        let player = Player::new(DEMO_BOARD).expect("the demo board loads");
+        let info = player.board_info();
+        let kinds: Vec<u8> = info.factories.iter().map(|factory| factory.kind).collect();
+        assert_eq!(kinds, [2, 10]);
+        assert!(info.factories[0].source.contains("rejected: no delivery address"));
+        assert!(info.factories[1].source.contains("body: \"home\""));
+        for factory in &info.factories {
+            let id = player.builder.node_for_handle(factory.render_handle).expect("a drawn machine");
+            assert!(player.run.minted().contains(&id));
+        }
+        assert!(info.calls_out, "the demo board places a Route");
+    }
+
+    #[test]
+    fn the_script_outcomes_info_lists_the_pass_through_factory_then_the_handler() {
+        let player = Player::new(OUTCOMES_BOARD).expect("the board loads");
+        let info = player.board_info();
+        assert_eq!(info.title, "Scripted call outcomes");
+        let kinds: Vec<u8> = info.factories.iter().map(|factory| factory.kind).collect();
+        assert_eq!(kinds, [2, 10]);
+        assert!(info.factories[0].render_handle < info.factories[1].render_handle);
+        assert!(!info.factories[0].source.is_empty(), "the Factory with no Configure runs a pass-through");
+        assert!(info.factories[1].source.contains("hello"));
+        assert!(info.calls_out);
+    }
+
+    #[test]
+    fn fp_board_info_hands_over_the_encoded_info_and_answers_a_stale_handle() {
+        let handle = create(DEMO_BOARD.as_bytes());
+        let len = fp_board_info(handle);
+        assert!(len > 0, "got: {}", out_text());
+        let expected = postcard::to_allocvec(Player::new(DEMO_BOARD).expect("it loads").board_info()).expect("it encodes");
+        let bytes = with_exports(|exports| exports.out.clone());
+        assert_eq!(bytes, expected);
+        assert_eq!(fp_destroy(handle), FP_OK);
+        assert_eq!(fp_board_info(handle), 0);
         assert!(out_text().contains("no player has handle"), "got: {}", out_text());
     }
 

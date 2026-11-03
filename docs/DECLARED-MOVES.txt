@@ -181,3 +181,12 @@ crates/fabrico-engine/tests/board_lint.rs
 crates/fabrico-engine/tests/fixtures/board_lint/deep_recursion.board.ron
 crates/fabrico-engine/tests/fixtures/board_lint/near_memory_limit.board.ron
 crates/fabrico-engine/tests/fixtures/board_lint/swallowed_overflow.board.ron
+# Board format 2: a title and a captions list, each caption's tick checked by the parser and its
+# machine checked at boot. A format 1 file is refused by its number. Neither field reaches the core,
+# so no end hash in the manifest moves.
+crates/fabrico-engine/src/board.rs
+# Every board under examples/boards is format 2 with a title, and the demo board's captions say what
+# its run does on their ticks.
+crates/fabrico-engine/tests/board_captions.rs
+# The scripted-run test reads the board format the parser now accepts.
+crates/fabrico-engine/tests/board_outcomes.rs

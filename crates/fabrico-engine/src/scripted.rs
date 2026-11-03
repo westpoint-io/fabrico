@@ -331,4 +331,10 @@ impl BoardRun {
     pub fn minted(&self) -> &[NodeId] {
         &self.minted
     }
+
+    /// The board this run plays, as it was booted.
+    #[must_use]
+    pub fn board(&self) -> &BoardFile {
+        &self.board
+    }
 }

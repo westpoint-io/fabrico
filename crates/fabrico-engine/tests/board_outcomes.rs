@@ -100,7 +100,7 @@ fn result_of(walked: &Walked, id: CommandId) -> Vec<(u64, Outcome)> {
 #[test]
 fn the_board_file_parses() {
     let board = parsed(BOARD);
-    assert_eq!(board.format, 1);
+    assert_eq!(board.format, 2);
     assert!(board.end_tick > board.script.last().expect("the board has a script").tick);
 }
 

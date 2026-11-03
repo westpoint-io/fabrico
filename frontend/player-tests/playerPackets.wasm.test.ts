@@ -451,6 +451,70 @@ describe('the player interface', () => {
   );
 });
 
+describe('the board info in wasm under Node', () => {
+  let module: PlayerModule;
+
+  beforeAll(async () => {
+    module = await loadFresh();
+  });
+
+  /** The captions as the board file spells them, read with a pattern so the test needs no RON parser. */
+  function captionsInFile(text: string): { tick: number; highlight: number; text: string }[] {
+    return [...text.matchAll(/Caption\(tick: (\d+), highlight: (\d+), text: "([^"]*)"\)/g)].map((m) => ({
+      tick: Number(m[1]),
+      highlight: Number(m[2]),
+      text: m[3],
+    }));
+  }
+
+  it('hands the page the demo board title, captions and programs, each caption on a keyframe node', () => {
+    const text = repoFile(DEMO);
+    const board = module.createBoard(text);
+    const info = board.boardInfo();
+    const keyframeBytes = board.takePacket();
+    if (keyframeBytes === null) expect.fail(`${DEMO}: no keyframe queued at boot`);
+    const keyframe = decodeRenderPacket(keyframeBytes);
+    const nodeKinds = new Map(keyframe.placed.map((node) => [node.id, node.kind]));
+
+    expect(info.title).toBe('Demo factory');
+    expect(info.endTick).toBe(board.endTick());
+    const fromFile = captionsInFile(text);
+    expect(fromFile.length, `${DEMO}: captions in the file`).toBeGreaterThanOrEqual(2);
+    expect(info.captions.map(({ tick, highlight, text }) => ({ tick, highlight, text }))).toEqual(fromFile);
+    for (const caption of info.captions) {
+      expect(caption.renderHandle, `${DEMO}: the caption at tick ${caption.tick}`).not.toBeNull();
+      expect(nodeKinds.has(caption.renderHandle as number), `${DEMO}: caption ${caption.tick}'s node`).toBe(true);
+    }
+
+    expect(info.factories.map(({ kind }) => kind)).toEqual([2, 10]);
+    for (const factory of info.factories) {
+      expect(nodeKinds.get(factory.renderHandle), `${DEMO}: the program's node kind`).toBe(factory.kind);
+    }
+    expect(info.factories[0].source).toContain('rejected: no delivery address');
+    expect(info.callsOut).toBe(true);
+
+    // The info is read at boot, so a step and a restart leave it the same.
+    board.step(300);
+    expect(board.boardInfo()).toEqual(info);
+    board.restart();
+    expect(board.boardInfo()).toEqual(info);
+    board.destroy();
+    expect(() => board.boardInfo()).toThrow(/no player has handle/);
+  });
+
+  it('lists the script-outcomes Factory and HTTP Handler in handle order', () => {
+    const board = module.createBoard(repoFile(OUTCOMES));
+    const info = board.boardInfo();
+    expect(info.title).toBe('Scripted call outcomes');
+    expect(info.captions).toEqual([]);
+    expect(info.factories.map(({ kind }) => kind)).toEqual([2, 10]);
+    expect(info.factories[0].renderHandle).toBeLessThan(info.factories[1].renderHandle);
+    expect(info.factories[1].source).toContain('hello');
+    expect(info.callsOut).toBe(true);
+    board.destroy();
+  });
+});
+
 describe('the shipped module', () => {
   it('has a linear-memory stack larger than its default stack limit', async () => {
     const instance = await WebAssembly.instantiate(await WebAssembly.compile(wasmBytes()), {

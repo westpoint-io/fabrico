@@ -182,7 +182,8 @@ fn factory_board(source: &str) -> String {
 fn factory_board_with_script(source: &str, more_script: &str) -> String {
     format!(
         r##"Board(
-    format: 1,
+    format: 2,
+    title: "One Factory",
     seed: 94,
     commands: [
         Place(kind: 0, cell_x: 1, cell_y: 2),
@@ -199,6 +200,7 @@ fn factory_board_with_script(source: &str, more_script: &str) -> String {
     script: [
         At(tick: 40, input: Webhook(source: 0, body: "{{}}")),
 {more_script}    ],
+    captions: [],
     executor: Executor(default: Reply(after_ticks: 1), rules: []),
     view: View(fit: Board),
     end_tick: 120,

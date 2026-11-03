@@ -55,8 +55,12 @@
 // is already Debug), for the same teaching reason as the Source's Webhook trigger.
 // `method: Post` matches the executor's behavior (it always POSTs;
 // the field is inert host-side, authored Post so data == behavior).
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
 Board(
-    format: 1,
+    format: 2,
+    title: "Order processing",
     seed: 55,
     commands: [
     // ── Machines (handles 0..=5, mint order == Place order) ──────────────
@@ -130,6 +134,7 @@ export default function (input, ctx) {
         At(tick: 60, input: Webhook(source: 0, body: r#"{"id":"ord-1","items":[{"sku":"widget","qty":2,"price":5}]}"#)),
         At(tick: 120, input: Webhook(source: 0, body: r#"{"id":"ord-2","items":[{"sku":"gadget","qty":1,"price":9}]}"#)),
     ],
+    captions: [],
     executor: Executor(default: Reply(after_ticks: 1), rules: []),
     view: View(fit: Board),
     end_tick: 1200,

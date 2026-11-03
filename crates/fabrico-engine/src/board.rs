@@ -1,9 +1,9 @@
 //! A board file: the one data format an example, a test and a docs page all read.
 //!
 //! A board is plain RON text at `examples/boards/<name>.board.ron`. It holds a format version, a
-//! seed, the list of [`GridCommand`]s that build the board, a track of scripted inputs, the
-//! answers a scripted run gives to outbound calls, a view hint and the tick a scripted run ends
-//! on. It isn't a `.fab` save: the app refuses a save at each version bump, and a board is source
+//! title, a seed, the list of [`GridCommand`]s that build the board, a track of scripted inputs,
+//! the captions a viewer shows on the way, the answers a scripted run gives to outbound calls, a
+//! view hint and the tick a scripted run ends on. It isn't a `.fab` save: the app refuses a save at each version bump, and a board is source
 //! text a person edits.
 //!
 //! [`parse_board`] takes a string and reads no file. Everything it can be handed comes back as a
@@ -11,12 +11,14 @@
 //! [`Engine`] through [`apply_gesture`], the path a user's own gesture takes, so a board can only
 //! do what a user can.
 //!
-//! The app ignores `script`, `executor` and `end_tick`, so an example in the app needs a real
-//! webhook or a timer to move.
+//! The app ignores `title`, `script`, `captions`, `executor` and `end_tick`, so an example in the
+//! app needs a real webhook or a timer to move. Neither a title nor a caption reaches the core, so
+//! neither moves a hash.
 
 use fabrico_command::CommandError;
 use fabrico_core::ids::NodeId;
-use fabrico_protocol::GridCommand;
+use fabrico_core::state::Node;
+use fabrico_protocol::{GridCommand, MachineConfig, SinkTemplate, machine_kind};
 use serde::Deserialize;
 
 use crate::engine::Engine;
@@ -25,7 +27,7 @@ use crate::timer::project_timers;
 
 /// The one board format this build reads. The check is exact in both directions, so an older
 /// board and a newer one are both refused by name. There is no shim.
-pub const BOARD_FORMAT: u32 = 1;
+pub const BOARD_FORMAT: u32 = 2;
 
 /// The ticks a boot folds after a board's last command: the history seal, one record in one tick.
 /// A booted core therefore sits at `commands.len() + HISTORY_SEAL_TICKS`, which is the boot end.
@@ -37,6 +39,8 @@ pub const HISTORY_SEAL_TICKS: u64 = 1;
 pub struct BoardFile {
     /// The format version, always [`BOARD_FORMAT`] once parsed.
     pub format: u32,
+    /// The board's name, as a page shows it. A viewer reads it and the core never does.
+    pub title: String,
     /// The genesis seed the board boots on.
     pub seed: u64,
     /// The commands that build the board, applied in file order, one per tick. Dense handles
@@ -44,6 +48,9 @@ pub struct BoardFile {
     pub commands: Vec<GridCommand>,
     /// Scripted inputs in tick order. Entries on one tick apply in file order.
     pub script: Vec<ScriptEntry>,
+    /// Where a viewer stops to explain a tick, in tick order. A viewer reads these and the core
+    /// never does.
+    pub captions: Vec<Caption>,
     /// What a scripted run answers when the board calls out.
     pub executor: ExecutorSpec,
     /// How a viewer frames the board.
@@ -60,6 +67,21 @@ pub struct ScriptEntry {
     pub tick: u64,
     /// What arrives on that tick.
     pub input: ScriptInput,
+}
+
+/// A stop a viewer makes on the way through a run: it pauses on `tick`, highlights one machine and
+/// shows one sentence. Play carries on from there.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Caption", deny_unknown_fields)]
+pub struct Caption {
+    /// The core tick the viewer pauses on, the tick its counter shows. Later than the boot end,
+    /// at most `end_tick`, and no earlier than the caption before it.
+    pub tick: u64,
+    /// The dense handle of the machine to highlight. It has to be a machine the board's commands
+    /// mint, and not a belt or a cable.
+    pub highlight: u64,
+    /// The sentence the viewer shows, as plain text.
+    pub text: String,
 }
 
 /// What a script can feed a running board.
@@ -204,6 +226,33 @@ pub enum BoardError {
         /// Why it was refused.
         source: CommandError,
     },
+    /// A caption falls at or before the boot end, when the board isn't built yet.
+    CaptionTickBeforeBoot {
+        /// The caption's tick.
+        tick: u64,
+        /// The tick the boot ends on.
+        boot_end: u64,
+    },
+    /// A caption falls after `end_tick`, so a run stops before reaching it.
+    CaptionTickAfterEnd {
+        /// The caption's tick.
+        tick: u64,
+        /// The board's end tick.
+        end_tick: u64,
+    },
+    /// A caption has a lower tick than the one before it.
+    CaptionOutOfOrder {
+        /// The caption's tick.
+        tick: u64,
+    },
+    /// A caption highlights a handle that isn't a machine the board's commands mint: a belt, a
+    /// cable, a node a command deleted, or a handle no command mints.
+    CaptionNotAMachine {
+        /// The caption's tick.
+        tick: u64,
+        /// The handle it highlights.
+        handle: u64,
+    },
 }
 
 impl std::fmt::Display for BoardError {
@@ -236,6 +285,18 @@ impl std::fmt::Display for BoardError {
             }
             Self::ScriptEditRefused { tick, source } => {
                 write!(f, "the scripted edit at tick {tick} was refused: {source}")
+            }
+            Self::CaptionTickBeforeBoot { tick, boot_end } => {
+                write!(f, "a caption at tick {tick} is at or before the boot end, tick {boot_end}")
+            }
+            Self::CaptionTickAfterEnd { tick, end_tick } => {
+                write!(f, "a caption at tick {tick} would never show, because the run ends at tick {end_tick}")
+            }
+            Self::CaptionOutOfOrder { tick } => {
+                write!(f, "the caption at tick {tick} is earlier than the one before it")
+            }
+            Self::CaptionNotAMachine { tick, handle } => {
+                write!(f, "the caption at tick {tick} highlights handle {handle}, which isn't a machine the board's commands mint")
             }
         }
     }
@@ -301,6 +362,21 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
     if let Some(entry) = board.script.iter().find(|entry| entry.tick >= board.end_tick) {
         return Err(BoardError::ScriptTickAfterEnd { tick: entry.tick, end_tick: board.end_tick });
     }
+    // A caption may sit on the end tick itself, because a run stops there and a viewer can
+    // still pause on it.
+    let mut previous = 0;
+    for caption in &board.captions {
+        if caption.tick <= boot_end {
+            return Err(BoardError::CaptionTickBeforeBoot { tick: caption.tick, boot_end });
+        }
+        if caption.tick > board.end_tick {
+            return Err(BoardError::CaptionTickAfterEnd { tick: caption.tick, end_tick: board.end_tick });
+        }
+        if caption.tick < previous {
+            return Err(BoardError::CaptionOutOfOrder { tick: caption.tick });
+        }
+        previous = caption.tick;
+    }
     for outcome in outcomes() {
         if let OutboundOutcome::Reply { after_ticks } | OutboundOutcome::Error { after_ticks } = outcome
             && *after_ticks > board.end_tick
@@ -320,8 +396,9 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
 /// boot just wrote: a timer installed earlier fires into a half-built board.
 ///
 /// # Errors
-/// [`BoardError::Command`] if a command is refused, and [`BoardError::EmptyBoard`] if the commands
-/// minted nothing.
+/// [`BoardError::Command`] if a command is refused, [`BoardError::EmptyBoard`] if the commands
+/// minted nothing, and [`BoardError::CaptionNotAMachine`] if a caption highlights anything but a
+/// machine the commands minted.
 pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>, BoardError> {
     let mut minted: Vec<NodeId> = Vec::new();
     for cmd in &board.commands {
@@ -334,9 +411,42 @@ pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>
     if minted.is_empty() {
         return Err(BoardError::EmptyBoard);
     }
+    check_caption_highlights(engine, board, &minted)?;
     let timers = project_timers(engine.session().edit_log());
     engine.set_timers(timers);
     Ok(minted)
+}
+
+/// Refuse a caption whose handle isn't a machine on the booted board. Only the handles the
+/// commands minted count, so a handle a scripted edit mints later is refused as well.
+fn check_caption_highlights(engine: &Engine, board: &BoardFile, minted: &[NodeId]) -> Result<(), BoardError> {
+    for caption in &board.captions {
+        let node = minted.get(caption.highlight as usize).and_then(|&id| engine.core().state.node(id));
+        if matches!(node, None | Some(Node::Belt(_) | Node::Wire(_))) {
+            return Err(BoardError::CaptionNotAMachine { tick: caption.tick, handle: caption.highlight });
+        }
+    }
+    Ok(())
+}
+
+impl BoardFile {
+    /// Whether a run of this board makes calls a real host would send out: a command, at boot or
+    /// in the script, places a Route or gives a Sink an HTTP target. A page uses it to say the
+    /// calls are recorded rather than sent.
+    #[must_use]
+    pub fn calls_out(&self) -> bool {
+        let scripted = self.script.iter().filter_map(|entry| match &entry.input {
+            ScriptInput::Edit(cmd) => Some(cmd),
+            _ => None,
+        });
+        self.commands.iter().chain(scripted).any(|cmd| {
+            matches!(
+                cmd,
+                GridCommand::Place { kind: machine_kind::ENDPOINT, .. }
+                    | GridCommand::Configure { config: MachineConfig::Sink { target: SinkTemplate::Http { .. } }, .. }
+            )
+        })
+    }
 }
 
 #[cfg(test)]
@@ -348,10 +458,19 @@ mod tests {
 
     /// A one-command board with the rest of its fields spelled out, so a test changes one thing.
     fn board_text(format: u32, commands: &str, script: &str, executor: &str, end_tick: u64) -> String {
+        captioned_text(format, commands, script, "", executor, end_tick)
+    }
+
+    /// [`board_text`] with a captions list as well.
+    fn captioned_text(format: u32, commands: &str, script: &str, captions: &str, executor: &str, end_tick: u64) -> String {
         format!(
-            "Board(format: {format}, seed: 7, commands: [{commands}], script: [{script}], \
-             executor: {executor}, view: View(fit: Board), end_tick: {end_tick})"
+            "Board(format: {format}, title: \"A test board\", seed: 7, commands: [{commands}], script: [{script}], \
+             captions: [{captions}], executor: {executor}, view: View(fit: Board), end_tick: {end_tick})"
         )
+    }
+
+    fn caption_at(tick: u64, highlight: u64) -> String {
+        format!(r#"Caption(tick: {tick}, highlight: {highlight}, text: "Something happens here.")"#)
     }
 
     const ONE_PLACE: &str = "Place(kind: 0, cell_x: 1, cell_y: 3)";
@@ -399,7 +518,7 @@ mod tests {
     /// that does nothing.
     #[test]
     fn a_stray_field_in_the_current_format_is_a_parse_error() {
-        let src = board_text(1, ONE_PLACE, "", PLAIN_EXECUTOR, 900).replace("seed: 7,", "seed: 7, sneed: 8,");
+        let src = board_text(BOARD_FORMAT, ONE_PLACE, "", PLAIN_EXECUTOR, 900).replace("seed: 7,", "seed: 7, sneed: 8,");
         assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{src}");
     }
 
@@ -415,8 +534,8 @@ mod tests {
             ),
         ] {
             let entry = |input: &str| format!("At(tick: 50, input: {input})");
-            assert!(parse_board(&board_text(1, ONE_PLACE, &entry(valid), PLAIN_EXECUTOR, 900)).is_ok(), "{valid}");
-            let src = board_text(1, ONE_PLACE, &entry(stray), PLAIN_EXECUTOR, 900);
+            assert!(parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, &entry(valid), PLAIN_EXECUTOR, 900)).is_ok(), "{valid}");
+            let src = board_text(BOARD_FORMAT, ONE_PLACE, &entry(stray), PLAIN_EXECUTOR, 900);
             assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{stray}");
         }
         for (valid, stray) in [
@@ -424,8 +543,8 @@ mod tests {
             ("Error(after_ticks: 1)", "Error(after_ticks: 1, status: 500)"),
         ] {
             let executor = |outcome: &str| format!("Executor(default: {outcome}, rules: [])");
-            assert!(parse_board(&board_text(1, ONE_PLACE, "", &executor(valid), 900)).is_ok(), "{valid}");
-            let src = board_text(1, ONE_PLACE, "", &executor(stray), 900);
+            assert!(parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", &executor(valid), 900)).is_ok(), "{valid}");
+            let src = board_text(BOARD_FORMAT, ONE_PLACE, "", &executor(stray), 900);
             assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{stray}");
         }
     }
@@ -433,10 +552,10 @@ mod tests {
     #[test]
     fn an_empty_command_list_is_refused_and_an_empty_script_and_rule_list_are_fine() {
         assert_eq!(
-            parse_board(&board_text(1, "", "", PLAIN_EXECUTOR, 900)),
+            parse_board(&board_text(BOARD_FORMAT, "", "", PLAIN_EXECUTOR, 900)),
             Err(BoardError::EmptyBoard)
         );
-        let board = parse_board(&board_text(1, ONE_PLACE, "", PLAIN_EXECUTOR, 900)).expect("a valid board");
+        let board = parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", PLAIN_EXECUTOR, 900)).expect("a valid board");
         assert!(board.script.is_empty());
         assert!(board.executor.rules.is_empty());
         assert_eq!(board.commands.len(), 1);
@@ -455,7 +574,7 @@ mod tests {
             r#"Executor(default: Timeout, rules: [Rule(url_prefix: "https://a", outcome: Error(after_ticks: 0))])"#,
         ] {
             assert_eq!(
-                parse_board(&board_text(1, ONE_PLACE, "", executor, 900)),
+                parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", executor, 900)),
                 Err(BoardError::ZeroAfterTicks),
                 "{executor}"
             );
@@ -475,24 +594,24 @@ mod tests {
                 format!(r#"Executor(default: Timeout, rules: [Rule(url_prefix: "https://a", outcome: Error(after_ticks: {after_ticks}))])"#),
             ] {
                 assert_eq!(
-                    parse_board(&board_text(1, ONE_PLACE, "", &executor, 900)),
+                    parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", &executor, 900)),
                     Err(BoardError::AfterTicksPastEnd { after_ticks, end_tick: 900 }),
                     "{executor}"
                 );
             }
         }
         let at_end = "Executor(default: Reply(after_ticks: 900), rules: [])";
-        assert!(parse_board(&board_text(1, ONE_PLACE, "", at_end, 900)).is_ok());
+        assert!(parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", at_end, 900)).is_ok());
     }
 
     #[test]
     fn a_script_entry_at_the_boot_end_is_refused_and_one_tick_later_is_accepted() {
-        let at_end = board_text(1, ONE_PLACE, &webhook_at(ONE_PLACE_BOOT_END, "a"), PLAIN_EXECUTOR, 900);
+        let at_end = board_text(BOARD_FORMAT, ONE_PLACE, &webhook_at(ONE_PLACE_BOOT_END, "a"), PLAIN_EXECUTOR, 900);
         assert_eq!(
             parse_board(&at_end),
             Err(BoardError::ScriptTickBeforeBoot { tick: ONE_PLACE_BOOT_END, boot_end: ONE_PLACE_BOOT_END })
         );
-        let after = board_text(1, ONE_PLACE, &webhook_at(ONE_PLACE_BOOT_END + 1, "a"), PLAIN_EXECUTOR, 900);
+        let after = board_text(BOARD_FORMAT, ONE_PLACE, &webhook_at(ONE_PLACE_BOOT_END + 1, "a"), PLAIN_EXECUTOR, 900);
         let board = parse_board(&after).expect("an entry one tick after the boot end is valid");
         assert_eq!(board.script[0].tick, ONE_PLACE_BOOT_END + 1);
     }
@@ -501,7 +620,7 @@ mod tests {
     fn script_ticks_running_backwards_are_refused() {
         let script = format!("{}, {}", webhook_at(50, "a"), webhook_at(40, "b"));
         assert_eq!(
-            parse_board(&board_text(1, ONE_PLACE, &script, PLAIN_EXECUTOR, 900)),
+            parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, &script, PLAIN_EXECUTOR, 900)),
             Err(BoardError::ScriptOutOfOrder { tick: 40 })
         );
     }
@@ -509,7 +628,7 @@ mod tests {
     #[test]
     fn two_entries_on_one_tick_are_accepted_and_keep_file_order() {
         let script = format!("{}, {}, {}", webhook_at(50, "first"), webhook_at(50, "second"), webhook_at(51, "third"));
-        let board = parse_board(&board_text(1, ONE_PLACE, &script, PLAIN_EXECUTOR, 900)).expect("a valid script");
+        let board = parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, &script, PLAIN_EXECUTOR, 900)).expect("a valid script");
         let bodies: Vec<&str> = board
             .script
             .iter()
@@ -524,20 +643,20 @@ mod tests {
     #[test]
     fn an_end_tick_before_the_boot_end_is_refused_and_one_on_it_is_accepted() {
         assert_eq!(
-            parse_board(&board_text(1, ONE_PLACE, "", PLAIN_EXECUTOR, ONE_PLACE_BOOT_END - 1)),
+            parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", PLAIN_EXECUTOR, ONE_PLACE_BOOT_END - 1)),
             Err(BoardError::EndTickBeforeBoot { end_tick: ONE_PLACE_BOOT_END - 1, boot_end: ONE_PLACE_BOOT_END })
         );
-        assert!(parse_board(&board_text(1, ONE_PLACE, "", PLAIN_EXECUTOR, ONE_PLACE_BOOT_END)).is_ok());
+        assert!(parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, "", PLAIN_EXECUTOR, ONE_PLACE_BOOT_END)).is_ok());
     }
 
     /// A run stops when the core reaches `end_tick`, so an entry on that tick would never apply.
     #[test]
     fn a_script_entry_on_the_end_tick_is_refused_and_one_tick_earlier_is_accepted() {
-        let on_end = board_text(1, ONE_PLACE, &webhook_at(50, "a"), PLAIN_EXECUTOR, 50);
+        let on_end = board_text(BOARD_FORMAT, ONE_PLACE, &webhook_at(50, "a"), PLAIN_EXECUTOR, 50);
         assert_eq!(parse_board(&on_end), Err(BoardError::ScriptTickAfterEnd { tick: 50, end_tick: 50 }));
-        let past_end = board_text(1, ONE_PLACE, &webhook_at(60, "a"), PLAIN_EXECUTOR, 50);
+        let past_end = board_text(BOARD_FORMAT, ONE_PLACE, &webhook_at(60, "a"), PLAIN_EXECUTOR, 50);
         assert_eq!(parse_board(&past_end), Err(BoardError::ScriptTickAfterEnd { tick: 60, end_tick: 50 }));
-        let before_end = board_text(1, ONE_PLACE, &webhook_at(49, "a"), PLAIN_EXECUTOR, 50);
+        let before_end = board_text(BOARD_FORMAT, ONE_PLACE, &webhook_at(49, "a"), PLAIN_EXECUTOR, 50);
         assert!(parse_board(&before_end).is_ok());
     }
 
@@ -554,7 +673,7 @@ mod tests {
             Rule(url_prefix: "https://example.com/bad", outcome: Error(after_ticks: 3)),
             Rule(url_prefix: "https://example.com/lost", outcome: Timeout),
         ])"#;
-        let board = parse_board(&board_text(1, ONE_PLACE, script, executor, 900)).expect("a valid board");
+        let board = parse_board(&board_text(BOARD_FORMAT, ONE_PLACE, script, executor, 900)).expect("a valid board");
         assert_eq!(board.script[0].input, ScriptInput::Webhook { source: 0, body: "{}".to_owned() });
         assert_eq!(
             board.script[1].input,
@@ -579,7 +698,7 @@ mod tests {
         let commands = "Place(kind: 0, cell_x: 1, cell_y: 3), \
                         Place(kind: 7, cell_x: 5, cell_y: 3), \
                         Configure(node: 0, config: Source(trigger: Timer(interval_ticks: 8)))";
-        let board = parse_board(&board_text(1, commands, "", PLAIN_EXECUTOR, 900)).expect("a valid board");
+        let board = parse_board(&board_text(BOARD_FORMAT, commands, "", PLAIN_EXECUTOR, 900)).expect("a valid board");
         let mut engine = fresh_engine(board.seed);
         let minted = boot_engine(&mut engine, &board).expect("the board boots");
         assert_eq!(minted.len(), 2);
@@ -592,9 +711,150 @@ mod tests {
     #[test]
     fn a_refused_command_comes_back_as_a_typed_error() {
         let commands = "Place(kind: 0, cell_x: 1, cell_y: 3), Place(kind: 7, cell_x: 1, cell_y: 3)";
-        let board = parse_board(&board_text(1, commands, "", PLAIN_EXECUTOR, 900)).expect("the text is valid");
+        let board = parse_board(&board_text(BOARD_FORMAT, commands, "", PLAIN_EXECUTOR, 900)).expect("the text is valid");
         let mut engine = fresh_engine(board.seed);
         assert!(matches!(boot_engine(&mut engine, &board), Err(BoardError::Command(_))));
+    }
+
+    /// Format 2 carries a title and captions. The same text with the format number set back to 1
+    /// is refused by its number before anything else is read.
+    #[test]
+    fn a_format_2_board_with_captions_parses_and_the_same_text_as_format_1_is_refused() {
+        let captions = format!("{}, {}", caption_at(50, 0), caption_at(60, 0));
+        let src = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &captions, PLAIN_EXECUTOR, 900);
+        let board = parse_board(&src).expect("a valid format 2 board");
+        assert_eq!(board.title, "A test board");
+        assert_eq!(
+            board.captions,
+            [
+                Caption { tick: 50, highlight: 0, text: "Something happens here.".to_owned() },
+                Caption { tick: 60, highlight: 0, text: "Something happens here.".to_owned() },
+            ]
+        );
+        let as_format_1 = captioned_text(1, ONE_PLACE, "", &captions, PLAIN_EXECUTOR, 900);
+        assert_eq!(parse_board(&as_format_1), Err(BoardError::UnknownFormat(1)));
+    }
+
+    /// A format 1 board as it was written, with no title and no captions, is refused by its number
+    /// rather than for the two missing fields.
+    #[test]
+    fn a_board_written_in_format_1_is_refused_by_its_format() {
+        let src = format!(
+            "Board(format: 1, seed: 7, commands: [{ONE_PLACE}], script: [], executor: {PLAIN_EXECUTOR}, \
+             view: View(fit: Board), end_tick: 900)"
+        );
+        assert_eq!(parse_board(&src), Err(BoardError::UnknownFormat(1)));
+    }
+
+    #[test]
+    fn a_board_with_no_title_or_no_captions_field_is_a_parse_error() {
+        let full = board_text(BOARD_FORMAT, ONE_PLACE, "", PLAIN_EXECUTOR, 900);
+        for missing in [full.replace("title: \"A test board\", ", ""), full.replace("captions: [], ", "")] {
+            assert!(matches!(parse_board(&missing), Err(BoardError::Parse(_))), "{missing}");
+        }
+    }
+
+    #[test]
+    fn a_stray_field_inside_a_caption_is_a_parse_error() {
+        let stray = r#"Caption(tick: 50, highlight: 0, text: "x", colour: 3)"#;
+        let src = captioned_text(BOARD_FORMAT, ONE_PLACE, "", stray, PLAIN_EXECUTOR, 900);
+        assert!(matches!(parse_board(&src), Err(BoardError::Parse(_))), "{src}");
+    }
+
+    #[test]
+    fn a_caption_at_the_boot_end_is_refused_and_one_tick_later_is_accepted() {
+        let at_end = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &caption_at(ONE_PLACE_BOOT_END, 0), PLAIN_EXECUTOR, 900);
+        assert_eq!(
+            parse_board(&at_end),
+            Err(BoardError::CaptionTickBeforeBoot { tick: ONE_PLACE_BOOT_END, boot_end: ONE_PLACE_BOOT_END })
+        );
+        let after = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &caption_at(ONE_PLACE_BOOT_END + 1, 0), PLAIN_EXECUTOR, 900);
+        assert!(parse_board(&after).is_ok());
+    }
+
+    /// A caption on the end tick is the last one a viewer can reach. One tick later is refused.
+    #[test]
+    fn a_caption_after_the_end_tick_is_refused_and_one_on_it_is_accepted() {
+        let past = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &caption_at(51, 0), PLAIN_EXECUTOR, 50);
+        assert_eq!(parse_board(&past), Err(BoardError::CaptionTickAfterEnd { tick: 51, end_tick: 50 }));
+        let on_end = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &caption_at(50, 0), PLAIN_EXECUTOR, 50);
+        assert!(parse_board(&on_end).is_ok());
+    }
+
+    #[test]
+    fn captions_out_of_tick_order_are_refused_and_two_on_one_tick_are_accepted() {
+        let backwards = format!("{}, {}", caption_at(60, 0), caption_at(50, 0));
+        let src = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &backwards, PLAIN_EXECUTOR, 900);
+        assert_eq!(parse_board(&src), Err(BoardError::CaptionOutOfOrder { tick: 50 }));
+        let same_tick = format!("{}, {}", caption_at(50, 0), caption_at(50, 0));
+        assert!(parse_board(&captioned_text(BOARD_FORMAT, ONE_PLACE, "", &same_tick, PLAIN_EXECUTOR, 900)).is_ok());
+    }
+
+    /// The commands mint a Source (0), a Sink (1), a belt (2), a Route (3), an HTTP Handler (4)
+    /// and its two cables (5 and 6), so a caption can name each kind of handle.
+    const CABLED_COMMANDS: &str = "Place(kind: 0, cell_x: 1, cell_y: 2), \
+        Place(kind: 7, cell_x: 5, cell_y: 2), \
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]), \
+        Place(kind: 9, cell_x: 13, cell_y: 6), \
+        Place(kind: 10, cell_x: 16, cell_y: 5), \
+        DrawWire(from_node: 3, from_port: 1, to_node: 4, to_port: 0)";
+
+    fn boot_with_caption(highlight: u64) -> Result<Vec<NodeId>, BoardError> {
+        let src = captioned_text(BOARD_FORMAT, CABLED_COMMANDS, "", &caption_at(100, highlight), PLAIN_EXECUTOR, 900);
+        let board = parse_board(&src).expect("the text is valid, since the parser doesn't know the handles");
+        let mut engine = fresh_engine(board.seed);
+        boot_engine(&mut engine, &board)
+    }
+
+    #[test]
+    fn a_caption_on_a_belt_a_cable_or_an_unminted_handle_is_refused_at_boot() {
+        assert_eq!(boot_with_caption(2), Err(BoardError::CaptionNotAMachine { tick: 100, handle: 2 }), "a belt");
+        assert_eq!(boot_with_caption(5), Err(BoardError::CaptionNotAMachine { tick: 100, handle: 5 }), "a cable");
+        assert_eq!(boot_with_caption(6), Err(BoardError::CaptionNotAMachine { tick: 100, handle: 6 }), "a cable");
+        assert_eq!(boot_with_caption(7), Err(BoardError::CaptionNotAMachine { tick: 100, handle: 7 }), "never minted");
+        assert_eq!(
+            boot_with_caption(u64::MAX),
+            Err(BoardError::CaptionNotAMachine { tick: 100, handle: u64::MAX }),
+            "never minted"
+        );
+        for machine in [0, 1, 3, 4] {
+            assert!(boot_with_caption(machine).is_ok(), "handle {machine} is a machine");
+        }
+    }
+
+    /// The error names the tick and the handle, so a person can find the line in the file.
+    #[test]
+    fn the_caption_errors_name_the_tick_and_the_handle() {
+        let text = BoardError::CaptionNotAMachine { tick: 100, handle: 2 }.to_string();
+        assert!(text.contains("tick 100") && text.contains("handle 2"), "{text}");
+        let text = BoardError::CaptionTickAfterEnd { tick: 51, end_tick: 50 }.to_string();
+        assert!(text.contains("tick 51") && text.contains("tick 50"), "{text}");
+    }
+
+    /// A handle a scripted edit mints is past the boot, so a caption can't name it.
+    #[test]
+    fn a_caption_on_a_handle_a_scripted_edit_mints_is_refused() {
+        let script = "At(tick: 50, input: Edit(Place(kind: 7, cell_x: 9, cell_y: 9)))";
+        let src = captioned_text(BOARD_FORMAT, ONE_PLACE, script, &caption_at(100, 1), PLAIN_EXECUTOR, 900);
+        let board = parse_board(&src).expect("the text is valid");
+        let mut engine = fresh_engine(board.seed);
+        assert_eq!(boot_engine(&mut engine, &board), Err(BoardError::CaptionNotAMachine { tick: 100, handle: 1 }));
+    }
+
+    #[test]
+    fn calls_out_reads_a_route_or_an_http_sink_at_boot_or_in_the_script() {
+        let parsed = |commands: &str, script: &str| {
+            parse_board(&board_text(BOARD_FORMAT, commands, script, PLAIN_EXECUTOR, 900)).expect("a valid board")
+        };
+        assert!(!parsed(ONE_PLACE, "").calls_out());
+        assert!(parsed(CABLED_COMMANDS, "").calls_out(), "a Route");
+        let http_sink = "Place(kind: 7, cell_x: 5, cell_y: 2), \
+            Configure(node: 0, config: Sink(target: Http(url: \"https://example.com\", method: Post)))";
+        assert!(parsed(http_sink, "").calls_out(), "a Sink with an HTTP target");
+        let debug_sink = "Place(kind: 7, cell_x: 5, cell_y: 2), Configure(node: 0, config: Sink(target: Debug))";
+        assert!(!parsed(debug_sink, "").calls_out(), "a Debug Sink");
+        let scripted = "At(tick: 50, input: Edit(Place(kind: 9, cell_x: 9, cell_y: 9)))";
+        assert!(parsed(ONE_PLACE, scripted).calls_out(), "a Route placed by the script");
     }
 
     proptest! {

@@ -33,8 +33,12 @@
 // fabrico-command `route_handler_pair`), request first, so a second DrawWire for the reply
 // would be refused as an occupied port. Every Dock, Rotate, Configure and DrawWire targets a
 // handle minted by an earlier command.
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
 Board(
-    format: 1,
+    format: 2,
+    title: "Demo factory",
     seed: 7,
     commands: [
     // ── Machines (handles 0..=10, mint order == Place order) ──────────────
@@ -185,6 +189,11 @@ export default function (input, ctx) {
     DrawWire(from_node: 29, from_port: 1, to_node: 30, to_port: 0),
     ],
     script: [],
+    captions: [
+        Caption(tick: 88, highlight: 1, text: "The Factory makes order 1 from the Source's first item and puts it on the belt to the Tee."),
+        Caption(tick: 232, highlight: 1, text: "The Factory rejects this order and sends it down its fault belt toward the Rejects sink."),
+        Caption(tick: 253, highlight: 5, text: "The rejected order reaches the Rejects sink."),
+    ],
     executor: Executor(default: Reply(after_ticks: 1), rules: []),
     view: View(fit: Board),
     end_tick: 1200,

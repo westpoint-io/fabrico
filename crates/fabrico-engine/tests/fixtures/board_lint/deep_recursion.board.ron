@@ -9,8 +9,12 @@
 // ship: the manifest check walks examples/boards/ and wants a hash line for every board there.
 //
 //   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2, one webhook at tick 40, the run ends on 120
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
 Board(
-    format: 1,
+    format: 2,
+    title: "Deep recursion",
     seed: 94,
     commands: [
         Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
@@ -27,6 +31,7 @@ Board(
     script: [
         At(tick: 40, input: Webhook(source: 0, body: "{}")),
     ],
+    captions: [],
     executor: Executor(default: Reply(after_ticks: 1), rules: []),
     view: View(fit: Board),
     end_tick: 120,

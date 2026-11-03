@@ -3,6 +3,7 @@ import {
   type PlayerExports,
   PlayerError,
   PlayerTrapped,
+  decodeBoardInfo,
   decodePlayerEffects,
   loadPlayerModule,
   playerModuleFrom,
@@ -39,6 +40,7 @@ function stub(overrides: (setOut: (text: string) => number) => Partial<PlayerExp
     fp_tick: () => 0n,
     fp_end_tick: () => 0n,
     fp_tick_hash: () => setOut('ab'),
+    fp_board_info: () => setOut('\0\0\0\0\0'),
     fp_out_ptr: () => OUT_AT,
     fp_out_len: () => outLen,
     ...overrides(setOut),
@@ -223,6 +225,58 @@ describe('statuses', () => {
       expect(() => board.step(ticks)).toThrow(PlayerError);
     }
     expect(() => board.step(2 ** 32 - 1)).not.toThrow();
+  });
+});
+
+describe('board info', () => {
+  const text = (value: string): number[] => {
+    const bytes = [...new TextEncoder().encode(value)];
+    return [bytes.length, ...bytes];
+  };
+
+  it('decodes the title, the captions with and without a render handle, the factories and the flag', () => {
+    const bytes = new Uint8Array([
+      ...text('T'),
+      0xb0, 0x09, // end tick 1200
+      2, // two captions
+      88, 1, 1, 40, ...text('a'), // tick 88, handle 1, Some(40)
+      253, 1, 5, 0, ...text('b'), // tick 253 (two varint bytes), handle 5, None
+      2, // two factories
+      41, 2, ...text('f'),
+      42, 10, ...text('h'),
+      1, // calls out
+    ]);
+    expect(decodeBoardInfo(bytes)).toEqual({
+      title: 'T',
+      endTick: 1200,
+      captions: [
+        { tick: 88, highlight: 1, renderHandle: 40, text: 'a' },
+        { tick: 253, highlight: 5, renderHandle: null, text: 'b' },
+      ],
+      factories: [
+        { renderHandle: 41, kind: 2, source: 'f' },
+        { renderHandle: 42, kind: 10, source: 'h' },
+      ],
+      callsOut: true,
+    });
+  });
+
+  it('refuses a bad option tag, a bad flag byte and bytes left over', () => {
+    expect(() => decodeBoardInfo(new Uint8Array([0, 0, 1, 1, 0, 2]))).toThrow(/option tag 2/);
+    expect(() => decodeBoardInfo(new Uint8Array([0, 0, 0, 0, 2]))).toThrow(/calls_out byte 2/);
+    expect(() => decodeBoardInfo(new Uint8Array([0, 0, 0, 0, 0, 9]))).toThrow(/1 bytes left over/);
+  });
+
+  it('throws the out text when fp_board_info returns 0', () => {
+    const board = playerModuleFrom(
+      stub((setOut) => ({
+        fp_board_info: () => {
+          setOut('no player has handle 1');
+          return 0;
+        },
+      })),
+    ).createBoard('board');
+    expect(() => board.boardInfo()).toThrow('no player has handle 1');
   });
 });
 

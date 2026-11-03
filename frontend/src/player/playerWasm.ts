@@ -119,6 +119,68 @@ export function decodePlayerEffects(bytes: Uint8Array): PlayerEffect[] {
   return effects;
 }
 
+/** A caption from the board file, with the render handle of the machine it highlights. */
+export interface BoardCaption {
+  /** The core tick a viewer pauses on. */
+  tick: number;
+  /** The machine's dense handle in the board file. */
+  highlight: number;
+  /** The machine's node id in the render packets, or null when the keyframe never named it. */
+  renderHandle: number | null;
+  /** The sentence to show, as plain text. */
+  text: string;
+}
+
+/** The program one Factory or HTTP Handler runs on the booted board. */
+export interface BoardFactory {
+  /** The machine's node id in the render packets. */
+  renderHandle: number;
+  /** The machine kind byte: 2 for a Factory, 10 for an HTTP Handler. */
+  kind: number;
+  /** The JavaScript source, as plain text. */
+  source: string;
+}
+
+/** What a page needs about a board that its render packets don't carry. */
+export interface BoardInfo {
+  title: string;
+  endTick: number;
+  captions: BoardCaption[];
+  /** Every Factory and HTTP Handler, in board handle order. */
+  factories: BoardFactory[];
+  /** Whether the board makes calls a real host would send out. The player only records them. */
+  callsOut: boolean;
+}
+
+/**
+ * Decode what {@link BoardPlayer.boardInfo} reads, a postcard `BoardInfo`. The field order mirrors
+ * the Rust struct in the player crate. Bytes left over are a decode error.
+ */
+export function decodeBoardInfo(bytes: Uint8Array): BoardInfo {
+  const r = new PostcardReader(bytes);
+  const title = r.str();
+  const endTick = r.varintU();
+  const captions = r.vec(() => {
+    const tick = r.varintU();
+    const highlight = r.varintU();
+    const tag = r.u8();
+    if (tag !== 0 && tag !== 1) throw new DecodeError(`caption render handle option tag ${tag} (expected 0 or 1)`);
+    const renderHandle = tag === 1 ? r.varintU() : null;
+    return { tick, highlight, renderHandle, text: r.str() };
+  });
+  const factories = r.vec(() => {
+    const renderHandle = r.varintU();
+    const kind = r.u8();
+    return { renderHandle, kind, source: r.str() };
+  });
+  const flag = r.u8();
+  if (flag !== 0 && flag !== 1) throw new DecodeError(`calls_out byte ${flag} (expected 0 or 1)`);
+  if (r.remaining() !== 0) {
+    throw new DecodeError(`${r.remaining()} bytes left over after the board info`);
+  }
+  return { title, endTick, captions, factories, callsOut: flag === 1 };
+}
+
 /** One running board on a loaded module. */
 export interface BoardPlayer {
   /** Run up to `ticks` ticks, stopping at the end tick. Each tick queues one packet. */
@@ -136,6 +198,8 @@ export interface BoardPlayer {
   endTick(): number;
   /** The state hash at the current tick, as 64 hex characters. */
   tickHash(): string;
+  /** The title, captions and Factory programs, as the board booted. The same at every tick. */
+  boardInfo(): BoardInfo;
   destroy(): void;
 }
 
@@ -162,6 +226,7 @@ export interface PlayerExports {
   fp_tick(handle: number): bigint;
   fp_end_tick(handle: number): bigint;
   fp_tick_hash(handle: number): number;
+  fp_board_info(handle: number): number;
   fp_out_ptr(): number;
   fp_out_len(): number;
 }
@@ -179,6 +244,7 @@ const EXPORT_NAMES: readonly (keyof PlayerExports)[] = [
   'fp_tick',
   'fp_end_tick',
   'fp_tick_hash',
+  'fp_board_info',
   'fp_out_ptr',
   'fp_out_len',
 ];
@@ -229,6 +295,7 @@ function guardExports(raw: PlayerExports): PlayerExports {
     fp_tick: guard(raw.fp_tick),
     fp_end_tick: guard(raw.fp_end_tick),
     fp_tick_hash: guard(raw.fp_tick_hash),
+    fp_board_info: guard(raw.fp_board_info),
     fp_out_ptr: guard(raw.fp_out_ptr),
     fp_out_len: guard(raw.fp_out_len),
   };
@@ -302,6 +369,11 @@ export function playerModuleFrom(rawExports: PlayerExports): PlayerModule {
           const len = exports.fp_tick_hash(handle) >>> 0;
           if (len === 0) throw new PlayerError(outText());
           return new TextDecoder().decode(readOut(len));
+        },
+        boardInfo() {
+          const len = exports.fp_board_info(handle) >>> 0;
+          if (len === 0) throw new PlayerError(outText());
+          return decodeBoardInfo(readOut(len));
         },
         destroy() {
           checkStatus(exports.fp_destroy(handle));
