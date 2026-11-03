@@ -1092,6 +1092,14 @@ jobs:
           WASM_OPT: ${{ runner.temp }}/binaryen/wasm-opt
         run: bash scripts/build-wasm.sh
 
+      - name: Keep the player module for the embed job
+        uses: actions/upload-artifact@v4
+        with:
+          name: fabrico-player-wasm
+          path: target/wasm-out
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Compare the player with the native build under Node
         run: bash scripts/check-wasm-player.sh
 
@@ -1121,6 +1129,57 @@ jobs:
 
       - name: Clippy on the player and the corpus harness, for wasm32
         run: cargo clippy -p fabrico-player -p fabrico-wasm-corpus --target wasm32-unknown-unknown --locked -- -D warnings
+
+  # THE READ-ONLY BOARD EMBED, in a job of its own after wasm-player. It takes the module that job
+  # built as an artifact, so the pages carry the module CI built and checked, and this job needs no
+  # Rust toolchain. scripts/build-embed.sh inlines the module into the bundle and the test pages,
+  # and scripts/check-embed.sh opens each page by file:// URL in headless Chromium and fails unless
+  # every listed test passed. When wasm-player fails, this job still
+  # starts under the gate and fails at the download, so a broken player can't leave it skipped.
+  # The artifact upload drops file modes, so a step that runs a native tool from the artifact has
+  # to set the executable bit itself. No step here does.
+  #
+  # TIME LIMIT. 15 minutes is a first estimate, to be set again from this job's first real run.
+  # Locally the embed build took about 10 seconds and its check about 20, and the setup steps are
+  # the same as wasm-player's Node and Playwright steps.
+  embed:
+    name: the read-only board embed runs from disk in a browser
+    needs: [changes, wasm-player]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Take the player module wasm-player built
+        uses: actions/download-artifact@v4
+        with:
+          name: fabrico-player-wasm
+          path: target/wasm-out
+
+      - name: Build the embed bundle and its test pages
+        run: bash scripts/build-embed.sh
+
+      - name: Run the embed pages from disk in headless Chromium
+        run: bash scripts/check-embed.sh
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand

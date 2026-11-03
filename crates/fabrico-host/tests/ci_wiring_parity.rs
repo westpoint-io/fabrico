@@ -425,6 +425,10 @@ const HEAVY_GATE: &str = "if: ${{ !cancelled() && needs.changes.outputs.docs_onl
 /// The heavy jobs' dependency on the classifier.
 const HEAVY_NEEDS: &str = "needs: changes";
 
+/// The `embed` job's dependency: the classifier, and the job whose module it takes. It is the one
+/// heavy job allowed a `needs:` line other than `HEAVY_NEEDS`, and it has to be exactly this one.
+const EMBED_NEEDS: &str = "needs: [changes, wasm-player]";
+
 /// Linux only on pull_request, all three legs on every other event. The Linux leg is
 /// pinned to `ubuntu-24.04` (2026-10-12, plan 84-01): `ubuntu-latest` moves to Ubuntu 26
 /// from 2026-10-19 and the apt package names were checked for 24.04 only.
@@ -434,10 +438,11 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// repository root when measured on 2026-09-30. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 8] = [
+const HEAVY_JOBS: [&str; 9] = [
     "determinism",
     "headless-build",
     "wasm-player",
+    "embed",
     "golden-corpus",
     "e2e",
     "e2e-live",
@@ -535,6 +540,55 @@ fn job_blocks_in(yml: &str) -> Vec<(&str, Vec<&str>)> {
     blocks
 }
 
+/// Everything wrong with how `yml` classes its jobs: every job is heavy or always-on, each heavy
+/// job carries its `needs:` line and the exact docs-only gate, and no always-on job carries either.
+/// The `embed` job's `needs:` line is `EMBED_NEEDS` and nothing else. Empty means right.
+fn job_classes_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let mut found_ids: Vec<&str> = blocks.iter().map(|(id, _)| *id).collect();
+    found_ids.sort_unstable();
+    let mut expected_ids: Vec<&str> = HEAVY_JOBS
+        .iter()
+        .chain(ALWAYS_ON_JOBS.iter())
+        .copied()
+        .collect();
+    expected_ids.sort_unstable();
+    if found_ids != expected_ids {
+        wrong.push(format!(
+            "the job ids under `jobs:` are {found_ids:?}, expected exactly {expected_ids:?}.\n\
+             Every job must be classified. A job that reads a markdown file at the \
+             repository root is ALWAYS-ON (add it to ALWAYS_ON_JOBS, \
+             no `needs: changes`, no gate). Otherwise it is HEAVY (add it to HEAVY_JOBS and \
+             give it `{HEAVY_NEEDS}` and `{HEAVY_GATE}`)."
+        ));
+    }
+    for (id, lines) in &blocks {
+        let needs = if *id == EMBED_JOB {
+            EMBED_NEEDS
+        } else {
+            HEAVY_NEEDS
+        };
+        let has_needs = lines.contains(&needs);
+        let has_gate = lines.contains(&HEAVY_GATE);
+        if HEAVY_JOBS.contains(id) && !(has_needs && has_gate) {
+            wrong.push(format!(
+                "heavy job `{id}` is missing `{needs}` (present: {has_needs}) or the \
+                 exact gate `{HEAVY_GATE}` (present: {has_gate}). Without both, it either \
+                 never skips or skips on the wrong verdict."
+            ));
+        }
+        let has_any_needs = lines.contains(&HEAVY_NEEDS) || lines.contains(&EMBED_NEEDS);
+        if ALWAYS_ON_JOBS.contains(id) && (has_any_needs || has_gate) {
+            wrong.push(format!(
+                "always-on job `{id}` carries a `needs:` line on the classifier or the docs-only \
+                 gate. It reads files a docs-only change can edit, so it must run on every push."
+            ));
+        }
+    }
+    wrong
+}
+
 /// The job that compiles the engine and the core with `redb` off, and the exact lines that do it.
 const HEADLESS_JOB: &str = "headless-build";
 const HEADLESS_RUN_LINES: [&str; 4] = [
@@ -625,6 +679,212 @@ fn the_wasm_player_job_builds_and_checks_the_player() {
     );
 }
 
+/// The job that runs the read-only board embed from disk, on the module `wasm-player` built.
+const EMBED_JOB: &str = "embed";
+/// The exact lines that build the embed's pages and check them. No other job runs either script.
+const EMBED_RUN_LINES: [&str; 2] = [
+    "run: bash scripts/build-embed.sh",
+    "run: bash scripts/check-embed.sh",
+];
+/// The artifact that carries the module from `wasm-player` to `EMBED_JOB`, as its `name:` line.
+const PLAYER_ARTIFACT: &str = "name: fabrico-player-wasm";
+/// Where the artifact is taken from and put back, as the step's `path:` line.
+const PLAYER_ARTIFACT_PATH: &str = "path: target/wasm-out";
+
+/// Everything wrong with how `yml` wires the embed job and the module it takes. Empty means right.
+fn embed_job_wrong(yml: &str) -> Vec<String> {
+    let _ = yml;
+    Vec::new()
+}
+
+/// The embed job builds its pages from the module CI built in `wasm-player`, and checks them.
+///
+/// The embed ships the CI-built module, so the module has to arrive from the job that built and
+/// checked it, and the two run lines are matched whole, because a trailing `|| true` on either would
+/// keep the job green whatever the pages did.
+#[test]
+fn the_embed_job_builds_and_checks_the_embed() {
+    let wrong = embed_job_wrong(CI_YML);
+    assert!(
+        wrong.is_empty(),
+        "the embed job isn't wired as it has to be:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// Every `continue-on-error` line in `job`, and every `if:` line inside a step of `job` that runs
+/// one of `needles`, each named. Either one can leave the job green with that check switched off:
+/// a condition skips the step, and `continue-on-error` swallows its failure. Empty means right.
+fn step_guards_wrong(yml: &str, job: &str, needles: &[&str]) -> Vec<String> {
+    let _ = (yml, job, needles);
+    Vec::new()
+}
+
+/// Neither wasm job can be switched off one step at a time. The run-line pins above match each
+/// line whole, and an `if: false` on the step, or `continue-on-error` on the job or the step, would
+/// pass them while the check never ran or never counted.
+#[test]
+fn the_wasm_jobs_cannot_be_switched_off_a_step_at_a_time() {
+    let mut wrong = step_guards_wrong(CI_YML, WASM_JOB, &WASM_RUN_LINES);
+    wrong.extend(step_guards_wrong(CI_YML, EMBED_JOB, &EMBED_RUN_LINES));
+    assert!(
+        wrong.is_empty(),
+        "a wasm job carries a step condition or continue-on-error:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// A copy of `yml` with the step whose first line is `header` taken out, up to the next step, the
+/// next blank line or the end of the job.
+fn without_step(yml: &str, header: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in yml.split_inclusive('\n') {
+        if line == header {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            let indent = line.len() - line.trim_start().len();
+            if line.trim().is_empty() || line.starts_with("      - ") || indent < 8 {
+                skipping = false;
+            } else {
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// `step_guards_wrong`, `embed_job_wrong` and `job_classes_wrong` can fail: each break below is
+/// planted in a copy of the real workflow, and the check has to name it.
+#[test]
+fn the_wasm_job_checks_name_each_way_of_switching_them_off() {
+    const WASM_HEADER: &str =
+        "    name: the wasm player builds on the pinned compiler and passes its checks\n";
+    const EMBED_HEADER: &str = "    name: the read-only board embed runs from disk in a browser\n";
+    const WASM_BUILD_STEP: &str = "      - name: Build the player\n";
+    const EMBED_BUILD_STEP: &str = "      - name: Build the embed bundle and its test pages\n";
+    const UPLOAD_STEP: &str = "      - name: Keep the player module for the embed job\n";
+    const DOWNLOAD_STEP: &str = "      - name: Take the player module wasm-player built\n";
+
+    let guards = |yml: &str| {
+        let mut wrong = step_guards_wrong(yml, WASM_JOB, &WASM_RUN_LINES);
+        wrong.extend(step_guards_wrong(yml, EMBED_JOB, &EMBED_RUN_LINES));
+        wrong.join("\n")
+    };
+    let mut missed: Vec<String> = Vec::new();
+    let mut check = |what: String, yml: String, named: String, must_name: &str| {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        if !named.contains(must_name) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    };
+
+    // A condition on the step that runs each pinned line, in both jobs.
+    for (job, lines) in [
+        (WASM_JOB, WASM_RUN_LINES.as_slice()),
+        (EMBED_JOB, EMBED_RUN_LINES.as_slice()),
+    ] {
+        for line in lines {
+            let yml = CI_YML.replace(
+                &format!("        {line}\n"),
+                &format!("        if: false\n        {line}\n"),
+            );
+            let named = guards(&yml);
+            check(
+                format!("`if: false` on the step running `{line}` in `{job}`"),
+                yml,
+                named,
+                &format!("the step that runs `{line}` in job `{job}` carries `if: false`"),
+            );
+        }
+    }
+
+    // continue-on-error on either job, and as a step's first key in either job.
+    for (job, from, to) in [
+        (
+            WASM_JOB,
+            WASM_HEADER.to_string(),
+            format!("{WASM_HEADER}    continue-on-error: true\n"),
+        ),
+        (
+            EMBED_JOB,
+            EMBED_HEADER.to_string(),
+            format!("{EMBED_HEADER}    continue-on-error: true\n"),
+        ),
+        (
+            WASM_JOB,
+            WASM_BUILD_STEP.to_string(),
+            "      - continue-on-error: true\n        name: Build the player\n".to_string(),
+        ),
+        (
+            EMBED_JOB,
+            EMBED_BUILD_STEP.to_string(),
+            "      - continue-on-error: true\n        name: Build the embed bundle and its test pages\n"
+                .to_string(),
+        ),
+    ] {
+        let yml = CI_YML.replace(&from, &to);
+        let named = guards(&yml);
+        check(
+            format!("continue-on-error planted at `{}` in `{job}`", from.trim()),
+            yml,
+            named,
+            &format!("job `{job}` carries `continue-on-error: true`"),
+        );
+    }
+
+    // The embed job's needs line changed either way.
+    for to in ["    needs: changes\n", "    needs: [changes, wasm-player, e2e]\n"] {
+        let yml = CI_YML.replace(&format!("    {EMBED_NEEDS}\n"), to);
+        let named = job_classes_wrong(&yml).join("\n");
+        check(
+            format!("the embed job's needs line set to `{}`", to.trim()),
+            yml,
+            named,
+            &format!("heavy job `{EMBED_JOB}` is missing `{EMBED_NEEDS}`"),
+        );
+    }
+
+    // The upload step taken out of wasm-player, and the download step taken out of embed.
+    for (what, header, job) in [
+        ("the upload step deleted", UPLOAD_STEP, WASM_JOB),
+        ("the download step deleted", DOWNLOAD_STEP, EMBED_JOB),
+    ] {
+        let yml = without_step(CI_YML, header);
+        let named = embed_job_wrong(&yml).join("\n");
+        check(
+            what.to_string(),
+            yml,
+            named,
+            &format!("`{PLAYER_ARTIFACT}` appears 0 time(s) in job `{job}`"),
+        );
+    }
+
+    // An embed run line swallowed.
+    for line in EMBED_RUN_LINES {
+        let yml = CI_YML.replace(&format!("        {line}\n"), &format!("        {line} || true\n"));
+        let named = embed_job_wrong(&yml).join("\n");
+        check(
+            format!("`{line}` with `|| true`"),
+            yml,
+            named,
+            &format!("`{line}` appears 0 time(s) in job `{EMBED_JOB}`"),
+        );
+    }
+
+    assert!(
+        missed.is_empty(),
+        "{} planted break(s) went unnamed:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+}
+
 /// The CI spend controls are wired, and wired in the fail-safe direction.
 ///
 /// Every fact is collected before the single assert, so one run names everything wrong.
@@ -668,40 +928,7 @@ fn ci_spend_controls_are_wired_fail_safe() {
 
     // (e): every job classified; heavy jobs gated, always-on jobs not.
     let blocks = job_blocks();
-    let mut found_ids: Vec<&str> = blocks.iter().map(|(id, _)| *id).collect();
-    found_ids.sort_unstable();
-    let mut expected_ids: Vec<&str> = HEAVY_JOBS
-        .iter()
-        .chain(ALWAYS_ON_JOBS.iter())
-        .copied()
-        .collect();
-    expected_ids.sort_unstable();
-    if found_ids != expected_ids {
-        wrong.push(format!(
-            "the job ids under `jobs:` are {found_ids:?}, expected exactly {expected_ids:?}.\n\
-             Every job must be classified. A job that reads a markdown file at the \
-             repository root is ALWAYS-ON (add it to ALWAYS_ON_JOBS, \
-             no `needs: changes`, no gate). Otherwise it is HEAVY (add it to HEAVY_JOBS and \
-             give it `{HEAVY_NEEDS}` and `{HEAVY_GATE}`)."
-        ));
-    }
-    for (id, lines) in &blocks {
-        let has_needs = lines.contains(&HEAVY_NEEDS);
-        let has_gate = lines.contains(&HEAVY_GATE);
-        if HEAVY_JOBS.contains(id) && !(has_needs && has_gate) {
-            wrong.push(format!(
-                "heavy job `{id}` is missing `{HEAVY_NEEDS}` (present: {has_needs}) or the \
-                 exact gate `{HEAVY_GATE}` (present: {has_gate}). Without both, it either \
-                 never skips or skips on the wrong verdict."
-            ));
-        }
-        if ALWAYS_ON_JOBS.contains(id) && (has_needs || has_gate) {
-            wrong.push(format!(
-                "always-on job `{id}` carries `{HEAVY_NEEDS}` or the docs-only gate. It reads \
-                 files a docs-only change can edit, so it must run on every push."
-            ));
-        }
-    }
+    wrong.extend(job_classes_wrong(CI_YML));
 
     // (f): no other polarity of the gate anywhere.
     for line in code
