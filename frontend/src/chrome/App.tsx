@@ -2389,6 +2389,7 @@ export function App() {
   const lessonsOpen = topRightPanel === 'lessons';
   const tutorialProbeRef = useRef<() => TutorialProbe>(idleTutorialProbe);
   const tutorialRefusalRef = useRef<((tag: string) => void) | null>(null);
+  const tutorialEscapeRef = useRef<(() => void) | null>(null);
   const [lessonActive, setLessonActive] = useState(false);
   // Plan 74.1-31 (PAUSE-TOOLBAR): WHERE THE TOOLBAR'S STATUS STRIP MAY HANG. The strip
   // (the status readout and the Unsaved badge, out of the button row) is right-aligned
@@ -2506,9 +2507,13 @@ export function App() {
     const onKeyCapture = (e: KeyboardEvent): void => {
       if (keysOwnedElsewhere(e)) return;
       if (matchesShortcut(e, SHORTCUTS.escape)) {
+        // The Lessons panel's reset question takes the first Escape pressed inside the panel, which cancels it.
+        const list = document.getElementById('fab-lessons-panel');
+        if (list !== null && list.querySelector('[data-fab-lessons-footer="confirming"]') !== null && list.contains(e.target as Node)) return;
         swallow(e);
-        // The list's own Escape never ran, and its focused button is about to unmount.
-        if (lessonsOpen) handFocusBackFromList(lessonActive);
+        // The list's own Escape never ran, and its focused button is about to unmount. During a lesson focus goes
+        // to the page whichever panel closed, so the next Escape and Space reach the board, not the Help button.
+        if (lessonsOpen || lessonActive) handFocusBackFromList(lessonActive);
         return;
       }
       if (
@@ -4216,15 +4221,18 @@ export function App() {
         // FAIL-01 (D-12): a stopped simulation, its OWN gate and not the modal one above, which
         // swallows every key: Escape and the camera must keep working on a stopped board.
         isSimStopped: () => simStoppedRef.current,
-        // ONB-01/IX-07: the LOWEST-priority Escape action. The gesture Escape
+        // ONB-01/IX-07: the LOWEST-priority Escape actions. The gesture Escape
         // stack calls this only when Escape was otherwise a no-op (nothing armed,
-        // nothing selected); dismiss the first-run welcome card ONLY if it is
-        // still showing (read live via the ref), so Escape never dismisses the
-        // card ahead of disarming a tool or clearing a selection (IX-07 wins).
+        // nothing selected). Each row stops the chain: the first-run welcome card
+        // if it is still showing (read live via the ref), then the lesson layer,
+        // which closes an open lesson list, then a finished or swapped card, and
+        // never a running one (phase 103, Mark's Escape rule).
         onEscapeFallback: () => {
           if (!welcomeSeenRef.current) {
             dismissWelcome();
+            return;
           }
+          tutorialEscapeRef.current?.();
         },
       });
 
@@ -4912,6 +4920,7 @@ export function App() {
             doNewThen={doNewThen}
             probeRef={tutorialProbeRef}
             refusalRef={tutorialRefusalRef}
+            escapeRef={tutorialEscapeRef}
             onActiveChange={setLessonActive}
             boardLive={simFatalReason === null && status.kind !== 'disconnected'}
             simStopped={simFatalReason !== null}

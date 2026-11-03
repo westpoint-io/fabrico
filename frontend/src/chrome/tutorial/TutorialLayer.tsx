@@ -299,6 +299,12 @@ export interface TutorialLayerProps {
    * refused. The layer fills it while mounted. It only reads the tag: nothing goes back to the host.
    */
   refusalRef: MutableRefObject<((tag: string) => void) | null>;
+  /**
+   * App calls this last in its Escape chain, after a draw, a tool, a selection and the welcome card. The layer
+   * fills it while mounted. It closes an open lesson list, else a finished card (as Keep building) or a swapped
+   * card (as Leave), and does nothing to a running or starting card.
+   */
+  escapeRef: MutableRefObject<(() => void) | null>;
   /** Tells App a lesson is on screen, so the empty-floor text stands down. */
   onActiveChange: (active: boolean) => void;
   /** False on a stopped or disconnected simulation: the ring hides, and the card keeps its text. */
@@ -321,6 +327,7 @@ export function TutorialLayer({
   doNewThen,
   probeRef,
   refusalRef,
+  escapeRef,
   onActiveChange,
   boardLive,
   simStopped,
@@ -589,6 +596,25 @@ export function TutorialLayer({
     onLessonsOpenChange(false);
     handFocusBackFromList(stateRef.current.card !== 'none');
   }, [onLessonsOpenChange]);
+
+  // MARK'S ESCAPE RULE: a running card ignores Escape. Lesson 1's tool-down step asks the user to press Esc to put
+  // the tool away, and a second press on the next step would otherwise drop the lesson, so a running lesson ends
+  // only on Leave. A finished card closes as Keep building and a swapped one as Leave, and an open list goes first.
+  // The card itself owns no key listener: this is the last row of App's Escape chain.
+  useLayoutEffect(() => {
+    escapeRef.current = (): void => {
+      if (lessonsOpen) {
+        closeList();
+        return;
+      }
+      const card = stateRef.current.card;
+      if (card === 'finished') keepBuilding();
+      else if (card === 'swapped') leave();
+    };
+    return () => {
+      escapeRef.current = null;
+    };
+  }, [escapeRef, lessonsOpen, closeList, keepBuilding, leave]);
 
   // Ask first, with the safe answer focused, so the destructive button is never the default.
   const askReset = useCallback((): void => {
