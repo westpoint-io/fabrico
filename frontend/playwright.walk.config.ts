@@ -15,10 +15,11 @@ export default defineConfig({
   testMatch: /\.walk\.ts$/,
   timeout: 90_000,
   // A ceiling on the whole run, so a wedged browser ends in a written report instead of a runner
-  // killed at the CI job's limit. The slowest whole run measured was 22 minutes, on two CPUs at a
-  // 100% quota. With about ten minutes of build before the suite, doubled, the CI job's limit is 64
-  // minutes, and this is that limit less those ten.
-  globalTimeout: 54 * 60_000,
+  // killed at the CI job's limit. The walk's 20 tests took 482 seconds unthrottled in a local run.
+  // Scaled by 6.7, the slowdown two CPUs at a 100% quota caused when the walk held 12 tests, that is
+  // 54 minutes. With about ten minutes of build before the suite, doubled, the CI job's limit is 128
+  // minutes, and this is that limit less those ten. A recorded CI run replaces these local numbers.
+  globalTimeout: 118 * 60_000,
   // One mutable host process is shared by every test.
   fullyParallel: false,
   workers: 1,

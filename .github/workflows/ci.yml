@@ -1290,17 +1290,18 @@ jobs:
   # didn't run and pass, or on fewer than its floor of tests. Its bite proof runs before the walk, and
   # `ci_wiring_parity.rs` pins all three steps.
   #
-  # THE LIMIT. When the walk held 12 tests they took 4 minutes unthrottled and 22 minutes on two CPUs
-  # at a 100% quota, both read from a local run and rounded up. The slowest figure plus about 10 minutes of
-  # build before the suite is 32, and twice that is 64. The `globalTimeout` in
-  # frontend/playwright.walk.config.ts is 54, the limit less those 10 minutes, so an overrun writes a
-  # report before the runner is killed. These are local numbers: a recorded CI run replaces them.
+  # THE LIMIT. The walk holds 20 tests, which took 482 seconds unthrottled in a local run. When it
+  # held 12 tests, two CPUs at a 100% quota made it 6.7 times slower than unthrottled, and that ratio
+  # puts the 20 tests at 54 minutes. Plus about 10 minutes of build before the suite is 64, and twice
+  # that is 128. The `globalTimeout` in frontend/playwright.walk.config.ts is 118, the limit less
+  # those 10 minutes, so an overrun writes a report before the runner is killed. These are local
+  # numbers: a recorded CI run replaces them.
   e2e-walk:
     name: lesson walk (real headless host)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 64
+    timeout-minutes: 128
     steps:
       - name: Checkout
         uses: actions/checkout@v4
