@@ -52,6 +52,8 @@ export function parseProgress(raw: string | null, knownIds: readonly string[]): 
 export interface ProgressStore {
   read(): Progress;
   write(p: Progress): void;
+  /** Forget every lesson's mark: the stored key and the cached last write both go, so the next read is empty. */
+  clear(): void;
 }
 
 /**
@@ -59,7 +61,10 @@ export interface ProgressStore {
  * The last write is also kept in memory, so a lesson the user finished still reads Done for the rest of
  * this run when storage fails. It's gone after a relaunch, which costs a status word.
  */
-export function localStorageProgress(storage: Pick<Storage, 'getItem' | 'setItem'> | null, knownIds: readonly string[]): ProgressStore {
+export function localStorageProgress(
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null,
+  knownIds: readonly string[],
+): ProgressStore {
   let lastWritten: Progress | null = null;
   let stored = storage !== null;
   return {
@@ -78,6 +83,18 @@ export function localStorageProgress(storage: Pick<Storage, 'getItem' | 'setItem
         storage.setItem(PROGRESS_KEY, JSON.stringify(p));
         stored = true;
       } catch {
+        stored = false;
+      }
+    },
+    clear: () => {
+      lastWritten = null;
+      if (storage === null) return;
+      try {
+        storage.removeItem(PROGRESS_KEY);
+        stored = true;
+      } catch {
+        // The old value may still be stored. Reads stay off storage until a write gets through, so this
+        // run reads empty, as the user asked.
         stored = false;
       }
     },

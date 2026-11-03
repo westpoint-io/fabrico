@@ -1090,6 +1090,7 @@ describe('rowViews', () => {
         setItem: () => {
           throw new Error('full');
         },
+        removeItem: () => {},
       },
       [LESSON],
     );

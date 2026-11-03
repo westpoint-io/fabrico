@@ -72,6 +72,29 @@ const textStyle: CSSProperties = {
   lineHeight: 1.4,
 };
 
+/** Where the Reset progress footer is: at rest, asking the question, or just after a reset. */
+export type ResetFooter = 'rest' | 'confirming' | 'cleared';
+
+/** The footer's one line of text. It sits in one live span in every state, so each change is read out. */
+const FOOTER_TEXT: Readonly<Record<ResetFooter, string>> = {
+  rest: '',
+  confirming: 'Clear all lesson progress?',
+  cleared: 'Progress cleared.',
+};
+
+const footerBaseStyle: CSSProperties = {
+  flexShrink: 0,
+  marginTop: 'var(--fab-space-sm)',
+  display: 'grid',
+  alignItems: 'center',
+  minHeight: 'var(--fab-min-target)',
+};
+
+// The question and both buttons need 536 px on one line and the panel has 432, so while it asks, the
+// footer goes to one column with the question above the buttons.
+const footerRestStyle: CSSProperties = { ...footerBaseStyle, gridTemplateColumns: '1fr auto', columnGap: 'var(--fab-space-md)' };
+const footerConfirmStyle: CSSProperties = { ...footerBaseStyle, gridTemplateColumns: '1fr', rowGap: 'var(--fab-space-sm)' };
+
 /** Start and Restart send New, which a stopped host can't take. Resume only brings the card back. */
 function isOff(row: RowView, action: RowAction): boolean {
   return row.disabled && action !== 'resume';
@@ -81,9 +104,16 @@ export interface LessonPanelProps {
   rows: readonly RowView[];
   onAction: (id: LessonId, action: RowAction) => void;
   onClose: () => void;
+  footer: ResetFooter;
+  /** Reset progress: ask first. */
+  onReset: () => void;
+  /** Keep progress, or Escape while the question is up. */
+  onKeep: () => void;
+  /** Clear progress. */
+  onClear: () => void;
 }
 
-export function LessonPanel({ rows, onAction, onClose }: LessonPanelProps): JSX.Element {
+export function LessonPanel({ rows, onAction, onClose, footer, onReset, onKeep, onClear }: LessonPanelProps): JSX.Element {
   return (
     <aside
       ref={focusFirstAction}
@@ -93,10 +123,11 @@ export function LessonPanel({ rows, onAction, onClose }: LessonPanelProps): JSX.
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           // Escape closes this panel only. It must not also disarm a tool or clear a selection
-          // behind it.
+          // behind it. With the reset question up it cancels the question first and the panel stays.
           e.preventDefault();
           e.stopPropagation();
-          onClose();
+          if (footer === 'confirming') onKeep();
+          else onClose();
         }
       }}
       style={{
@@ -162,6 +193,28 @@ export function LessonPanel({ rows, onAction, onClose }: LessonPanelProps): JSX.
             </li>
           ))}
         </ul>
+      </div>
+      {/* Outside the scroll box, like the head row, so a short window keeps it in view. The buttons
+          carry data attributes so TutorialLayer can move focus to them after a press. */}
+      <div data-fab-lessons-footer={footer} style={footer === 'confirming' ? footerConfirmStyle : footerRestStyle}>
+        <span aria-live="polite" style={textStyle}>
+          {FOOTER_TEXT[footer]}
+        </span>
+        {footer === 'confirming' ? (
+          // The guard dialogs' order and classes: the safe choice first.
+          <div style={{ justifySelf: 'end', display: 'flex', gap: 'var(--fab-space-sm)' }}>
+            <button type="button" className="fab-dialog-btn fab-dialog-btn--cancel" data-fab-reset-keep="" onClick={onKeep}>
+              Keep progress
+            </button>
+            <button type="button" className="fab-dialog-btn fab-dialog-btn--danger" data-fab-reset-clear="" onClick={onClear}>
+              Clear progress
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="fab-tool-btn fab-tool-btn--labeled" data-fab-reset="" onClick={onReset}>
+            Reset progress
+          </button>
+        )}
       </div>
     </aside>
   );

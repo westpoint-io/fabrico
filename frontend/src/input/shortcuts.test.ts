@@ -212,7 +212,7 @@ describe('no keyboard handler reads a key outside the table (review WR-C03)', ()
     'chrome/QuitGuardDialog.tsx': { keys: ['Escape', 'Tab'], reason: 'a modal: Escape cancels it and Tab cycles inside it while it is open' },
     'chrome/ExamplesPopover.tsx': { keys: ['Escape'], reason: 'its own Escape closes the popover and nothing behind it' },
     'chrome/LoadRefusedCard.tsx': { keys: ['Escape'], reason: 'Escape dismisses the card; it is not a modal, so Tab stays free' },
-    'chrome/tutorial/LessonPanel.tsx': { keys: ['Escape'], reason: 'its own Escape closes the lesson list and nothing behind it' },
+    'chrome/tutorial/LessonPanel.tsx': { keys: ['Escape'], reason: 'its own Escape cancels the reset question if it is up, else closes the lesson list, and nothing behind it' },
     'embed/codeView.ts': {
       keys: ['ArrowLeft', 'ArrowRight'],
       reason: "the read-only board's code tabs: the arrow keys move between tabs while one has focus, the ARIA tab pattern",

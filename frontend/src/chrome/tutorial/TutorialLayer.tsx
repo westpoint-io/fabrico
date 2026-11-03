@@ -20,7 +20,7 @@ import type { ArmedTool } from '../Palette';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { moveCamera, readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
-import { LESSONS_PANEL_ID, LessonPanel, focusListClose } from './LessonPanel';
+import { LESSONS_PANEL_ID, LessonPanel, focusListClose, type ResetFooter } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
 import { readAppliedTrigger } from './triggerRead';
 
@@ -361,6 +361,13 @@ export function TutorialLayer({
   const progressRef = useRef<ProgressStore | null>(null);
   progressRef.current ??= browserProgress();
   const progress = progressRef.current;
+  // The Lessons panel's Reset progress footer. Closing the list, from anywhere, drops the question and
+  // the "Progress cleared." line, so the next open starts at rest. Set during render, which React allows
+  // for state that follows a prop, so the panel never paints a stale footer.
+  const [footer, setFooter] = useState<ResetFooter>('rest');
+  if (!lessonsOpen && footer !== 'rest') setFooter('rest');
+  // Which footer button takes focus once the press that changed the footer has rendered.
+  const footerFocusRef = useRef<'keep' | 'reset' | null>(null);
 
   // THE TRIGGER READ, from the moment the Source is bound. A Timer applied before its step comes up
   // has to be known when that step does, so the step finishes in the same pass and the note says so.
@@ -583,6 +590,26 @@ export function TutorialLayer({
     handFocusBackFromList(stateRef.current.card !== 'none');
   }, [onLessonsOpenChange]);
 
+  // Ask first, with the safe answer focused, so the destructive button is never the default.
+  const askReset = useCallback((): void => {
+    footerFocusRef.current = 'keep';
+    setFooter('confirming');
+  }, []);
+
+  const keepProgress = useCallback((): void => {
+    footerFocusRef.current = 'reset';
+    setFooter('rest');
+  }, []);
+
+  // Only the store changes. A running lesson keeps running, and its row reads In progress from the
+  // run. The Done write stays on the finished transition alone, so a reset under the finished card
+  // stays a reset after Keep building.
+  const clearProgress = useCallback((): void => {
+    progress.clear();
+    footerFocusRef.current = 'reset';
+    setFooter('cleared');
+  }, [progress]);
+
   const onRowAction = useCallback(
     (lessonId: LessonId, action: RowAction): void => {
       if (action === 'resume') resume();
@@ -615,10 +642,28 @@ export function TutorialLayer({
     const held = focusInList.current;
     if (held !== null && !held.isConnected && document.activeElement === document.body) focusListClose();
   }, [offered]);
+  // After the effect above, which a Clear can trigger by changing the rows, so the footer has the last word.
+  useLayoutEffect(() => {
+    const target = footerFocusRef.current;
+    if (target === null) return;
+    footerFocusRef.current = null;
+    const selector = target === 'keep' ? '[data-fab-reset-keep]' : '[data-fab-reset]';
+    document.getElementById(LESSONS_PANEL_ID)?.querySelector<HTMLElement>(selector)?.focus();
+  }, [footer]);
 
   return (
     <>
-      {lessonsOpen && <LessonPanel rows={rows} onAction={onRowAction} onClose={closeList} />}
+      {lessonsOpen && (
+        <LessonPanel
+          rows={rows}
+          onAction={onRowAction}
+          onClose={closeList}
+          footer={footer}
+          onReset={askReset}
+          onKeep={keepProgress}
+          onClear={clearProgress}
+        />
+      )}
       {active && <HintPointer handleRef={handleRef} targetRef={targetRef} paintRef={paintRingRef} />}
       {view !== null && (
         <StepCard

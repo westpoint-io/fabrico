@@ -3,7 +3,7 @@ import type { RowView } from '../../tutorial/machine.ts';
 import type { LessonId } from '../../tutorial/types.ts';
 import { TOP_RIGHT_PANEL_MAX_HEIGHT } from '../HelpPanel.tsx';
 import { SIM_STOPPED_COPY } from '../SimStoppedCard.tsx';
-import { LESSONS_PANEL_ID, LessonPanel } from './LessonPanel.tsx';
+import { LESSONS_PANEL_ID, LessonPanel, type LessonPanelProps } from './LessonPanel.tsx';
 
 // The vitest env is `node`, with no DOM, so the component is called directly and its element tree is
 // walked, as `StepCard.test.tsx` does.
@@ -36,14 +36,15 @@ function textOf(node: unknown): string {
 const ID = 'your-first-line' as LessonId;
 const NOT_STARTED: RowView = { id: ID, title: 'Your first line', status: 'notStarted', actions: ['start'], accent: 'start', disabled: false };
 
-const NOOPS = { onAction: () => {}, onClose: () => {} };
+const NOOPS = { onAction: () => {}, onClose: () => {}, onReset: () => {}, onKeep: () => {}, onClear: () => {} };
 
-function render(rows: readonly RowView[]): El[] {
-  return elements(LessonPanel({ rows, ...NOOPS }));
+function render(rows: readonly RowView[], footer: LessonPanelProps['footer'] = 'rest'): El[] {
+  return elements(LessonPanel({ rows, footer, ...NOOPS }));
 }
 
 const buttonsOf = (els: El[]): El[] => els.filter((el) => el.type === 'button');
-const rowButtons = (els: El[]): El[] => buttonsOf(els).filter((b) => textOf(b) !== 'Close');
+const FOOTER_WORDS = ['Close', 'Reset progress', 'Keep progress', 'Clear progress'];
+const rowButtons = (els: El[]): El[] => buttonsOf(els).filter((b) => !FOOTER_WORDS.includes(textOf(b)));
 const styleOf = (el: El): Record<string, unknown> => (el.props.style ?? {}) as Record<string, unknown>;
 const panelOf = (els: El[]): El => els[0] as El;
 
@@ -145,7 +146,7 @@ describe('LessonPanel', () => {
 
   it('a press names the lesson and the action', () => {
     const seen: string[] = [];
-    const els = elements(LessonPanel({ rows: FIVE, onClose: () => {}, onAction: (id, action) => seen.push(`${id}:${action}`) }));
+    const els = elements(LessonPanel({ ...NOOPS, rows: FIVE, footer: 'rest', onAction: (id, action) => seen.push(`${id}:${action}`) }));
     for (const b of rowButtons(els)) (b.props.onClick as () => void)();
     expect(seen).toEqual(['a:restart', 'b:resume', 'b:restart', 'c:restart', 'd:start', 'e:start']);
   });
@@ -154,12 +155,103 @@ describe('LessonPanel', () => {
     let closed = 0;
     let stopped = 0;
     let prevented = 0;
-    const [panel] = elements(LessonPanel({ rows: [NOT_STARTED], onAction: () => {}, onClose: () => (closed += 1) }));
+    const [panel] = elements(LessonPanel({ ...NOOPS, rows: [NOT_STARTED], footer: 'rest', onClose: () => (closed += 1) }));
     const onKeyDown = panel?.props.onKeyDown as (e: unknown) => void;
     onKeyDown({ key: 'Tab', preventDefault: () => (prevented += 1), stopPropagation: () => (stopped += 1) });
     expect([closed, stopped, prevented], 'another key does nothing').toEqual([0, 0, 0]);
     onKeyDown({ key: 'Escape', preventDefault: () => (prevented += 1), stopPropagation: () => (stopped += 1) });
     expect([closed, stopped, prevented]).toEqual([1, 1, 1]);
+  });
+
+  describe('the Reset progress footer', () => {
+    const footerOf = (els: El[]): El => els.find((el) => el.props['data-fab-lessons-footer'] !== undefined) as El;
+    const liveOf = (els: El[]): El => elements(footerOf(els)).find((el) => el.props['aria-live'] !== undefined) as El;
+    const footerButtons = (els: El[]): El[] => buttonsOf(elements(footerOf(els)));
+
+    it('sits under the scroll box and keeps its height', () => {
+      const els = render(FIVE);
+      const footer = footerOf(els);
+      expect(footer, 'the footer is there').toBeDefined();
+      const box = els.find((el) => el.props['data-fab-help-scroll'] !== undefined) as El;
+      expect(elements(box).includes(footer), 'it is outside the scroll box').toBe(false);
+      const panelChildren = (panelOf(els).props.children as unknown[]).filter(isEl);
+      expect(panelChildren.at(-1), 'it is the last thing in the panel').toBe(footer);
+      const style = styleOf(footer);
+      expect(style.flexShrink).toBe(0);
+      expect(style.marginTop).toBe('var(--fab-space-sm)');
+      expect(style.display).toBe('grid');
+      expect(style.minHeight).toBe('var(--fab-min-target)');
+      expect(style.alignItems).toBe('center');
+    });
+
+    it('at rest, offers Reset progress with an empty line, on the two columns the rows use', () => {
+      const els = render([NOT_STARTED]);
+      expect(styleOf(footerOf(els)).gridTemplateColumns).toBe('1fr auto');
+      expect(styleOf(footerOf(els)).columnGap).toBe('var(--fab-space-md)');
+      expect(textOf(liveOf(els))).toBe('');
+      const buttons = footerButtons(els);
+      expect(buttons.map(textOf)).toEqual(['Reset progress']);
+      expect(buttons[0]?.props.className).toBe('fab-tool-btn fab-tool-btn--labeled');
+      expect(buttons[0]?.props['data-fab-reset']).toBe('');
+      expect(buttons[0]?.props.disabled, 'enabled whether or not anything is stored').toBeFalsy();
+    });
+
+    it('while confirming, asks the question above Keep progress then Clear progress, in the guard dialog classes', () => {
+      const els = render([NOT_STARTED], 'confirming');
+      const style = styleOf(footerOf(els));
+      expect(style.gridTemplateColumns).toBe('1fr');
+      expect(style.rowGap).toBe('var(--fab-space-sm)');
+      expect(textOf(liveOf(els))).toBe('Clear all lesson progress?');
+      const buttons = footerButtons(els);
+      expect(buttons.map(textOf)).toEqual(['Keep progress', 'Clear progress']);
+      expect(buttons.map((b) => b.props.className)).toEqual(['fab-dialog-btn fab-dialog-btn--cancel', 'fab-dialog-btn fab-dialog-btn--danger']);
+      expect(buttons[0]?.props['data-fab-reset-keep']).toBe('');
+      expect(buttons[1]?.props['data-fab-reset-clear']).toBe('');
+      const line = elements(footerOf(els)).find((el) => el.type === 'div' && elements(el).includes(buttons[0] as El) && el !== footerOf(els)) as El;
+      expect(styleOf(line).justifySelf).toBe('end');
+      expect(styleOf(line).gap).toBe('var(--fab-space-sm)');
+    });
+
+    it('after a reset, says so beside Reset progress', () => {
+      const els = render([NOT_STARTED], 'cleared');
+      expect(styleOf(footerOf(els)).gridTemplateColumns).toBe('1fr auto');
+      expect(textOf(liveOf(els))).toBe('Progress cleared.');
+      expect(footerButtons(els).map(textOf)).toEqual(['Reset progress']);
+    });
+
+    it('keeps one polite live span, first in the footer, in every state', () => {
+      for (const footer of ['rest', 'confirming', 'cleared'] as const) {
+        const first = (footerOf(render([NOT_STARTED], footer)).props.children as unknown[])[0] as El;
+        expect(first.type, footer).toBe('span');
+        expect(first.props['aria-live'], footer).toBe('polite');
+        expect(first.props.role, footer).toBeUndefined();
+      }
+    });
+
+    it('each button calls its own prop', () => {
+      const seen: string[] = [];
+      const props = { ...NOOPS, rows: [NOT_STARTED], onReset: () => seen.push('reset'), onKeep: () => seen.push('keep'), onClear: () => seen.push('clear') };
+      for (const footer of ['rest', 'confirming'] as const) {
+        for (const b of footerButtons(elements(LessonPanel({ ...props, footer })))) (b.props.onClick as () => void)();
+      }
+      expect(seen).toEqual(['reset', 'keep', 'clear']);
+    });
+
+    it('Escape cancels the question first and closes the panel otherwise, stopping there both times', () => {
+      for (const [footer, want] of [
+        ['rest', 'close'],
+        ['confirming', 'keep'],
+        ['cleared', 'close'],
+      ] as const) {
+        const seen: string[] = [];
+        let stopped = 0;
+        const panel = panelOf(
+          elements(LessonPanel({ ...NOOPS, rows: [NOT_STARTED], footer, onClose: () => seen.push('close'), onKeep: () => seen.push('keep') })),
+        );
+        (panel.props.onKeyDown as (e: unknown) => void)({ key: 'Escape', preventDefault: () => {}, stopPropagation: () => (stopped += 1) });
+        expect([seen, stopped], footer).toEqual([[want], 1]);
+      }
+    });
   });
 
   describe('with the simulation stopped', () => {

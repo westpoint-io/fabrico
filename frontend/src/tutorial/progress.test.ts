@@ -15,7 +15,12 @@ const LESSON = 'your-first-line';
 const stored = (value: unknown): string => JSON.stringify(value);
 
 /** The part of `Storage` the store uses, backed by a plain object. */
-function fakeStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; data: Record<string, string> } {
+function fakeStorage(initial: Record<string, string> = {}): {
+  getItem(k: string): string | null;
+  setItem(k: string, v: string): void;
+  removeItem(k: string): void;
+  data: Record<string, string>;
+} {
   const data = { ...initial };
   return {
     data,
@@ -23,8 +28,13 @@ function fakeStorage(initial: Record<string, string> = {}): { getItem(k: string)
     setItem: (k, v) => {
       data[k] = v;
     },
+    removeItem: (k) => {
+      delete data[k];
+    },
   };
 }
+
+const noRemove = (): void => {};
 
 describe('parseProgress', () => {
   it('reads a good value', () => {
@@ -103,6 +113,7 @@ describe('localStorageProgress', () => {
           throw new Error('blocked');
         },
         setItem: () => {},
+        removeItem: noRemove,
       },
       KNOWN,
     );
@@ -116,6 +127,7 @@ describe('localStorageProgress', () => {
         setItem: () => {
           throw new Error('full');
         },
+        removeItem: noRemove,
       },
       KNOWN,
     );
@@ -129,13 +141,13 @@ describe('localStorageProgress', () => {
     };
 
     it('reads back a write that could not be stored', () => {
-      const store = localStorageProgress({ getItem: () => null, setItem: blocked }, KNOWN);
+      const store = localStorageProgress({ getItem: () => null, setItem: blocked, removeItem: noRemove }, KNOWN);
       store.write(DONE);
       expect(store.read()).toEqual(DONE);
     });
 
     it('reads back a write when reading throws too', () => {
-      const store = localStorageProgress({ getItem: blocked, setItem: blocked }, KNOWN);
+      const store = localStorageProgress({ getItem: blocked, setItem: blocked, removeItem: noRemove }, KNOWN);
       store.write(DONE);
       expect(store.read()).toEqual(DONE);
     });
@@ -149,6 +161,7 @@ describe('localStorageProgress', () => {
             throw new Error('blocked');
           },
           setItem: () => {},
+          removeItem: noRemove,
         },
         KNOWN,
       );
@@ -173,6 +186,7 @@ describe('localStorageProgress', () => {
             if (full) throw new Error('full');
             storage.setItem(k, v);
           },
+          removeItem: storage.removeItem,
         },
         KNOWN,
       );
@@ -183,6 +197,55 @@ describe('localStorageProgress', () => {
       expect(storage.data[PROGRESS_KEY], 'the later write reached storage').toBe(JSON.stringify(later));
       storage.setItem(PROGRESS_KEY, JSON.stringify(DONE));
       expect(store.read(), 'and reads come from storage again').toEqual(DONE);
+    });
+  });
+
+  describe('clear', () => {
+    const DONE: Progress = { version: 1, lessons: { [LESSON]: 'done' } };
+    const blocked = (): never => {
+      throw new Error('blocked');
+    };
+
+    it('removes the one key, and the next read is empty', () => {
+      const storage = fakeStorage({ [PROGRESS_KEY]: JSON.stringify(DONE), other: 'kept' });
+      const store = localStorageProgress(storage, KNOWN);
+      expect(store.read()).toEqual(DONE);
+      store.clear();
+      expect(store.read()).toEqual(EMPTY_PROGRESS);
+      expect(Object.keys(storage.data), 'only the progress key went').toEqual(['other']);
+    });
+
+    it('forgets the last write too, when reading throws', () => {
+      // Without this the cached write would bring Done back on the next read.
+      const store = localStorageProgress({ getItem: blocked, setItem: () => {}, removeItem: () => {} }, KNOWN);
+      store.write(DONE);
+      expect(store.read(), 'the cached write reads back first').toEqual(DONE);
+      store.clear();
+      expect(store.read()).toEqual(EMPTY_PROGRESS);
+    });
+
+    it("doesn't throw when removeItem throws, and the next read is still empty", () => {
+      const storage = fakeStorage({ [PROGRESS_KEY]: JSON.stringify(DONE) });
+      const store = localStorageProgress({ getItem: storage.getItem, setItem: storage.setItem, removeItem: blocked }, KNOWN);
+      expect(() => store.clear()).not.toThrow();
+      expect(store.read(), 'the old value is still stored, and it must not read back this run').toEqual(EMPTY_PROGRESS);
+    });
+
+    it('goes back to storage once a later write gets through', () => {
+      const storage = fakeStorage({ [PROGRESS_KEY]: JSON.stringify(DONE) });
+      const store = localStorageProgress({ getItem: storage.getItem, setItem: storage.setItem, removeItem: blocked }, KNOWN);
+      store.clear();
+      const later: Progress = { version: 1, lessons: { [LESSON]: 'inProgress' } };
+      store.write(later);
+      expect(store.read()).toEqual(later);
+      expect(storage.data[PROGRESS_KEY]).toBe(JSON.stringify(later));
+    });
+
+    it('works with no storage at all', () => {
+      const store = localStorageProgress(null, KNOWN);
+      store.write(DONE);
+      store.clear();
+      expect(store.read()).toEqual(EMPTY_PROGRESS);
     });
   });
 
