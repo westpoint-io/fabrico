@@ -13,6 +13,7 @@ import {
   recordConsoleErrors,
   recordRequests,
   watchPageErrors,
+  WHOLE_PAGE_VIEWPORT,
 } from './support/health.ts';
 
 // Captions on panels.html, where the demo board sits in a 600 px column, so it draws at about half
@@ -27,6 +28,8 @@ import {
 // brings the opening line back.
 
 const PAGE = pageUrl('panels.html');
+// Every board on this page runs at once, so the viewport holds the whole page.
+test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 const DEMO = 'demo_scene';
 /** `--fab-focus` in the locked skin, the ring's colour. */
 const FOCUS_RGB = [0x4f, 0xa8, 0xff] as const;

@@ -13,6 +13,7 @@ import {
   recordConsoleErrors,
   recordRequests,
   watchPageErrors,
+  boardsNearViewport,
 } from './support/health.ts';
 
 // A reader's input can't reach the run. On three-boards.html, which is taller than the viewport,
@@ -110,6 +111,10 @@ test('clicks, drags, keys and wheel turns leave every tick, the end hash and the
   expect(samples[samples.length - 1].tick, 'the input finished before the run did').toBeLessThan(end.endTick);
   console.log(`samples during input: ${samples.map((s) => `tick ${s.tick} frames ${s.frames}`).join(', ')}`);
 
+  // The Space key and the wheel scroll the page, which can carry the demo board more than 200 px
+  // out of view; a board out there pauses until it comes back. Bring it back before waiting for
+  // the end. Pausing changes when ticks run, never what they do.
+  await board.scrollIntoViewIfNeeded();
   // The run, start to end, is the native engine's run.
   await expect.poll(async () => (await readProbe(page, BOARD)).endHash, { timeout: 60_000 }).not.toBeNull();
   const after = await readProbe(page, BOARD);
@@ -123,7 +128,11 @@ test('clicks, drags, keys and wheel turns leave every tick, the end hash and the
   await board.scrollIntoViewIfNeeded();
   await board.locator('button[data-control="play"]').click();
   await expectBoardDrawing(page, BOARD, 'after the input');
-  expect(await glCounts(page)).toMatchObject({ live: 3, lost: 0, hidden: 1 });
+  // Only the boards within 200 px of the viewport hold a renderer.
+  const near = await boardsNearViewport(page);
+  expect(near, 'the demo board is near the viewport').toContain(BOARD);
+  await expect.poll(async () => (await glCounts(page)).live, { message: 'one live context per near board' }).toBe(near.length);
+  expect(await glCounts(page)).toMatchObject({ live: near.length, lost: 0, hidden: 1 });
 
   errors.assertNone('during and after the input');
   expect(consoleErrors).toEqual([]);

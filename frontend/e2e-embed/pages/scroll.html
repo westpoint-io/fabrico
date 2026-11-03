@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Boards far apart</title>
+<style>
+  html, body { margin: 0; background: #1b1f27; color: #b0bacb; }
+  body { font-family: 'Martian Mono', monospace; font-size: 12px; line-height: 1.4; }
+  main { padding: 24px; }
+  .row { display: flex; gap: 16px; align-items: flex-start; }
+  .col { width: 392px; flex: none; }
+  /* Taller than three viewports, so the two rows are never near the viewport together. */
+  .spacer { height: 2600px; }
+  /* Room under the second row, so it can scroll to the top of the viewport. */
+  .tail { height: 1200px; }
+</style>
+</head>
+<body>
+<main>
+  <section class="row" id="top">
+    <div class="col" data-slot="top-0"><fabrico-board name="demo_scene"></fabrico-board></div>
+    <div class="col" data-slot="top-1"><fabrico-board name="order_processing"></fabrico-board></div>
+    <div class="col" data-slot="top-2"><fabrico-board name="advanced"></fabrico-board></div>
+  </section>
+  <div class="spacer"></div>
+  <section class="row" id="bottom">
+    <div class="col" data-slot="bottom-0"><fabrico-board name="docs-script-outcomes"></fabrico-board></div>
+    <div class="col" data-slot="bottom-1"><fabrico-board name="docs-arrival-order"></fabrico-board></div>
+    <div class="col" data-slot="bottom-2"><fabrico-board name="demo_scene"></fabrico-board></div>
+  </section>
+  <div class="tail"></div>
+</main>
+<!-- fabrico:bundle -->
+</body>
+</html>

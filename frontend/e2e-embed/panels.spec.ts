@@ -8,6 +8,7 @@ import {
   recordConsoleErrors,
   recordRequests,
   watchPageErrors,
+  WHOLE_PAGE_VIEWPORT,
 } from './support/health.ts';
 
 // The code view and the effect log on panels.html. The code view shows each Factory's and HTTP
@@ -18,6 +19,8 @@ import {
 // nothing after itself: the request recorder sees only the page's own URL.
 
 const PAGE = pageUrl('panels.html');
+// Every board on this page runs at once, so the viewport holds the whole page.
+test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 const BOARDS = ['demo_scene', 'docs-script-outcomes', 'docs-arrival-order', 'one-factory'] as const;
 const OUTCOMES = 'docs-script-outcomes';
 const SUBSTRATE = [0x1b, 0x1f, 0x27] as const;

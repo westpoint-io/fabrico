@@ -25,13 +25,17 @@ export type ProbeState = 'loading' | 'running' | 'error';
 
 export interface BoardProbe {
   id: string;
+  /** True while the board holds a Pixi app (a WebGL context); false while it waits or is away. */
   mounted: boolean;
+  /** Whether the board was playing when it last left the margin, or null if it never left. */
+  wasPlaying: boolean | null;
   state: ProbeState;
   tick: number;
   endTick: number;
   /** The tick the player reported right after create (or after the last restart). */
   bootTick: number;
   playing: boolean;
+  /** Pixi ticker callbacks, summed over every mount since connect. */
   frames: number;
   endHash: string | null;
   /** The selected speed, 0.25 to 4. */

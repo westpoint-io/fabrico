@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { moduleRel, refusedModule } from './src/embed/moduleGuard.ts';
+import { loadPlayerModule, type BoardInfo } from './src/player/playerWasm.ts';
 
 const FRONTEND = fileURLToPath(new URL('.', import.meta.url));
 const REPO = path.resolve(FRONTEND, '..');
@@ -38,13 +39,36 @@ function boardId(repoPath: string): string {
   return repoPath.slice('examples/boards/'.length, -'.board.ron'.length).replace(/\//g, '-');
 }
 
+/**
+ * Each bundled board's info (title, captions, Factory and Handler sources), read by running the
+ * player itself on the board text at build time. A page uses it to lay a board out before its
+ * player has loaded, so the code column and the caption strip are there from the first frame and
+ * the stage doesn't narrow when the board finishes loading. A board the player refuses gets no
+ * entry; the page then shows the player's own error when it loads.
+ */
+async function buildBoardInfo(wasm: Uint8Array<ArrayBuffer>, boards: readonly { id: string; text: string }[]): Promise<Record<string, BoardInfo>> {
+  const player = await loadPlayerModule(wasm);
+  const out: Record<string, BoardInfo> = {};
+  for (const { id, text } of boards) {
+    let board;
+    try {
+      board = player.createBoard(text, { order: 'forward' });
+    } catch {
+      continue;
+    }
+    out[id] = board.boardInfo();
+    board.destroy();
+  }
+  return out;
+}
+
 function embedDataPlugin(): Plugin {
   return {
     name: 'fab-embed-data',
     resolveId(id) {
       return id === VIRTUAL_ID ? RESOLVED_ID : null;
     },
-    load(id) {
+    async load(id) {
       if (id !== RESOLVED_ID) return null;
       const wasmPath = process.env.FABRICO_PLAYER_WASM;
       if (wasmPath === undefined || wasmPath === '') {
@@ -65,10 +89,13 @@ function embedDataPlugin(): Plugin {
         text: fs.readFileSync(path.join(REPO, p), 'utf8'),
       }));
       const manifest = fs.readFileSync(path.join(BOARDS_DIR, 'hashes.manifest'), 'utf8');
-      const wasm = fs.readFileSync(wasmPath).toString('base64');
+      const wasmBytes = fs.readFileSync(wasmPath);
+      const wasm = wasmBytes.toString('base64');
+      const info = await buildBoardInfo(Uint8Array.from(wasmBytes), boards);
       return [
         `export const PLAYER_WASM_BASE64 = ${JSON.stringify(wasm)};`,
         `export const BOARDS = ${JSON.stringify(boards)};`,
+        `export const BOARD_INFO = ${JSON.stringify(info)};`,
         `export const MANIFEST_TEXT = ${JSON.stringify(manifest)};`,
       ].join('\n');
     },

@@ -8,6 +8,7 @@ import {
   recordConsoleErrors,
   recordRequests,
   watchPageErrors,
+  WHOLE_PAGE_VIEWPORT,
 } from './support/health.ts';
 
 // The error cards (errors.html): a name the bundle has no board for, a board file in format 1 and
@@ -16,6 +17,8 @@ import {
 // keeps the size a running board has at the same width.
 
 const PAGE = pageUrl('errors.html');
+// Every board on this page runs at once, so the viewport holds the whole page.
+test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 
 interface StageRead {
   width: number;

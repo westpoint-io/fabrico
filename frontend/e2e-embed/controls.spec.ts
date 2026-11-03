@@ -14,6 +14,7 @@ import {
   recordRequests,
   shadowText,
   watchPageErrors,
+  WHOLE_PAGE_VIEWPORT,
 } from './support/health.ts';
 
 // Three boards on one page (three-boards.html), each in a column of its own width, each drawn by
@@ -23,6 +24,8 @@ import {
 const BOARDS = ['demo_scene', 'order_processing', 'advanced'] as const;
 const COLUMN_PX: Record<(typeof BOARDS)[number], number> = { demo_scene: 960, order_processing: 600, advanced: 420 };
 const PAGE = pageUrl('three-boards.html');
+// Every board on this page runs at once, so the viewport holds the whole page.
+test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 
 /** Everything a test on this page checks at the end: no page error, no console error, no request. */
 async function openPage(page: Page): Promise<() => Promise<void>> {

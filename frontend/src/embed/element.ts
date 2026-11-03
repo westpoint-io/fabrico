@@ -23,14 +23,26 @@
 // board the player refuses puts an error card in the stage and leaves the controls disabled. An
 // engine that stops mid-run puts its card over the last frame and leaves only Restart enabled.
 //
-// Each board owns one Pixi Application, so one WebGL context. Teardown is `handle.stop()` then
-// `handle.app.destroy(true)`: Pixi frees the context itself in `destroy`, and only removing the
-// canvas would leave the context alive and counted against the browser's per-page limit.
+// MOUNTING. The page's scheduler (`scheduler.ts`) decides when a board holds a renderer: while it
+// is within 200 px of the viewport and one of the page's 8 slots is free. A board has two parts.
+// The board part (its player, its scene, its tick clock) lives from connect to disconnect. The
+// view part (one Pixi Application, so one WebGL context, plus the label and ring layers) lives
+// only while the board holds a slot. Leaving pauses the clock, remembers whether it was playing,
+// and tears the view down with `handle.stop()` then `handle.app.destroy(true)`: Pixi frees the
+// context itself in `destroy`, and only removing the canvas would leave the context alive and
+// counted against the browser's per-page limit. Coming back boots a new Pixi app on the kept
+// scene (the player sends a keyframe only at create and restart) and plays on from the same tick
+// if the board was playing.
+//
+// A bundled board's info (title, captions, code) is in the bundle from build time, so the code
+// column and the caption strip are laid out at connect and the stage keeps its width when the
+// player finishes loading.
 
 import { createPacketPipeline } from '../render/packetPipeline';
+import { createSceneState, type SceneState } from '../render/sceneState';
 import { fitToFactory } from '../render/camera';
 import { bootPixi, type SceneHandle } from '../render/pixiApp';
-import { instantiatePlayer, type BoardFactory, type BoardPlayer } from '../player/playerWasm';
+import { instantiatePlayer, type BoardFactory, type BoardInfo, type BoardPlayer } from '../player/playerWasm';
 import { verdictOf, type BadgeState } from './badge';
 import { createCaptionRing, createCaptionStrip, type CaptionRing, type CaptionStrip } from './captions';
 import { createCodeView, type CodeView } from './codeView';
@@ -40,7 +52,8 @@ import { createControlBar, type BarState, type ControlBar } from './controls';
 import { buildErrorCard, classifyPlayerError, errorCopy, unknownBoardCopy, type ErrorCopy } from './errors';
 import { createLabelOverlay, type LabelOverlay } from './labelOverlay';
 import { beltRegion, tickHashes, type BoardProbe } from './probe';
-import { boardText, compiledPlayer, manifestEntry, onBoardRegistered } from './registry';
+import { boardText, bundledInfo, compiledPlayer, manifestEntry, onBoardRegistered } from './registry';
+import { pageScheduler, type ScheduledBoard } from './scheduler';
 import { boardStylesheet, injectFonts } from './styles';
 import { createWasmPacketSource } from './wasmPacketSource';
 
@@ -65,13 +78,23 @@ function traceRequested(): boolean {
   return (globalThis as { __FABRICO_EMBED_TRACE__?: unknown }).__FABRICO_EMBED_TRACE__ === true;
 }
 
-/** Everything a mounted board holds, dropped whole on disconnect. */
-interface Mounted {
-  handle: SceneHandle;
+/** The board part: lives from connect to disconnect, across any number of mounts. */
+interface Board {
   player: BoardPlayer;
+  info: BoardInfo;
+  /** The scene the packets build. Each new Pixi app draws this same object. */
+  scene: SceneState;
   clock: BoardClock;
-  resize: ResizeObserver;
+  /** Pixi ticker callbacks across every mount, for the probe. */
   frames: { n: number };
+  /** Has the board been mounted and started once? The first mount autoplays. */
+  started: boolean;
+}
+
+/** The view part: one Pixi Application and the layers over it, while the board holds a slot. */
+interface View {
+  handle: SceneHandle;
+  resize: ResizeObserver;
   labels: LabelOverlay;
   ring: CaptionRing;
 }
@@ -93,7 +116,21 @@ export class FabricoBoardElement extends HTMLElement {
   #order: BoardOrder | null = null;
   /** The board's Factories and Handlers, once it has booted. */
   #factories: BoardFactory[] = [];
-  #mounted: Mounted | null = null;
+  #board: Board | null = null;
+  #view: View | null = null;
+  /** True while the scheduler has given this board a slot. */
+  #inSlot = false;
+  /** Bumped on every slot grant and leave, so a view boot that finishes late knows it is stale. */
+  #run = 0;
+  /** Whether the board was playing when it last left; null before it ever left. */
+  #wasPlaying: boolean | null = null;
+  /** What the page scheduler sees of this board. */
+  readonly #slot: ScheduledBoard = {
+    element: this,
+    mount: () => this.#onSlot(),
+    unmount: () => this.#onLeave(),
+    setCapped: () => {},
+  };
   #state: BarState = 'loading';
   #speed: Speed = 1;
   /** The card the stage shows, or null. */
@@ -119,12 +156,12 @@ export class FabricoBoardElement extends HTMLElement {
     this.#bar = createControlBar({
       onRestart: () => this.#restart(),
       onPlayPause: () => {
-        const clock = this.#mounted?.clock;
+        const clock = this.#live()?.clock;
         if (clock === undefined) return;
         if (clock.playing()) clock.pause();
         else clock.play();
       },
-      onStep: () => this.#mounted?.clock.stepOne(),
+      onStep: () => this.#live()?.clock.stepOne(),
       onSpeed: (speed) => this.#setSpeed(speed),
     });
     this.#captions = createCaptionStrip();
@@ -150,20 +187,24 @@ export class FabricoBoardElement extends HTMLElement {
     this.#order = orderOf(this.getAttribute('order'));
     this.#orderStrip.hidden = this.#order === null;
     this.#orderStrip.textContent = this.#order === null ? '' : ORDER_STRIP[this.#order];
-    const generation = ++this.#generation;
+    this.#generation += 1;
+    this.#wasPlaying = null;
     this.#state = 'loading';
+    this.#layOut(bundledInfo(this.#name()));
     this.#showLoading();
     this.#refresh();
-    void this.#mount(generation).catch((error: unknown) => {
-      console.error(`fabrico-board "${this.#name()}" failed to start`, error);
-    });
+    pageScheduler().add(this.#slot);
   }
 
   disconnectedCallback(): void {
     this.#generation += 1;
     this.#stopWaiting?.();
     this.#stopWaiting = null;
-    this.#unmount();
+    pageScheduler().remove(this.#slot);
+    this.#inSlot = false;
+    this.#run += 1;
+    this.#teardownView();
+    this.#dropBoard();
   }
 
   attributeChangedCallback(name: string): void {
@@ -173,7 +214,8 @@ export class FabricoBoardElement extends HTMLElement {
 
   /** A plain-data snapshot for tests. */
   fabricoProbe(): BoardProbe {
-    const m = this.#mounted;
+    const b = this.#board;
+    const v = this.#view;
     const badge = this.#badgeState();
     const base = {
       id: this.#name(),
@@ -182,8 +224,8 @@ export class FabricoBoardElement extends HTMLElement {
       verdict: badge.verdict,
       badgeText: this.#bar.badge.textContent ?? '',
       error: this.#error === null ? null : { ...this.#error },
-      caption: this.#mounted?.ring.probe() ?? null,
-      captionWithoutRing: this.#mounted?.ring.missedRing() ?? false,
+      caption: v?.ring.probe() ?? null,
+      captionWithoutRing: v?.ring.missedRing() ?? false,
       codeTabs: this.#code.root.hidden ? [] : this.#code.labels(),
       codeText: this.#code.root.hidden ? null : this.#code.text(),
       effectRows: [...this.#log.well.querySelectorAll('.row')].map((row) => ({
@@ -192,38 +234,28 @@ export class FabricoBoardElement extends HTMLElement {
       })),
       logScrollTop: this.#log.well.scrollTop,
       orderStrip: this.#orderStrip.hidden ? null : this.#orderStrip.textContent,
+      mounted: v !== null,
+      wasPlaying: this.#wasPlaying,
+      frames: b?.frames.n ?? 0,
+      cameraSnapshot: v?.handle.cameraSnapshot() ?? null,
+      beltRegion: v === null ? null : beltRegion(v.handle.sceneState, v.handle.cam, v.handle.app.canvas),
     };
-    if (m === null) {
-      return {
-        ...base,
-        mounted: false,
-        tick: 0,
-        endTick: 0,
-        bootTick: 0,
-        playing: false,
-        frames: 0,
-        endHash: null,
-        cameraSnapshot: null,
-        beltRegion: null,
-      };
+    if (b === null) {
+      return { ...base, tick: 0, endTick: 0, bootTick: 0, playing: false, endHash: null };
     }
     return {
       ...base,
-      mounted: true,
-      tick: m.player.tick(),
-      endTick: m.player.endTick(),
-      bootTick: m.clock.bootTick(),
-      playing: m.clock.playing(),
-      frames: m.frames.n,
-      endHash: m.clock.endHash(),
-      cameraSnapshot: m.handle.cameraSnapshot(),
-      beltRegion: beltRegion(m.handle.sceneState, m.handle.cam, m.handle.app.canvas),
+      tick: b.player.tick(),
+      endTick: b.player.endTick(),
+      bootTick: b.clock.bootTick(),
+      playing: b.clock.playing(),
+      endHash: b.clock.endHash(),
     };
   }
 
   /** Every tick and its hash since boot or the last restart, when the page asked for a trace. */
   fabricoTickHashes(): [number, string][] {
-    return tickHashes(this.#mounted?.clock.tickHashes() ?? []);
+    return tickHashes(this.#board?.clock.tickHashes() ?? []);
   }
 
   #name(): string {
@@ -235,6 +267,24 @@ export class FabricoBoardElement extends HTMLElement {
     const show = this.#factories.length > 0 && !this.hasAttribute('no-code');
     this.#code.setFactories(show ? this.#factories : []);
     this.#frame.classList.toggle('has-code', show);
+  }
+
+  /**
+   * Lay the panels out from a board's info: the code column, the caption strip and the effect
+   * log's empty line. Called at connect with the info the bundle carries, so the layout is final
+   * before the player loads, and again with the player's own info once it has.
+   */
+  #layOut(info: BoardInfo | null): void {
+    this.#factories = info?.factories ?? [];
+    this.#applyCode();
+    this.#captions.setCaptions(info?.captions ?? []);
+    this.#log.clear();
+    this.#log.setCallsOut(info?.callsOut ?? false);
+  }
+
+  /** The board, when it has a view to play on. Controls act only then. */
+  #live(): Board | null {
+    return this.#view === null ? null : this.#board;
   }
 
   /** Move the effects the player recorded since the last call into the log. */
@@ -283,20 +333,20 @@ export class FabricoBoardElement extends HTMLElement {
 
   /** The engine stopped mid-run: its card over the last frame, Restart still enabled. */
   #onFault(name: string, error: unknown): void {
-    const fault = this.#mounted?.clock.fault();
+    const fault = this.#board?.clock.fault();
     const message = fault?.message ?? (error instanceof Error ? error.message : String(error));
     console.warn(`fabrico-board "${name}" stopped`, error);
     this.#showError(errorCopy(classifyPlayerError(message, 'step'), { message, tick: fault?.tick ?? 0 }), 'stopped');
   }
 
   #restart(): void {
-    const m = this.#mounted;
-    if (m === null) return;
+    const b = this.#live();
+    if (b === null) return;
     if (this.#state === 'stopped') {
       this.#hideStatus();
       this.#state = 'running';
     }
-    m.clock.restart();
+    b.clock.restart();
   }
 
   /** Wait for the page to register this name, then mount again. */
@@ -306,58 +356,92 @@ export class FabricoBoardElement extends HTMLElement {
       if (id !== name || this.#name() !== name || !this.isConnected) return;
       this.#stopWaiting?.();
       this.#stopWaiting = null;
-      const generation = ++this.#generation;
+      this.#generation += 1;
       this.#state = 'loading';
       this.#showLoading();
       this.#refresh();
-      void this.#mount(generation).catch((error: unknown) => {
-        console.error(`fabrico-board "${name}" failed to start`, error);
-      });
+      // Back in the scheduler, which reports the board at once and mounts it when it is near.
+      pageScheduler().add(this.#slot);
     });
   }
 
   #badgeState(): BadgeState {
-    const hash = this.#mounted?.clock.endHash() ?? null;
+    const hash = this.#board?.clock.endHash() ?? null;
     if (hash === null) return { hash: null, verdict: null };
     return { hash, verdict: verdictOf(hash, manifestEntry(this.#name())) };
   }
 
   #setSpeed(speed: Speed): void {
     this.#speed = speed;
-    const m = this.#mounted;
-    if (m === null) return;
-    m.clock.setSpeed(speed);
-    m.handle.setRenderPace(speed);
+    this.#board?.clock.setSpeed(speed);
+    this.#view?.handle.setRenderPace(speed);
   }
 
   /** Bring the control bar in line with the board. */
   #refresh(): void {
-    const m = this.#mounted;
+    const b = this.#board;
+    // Controls act only on a board with a view; while it loads, or sits out of view, they wait.
+    const state = b !== null && this.#view === null && this.#state === 'running' ? 'loading' : this.#state;
     this.#bar.update({
-      state: this.#state,
-      tick: m?.player.tick() ?? 0,
-      endTick: m?.player.endTick() ?? 0,
-      bootTick: m?.clock.bootTick() ?? 0,
-      playing: m?.clock.playing() ?? false,
-      holding: (m?.clock.caption() ?? null) !== null,
+      state,
+      tick: b?.player.tick() ?? 0,
+      // The bundled info's end tick sizes the tick counter's slot before the player loads.
+      endTick: b?.player.endTick() ?? bundledInfo(this.#name())?.endTick ?? 0,
+      bootTick: b?.clock.bootTick() ?? 0,
+      playing: b?.clock.playing() ?? false,
+      holding: (b?.clock.caption() ?? null) !== null,
       speed: this.#speed,
       badge: this.#badgeState(),
       entry: manifestEntry(this.#name()),
     });
-    if (m !== undefined && m !== null) this.#captions.update({ held: m.clock.caption(), last: m.clock.lastCaption() });
+    if (b !== null) this.#captions.update({ held: b.clock.caption(), last: b.clock.lastCaption() });
   }
 
-  async #mount(generation: number): Promise<void> {
+  /** The scheduler gave this board a slot. */
+  #onSlot(): void {
+    this.#inSlot = true;
+    const generation = this.#generation;
+    const run = ++this.#run;
+    void this.#mountView(generation, run).catch((error: unknown) => {
+      console.error(`fabrico-board "${this.#name()}" failed to start`, error);
+    });
+  }
+
+  /** The board left the margin: pause, remember whether it played, and free the WebGL context. */
+  #onLeave(): void {
+    this.#inSlot = false;
+    this.#run += 1;
+    const b = this.#board;
+    if (this.#view === null || b === null) return;
+    this.#wasPlaying = b.clock.playing();
+    b.clock.pause();
+    this.#teardownView();
+    this.#refresh();
+  }
+
+  /** Is a view boot for this connect and this slot grant still wanted? */
+  #current(generation: number, run: number): boolean {
+    return generation === this.#generation && run === this.#run && this.#inSlot;
+  }
+
+  /**
+   * Load the board part once per connect: the player, its info, the scene and the clock. Returns
+   * null after showing the card for a board that can't load.
+   */
+  async #loadBoard(generation: number): Promise<Board | null> {
+    if (this.#board !== null) return this.#board;
     const module = await instantiatePlayer(await compiledPlayer());
-    if (generation !== this.#generation) return;
+    if (generation !== this.#generation) return null;
+    if (this.#board !== null) return this.#board;
     // Looked up after the awaits, so a page script that registers a board right after the
     // bundle has run is in time.
     const name = this.#name();
     const text = boardText(name);
     if (text === null) {
       this.#showError(unknownBoardCopy(name), 'error');
+      pageScheduler().remove(this.#slot);
       this.#waitForRegistration(name);
-      return;
+      return null;
     }
     let player: BoardPlayer;
     try {
@@ -365,36 +449,48 @@ export class FabricoBoardElement extends HTMLElement {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#showError(errorCopy(classifyPlayerError(message, 'create'), { message, tick: 0 }), 'error');
-      return;
-    }
-    let handle: SceneHandle;
-    try {
-      handle = await bootPixi(this.#stage, { interactive: false, resizeTo: this.#stage });
-    } catch (error) {
-      player.destroy();
-      throw error;
-    }
-    if (generation !== this.#generation) {
-      handle.stop();
-      handle.app.destroy(true);
-      player.destroy();
-      return;
+      pageScheduler().remove(this.#slot);
+      return null;
     }
     const info = player.boardInfo();
-    const title = info.title || name;
-    handle.app.canvas.setAttribute('role', 'img');
-    handle.app.canvas.setAttribute('aria-label', `${title}, a running Fabrico board`);
-
-    const pipeline = createPacketPipeline(() => handle.sceneState);
+    const scene = createSceneState();
+    const pipeline = createPacketPipeline(() => scene);
     const source = createWasmPacketSource(player);
     source.onPacket((bytes) => pipeline.handle(bytes));
-    // The keyframe the player queued at create.
+    // The keyframe the player queued at create, into the kept scene.
     source.drain();
-    this.#factories = info.factories;
-    this.#applyCode();
-    this.#log.clear();
-    this.#log.setCallsOut(info.callsOut);
+    this.#layOut(info);
     this.#drainEffects(player);
+    const clock = createBoardClock({
+      player,
+      drain: () => {
+        source.drain();
+        this.#drainEffects(player);
+      },
+      onRestart: () => this.#log.clear(),
+      onChange: () => this.#refresh(),
+      onFault: (error) => this.#onFault(name, error),
+      trace: traceRequested(),
+    });
+    clock.setSpeed(this.#speed);
+    this.#board = { player, info, scene, clock, frames: { n: 0 }, started: false };
+    return this.#board;
+  }
+
+  /** Boot a Pixi app on the board's kept scene and put the layers over it. */
+  async #mountView(generation: number, run: number): Promise<void> {
+    const board = await this.#loadBoard(generation);
+    if (board === null || !this.#current(generation, run) || this.#view !== null) return;
+    const handle = await bootPixi(this.#stage, { interactive: false, resizeTo: this.#stage, scene: board.scene });
+    if (!this.#current(generation, run) || this.#view !== null) {
+      handle.app.canvas.setAttribute('data-fab-teardown', '');
+      handle.stop();
+      handle.app.destroy(true);
+      return;
+    }
+    const title = board.info.title || this.#name();
+    handle.app.canvas.setAttribute('role', 'img');
+    handle.app.canvas.setAttribute('aria-label', `${title}, a running Fabrico board`);
 
     const fit = (): void => {
       const { width, height } = handle.app.screen;
@@ -412,53 +508,52 @@ export class FabricoBoardElement extends HTMLElement {
       fit();
     });
     resize.observe(this.#stage);
-
-    const frames = { n: 0 };
     handle.app.ticker.add(() => {
-      frames.n += 1;
+      board.frames.n += 1;
     });
-
-    const clock = createBoardClock({
-      player,
-      drain: () => {
-        source.drain();
-        this.#drainEffects(player);
-      },
-      onRestart: () => this.#log.clear(),
-      onChange: () => this.#refresh(),
-      onFault: (error) => this.#onFault(name, error),
-      trace: traceRequested(),
-    });
-    clock.setSpeed(this.#speed);
     handle.setRenderPace(this.#speed);
     // The ring layer sits under the labels, so a name chip stays readable over the ring's edge.
-    const ring = createCaptionRing(this.#stage, handle, info.captions, () => clock.caption());
+    const ring = createCaptionRing(this.#stage, handle, board.info.captions, () => board.clock.caption());
     const labels = createLabelOverlay(this.#stage, handle);
-    this.#captions.setCaptions(info.captions);
     // The status layer (loading line, error cards) stays above the canvas and the labels.
     this.#stage.append(this.#status);
-    this.#mounted = { handle, player, clock, resize, frames, labels, ring };
-    this.#state = 'running';
-    this.#hideStatus();
+    this.#view = { handle, resize, labels, ring };
+    if (this.#state === 'loading') {
+      this.#state = 'running';
+      this.#hideStatus();
+    }
+    if (!board.started) {
+      board.started = true;
+      board.clock.play();
+    } else if (this.#wasPlaying === true) {
+      board.clock.play();
+    }
     this.#refresh();
-    clock.play();
   }
 
-  #unmount(): void {
-    const m = this.#mounted;
-    if (m === null) return;
-    this.#mounted = null;
-    m.clock.stop();
-    m.resize.disconnect();
+  /** Free the WebGL context and the layers over it. The board part stays. */
+  #teardownView(): void {
+    const v = this.#view;
+    if (v === null) return;
+    this.#view = null;
+    v.resize.disconnect();
     // Tests count live WebGL contexts from outside the page; this marks a canvas being torn
     // down on purpose, so its context loss is not read as a fault.
-    m.handle.app.canvas.setAttribute('data-fab-teardown', '');
-    m.handle.stop();
-    m.handle.app.destroy(true);
-    m.labels.root.remove();
-    m.ring.root.remove();
+    v.handle.app.canvas.setAttribute('data-fab-teardown', '');
+    v.handle.stop();
+    v.handle.app.destroy(true);
+    v.labels.root.remove();
+    v.ring.root.remove();
+  }
+
+  /** Drop the board part on disconnect. A later connect loads the board afresh. */
+  #dropBoard(): void {
+    const b = this.#board;
+    if (b === null) return;
+    this.#board = null;
+    b.clock.stop();
     try {
-      m.player.destroy();
+      b.player.destroy();
     } catch {
       // A trapped instance can take no more calls; it goes with the page.
     }

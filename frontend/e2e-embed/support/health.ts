@@ -95,6 +95,30 @@ export async function installGlCounter(page: Page): Promise<void> {
   });
 }
 
+/**
+ * A viewport tall enough to hold every board on the test pages that run all their boards at once.
+ * A board holds a renderer only within 200 px of the viewport, so a spec about something other
+ * than scrolling uses this to have every board on its page mounted from the start.
+ */
+export const WHOLE_PAGE_VIEWPORT = { width: 1280, height: 3200 } as const;
+
+/**
+ * The names of the boards whose element box is within `margin` CSS px of the viewport, measured
+ * by the test from the page's layout, not read from the embed.
+ */
+export async function boardsNearViewport(page: Page, margin = 200): Promise<string[]> {
+  return page.evaluate((m) => {
+    const out: string[] = [];
+    for (const el of document.querySelectorAll('fabrico-board')) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom >= -m && r.top <= window.innerHeight + m && r.right >= -m && r.left <= window.innerWidth + m) {
+        out.push(el.getAttribute('name') ?? '');
+      }
+    }
+    return out;
+  }, margin);
+}
+
 /** Read the outside context counts. */
 export async function glCounts(page: Page): Promise<GlCounts> {
   return page.evaluate(() => {

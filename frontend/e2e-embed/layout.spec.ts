@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { autoContinueCaptions, installGlCounter, pageUrl, recordConsoleErrors, recordRequests, watchPageErrors } from './support/health.ts';
+import {
+  autoContinueCaptions,
+  installGlCounter,
+  pageUrl,
+  recordConsoleErrors,
+  recordRequests,
+  watchPageErrors,
+  WHOLE_PAGE_VIEWPORT,
+} from './support/health.ts';
 
 // The demo board at element widths of 360, 600 and 1024 px (layout.html). The control bar wraps
 // when its two groups don't fit on one line, no control leaves the frame, every button and the
@@ -7,6 +15,8 @@ import { autoContinueCaptions, installGlCounter, pageUrl, recordConsoleErrors, r
 // loading state shows "Loading board" with every control disabled.
 
 const PAGE = pageUrl('layout.html');
+// Every board on this page runs at once, so the viewport holds the whole page.
+test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 const WIDTHS = [360, 600, 1024] as const;
 
 interface Rect {
@@ -169,6 +179,7 @@ test('before the player is ready, the stage says Loading board and every control
   await autoContinueCaptions(page);
   await page.goto(PAGE);
   await page.waitForTimeout(1000);
+  const loadingStage = new Map<number, { width: number; height: number }>();
   for (const w of WIDTHS) {
     const read = await page.evaluate((width) => {
       const el = document.querySelector(`[data-width="${width}"] fabrico-board`) as HTMLElement & {
@@ -186,14 +197,26 @@ test('before the player is ready, the stage says Loading board and every control
     expect(read.state, `${w} px: loading`).toBe('loading');
     expect(read.status, `${w} px: the stage text`).toBe('Loading board');
     expect(read.disabled, `${w} px: restart, play, step and speed are disabled`).toEqual([true, true, true, true]);
-    const want = Math.min(560, Math.max(240, ((w - 28) * 10) / 16));
-    expect(Math.abs(read.stage.height - want), `${w} px: the stage already has its size`).toBeLessThanOrEqual(1);
+    const want = Math.min(560, Math.max(240, (read.stage.width * 10) / 16));
+    expect(Math.abs(read.stage.height - want), `${w} px: the stage is 16:10 to its own width while loading`).toBeLessThanOrEqual(1);
+    loadingStage.set(w, read.stage);
   }
   await page.evaluate(() => (window as unknown as { __fabReleasePlayer: () => void }).__fabReleasePlayer());
   for (const w of WIDTHS) {
     await expect
       .poll(async () => (await readLayout(page, w)).state, { timeout: 20_000, message: `${w} px: runs once released` })
       .toBe('running');
+    // The code column and the caption strip are laid out from the bundle before the player loads,
+    // so the stage doesn't change size when the board starts.
+    const running = await page.evaluate((width) => {
+      const el = document.querySelector(`[data-width="${width}"] fabrico-board`) as HTMLElement;
+      const box = ((el.shadowRoot as ShadowRoot).querySelector('.stage') as HTMLElement).getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    }, w);
+    const before = loadingStage.get(w) ?? { width: 0, height: 0 };
+    console.log(`${w} px: stage ${before.width.toFixed(1)} x ${before.height.toFixed(1)} loading, ${running.width.toFixed(1)} x ${running.height.toFixed(1)} running`);
+    expect(Math.abs(running.width - before.width), `${w} px: the stage keeps its width when the board starts`).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(running.height - before.height), `${w} px: the stage keeps its height when the board starts`).toBeLessThanOrEqual(0.5);
   }
   errors.assertNone('on the layout page while loading');
 });

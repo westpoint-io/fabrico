@@ -5,8 +5,8 @@
 // `window.FabricoEmbed.registerBoard`). A registered board has no manifest line, so its badge reads
 // "not pinned", and it can't take a bundled board's id, so it can't borrow that board's pin.
 
-import { BOARDS, MANIFEST_TEXT, PLAYER_WASM_BASE64 } from 'virtual:fabrico-embed-data';
-import { compilePlayer } from '../player/playerWasm';
+import { BOARD_INFO, BOARDS, MANIFEST_TEXT, PLAYER_WASM_BASE64 } from 'virtual:fabrico-embed-data';
+import { compilePlayer, type BoardInfo } from '../player/playerWasm';
 
 /** A board's line in `hashes.manifest`: the tick it ends on and its state hash there. */
 export interface ManifestEntry {
@@ -34,6 +34,16 @@ const registeredListeners = new Set<(id: string) => void>();
 /** A board's file text, bundled or registered, or null when there is no board by that id. */
 export function boardText(id: string): string | null {
   return BOARDS.find((b) => b.id === id)?.text ?? registered.get(id) ?? null;
+}
+
+/**
+ * A bundled board's info as the player reported it when the bundle was built, or null for a
+ * registered board or an unknown id. The element lays the board out from it before its own player
+ * has loaded.
+ */
+export function bundledInfo(id: string): BoardInfo | null {
+  if (!BOARDS.some((b) => b.id === id)) return null;
+  return BOARD_INFO[id] ?? null;
 }
 
 /** Was this id added by the page rather than carried by the bundle? */

@@ -13,4 +13,9 @@ declare module 'virtual:fabrico-embed-data' {
   export const BOARDS: readonly { id: string; path: string; text: string }[];
   /** The text of `examples/boards/hashes.manifest`. */
   export const MANIFEST_TEXT: string;
+  /**
+   * Each bundled board's info, keyed by board id, as the player reported it at build time. A board
+   * the player refused has no entry.
+   */
+  export const BOARD_INFO: Readonly<Record<string, import('../src/player/playerWasm').BoardInfo>>;
 }
