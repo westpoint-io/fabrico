@@ -32,10 +32,13 @@ async function openPage(page: Page): Promise<() => Promise<void>> {
     await expect.poll(async () => (await readProbe(page, name)).state, { timeout: 20_000 }).toBe('running');
   }
   return async () => {
+    // The request list first: it names a URL the page reached for, whether or not the page's
+    // policy stopped it. Without the policy a cross-origin fetch still goes out and only its answer
+    // is blocked, so the console line would name CORS rather than the request.
+    expect(requests, 'the page made no request after itself').toEqual([PAGE]);
     expect((await glCounts(page)).lost).toBe(0);
     errors.assertNone('on the panels page');
     expect(consoleErrors, 'the page logged no console error').toEqual([]);
-    expect(requests, 'the page made no request after itself').toEqual([PAGE]);
   };
 }
 
