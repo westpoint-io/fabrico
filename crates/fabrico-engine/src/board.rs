@@ -417,6 +417,14 @@ pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>
     Ok(minted)
 }
 
+/// The script with the entries inside each same-tick run in reverse order, and the runs themselves
+/// left in tick order. A board whose run doesn't depend on the order its same-tick inputs arrive
+/// in gives the same hash at every tick either way.
+#[must_use]
+pub fn reverse_same_tick_runs(script: &[ScriptEntry]) -> Vec<ScriptEntry> {
+    script.to_vec()
+}
+
 /// Refuse a caption whose handle isn't a machine on the booted board. Only the handles the
 /// commands minted count, so a handle a scripted edit mints later is refused as well.
 fn check_caption_highlights(engine: &Engine, board: &BoardFile, minted: &[NodeId]) -> Result<(), BoardError> {
@@ -855,6 +863,39 @@ mod tests {
         assert!(!parsed(debug_sink, "").calls_out(), "a Debug Sink");
         let scripted = "At(tick: 50, input: Edit(Place(kind: 9, cell_x: 9, cell_y: 9)))";
         assert!(parsed(ONE_PLACE, scripted).calls_out(), "a Route placed by the script");
+    }
+
+    fn webhook_entry(tick: u64, source: u64, body: &str) -> ScriptEntry {
+        ScriptEntry { tick, input: ScriptInput::Webhook { source, body: body.to_owned() } }
+    }
+
+    #[test]
+    fn reversing_a_script_with_no_same_tick_run_changes_nothing() {
+        let script = [webhook_entry(10, 0, "a"), webhook_entry(11, 0, "b"), webhook_entry(20, 1, "c")];
+        assert_eq!(reverse_same_tick_runs(&script), script);
+        assert_eq!(reverse_same_tick_runs(&[]), []);
+    }
+
+    #[test]
+    fn reversing_turns_each_same_tick_run_round_and_keeps_the_runs_in_tick_order() {
+        let script = [
+            webhook_entry(10, 0, "a"),
+            webhook_entry(10, 1, "b"),
+            webhook_entry(10, 2, "c"),
+            webhook_entry(11, 0, "d"),
+            webhook_entry(20, 0, "e"),
+            webhook_entry(20, 1, "f"),
+        ];
+        let reversed = reverse_same_tick_runs(&script);
+        let order: Vec<(u64, &str)> = reversed
+            .iter()
+            .map(|entry| match &entry.input {
+                ScriptInput::Webhook { body, .. } => (entry.tick, body.as_str()),
+                other => panic!("expected a webhook, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(order, [(10, "c"), (10, "b"), (10, "a"), (11, "d"), (20, "f"), (20, "e")]);
+        assert_eq!(reverse_same_tick_runs(&reversed), script, "reversing twice gives the script back");
     }
 
     proptest! {

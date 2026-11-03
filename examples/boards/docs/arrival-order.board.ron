@@ -1,0 +1,68 @@
+// A docs board for running one board twice: as written, and with the webhooks inside each tick
+// sent in the reverse order. Three Sources each get a webhook on the same tick, and their items
+// travel on three different belts through two Merges, so the order they were sent in can't change
+// any tick of the run. The run makes no outbound call: the Sink is a Debug sink.
+//
+//   row 3:   SOURCE 0 -b6-> MERGE 3 In 0 \
+//   row 4:   SOURCE 1 -b7-> MERGE 3 In 1  >- MERGE 3 Out -b8-> MERGE 4 In 0 \
+//   row 5:   SOURCE 2 -b9------------------------------------> MERGE 4 In 1  >- MERGE 4 Out -b10-> SINK 5
+//
+// A Merge has two Ins, so the third Source joins at the second Merge.
+//
+// Same-tick webhooks into one Source are a different case: the Source queues them in the order
+// they arrive, so reversing them changes the run. That is why each Source here gets one webhook
+// per tick.
+//
+// Handles mint in command order: the Sources 0, 1 and 2, the Merges 3 and 4, the Sink 5, then
+// the belts 6 to 10. The 21 commands and the history seal end the boot on tick 22.
+//
+// machine_kind u8 legend: SOURCE=0, MERGE=6, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; MERGE In=0, In=1, Out=2; SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Arrival order",
+    seed: 95,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 3),        // 0: SOURCE
+        Place(kind: 0, cell_x: 1, cell_y: 4),        // 1: SOURCE
+        Place(kind: 0, cell_x: 1, cell_y: 5),        // 2: SOURCE
+        Place(kind: 6, cell_x: 6, cell_y: 3),        // 3: MERGE, 2x2
+        Place(kind: 6, cell_x: 11, cell_y: 3),       // 4: MERGE, 2x2
+        Place(kind: 7, cell_x: 16, cell_y: 3),       // 5: SINK, Debug by default
+        DrawBelt(cells: [(2, 3), (3, 3), (4, 3), (5, 3)]),                // 6
+        DrawBelt(cells: [(2, 4), (3, 4), (4, 4), (5, 4)]),                // 7
+        DrawBelt(cells: [(8, 3), (9, 3), (10, 3)]),                       // 8
+        DrawBelt(cells: [(2, 5), (3, 5), (4, 5), (5, 5), (6, 5), (7, 5), (8, 5), (9, 5), (9, 4), (10, 4)]), // 9
+        DrawBelt(cells: [(13, 3), (14, 3), (15, 3)]),                     // 10
+        Dock(belt: 6, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 7, endpoint: Head, node: 3, port: 1),
+        Dock(belt: 8, endpoint: Tail, node: 3, port: 2),
+        Dock(belt: 8, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 2, port: 0),
+        Dock(belt: 9, endpoint: Head, node: 4, port: 1),
+        Dock(belt: 10, endpoint: Tail, node: 4, port: 2),
+        Dock(belt: 10, endpoint: Head, node: 5, port: 0),
+    ],
+    script: [
+        // Each of these two ticks sends one webhook to every Source.
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"from":"a","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 1, body: r#"{"from":"b","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 2, body: r#"{"from":"c","round":1}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"from":"a","round":2}"#)),
+        At(tick: 120, input: Webhook(source: 1, body: r#"{"from":"b","round":2}"#)),
+        At(tick: 120, input: Webhook(source: 2, body: r#"{"from":"c","round":2}"#)),
+    ],
+    captions: [
+        // Measured: both belts into the first Merge empty on the step that ends on tick 71.
+        Caption(tick: 71, highlight: 3, text: "The webhooks sent to the top two Sources on tick 40 reach this Merge together, on two different belts."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)

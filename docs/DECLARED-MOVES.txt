@@ -190,3 +190,6 @@ crates/fabrico-engine/src/board.rs
 crates/fabrico-engine/tests/board_captions.rs
 # The scripted-run test reads the board format the parser now accepts.
 crates/fabrico-engine/tests/board_outcomes.rs
+# The arrival-order board played as written and with its same-tick webhooks reversed, compared at
+# every tick, with a same-Source variant that has to differ.
+crates/fabrico-engine/tests/board_arrival_order.rs
