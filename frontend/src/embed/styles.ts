@@ -263,6 +263,7 @@ export const LAYOUT_CSS = `
   line-height: 1.4;
   color: var(--fab-ink);
   text-align: center;
+  text-wrap: balance;
   overflow-wrap: anywhere;
 }
 .poster-band[hidden] { display: none; }
