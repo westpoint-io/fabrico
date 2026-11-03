@@ -1,5 +1,9 @@
 // What the bundle carries: every example board's text, the hash manifest and the player module,
 // all inlined at build time by `vite.embed.config.ts`. Nothing here fetches.
+//
+// A page can add a board the bundle doesn't carry with `registerBoard(id, text)` (exposed as
+// `window.FabricoEmbed.registerBoard`). A registered board has no manifest line, so its badge reads
+// "not pinned", and it can't take a bundled board's id, so it can't borrow that board's pin.
 
 import { BOARDS, MANIFEST_TEXT, PLAYER_WASM_BASE64 } from 'virtual:fabrico-embed-data';
 import { compilePlayer } from '../player/playerWasm';
@@ -24,9 +28,37 @@ export function boardIds(): string[] {
   return BOARDS.map((b) => b.id);
 }
 
-/** A board's file text, or null when the bundle has no board by that id. */
+const registered = new Map<string, string>();
+const registeredListeners = new Set<(id: string) => void>();
+
+/** A board's file text, bundled or registered, or null when there is no board by that id. */
 export function boardText(id: string): string | null {
-  return BOARDS.find((b) => b.id === id)?.text ?? null;
+  return BOARDS.find((b) => b.id === id)?.text ?? registered.get(id) ?? null;
+}
+
+/** Was this id added by the page rather than carried by the bundle? */
+export function isRegistered(id: string): boolean {
+  return registered.has(id);
+}
+
+/**
+ * Add a board the bundle doesn't carry. Boards already on the page under that name that found no
+ * board load it now. Throws a TypeError for an empty id, non-string text, or a bundled id.
+ */
+export function registerBoard(id: unknown, text: unknown): void {
+  if (typeof id !== 'string' || id === '') throw new TypeError('registerBoard: the id is a non-empty string');
+  if (typeof text !== 'string') throw new TypeError(`registerBoard: the text of "${id}" is a string`);
+  if (BOARDS.some((b) => b.id === id)) {
+    throw new TypeError(`registerBoard: "${id}" is a board this bundle carries, so it can't be replaced`);
+  }
+  registered.set(id, text);
+  for (const listener of registeredListeners) listener(id);
+}
+
+/** Hear about each board a page registers. Returns the function that stops listening. */
+export function onBoardRegistered(listener: (id: string) => void): () => void {
+  registeredListeners.add(listener);
+  return () => registeredListeners.delete(listener);
 }
 
 let manifest: Map<string, ManifestEntry> | null = null;
@@ -48,6 +80,7 @@ export function parseManifest(text: string): Map<string, ManifestEntry> {
 
 /** The manifest line for a board id, or null when the manifest doesn't pin it. */
 export function manifestEntry(id: string): ManifestEntry | null {
+  if (registered.has(id)) return null;
   manifest ??= parseManifest(MANIFEST_TEXT);
   return manifest.get(id) ?? null;
 }

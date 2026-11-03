@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Board errors</title>
+<style>
+  html, body { margin: 0; background: #1b1f27; color: #b0bacb; }
+  body { font-family: 'Martian Mono', monospace; font-size: 12px; line-height: 1.4; }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+  section { margin: 0 0 48px; }
+  h2 { font-family: 'Sono', monospace; font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin: 0 0 24px; }
+  .col { width: 600px; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>A running board</h2>
+    <div class="col"><fabrico-board name="demo_scene"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>A name with no board</h2>
+    <div class="col"><fabrico-board name="no_such_board"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>A format 1 board</h2>
+    <div class="col"><fabrico-board name="old-format"></fabrico-board></div>
+  </section>
+  <section>
+    <h2>An engine that stops mid-run</h2>
+    <div class="col"><fabrico-board name="stops-mid-run"></fabrico-board></div>
+  </section>
+</main>
+<!-- A board file in format 1, which this player refuses. -->
+<script type="text/x-fabrico-board" id="old-format">
+Board(
+    format: 1,
+    seed: 95,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 3),
+        Place(kind: 0, cell_x: 1, cell_y: 4),
+        Place(kind: 0, cell_x: 1, cell_y: 5),
+        Place(kind: 6, cell_x: 6, cell_y: 3),
+        Place(kind: 6, cell_x: 11, cell_y: 3),
+        Place(kind: 7, cell_x: 16, cell_y: 3),
+        DrawBelt(cells: [(2, 3), (3, 3), (4, 3), (5, 3)]),
+        DrawBelt(cells: [(2, 4), (3, 4), (4, 4), (5, 4)]),
+        DrawBelt(cells: [(8, 3), (9, 3), (10, 3)]),
+        DrawBelt(cells: [(2, 5), (3, 5), (4, 5), (5, 5), (6, 5), (7, 5), (8, 5), (9, 5), (9, 4), (10, 4)]),
+        DrawBelt(cells: [(13, 3), (14, 3), (15, 3)]),
+        Dock(belt: 6, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 7, endpoint: Head, node: 3, port: 1),
+        Dock(belt: 8, endpoint: Tail, node: 3, port: 2),
+        Dock(belt: 8, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 2, port: 0),
+        Dock(belt: 9, endpoint: Head, node: 4, port: 1),
+        Dock(belt: 10, endpoint: Tail, node: 4, port: 2),
+        Dock(belt: 10, endpoint: Head, node: 5, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"from":"a","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 1, body: r#"{"from":"b","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 2, body: r#"{"from":"c","round":1}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"from":"a","round":2}"#)),
+        At(tick: 120, input: Webhook(source: 1, body: r#"{"from":"b","round":2}"#)),
+        At(tick: 120, input: Webhook(source: 2, body: r#"{"from":"c","round":2}"#)),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)
+
+</script>
+<!-- A format 2 board whose script sends a webhook to handle 42 on tick 120. No machine has that
+     handle, so the player's step fails there. -->
+<script type="text/x-fabrico-board" id="stops-mid-run">
+Board(
+    format: 2,
+    title: "Stops mid-run",
+    seed: 95,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 3),
+        Place(kind: 0, cell_x: 1, cell_y: 4),
+        Place(kind: 0, cell_x: 1, cell_y: 5),
+        Place(kind: 6, cell_x: 6, cell_y: 3),
+        Place(kind: 6, cell_x: 11, cell_y: 3),
+        Place(kind: 7, cell_x: 16, cell_y: 3),
+        DrawBelt(cells: [(2, 3), (3, 3), (4, 3), (5, 3)]),
+        DrawBelt(cells: [(2, 4), (3, 4), (4, 4), (5, 4)]),
+        DrawBelt(cells: [(8, 3), (9, 3), (10, 3)]),
+        DrawBelt(cells: [(2, 5), (3, 5), (4, 5), (5, 5), (6, 5), (7, 5), (8, 5), (9, 5), (9, 4), (10, 4)]),
+        DrawBelt(cells: [(13, 3), (14, 3), (15, 3)]),
+        Dock(belt: 6, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 7, endpoint: Head, node: 3, port: 1),
+        Dock(belt: 8, endpoint: Tail, node: 3, port: 2),
+        Dock(belt: 8, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 2, port: 0),
+        Dock(belt: 9, endpoint: Head, node: 4, port: 1),
+        Dock(belt: 10, endpoint: Tail, node: 4, port: 2),
+        Dock(belt: 10, endpoint: Head, node: 5, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"from":"a","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 1, body: r#"{"from":"b","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 2, body: r#"{"from":"c","round":1}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"from":"a","round":2}"#)),
+        At(tick: 120, input: Webhook(source: 1, body: r#"{"from":"b","round":2}"#)),
+        At(tick: 120, input: Webhook(source: 42, body: r#"{"from":"c","round":2}"#)),
+    ],
+    captions: [
+        Caption(tick: 71, highlight: 3, text: "The webhooks sent to the top two Sources on tick 40 reach this Merge together, on two different belts."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)
+
+</script>
+<!-- fabrico:bundle -->
+<script>
+  for (const id of ['old-format', 'stops-mid-run']) {
+    window.FabricoEmbed.registerBoard(id, document.getElementById(id).textContent);
+  }
+</script>
+</body>
+</html>

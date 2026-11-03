@@ -6,7 +6,13 @@
 //
 // Layout, top to bottom inside a panel frame: the stage (the canvas, sized 16:10 to the element's
 // width and clamped to 240 to 560 px, or to the `height` attribute) and the control bar. The stage
-// holds its size while loading, so the page never shifts.
+// holds its size while loading, behind an error card and after the engine stops, so the page never
+// shifts. Over the canvas sits the label overlay (machine name chips and label words).
+//
+// States: `loading` until the player has booted the board (the stage says "Loading board" and
+// every control is disabled), then `running`. A name with no board, an old board format or a
+// board the player refuses puts an error card in the stage and leaves the controls disabled. An
+// engine that stops mid-run puts its card over the last frame and leaves only Restart enabled.
 //
 // Each board owns one Pixi Application, so one WebGL context. Teardown is `handle.stop()` then
 // `handle.app.destroy(true)`: Pixi frees the context itself in `destroy`, and only removing the
@@ -19,8 +25,10 @@ import { instantiatePlayer, type BoardPlayer } from '../player/playerWasm';
 import { verdictOf, type BadgeState } from './badge';
 import { createBoardClock, type BoardClock, type Speed } from './controller';
 import { createControlBar, type BarState, type ControlBar } from './controls';
+import { buildErrorCard, classifyPlayerError, errorCopy, unknownBoardCopy, type ErrorCopy } from './errors';
+import { createLabelOverlay, type LabelOverlay } from './labelOverlay';
 import { beltRegion, tickHashes, type BoardProbe } from './probe';
-import { boardText, compiledPlayer, manifestEntry } from './registry';
+import { boardText, compiledPlayer, manifestEntry, onBoardRegistered } from './registry';
 import { boardStylesheet, injectFonts } from './styles';
 import { createWasmPacketSource } from './wasmPacketSource';
 
@@ -39,6 +47,7 @@ interface Mounted {
   clock: BoardClock;
   resize: ResizeObserver;
   frames: { n: number };
+  labels: LabelOverlay;
 }
 
 export class FabricoBoardElement extends HTMLElement {
@@ -52,6 +61,10 @@ export class FabricoBoardElement extends HTMLElement {
   #mounted: Mounted | null = null;
   #state: BarState = 'loading';
   #speed: Speed = 1;
+  /** The card the stage shows, or null. */
+  #error: ErrorCopy | null = null;
+  /** Stops listening for a page registering this board's name, when it found no board. */
+  #stopWaiting: (() => void) | null = null;
   /** Bumped on every connect and disconnect, so a mount that finishes late knows it is stale. */
   #generation = 0;
 
@@ -68,7 +81,7 @@ export class FabricoBoardElement extends HTMLElement {
     this.#status.className = 'status';
     this.#stage.append(this.#status);
     this.#bar = createControlBar({
-      onRestart: () => this.#mounted?.clock.restart(),
+      onRestart: () => this.#restart(),
       onPlayPause: () => {
         const clock = this.#mounted?.clock;
         if (clock === undefined) return;
@@ -97,6 +110,8 @@ export class FabricoBoardElement extends HTMLElement {
 
   disconnectedCallback(): void {
     this.#generation += 1;
+    this.#stopWaiting?.();
+    this.#stopWaiting = null;
     this.#unmount();
   }
 
@@ -110,11 +125,11 @@ export class FabricoBoardElement extends HTMLElement {
     const badge = this.#badgeState();
     const base = {
       id: this.#name(),
-      state: this.#state === 'running' || this.#state === 'stopped' ? ('running' as const) : this.#state,
+      state: this.#state === 'running' ? ('running' as const) : this.#state === 'loading' ? ('loading' as const) : ('error' as const),
       speed: this.#speed,
       verdict: badge.verdict,
       badgeText: this.#bar.badge.textContent ?? '',
-      error: null,
+      error: this.#error === null ? null : { ...this.#error },
     };
     if (m === null) {
       return {
@@ -180,6 +195,51 @@ export class FabricoBoardElement extends HTMLElement {
   #hideStatus(): void {
     this.#status.replaceChildren();
     this.#status.hidden = true;
+    this.#error = null;
+  }
+
+  /** Put an error card in the stage. `stopped` keeps Restart enabled; `error` disables all. */
+  #showError(copy: ErrorCopy, state: 'error' | 'stopped'): void {
+    this.#error = copy;
+    this.#state = state;
+    this.#status.replaceChildren(buildErrorCard(copy));
+    this.#status.hidden = false;
+    this.#refresh();
+  }
+
+  /** The engine stopped mid-run: its card over the last frame, Restart still enabled. */
+  #onFault(name: string, error: unknown): void {
+    const fault = this.#mounted?.clock.fault();
+    const message = fault?.message ?? (error instanceof Error ? error.message : String(error));
+    console.warn(`fabrico-board "${name}" stopped`, error);
+    this.#showError(errorCopy(classifyPlayerError(message, 'step'), { message, tick: fault?.tick ?? 0 }), 'stopped');
+  }
+
+  #restart(): void {
+    const m = this.#mounted;
+    if (m === null) return;
+    if (this.#state === 'stopped') {
+      this.#hideStatus();
+      this.#state = 'running';
+    }
+    m.clock.restart();
+  }
+
+  /** Wait for the page to register this name, then mount again. */
+  #waitForRegistration(name: string): void {
+    this.#stopWaiting?.();
+    this.#stopWaiting = onBoardRegistered((id) => {
+      if (id !== name || this.#name() !== name || !this.isConnected) return;
+      this.#stopWaiting?.();
+      this.#stopWaiting = null;
+      const generation = ++this.#generation;
+      this.#state = 'loading';
+      this.#showLoading();
+      this.#refresh();
+      void this.#mount(generation).catch((error: unknown) => {
+        console.error(`fabrico-board "${name}" failed to start`, error);
+      });
+    });
   }
 
   #badgeState(): BadgeState {
@@ -219,12 +279,18 @@ export class FabricoBoardElement extends HTMLElement {
     const name = this.#name();
     const text = boardText(name);
     if (text === null) {
-      this.#state = 'error';
-      this.#status.textContent = `No example board is named "${name}".`;
-      this.#refresh();
+      this.#showError(unknownBoardCopy(name), 'error');
+      this.#waitForRegistration(name);
       return;
     }
-    const player = module.createBoard(text);
+    let player: BoardPlayer;
+    try {
+      player = module.createBoard(text);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#showError(errorCopy(classifyPlayerError(message, 'create'), { message, tick: 0 }), 'error');
+      return;
+    }
     let handle: SceneHandle;
     try {
       handle = await bootPixi(this.#stage, { interactive: false, resizeTo: this.#stage });
@@ -276,12 +342,15 @@ export class FabricoBoardElement extends HTMLElement {
         source.drain();
       },
       onChange: () => this.#refresh(),
-      onFault: (error) => console.warn(`fabrico-board "${name}" stopped`, error),
+      onFault: (error) => this.#onFault(name, error),
       trace: traceRequested(),
     });
     clock.setSpeed(this.#speed);
     handle.setRenderPace(this.#speed);
-    this.#mounted = { handle, player, clock, resize, frames };
+    const labels = createLabelOverlay(this.#stage, handle);
+    // The status layer (loading line, error cards) stays above the canvas and the labels.
+    this.#stage.append(this.#status);
+    this.#mounted = { handle, player, clock, resize, frames, labels };
     this.#state = 'running';
     this.#hideStatus();
     this.#refresh();
@@ -299,6 +368,7 @@ export class FabricoBoardElement extends HTMLElement {
     m.handle.app.canvas.setAttribute('data-fab-teardown', '');
     m.handle.stop();
     m.handle.app.destroy(true);
+    m.labels.root.remove();
     try {
       m.player.destroy();
     } catch {
