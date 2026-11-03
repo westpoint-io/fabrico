@@ -168,14 +168,14 @@ describe('LessonPanel', () => {
     const liveOf = (els: El[]): El => elements(footerOf(els)).find((el) => el.props['aria-live'] !== undefined) as El;
     const footerButtons = (els: El[]): El[] => buttonsOf(elements(footerOf(els)));
 
-    it('sits under the scroll box and keeps its height', () => {
+    it('sits last in the scroll box, under the rows, so a short window still has room for the rows', () => {
       const els = render(FIVE);
       const footer = footerOf(els);
       expect(footer, 'the footer is there').toBeDefined();
       const box = els.find((el) => el.props['data-fab-help-scroll'] !== undefined) as El;
-      expect(elements(box).includes(footer), 'it is outside the scroll box').toBe(false);
-      const panelChildren = (panelOf(els).props.children as unknown[]).filter(isEl);
-      expect(panelChildren.at(-1), 'it is the last thing in the panel').toBe(footer);
+      const boxChildren = (box.props.children as unknown[]).filter(isEl);
+      expect(boxChildren.at(-1), 'it is the last thing in the scroll box').toBe(footer);
+      expect(boxChildren.at(-2)?.type, 'right under the list').toBe('ul');
       const style = styleOf(footer);
       expect(style.flexShrink).toBe(0);
       expect(style.marginTop).toBe('var(--fab-space-sm)');

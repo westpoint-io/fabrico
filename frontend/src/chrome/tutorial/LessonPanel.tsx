@@ -193,28 +193,29 @@ export function LessonPanel({ rows, onAction, onClose, footer, onReset, onKeep, 
             </li>
           ))}
         </ul>
-      </div>
-      {/* Outside the scroll box, like the head row, so a short window keeps it in view. The buttons
-          carry data attributes so TutorialLayer can move focus to them after a press. */}
-      <div data-fab-lessons-footer={footer} style={footer === 'confirming' ? footerConfirmStyle : footerRestStyle}>
-        <span aria-live="polite" style={textStyle}>
-          {FOOTER_TEXT[footer]}
-        </span>
-        {footer === 'confirming' ? (
-          // The guard dialogs' order and classes: the safe choice first.
-          <div style={{ justifySelf: 'end', display: 'flex', gap: 'var(--fab-space-sm)' }}>
-            <button type="button" className="fab-dialog-btn fab-dialog-btn--cancel" data-fab-reset-keep="" onClick={onKeep}>
-              Keep progress
+        {/* Last in the scroll box, under the rows. Outside it, with the head row, it left the rows no
+            height at all on a 340 px window, so Start could not be reached. Where the list fits it reads
+            the same either way. The buttons carry data attributes so TutorialLayer can move focus to them. */}
+        <div data-fab-lessons-footer={footer} style={footer === 'confirming' ? footerConfirmStyle : footerRestStyle}>
+          <span aria-live="polite" style={textStyle}>
+            {FOOTER_TEXT[footer]}
+          </span>
+          {footer === 'confirming' ? (
+            // The guard dialogs' order and classes: the safe choice first.
+            <div style={{ justifySelf: 'end', display: 'flex', gap: 'var(--fab-space-sm)' }}>
+              <button type="button" className="fab-dialog-btn fab-dialog-btn--cancel" data-fab-reset-keep="" onClick={onKeep}>
+                Keep progress
+              </button>
+              <button type="button" className="fab-dialog-btn fab-dialog-btn--danger" data-fab-reset-clear="" onClick={onClear}>
+                Clear progress
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="fab-tool-btn fab-tool-btn--labeled" data-fab-reset="" onClick={onReset}>
+              Reset progress
             </button>
-            <button type="button" className="fab-dialog-btn fab-dialog-btn--danger" data-fab-reset-clear="" onClick={onClear}>
-              Clear progress
-            </button>
-          </div>
-        ) : (
-          <button type="button" className="fab-tool-btn fab-tool-btn--labeled" data-fab-reset="" onClick={onReset}>
-            Reset progress
-          </button>
-        )}
+          )}
+        </div>
       </div>
     </aside>
   );
