@@ -136,10 +136,13 @@ async function readCard(page: Page): Promise<{ top: number; bottom: number; heig
 /**
  * The tallest each card state may be, in px: 44 of padding, 16.8 a line of text and 8 between
  * paragraphs. Starting is one button tall, 44 + 44. Running is the text budget, 2 lines of note, the
- * step line and 3 of instruction: 44 + 6 x 16.8 + 2 x 8. Swapped is 44 + 3 x 16.8 + 8. Finished is
- * the heading, 2 lines of closing sentence and the buttons under them, as measured at 163.6.
+ * step line and 3 of instruction, then the off-screen row every running card reserves, 8 of gap and
+ * 44 tall: 44 + 6 x 16.8 + 2 x 8 + 8 + 44 = 212.8 (the UI-SPEC rounds it to 214). Measured at
+ * 1024x768 with the longest note and instruction it is 196.0, because that instruction takes 2 lines,
+ * not 3. Swapped is 44 + 3 x 16.8 + 8. Finished is the heading, 2 lines of closing sentence and the
+ * buttons under them, as measured at 163.6.
  */
-const CARD_MAX_HEIGHT = { starting: 88, running: 161, swapped: 103, finished: 164 } as const;
+const CARD_MAX_HEIGHT = { starting: 88, running: 213, swapped: 103, finished: 164 } as const;
 
 /** A sentence too long for the card makes it taller, up over the board, and only its box shows that. */
 async function expectCardFits(page: Page, state: keyof typeof CARD_MAX_HEIGHT): Promise<void> {
@@ -154,10 +157,11 @@ async function expectCardFits(page: Page, state: keyof typeof CARD_MAX_HEIGHT): 
 async function fillCard(page: Page): Promise<void> {
   await page.locator(`${CARD} [aria-live]`).evaluate(
     (column, words) => {
-      const instruction = column.lastElementChild as HTMLElement;
+      const instruction = column.querySelector('[data-fab-step-text]') as HTMLElement;
       const paragraph = (text: string): HTMLElement => {
         const el = instruction.cloneNode(false) as HTMLElement;
         el.textContent = text;
+        el.removeAttribute('data-fab-step-text');
         el.setAttribute('data-test-fill', '');
         return el;
       };
@@ -173,7 +177,7 @@ async function fillCard(page: Page): Promise<void> {
 async function clearFilledCard(page: Page): Promise<void> {
   await page.locator(`${CARD} [aria-live]`).evaluate((column) => {
     column.querySelectorAll('[data-test-fill]').forEach((el) => el.remove());
-    (column.lastElementChild as HTMLElement).style.display = '';
+    (column.querySelector('[data-fab-step-text]') as HTMLElement).style.display = '';
   });
 }
 

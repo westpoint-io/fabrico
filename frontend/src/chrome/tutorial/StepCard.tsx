@@ -28,6 +28,10 @@ export type StepCardView =
        */
       noteHidden: boolean;
       text: readonly PhraseToken[];
+      /** Is the stage's ring out of the free area? The off-screen row shows only then. */
+      offScreen: boolean;
+      /** Is a belt draw held? Show me waits for it to end, because a camera move under a draw would move its path. */
+      drawing: boolean;
     }
   | { state: 'finished'; text: readonly PhraseToken[] };
 
@@ -40,7 +44,12 @@ export interface StepCardProps {
   onRestart?: () => void;
   /** New can't reach a stopped host, so Restart says so. Leave sends nothing and still works. */
   simStopped?: boolean;
+  /** Bring the out-of-view ring into view. It moves the camera only. */
+  onShowMe?: () => void;
 }
+
+/** Show me's title while a belt draw is held. */
+export const SHOW_ME_DRAWING_TITLE = 'Finish or cancel the belt first.';
 
 const textStyle: CSSProperties = {
   margin: 0,
@@ -51,9 +60,9 @@ const textStyle: CSSProperties = {
 };
 
 /** Key and machine names at weight 700. The words are React text children, never markup. */
-function Words({ tokens }: { tokens: readonly PhraseToken[] }): JSX.Element {
+function Words({ tokens, mark }: { tokens: readonly PhraseToken[]; mark?: string }): JSX.Element {
   return (
-    <p style={textStyle}>
+    <p style={textStyle} {...(mark === undefined ? {} : { [mark]: '' })}>
       {phrase(tokens).map((segment, i) =>
         segment.strong ? (
           <span key={i} style={{ fontWeight: 700 }}>
@@ -112,6 +121,43 @@ function Buttons({ view, onLeave, onBackToLessons, onKeepBuilding, onRestart, si
   );
 }
 
+/**
+ * The off-screen row, on every running card. It keeps its height with `visibility: hidden` while the
+ * ring is in view, so panning across the edge never moves the card, and the hidden button drops out of
+ * the tab order and the accessibility tree. It sits outside the live region, so the flag flipping
+ * doesn't read the whole step out again.
+ */
+function OffScreenRow({ offScreen, drawing, onShowMe }: { offScreen: boolean; drawing: boolean; onShowMe?: () => void }): JSX.Element {
+  return (
+    <div
+      data-fab-offscreen-row=""
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--fab-space-md)',
+        minHeight: 'var(--fab-min-target)',
+        ...(offScreen ? {} : { visibility: 'hidden' }),
+      }}
+    >
+      <p id="fab-offscreen-line" style={textStyle}>
+        The ring is out of view.
+      </p>
+      <button
+        type="button"
+        className="fab-tool-btn fab-tool-btn--labeled"
+        style={{ pointerEvents: 'auto' }}
+        aria-describedby="fab-offscreen-line"
+        disabled={drawing}
+        {...(drawing ? { title: SHOW_ME_DRAWING_TITLE } : {})}
+        onMouseDown={keepFocusOff}
+        onClick={onShowMe}
+      >
+        Show me
+      </button>
+    </div>
+  );
+}
+
 export function StepCard(props: StepCardProps): JSX.Element {
   const { view } = props;
   // Two buttons don't fit beside the closing sentence, so a finished card sets them under it.
@@ -119,6 +165,7 @@ export function StepCard(props: StepCardProps): JSX.Element {
   return (
     <aside
       data-fab-step-card=""
+      {...(view.state === 'running' ? { 'data-fab-offscreen': view.offScreen ? 'true' : 'false' } : {})}
       className="fab-panel"
       aria-label="Lesson step"
       style={{
@@ -137,38 +184,44 @@ export function StepCard(props: StepCardProps): JSX.Element {
         pointerEvents: 'none',
       }}
     >
-      {/* Polite, with no role, so the page-wide status and alert locators don't change. */}
-      <div
-        aria-live="polite"
-        aria-atomic="true"
-        style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--fab-space-sm)' }}
-      >
-        {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
-        {view.state === 'swapped' && (
-          <>
-            <p style={{ ...textStyle, fontWeight: 700 }}>Lesson paused</p>
-            <p style={textStyle}>The board changed, so this lesson stopped. Restart it, or leave it.</p>
-          </>
-        )}
+      {/* The left column: the live region, then the off-screen row on a running card. */}
+      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--fab-space-sm)' }}>
+        {/* Polite, with no role, so the page-wide status and alert locators don't change. */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--fab-space-sm)' }}
+        >
+          {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
+          {view.state === 'swapped' && (
+            <>
+              <p style={{ ...textStyle, fontWeight: 700 }}>Lesson paused</p>
+              <p style={textStyle}>The board changed, so this lesson stopped. Restart it, or leave it.</p>
+            </>
+          )}
+          {view.state === 'running' && (
+            <>
+              {/* No wrapper without a note, so the column's gap doesn't grow the card. */}
+              {view.note !== null && (
+                <div data-fab-step-note={view.noteKind} {...(view.noteHidden ? { style: { visibility: 'hidden' } } : {})}>
+                  <Words tokens={view.note} />
+                </div>
+              )}
+              <p style={{ ...textStyle, fontWeight: 700 }}>{`Step ${view.stepNumber} of ${view.stepCount}`}</p>
+              <Words tokens={view.text} mark="data-fab-step-text" />
+            </>
+          )}
+          {view.state === 'finished' && (
+            <>
+              <h2 className="fab-title" style={{ margin: 0 }}>
+                Lesson done
+              </h2>
+              <Words tokens={view.text} />
+            </>
+          )}
+        </div>
         {view.state === 'running' && (
-          <>
-            {/* No wrapper without a note, so the column's gap doesn't grow the card. */}
-            {view.note !== null && (
-              <div data-fab-step-note={view.noteKind} {...(view.noteHidden ? { style: { visibility: 'hidden' } } : {})}>
-                <Words tokens={view.note} />
-              </div>
-            )}
-            <p style={{ ...textStyle, fontWeight: 700 }}>{`Step ${view.stepNumber} of ${view.stepCount}`}</p>
-            <Words tokens={view.text} />
-          </>
-        )}
-        {view.state === 'finished' && (
-          <>
-            <h2 className="fab-title" style={{ margin: 0 }}>
-              Lesson done
-            </h2>
-            <Words tokens={view.text} />
-          </>
+          <OffScreenRow offScreen={view.offScreen} drawing={view.drawing} {...(props.onShowMe === undefined ? {} : { onShowMe: props.onShowMe })} />
         )}
       </div>
       <Buttons {...props} />

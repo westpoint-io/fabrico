@@ -14,6 +14,7 @@ import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
+import { offScreen as rectOffScreen } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { readCamera } from './cameraRead';
@@ -49,6 +50,8 @@ export interface TutorialProbe {
   noteKind: string;
   /** The words of a note that shows, or empty when the slot is empty or hidden. */
   noteText: string;
+  /** Is the stage's ring (for a drag, either ring) out of the free area? Never for a panel target. */
+  offScreen: boolean;
 }
 
 /** The facts the last frame used. */
@@ -93,14 +96,43 @@ function ringToRectFor(key: string, shape: HintRect['shape']): HintRect | null {
   return rectOf(to, shape);
 }
 
-function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRecord | null): TutorialProbe {
+/**
+ * The stage's board rings as painted this frame: the main ring, and for a drag the far ring too. Null
+ * when the stage marks a panel or nothing, or the ring wasn't last placed for `key`.
+ */
+function boardRingRects(stage: Stage, key: string): DOMRect[] | null {
+  const hint = stage.hint;
+  if (hint === null || hint.on === 'panel') return null;
+  const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
+  if (ring === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
+  const rects = [ring.getBoundingClientRect()];
+  if (hint.on === 'port' && hint.to !== undefined) {
+    const to = document.querySelector<HTMLElement>('[data-fab-hint-to]');
+    if (to === null) return null;
+    rects.push(to.getBoundingClientRect());
+  }
+  return rects;
+}
+
+/**
+ * This frame's off-screen flag. A panel target or no target is never out of view. A board ring not yet
+ * placed for the shown stage keeps the last value, because its rect still belongs to the old stage.
+ */
+function offScreenNow(stage: Stage | null, key: string | null, free: ChromeFacts['view']['freeArea'], last: boolean): boolean {
+  if (stage === null || key === null || stage.hint === null || stage.hint.on === 'panel') return false;
+  const rects = boardRingRects(stage, key);
+  if (rects === null) return last;
+  return rects.some((r) => rectOffScreen(r, free));
+}
+
+function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRecord | null, offScreen: boolean): TutorialProbe {
   const lesson = LESSONS.find((l) => l.id === s.lessonId) ?? null;
   const bound: Record<string, number> = {};
   for (const [name, node] of Object.entries(s.bindings)) {
     if (node !== undefined) bound[name] = node.id;
   }
   const stage = facts === null ? null : currentStage(s, facts.board, facts.chrome, LESSONS);
-  const slot = s.card === 'running' && stage !== null ? noteViewOf(s, stage, refusal).slot : null;
+  const slot = s.card === 'running' && stage !== null ? noteViewOf(s, stage, refusal, offScreen).slot : null;
   return {
     lessonId: s.lessonId,
     card: s.card,
@@ -116,12 +148,13 @@ function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRec
     bound,
     noteKind: slot?.kind ?? '',
     noteText: slot === null || slot.hidden ? '' : phrasePlain(slot.tokens),
+    offScreen: s.card === 'running' && offScreen,
   };
 }
 
 /** The probe before the layer mounts: no lesson. */
 export function idleTutorialProbe(): TutorialProbe {
-  return probeOf(IDLE, null, null);
+  return probeOf(IDLE, null, null, false);
 }
 
 /** The shared dock offset, the top of the panels on the right. */
@@ -180,30 +213,34 @@ function refusalWords(stage: Stage, tag: string): readonly PhraseToken[] | null 
   return Object.hasOwn(BAND_COPY, tag) ? [BAND_COPY[tag] as string] : null;
 }
 
-/**
- * The running card's note slot and off-screen row, by `noteFor`'s one rule. The off-screen flag is
- * false until the off-screen row is wired.
- */
-function noteViewOf(s: TutorialState, stage: Stage, refusal: RefusalRecord | null): NoteView {
+/** The running card's note slot and off-screen row, by `noteFor`'s one rule. */
+function noteViewOf(s: TutorialState, stage: Stage, refusal: RefusalRecord | null, offScreen: boolean): NoteView {
   const pending = refusal !== null && refusal.at === stageKey(s.stepIndex, stage.id) ? refusalWords(stage, refusal.tag) : null;
   return noteFor({
     refusal: pending,
-    offScreen: false,
+    offScreen,
     lessonNote: s.note === null ? null : { kind: s.note.kind, tokens: noteTokens(s.note) },
   });
 }
 
 /** What the card shows, or null when it has nothing to show. */
-function cardViewOf(s: TutorialState, stage: Stage | null, refusal: RefusalRecord | null): StepCardView | null {
+function cardViewOf(
+  s: TutorialState,
+  stage: Stage | null,
+  refusal: RefusalRecord | null,
+  offScreen: boolean,
+  drawing: boolean,
+): StepCardView | null {
   if (s.card === 'starting') return { state: 'starting' };
   if (s.card === 'swapped') return { state: 'swapped' };
   const lesson = LESSONS.find((l) => l.id === s.lessonId);
   if (s.card === 'finished' && lesson !== undefined) return { state: 'finished', text: lesson.closing };
   if (s.card !== 'running' || stage === null) return null;
   const running = { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, text: stage.text } as const;
-  const { slot } = noteViewOf(s, stage, refusal);
-  if (slot === null) return { ...running, note: null, noteKind: '', noteHidden: false };
-  return { ...running, note: slot.tokens, noteKind: slot.kind, noteHidden: slot.hidden };
+  const { slot, row } = noteViewOf(s, stage, refusal, offScreen);
+  const flags = { offScreen: row, drawing };
+  if (slot === null) return { ...running, ...flags, note: null, noteKind: '', noteHidden: false };
+  return { ...running, ...flags, note: slot.tokens, noteKind: slot.kind, noteHidden: slot.hidden };
 }
 
 /** A store over this browser's `localStorage`, which a locked-down webview can refuse just by being read. */
@@ -297,6 +334,10 @@ export function TutorialLayer({
   // The last refusal shown on a stage. The ref is what the frame loop compares; the state renders it.
   const refusalRecordRef = useRef<RefusalRecord | null>(null);
   const [refusal, setRefusal] = useState<RefusalRecord | null>(null);
+  // Is the shown stage's ring out of view? Worked out every frame into the ref; React state follows
+  // only when it flips, so a pan costs no render until the ring crosses the free area's edge.
+  const offScreenRef = useRef(false);
+  const [offScreen, setOffScreen] = useState(false);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
   // The host's last answer about the bound Source's trigger. The frame loop reads only this.
@@ -340,7 +381,7 @@ export function TutorialLayer({
   }, [watchedNode]);
 
   useLayoutEffect(() => {
-    probeRef.current = () => probeOf(stateRef.current, factsRef.current, refusalRecordRef.current);
+    probeRef.current = () => probeOf(stateRef.current, factsRef.current, refusalRecordRef.current, offScreenRef.current);
     return () => {
       probeRef.current = idleTutorialProbe;
     };
@@ -420,6 +461,14 @@ export function TutorialLayer({
           shown === null || !boardLiveRef.current
             ? null
             : { stageKey: stageKey(next.stepIndex, shown.id), hint: shown.hint, cell: next.spot?.cell ?? null, bindings: next.bindings };
+        // The off-screen flag, against this frame's free area. A ring hidden because the board isn't
+        // live has nothing to bring into view.
+        const shownKey = next.card === 'running' && shown !== null ? stageKey(next.stepIndex, shown.id) : null;
+        const out = boardLiveRef.current && offScreenNow(shown, shownKey, chrome.view.freeArea, offScreenRef.current);
+        if (out !== offScreenRef.current) {
+          offScreenRef.current = out;
+          setOffScreen(out);
+        }
       }
       raf = requestAnimationFrame(frame);
     };
@@ -496,7 +545,7 @@ export function TutorialLayer({
     [resume, start],
   );
 
-  const view = cardViewOf(state, stage, refusal);
+  const view = cardViewOf(state, stage, refusal, offScreen, false);
   // Read at render, which App's 10 Hz re-render keeps fresh enough for a list a person is reading.
   const rows = lessonsOpen
     ? rowViews({

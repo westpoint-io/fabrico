@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { noteTokens } from '../../tutorial/machine.ts';
 import { MAX_NOTE_CHARS } from '../../tutorial/phrase.ts';
-import { StepCard, type StepCardView } from './StepCard.tsx';
+import { SHOW_ME_DRAWING_TITLE, StepCard, type StepCardView } from './StepCard.tsx';
 
 // The vitest env is `node`, with no DOM, so the component is called directly and its element tree is
 // walked, as `WelcomeCard.test.tsx` does. `Words` is a component the tree holds unexpanded, so the walk
@@ -43,6 +43,8 @@ const RUNNING: StepCardView = {
   noteKind: '',
   noteHidden: false,
   text: ['A ', { kind: 0 }, ' makes items.'],
+  offScreen: false,
+  drawing: false,
 };
 
 const NOOPS = { onLeave: () => {}, onBackToLessons: () => {}, onKeepBuilding: () => {} };
@@ -78,23 +80,94 @@ describe('StepCard', () => {
     expect(render(RUNNING).filter((el) => el.props.role !== undefined), 'no role anywhere on the card').toEqual([]);
   });
 
-  it('passes the pointer through everywhere but the button box', () => {
+  it('passes the pointer through everywhere but Show me and the Leave box', () => {
     const tree = render(RUNNING);
     expect(styleOf(tree[0]!).pointerEvents).toBe('none');
     const auto = tree.filter((el) => styleOf(el).pointerEvents === 'auto');
-    expect(auto, 'one element takes the pointer').toHaveLength(1);
-    expect(elements(auto[0]!.props.children).map((el) => el.type)).toEqual(['button']);
+    expect(auto, 'two elements take the pointer').toHaveLength(2);
+    expect(auto[0]?.type, 'Show me itself').toBe('button');
+    expect(textOf(auto[0])).toBe('Show me');
+    expect(elements(auto[1]!.props.children).map((el) => el.type), 'the Leave box').toEqual(['button']);
   });
 
   it('keeps focus off a pressed button, the way the Palette rows do', () => {
-    const [button] = render(RUNNING).filter((el) => el.type === 'button');
-    let prevented = 0;
-    (button!.props.onMouseDown as (ev: { preventDefault(): void }) => void)({
-      preventDefault: () => {
-        prevented += 1;
-      },
+    const buttons = render(RUNNING).filter((el) => el.type === 'button');
+    expect(buttons.map((b) => textOf(b))).toEqual(['Show me', 'Leave']);
+    for (const button of buttons) {
+      let prevented = 0;
+      (button.props.onMouseDown as (ev: { preventDefault(): void }) => void)({
+        preventDefault: () => {
+          prevented += 1;
+        },
+      });
+      expect(prevented, textOf(button)).toBe(1);
+    }
+  });
+
+  describe('the off-screen row', () => {
+    const rowOf = (view: StepCardView): El[] => render(view).filter((el) => el.props['data-fab-offscreen-row'] !== undefined);
+    const showMeOf = (els: El[]): El | undefined => els.find((el) => el.type === 'button' && textOf(el) === 'Show me');
+
+    it('is on every running card, hidden in place while the ring is in view', () => {
+      const [row] = rowOf(RUNNING);
+      expect(row, 'the row is reserved').toBeDefined();
+      expect(styleOf(row!).visibility).toBe('hidden');
+      expect(styleOf(row!).display).toBe('flex');
+      expect(styleOf(row!).alignItems).toBe('center');
+      expect(styleOf(row!).gap).toBe('var(--fab-space-md)');
+      expect(styleOf(row!).minHeight).toBe('var(--fab-min-target)');
+      expect(render(RUNNING)[0]?.props['data-fab-offscreen']).toBe('false');
     });
-    expect(prevented).toBe(1);
+
+    it('shows its line and Show me with the ring out of view', () => {
+      const view: StepCardView = { ...RUNNING, offScreen: true };
+      const [row] = rowOf(view);
+      expect(styleOf(row!).visibility).toBeUndefined();
+      expect(render(view)[0]?.props['data-fab-offscreen']).toBe('true');
+      const line = elements(row!.props.children).find((el) => el.type === 'p');
+      expect(line?.props.id).toBe('fab-offscreen-line');
+      expect(textOf(line)).toBe('The ring is out of view.');
+      const button = showMeOf(elements(row!.props.children));
+      expect(button?.props.className).toBe('fab-tool-btn fab-tool-btn--labeled');
+      expect(button?.props['aria-describedby']).toBe('fab-offscreen-line');
+      expect(button?.props.disabled).toBe(false);
+      expect(button?.props.title).toBeUndefined();
+    });
+
+    it('sits outside the live region, under the instruction', () => {
+      const live = render({ ...RUNNING, offScreen: true }).find((el) => el.props['aria-live'] !== undefined);
+      expect(elements(live!.props.children).filter((el) => el.props['data-fab-offscreen-row'] !== undefined)).toEqual([]);
+      const text = textOf(StepCard({ view: { ...RUNNING, offScreen: true }, ...NOOPS }));
+      expect(text.indexOf('A Source makes items.')).toBeLessThan(text.indexOf('The ring is out of view.'));
+    });
+
+    it('disables Show me with its title while a belt draw is held', () => {
+      const button = showMeOf(render({ ...RUNNING, offScreen: true, drawing: true }));
+      expect(button?.props.disabled).toBe(true);
+      expect(button?.props.title).toBe(SHOW_ME_DRAWING_TITLE);
+      expect(SHOW_ME_DRAWING_TITLE).toBe('Finish or cancel the belt first.');
+    });
+
+    it('calls onShowMe when Show me is pressed', () => {
+      let shown = 0;
+      const els = elements(StepCard({ view: { ...RUNNING, offScreen: true }, ...NOOPS, onShowMe: () => (shown += 1) }));
+      (showMeOf(els)!.props.onClick as () => void)();
+      expect(shown).toBe(1);
+    });
+
+    it('is not on a starting, swapped or finished card', () => {
+      for (const view of [{ state: 'starting' }, { state: 'swapped' }, FINISHED] as StepCardView[]) {
+        expect(rowOf(view), view.state).toEqual([]);
+        expect(render(view)[0]?.props['data-fab-offscreen'], view.state).toBeUndefined();
+        expect(showMeOf(render(view)), view.state).toBeUndefined();
+      }
+    });
+
+    it('marks the instruction, so a test finds it without counting children', () => {
+      const marked = render(RUNNING).filter((el) => el.props['data-fab-step-text'] !== undefined);
+      expect(marked).toHaveLength(1);
+      expect(textOf(marked[0])).toBe('A Source makes items.');
+    });
   });
 
   it('reads the step counter and the instruction while running, with Leave', () => {
