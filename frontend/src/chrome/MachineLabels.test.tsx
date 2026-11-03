@@ -47,7 +47,7 @@ function handleFor(...nodes: Record<string, number>[]): RefObject<SceneHandle | 
 
 /** The text content of every rendered chip, in render order. */
 function chipTexts(...nodes: Record<string, number>[]): string[] {
-  const html = renderToStaticMarkup(createElement(MachineLabels, { handleRef: handleFor(...nodes) }));
+  const html = renderToStaticMarkup(createElement(MachineLabels, { handleRef: handleFor(...nodes) , readCamera: () => null }));
   return [...html.matchAll(/data-testid="machine-label"[^>]*>([^<]*)</g)].map((m) => m[1]);
 }
 
@@ -139,7 +139,7 @@ describe('the Alt-hold chip resolves a NAME for every node it draws (66-03, D-10
 // App mounts it just after `LabelWords` (also 1), so a tag still paints over a label's words.
 describe('the name-tag layer sits under every panel (CHROME-08, D-07)', () => {
   it('renders its layer at zIndex 1 with no pointer events', () => {
-    const html = renderToStaticMarkup(createElement(MachineLabels, { handleRef: handleFor(node(1, machine_kind.SOURCE)) }));
+    const html = renderToStaticMarkup(createElement(MachineLabels, { handleRef: handleFor(node(1, machine_kind.SOURCE)) , readCamera: () => null }));
     const layer = /^<div[^>]*style="([^"]*)"/.exec(html);
     expect(layer, 'the layer is the outermost div').not.toBeNull();
     expect(layer![1]).toContain('z-index:1');

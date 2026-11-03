@@ -80,6 +80,9 @@ let root: Root;
 let frame: FrameRequestCallback | null = null;
 let nodes: Map<number, FakeNode>;
 let handleRef: RefObject<SceneHandle | null>;
+/** The overlays' camera read, answered by the window stub each test installs. */
+const readStubCamera = (): { x: number; y: number; scale: number } | null =>
+  window.__fabrico?.camera() ?? null;
 const savedWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
 const savedHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
 
@@ -167,7 +170,7 @@ const chipReading = (text: string): HTMLElement | undefined =>
 describe('LabelWords on the frame its handle changes (CR-01)', () => {
   it('label_words_hide_the_frame_their_handle_becomes_a_machine', async () => {
     setNodes(labelNode(0, 10, 12, 'Order intake'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const el = wordsEl(0);
     expect(el?.textContent, 'POSITIVE CONTROL: the words are mounted').toBe('Order intake');
@@ -184,7 +187,7 @@ describe('LabelWords on the frame its handle changes (CR-01)', () => {
 
   it('label_words_stay_shown_the_frame_their_words_change', async () => {
     setNodes(labelNode(0, 10, 12, 'Order intake'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const el = wordsEl(0);
     expect(el!.style.visibility, 'POSITIVE CONTROL: the words are visible').toBe('visible');
@@ -203,7 +206,7 @@ describe('LabelWords on the frame its handle changes (CR-01)', () => {
 describe('MachineLabels on the frame its handle changes (CR-01)', () => {
   it('a_name_chip_hides_the_frame_its_handle_becomes_a_label', () => {
     setNodes(machineNode(0, machine_kind.SOURCE, 4, 4), machineNode(1, machine_kind.SINK, 8, 4));
-    mount(<MachineLabels handleRef={handleRef} />);
+    mount(<MachineLabels handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const source = chipReading('Source');
     const sink = chipReading('Sink');
@@ -220,7 +223,7 @@ describe('MachineLabels on the frame its handle changes (CR-01)', () => {
 
   it('a_name_chip_hides_the_frame_its_handle_becomes_another_kind', async () => {
     setNodes(machineNode(0, machine_kind.SOURCE, 4, 4));
-    mount(<MachineLabels handleRef={handleRef} />);
+    mount(<MachineLabels handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const chip = chipReading('Source');
     expect(chip?.style.visibility, 'POSITIVE CONTROL: the Source chip is visible').toBe('visible');
@@ -240,7 +243,7 @@ describe('MachineLabels on the frame its handle changes (CR-01)', () => {
 
   it('a_name_chip_hides_the_frame_its_machine_is_deleted', () => {
     setNodes(machineNode(0, machine_kind.SOURCE, 4, 4), machineNode(1, machine_kind.SINK, 8, 4));
-    mount(<MachineLabels handleRef={handleRef} />);
+    mount(<MachineLabels handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const source = chipReading('Source');
     expect(source?.style.visibility, 'POSITIVE CONTROL: the Source chip is visible').toBe('visible');

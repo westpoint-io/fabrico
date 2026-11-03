@@ -6,11 +6,12 @@
 // (altHeld || labelsToggled), so an unmount tears the rAF down.
 //
 // Anchoring mirrors the DeleteControl per-frame anchor (App.tsx §861-892): ONE
-// batched requestAnimationFrame reads the READ-ONLY window.__fabrico.camera()
-// snapshot and the live sceneState.nodes, projects each machine's top-edge anchor
-// to screen (world*scale + pan), and writes each chip's CSS transform. Chip
+// batched requestAnimationFrame reads the READ-ONLY camera snapshot from the
+// `readCamera` prop (the board's own handle) and the live sceneState.nodes,
+// projects each machine's top-edge anchor to screen (world*scale + pan), and
+// writes each chip's CSS transform. Chip
 // positions are NEVER React state (that would re-render the tree at 60fps) and
-// there is never a camera() setter — the snapshot is consumed one-way,
+// there is never a camera setter: the snapshot is consumed one-way,
 // display-only (T-30-03 / T-14-FABRICO-RO). The only React state here is the
 // low-frequency id+kind LIST of machines (changes on edits, not per frame), so
 // the chip TEXT renders as a React text child (never innerHTML — T-33-XSS).
@@ -21,15 +22,23 @@
 // `namesChip`, decides both sites below.
 
 import { useLayoutEffect, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react';
-import type { SceneHandle } from '../render/pixiApp';
+import type { CameraSnapshot, SceneHandle } from '../render/pixiApp';
 import { CELL, INSET } from '../../shared/geometry';
 import { effectiveBox } from '../protocol/footprint';
-import { machine_kind } from '../protocol/kinds';
-import { KIND_NAMES } from './kindNames';
+import { CHIP_GAP_PX, chipMatchesNode, chipName, namesChip } from '../render/labelGeometry';
+
+// The pure chip rules moved to `render/labelGeometry.ts` so a read-only board can use them
+// without importing chrome. Re-exported here so every existing import keeps working.
+export { CHIP_GAP_PX, chipMatchesNode, chipName, namesChip } from '../render/labelGeometry';
 
 export interface MachineLabelsProps {
   /** The live scene handle ref (App's handleRef) — the authoritative NodeView map. */
   handleRef: RefObject<SceneHandle | null>;
+  /**
+   * Reads this board's camera: a fresh `{ x, y, scale }` each call, or null before the
+   * scene is up. The App passes its own handle's `cameraSnapshot()`. Read-only.
+   */
+  readCamera: () => CameraSnapshot | null;
 }
 
 /** One labelled machine: its stable handle id + kind byte (drives the chip text). */
@@ -37,9 +46,6 @@ interface Chip {
   id: number;
   kind: number;
 }
-
-/** Gap in px between the chip's bottom edge and the machine's top edge. */
-const CHIP_GAP_PX = 4;
 
 const chipStyle: CSSProperties = {
   position: 'absolute',
@@ -68,23 +74,6 @@ const chipStyle: CSSProperties = {
   border: '1px solid var(--fab-outline)',
 };
 
-/** Does a node of `kind` get a name chip? Every machine; never a belt or a label. */
-function namesChip(kind: number): boolean {
-  return kind !== machine_kind.BELT && kind !== machine_kind.LABEL;
-}
-
-/**
- * Does this node still match a chip drawn for `kind` (CR-01, plan 76-14)? Present, a kind
- * that gets a chip, and the SAME kind the chip names. A keyframe (undo, redo, load, New, a
- * resync after a `RenderProducer::reset`) can hand a machine's handle to a label, to
- * another kind, or to nothing, and the chip set only follows on React's next commit. On
- * the frames in between a chip failing this is hidden, so no name ever sits over the
- * wrong node; an absent node fails it, so a deleted machine's chip hides on that frame too.
- */
-export function chipMatchesNode<N extends { kind: number }>(kind: number, node: N | undefined): node is N {
-  return node !== undefined && namesChip(node.kind) && node.kind === kind;
-}
-
 /** Read the current named machines as a fresh id+kind list from the handle. */
 function readChips(handle: SceneHandle | null): Chip[] {
   const list: Chip[] = [];
@@ -102,7 +91,7 @@ function chipSig(chips: Chip[]): string {
   return chips.map((c) => `${c.id}:${c.kind}`).join(',');
 }
 
-export function MachineLabels({ handleRef }: MachineLabelsProps): JSX.Element {
+export function MachineLabels({ handleRef, readCamera }: MachineLabelsProps): JSX.Element {
   // The LOW-FREQUENCY machine list. Seeded synchronously from the live handle so
   // the first paint already has the chip elements (the useLayoutEffect below
   // positions them pre-paint — no origin flash on reveal).
@@ -114,7 +103,7 @@ export function MachineLabels({ handleRef }: MachineLabelsProps): JSX.Element {
     let raf = 0;
     let lastSig = chipSig(chips);
     const project = (): void => {
-      const cam = window.__fabrico?.camera();
+      const cam = readCamera();
       const nodes = handleRef.current?.sceneState.nodes;
       if (cam && nodes) {
         // Re-sync the chip element set only when the machine set actually changes
@@ -159,9 +148,10 @@ export function MachineLabels({ handleRef }: MachineLabelsProps): JSX.Element {
     return () => cancelAnimationFrame(raf);
     // Mount-once: the loop reads the live handle/camera each frame, so it never
     // needs to re-subscribe. `chips` is intentionally excluded (positions are
-    // imperative; the list re-syncs inside the loop).
+    // imperative; the list re-syncs inside the loop). `readCamera` is a dependency so a
+    // new reader restarts the loop; the App passes a stable one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleRef]);
+  }, [handleRef, readCamera]);
 
   return (
     <div
@@ -197,11 +187,11 @@ export function MachineLabels({ handleRef }: MachineLabelsProps): JSX.Element {
             the split existed - that the Legend iterates a name table - is answered by
             the Legend iterating `KIND_LEGEND_ORDER`, its own ordered view; see `kindNames.ts`.
 
-            The final 'Machine' arm STAYS. It catches WIRE (kind 8), which is a transport
+            The final 'Machine' arm (now inside `chipName`) STAYS. It catches WIRE (kind 8), which is a transport
             seam rather than a node and should never reach this list at all; if one ever
             does it reads as a machine rather than as a blank box.
           */}
-          {KIND_NAMES[c.kind] ?? 'Machine'}
+          {chipName(c.kind)}
         </div>
       ))}
     </div>

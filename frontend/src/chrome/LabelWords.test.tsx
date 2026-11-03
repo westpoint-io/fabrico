@@ -37,7 +37,7 @@ function handleFor(...nodes: Record<string, unknown>[]): RefObject<SceneHandle |
 }
 
 function markup(...nodes: Record<string, unknown>[]): string {
-  return renderToStaticMarkup(createElement(LabelWords, { handleRef: handleFor(...nodes) }));
+  return renderToStaticMarkup(createElement(LabelWords, { handleRef: handleFor(...nodes) , readCamera: () => null }));
 }
 
 describe('LabelWords - which labels get a words element', () => {

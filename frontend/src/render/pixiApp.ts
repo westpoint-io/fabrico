@@ -177,8 +177,26 @@ export interface SceneHandle {
    * carries no figure of its own at any layer of this pass-through.
    */
   setTreadAppearanceOverride(pxPerTick: number | null): void;
+  /**
+   * This board's camera as a NEW plain object on every call (pan from the root Container,
+   * zoom from `cam.worldScale()`). Each board answers for its own camera, so the app's
+   * overlays and a page's read-only board read the board they sit on, not a page-wide
+   * hook. Nothing returned is live, so it can't become a write path into the camera.
+   */
+  cameraSnapshot(): CameraSnapshot;
   /** Stop the render loop + detach camera listeners. */
   stop(): void;
+}
+
+/**
+ * A copy of one board's camera at the moment it was read: the root Container's pan in
+ * canvas px and the uniform zoom. Plain numbers, so a reader holding it can't move the
+ * camera.
+ */
+export interface CameraSnapshot {
+  x: number;
+  y: number;
+  scale: number;
 }
 
 /** Backward-compatible alias (App.tsx imports `PixiScene`). */
@@ -369,6 +387,11 @@ export async function bootPixi(container: HTMLElement, opts: BootOptions): Promi
     items,
     sceneState,
     drawScene,
+    cameraSnapshot: (): CameraSnapshot => ({
+      x: cam.container.x,
+      y: cam.container.y,
+      scale: cam.worldScale(),
+    }),
     // MOTION-04: surface the loop's pinned-clock hook end to end (the local `loop`
     // already holds them) so window.__fabrico can read/control the render clock.
     frame: (): number => loop.frame(),

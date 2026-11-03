@@ -59,6 +59,9 @@ let root: Root;
 let frame: FrameRequestCallback | null = null;
 let nodes: Map<number, FakeNode>;
 let handleRef: RefObject<SceneHandle | null>;
+/** The overlays' camera read, answered by the window stub each test installs. */
+const readStubCamera = (): { x: number; y: number; scale: number } | null =>
+  window.__fabrico?.camera() ?? null;
 const savedWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
 const savedHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
 
@@ -170,7 +173,7 @@ function wrongWordsShown(): Array<{ node: string; shows: string; labelSays: stri
 describe('LabelWords on the frame a keyframe hands a label handle to another label (CR-01)', () => {
   it('label_words_hide_the_frame_their_handle_passes_to_another_label', async () => {
     setNodes(labelNode(0, 10, 12, 'Alpha'), labelNode(1, 18, 12, 'Beta'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const alpha = wordsEl(0);
     expect(alpha?.textContent, 'POSITIVE CONTROL: Alpha is on handle 0').toBe('Alpha');
@@ -196,7 +199,7 @@ describe('LabelWords on the frame a keyframe hands a label handle to another lab
 
   it('label_words_hide_the_frame_their_handle_passes_to_a_label_with_no_words', async () => {
     setNodes(labelNode(0, 10, 12, 'Alpha'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const alpha = wordsEl(0);
     expect(alpha!.style.visibility, 'POSITIVE CONTROL: Alpha is visible').toBe('visible');
@@ -212,7 +215,7 @@ describe('LabelWords on the frame a keyframe hands a label handle to another lab
 
   it('label_words_hide_the_frame_two_labels_trade_handles', async () => {
     setNodes(labelNode(0, 10, 12, 'Order intake'), labelNode(1, 30, 20, 'Payment'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const intake = wordsEl(0);
     const payment = wordsEl(1);
@@ -235,7 +238,7 @@ describe('LabelWords on the frame a keyframe hands a label handle to another lab
 
   it('label_words_hide_the_frame_their_handle_passes_to_a_smaller_label_with_the_same_words', () => {
     setNodes(labelNode(0, 10, 12, 'Note'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     const el = wordsEl(0);
     expect(el!.style.visibility, 'POSITIVE CONTROL').toBe('visible');
@@ -252,7 +255,7 @@ describe('LabelWords on the frame a keyframe hands a label handle to another lab
   it('label_words_stay_shown_across_a_keyframe_that_leaves_them_alone', () => {
     // An Undo of a Source placement: a keyframe, and both labels keep handle and words.
     setNodes(labelNode(0, 10, 12, 'Alpha'), labelNode(1, 18, 12, 'Beta'), machineNode(2, machine_kind.SOURCE, 4, 4));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     expect(wordsEl(0)!.style.visibility, 'POSITIVE CONTROL').toBe('visible');
 
@@ -265,7 +268,7 @@ describe('LabelWords on the frame a keyframe hands a label handle to another lab
 
   it('label_words_stay_shown_on_an_apply_after_a_keyframe_settles', async () => {
     setNodes(labelNode(0, 10, 12, 'Alpha'), labelNode(1, 18, 12, 'Beta'));
-    mount(<LabelWords handleRef={handleRef} />);
+    mount(<LabelWords handleRef={handleRef} readCamera={readStubCamera} />);
     expectHarness();
     keyframe(labelNode(0, 18, 12, 'Beta'));
     runFrameOutsideAct();

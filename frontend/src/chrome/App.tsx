@@ -1268,6 +1268,11 @@ export function App() {
   const hostRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<SceneHandle | null>(null);
   /**
+   * The label overlays' camera read: this board's own `cameraSnapshot()`, or null before
+   * the scene is up. Stable for the page's life, so the overlays' per-frame loops start once.
+   */
+  const readCamera = useCallback(() => handleRef.current?.cameraSnapshot() ?? null, []);
+  /**
    * The page-lifetime gesture counter (phase 88, D-06): the id of the last gesture
    * `submitInput` framed. Every gesture takes the next one, starting at 1; the host's
    * verdict on a gesture names it back as `seq`. Never reset within a page. A reload starts
@@ -2702,7 +2707,7 @@ export function App() {
   const flashedCellOnScreen = useCallback((): ScreenRect | null => {
     try {
       const cell = handleRef.current?.overlay.rejectFlashCell() ?? null;
-      const cam = window.__fabrico?.camera();
+      const cam = handleRef.current?.cameraSnapshot();
       if (cell === null || !cam) return null;
       const s = cam.scale;
       return {
@@ -3419,11 +3424,10 @@ export function App() {
         // getter can never become a write path into camera/view state. Always
         // exposed (not DEV-guarded) because the e2e coordinate transform rides it
         // in both dev and CI.
-        camera: () => ({
-          x: handle.camera.x,
-          y: handle.camera.y,
-          scale: handle.cam.worldScale(),
-        }),
+        // Since the read-only board work the snapshot is the handle's own
+        // `cameraSnapshot()`, the same one the label overlays, the refusal band and the
+        // delete control read, so the test hook and the chrome can't disagree.
+        camera: () => handle.cameraSnapshot(),
         // CONNECT-02 (67-REVIEW WR-05): the ring-paint liveness probe. A pure read
         // of `alertBornMs !== null` inside the overlay - the SAME state the paint
         // and the TTL are driven from, and the same one the gesture layer's hit
@@ -4594,14 +4598,14 @@ export function App() {
   }, []); // register once (dirty is read via the live ref, not a dep)
 
   // IX-04: glue the floating DeleteControl to the selected node's ring TOP-LEFT
-  // corner, projected to screen through the READ-ONLY window.__fabrico.camera()
+  // corner, projected to screen through the handle's READ-ONLY cameraSnapshot()
   // (world*scale + pan), re-projected EVERY FRAME while a node is selected so it
   // stays stuck as the camera pans/zooms/resizes. A per-frame rAF (NOT the ~10Hz
   // chrome poll, which would visibly trail a fast pan — RESEARCH Pitfall 3); the
   // loop is scoped to [selectedNode] so it runs ONLY while selected and is torn
   // down the instant the selection clears. Positioning is a cheap DOM transform
   // write on the anchor wrapper — no scene write, no new window.__fabrico setter
-  // (T-30-03: camera() is consumed read-only). useLayoutEffect + an immediate
+  // (T-30-03: the camera snapshot is consumed read-only). useLayoutEffect + an immediate
   // project() paints the first frame in the right place (no origin flash).
   useLayoutEffect(() => {
     // Gate on the SAME condition as the render below (selected AND not armed) so
@@ -4617,7 +4621,7 @@ export function App() {
       // no snapshot allocation). The placement itself is `placeDeleteAnchor`, called
       // with or without a node: a keyframe that leaves nothing on the handle must
       // still reach its hide (76-15 refuter round).
-      const cam = window.__fabrico?.camera();
+      const cam = handleRef.current?.cameraSnapshot();
       const node = handleRef.current?.sceneState.nodes.get(selectedNode);
       if (el && cam) {
         // UI-01: the rings as PLOTTED, so the control steps off whatever ring is on screen.
@@ -4912,7 +4916,7 @@ export function App() {
               reveal), z-index 1 under every panel. It reads the same read-only camera
               snapshot; no setter, no scene write. Name tags sit over label words and
               under every panel: they are z-index 1 too and mount just after this. */}
-          <LabelWords handleRef={handleRef} />
+          <LabelWords handleRef={handleRef} readCamera={readCamera} />
           {/* READ-01: the Alt-hold / toggle machine-name chip overlay, mounted
               ONLY while labelsVisible so its per-frame rAF anchor exists exactly
               while names are shown (blur-safe via altHeld above). The chips read
@@ -4920,7 +4924,7 @@ export function App() {
               no scene write. CHROME-08 (phase 91, D-07): z-index 1, mounted AFTER
               LabelWords, so a tag paints over label words and under every chrome
               surface at 2 (Toolbar, Palette, Legend, Help, inspector, camera cluster). */}
-          {labelsVisible && <MachineLabels handleRef={handleRef} />}
+          {labelsVisible && <MachineLabels handleRef={handleRef} readCamera={readCamera} />}
           {/* NAV-01/02: the interactive camera cluster, live zoom readout + Fit. It is
               the one surface in the bottom-right corner (plan 91-03 removed the passive
               tick / fps / machine readout that sat under it, CHROME-01), pointer-events:auto

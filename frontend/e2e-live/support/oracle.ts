@@ -1310,7 +1310,7 @@ export async function ensurePlaying(page: Page): Promise<void> {
 //
 // The two helpers below are the two halves of "still drawn", and neither reads a pixel:
 //
-//   watchPageErrors    an uncaught page error is a RED GATE, not a console curiosity.
+//   watchPageErrors    an uncaught page error, or a packet the pipeline failed to apply, is a RED GATE.
 //   expectRenderLoopAlive  `__fabrico.frame()` is derived from the render clock, which
 //                      only advances inside the ticker. tick climbing while frame is
 //                      frozen is the precise signature of a dead render loop.
@@ -1330,18 +1330,37 @@ export async function frameOf(page: Page): Promise<number> {
 }
 
 /**
- * Fail the test on ANY uncaught page error, at the point the caller asks.
+ * The line the packet pipeline (`src/render/packetPipeline.ts`) logs through `console.error`
+ * when a hook or `applyPacket` throws. The pipeline catches that throw so one bad packet
+ * can't stop the transport, which also means no `pageerror` ever fires for it. The
+ * pipeline's unit test pins the same words (`packetPipeline.test.ts`), so a rename there
+ * fails that test before it can blind this one.
+ */
+export const PACKET_HANDLER_FAILED = 'packet handler failed';
+
+/**
+ * Fail the test on ANY uncaught page error, or on a render packet the pipeline failed to
+ * apply, at the point the caller asks.
  *
  * Install it BEFORE `page.goto` so a boot-time throw is caught too. It collects rather
  * than throwing inline, because a Playwright `pageerror` fires outside the assertion
- * stack and an inline throw there surfaces as an unhelpful unhandled rejection.
+ * stack and an inline throw there surfaces as an unhandled rejection.
+ *
+ * The pipeline line is matched by its prefix only. Other `console.error` output is left
+ * alone: the app logs some on purpose (a refused file, a dropped socket), and a spec that
+ * wants those checks for them itself.
  */
 export function watchPageErrors(page: Page): { assertNone(context: string): void } {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`${e.message}\n${e.stack ?? '(no stack)'}`));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && m.text().startsWith(PACKET_HANDLER_FAILED)) {
+      errors.push(`console.error: ${m.text()}`);
+    }
+  });
   return {
     assertNone(context: string): void {
-      expect(errors, `uncaught page error ${context}`).toEqual([]);
+      expect(errors, `uncaught page error or failed render packet ${context}`).toEqual([]);
     },
   };
 }
