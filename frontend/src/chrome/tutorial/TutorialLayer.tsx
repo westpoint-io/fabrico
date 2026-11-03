@@ -190,6 +190,33 @@ function readFreeArea(): ChromeFacts['view']['freeArea'] {
   };
 }
 
+/** The gap between the card's right edge and the open inspector's left edge. */
+const CARD_INSPECTOR_GAP_PX = 8;
+
+/**
+ * The card's left edge in its container's px while the open inspector meets the card's centred place,
+ * or null for centred. The card keeps its width, so its right edge sits 8 px short of the inspector; at
+ * 1024 wide that puts it over the palette's lower rows, which UI-SPEC "Card placement" accepts. The
+ * inspector is found by its heading, because the camera cluster carries `[data-fab-corner-dock]` too.
+ * Help hides the inspector with `display: none`, which reads as an empty rect, so the card is centred
+ * again. Only x depends on this, and the centred place is worked out from the container and the card's
+ * width, never the card's current x, so the shift can't feed back into itself.
+ */
+function readCardLeft(): number | null {
+  const card = document.querySelector<HTMLElement>('[data-fab-step-card]');
+  const inspector = document.querySelector<HTMLElement>('aside[aria-labelledby="fab-config-heading"]');
+  if (card === null || inspector === null) return null;
+  const ins = inspector.getBoundingClientRect();
+  if (ins.width === 0 || ins.height === 0) return null;
+  const box = card.getBoundingClientRect();
+  const parent = card.offsetParent;
+  const host = parent === null ? { left: 0, width: window.innerWidth } : parent.getBoundingClientRect();
+  const centredLeft = host.left + (host.width - box.width) / 2;
+  const meets = ins.left < centredLeft + box.width && ins.right > centredLeft && ins.top < box.bottom && ins.bottom > box.top;
+  if (!meets) return null;
+  return ins.left - CARD_INSPECTOR_GAP_PX - box.width - host.left;
+}
+
 /**
  * A refusal the app showed while a stage was on the card: its tag, and the `stageKey` of the stage it
  * landed on. It stays until that stage or step changes or the next refusal replaces it, with no timer.
@@ -352,6 +379,9 @@ export function TutorialLayer({
   // Is a belt draw held? The same pattern: read each frame, state only on a flip.
   const drawingRef = useRef(false);
   const [drawing, setDrawing] = useState(false);
+  // The card's left edge while the open inspector meets its centred place. The same pattern again.
+  const cardLeftRef = useRef<number | null>(null);
+  const [cardLeft, setCardLeft] = useState<number | null>(null);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
   // The host's last answer about the bound Source's trigger. The frame loop reads only this.
@@ -500,6 +530,11 @@ export function TutorialLayer({
         if (drawNow !== drawingRef.current) {
           drawingRef.current = drawNow;
           setDrawing(drawNow);
+        }
+        const leftNow = readCardLeft();
+        if (leftNow !== cardLeftRef.current) {
+          cardLeftRef.current = leftNow;
+          setCardLeft(leftNow);
         }
       }
       raf = requestAnimationFrame(frame);
@@ -699,6 +734,7 @@ export function TutorialLayer({
           onKeepBuilding={keepBuilding}
           onShowMe={showMe}
           simStopped={simStopped}
+          {...(cardLeft === null ? {} : { left: cardLeft })}
           {...(lessonId === null ? {} : { onRestart: () => start(lessonId) })}
         />
       )}

@@ -1,6 +1,7 @@
 // StepCard.tsx - the small card that says what the current lesson step asks for.
 //
-// Docked bottom centre, above the Legend strip when it's open. It takes no focus and passes the
+// Docked bottom centre, above the Legend strip when it's open, or moved left of an open inspector
+// that meets that place. It takes no focus and passes the
 // pointer through everywhere but its buttons, so the gesture a step asks for works under it. It owns
 // no key listener, and its buttons call `preventDefault` on mouse down as the Palette rows do, so a
 // press can't leave focus on a button and trap Space behind the focus guard.
@@ -46,6 +47,11 @@ export interface StepCardProps {
   simStopped?: boolean;
   /** Bring the out-of-view ring into view. It moves the camera only. */
   onShowMe?: () => void;
+  /**
+   * The card's left edge in px, set by TutorialLayer while the open inspector meets the card's centred
+   * place. Without it the card is centred. Only x moves: the width and the bottom anchor stay.
+   */
+  left?: number;
 }
 
 /** Show me's title while a belt draw is held. */
@@ -170,10 +176,10 @@ export function StepCard(props: StepCardProps): JSX.Element {
       aria-label="Lesson step"
       style={{
         position: 'absolute',
-        left: '50%',
+        left: props.left ?? '50%',
         // 24 px above the window's bottom, or 8 px above the open Legend, whichever is higher.
         top: 'min(calc(100% - var(--fab-space-lg)), calc(var(--fab-legend-top, 100000px) - var(--fab-space-sm)))',
-        transform: 'translate(-50%, -100%)',
+        transform: props.left === undefined ? 'translate(-50%, -100%)' : 'translate(0, -100%)',
         zIndex: 3,
         width: 480,
         padding: 'calc(var(--fab-space-md) + var(--fab-bezel-ring))',

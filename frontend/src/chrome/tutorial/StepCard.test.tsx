@@ -71,6 +71,31 @@ describe('StepCard', () => {
     expect(styleOf(panel!).zIndex).toBe(3);
   });
 
+  it('stays centred when the layer passes no left', () => {
+    const [panel] = elements(StepCard({ view: RUNNING, ...NOOPS }));
+    expect(styleOf(panel!).left).toBe('50%');
+    expect(styleOf(panel!).transform).toBe('translate(-50%, -100%)');
+  });
+
+  it('takes a left in px from the layer, keeping its width, its top and its bottom anchor', () => {
+    const [centred] = render(RUNNING);
+    const [shifted] = elements(StepCard({ view: RUNNING, ...NOOPS, left: 86.5 }));
+    expect(styleOf(shifted!).left).toBe(86.5);
+    // Only x moves: the bottom-anchored translate keeps its -100%, and nothing else in the style changes.
+    expect(styleOf(shifted!).transform).toBe('translate(0, -100%)');
+    expect(styleOf(shifted!).width).toBe(styleOf(centred!).width);
+    expect(styleOf(shifted!).top).toBe(styleOf(centred!).top);
+    expect(styleOf(shifted!).padding).toBe(styleOf(centred!).padding);
+  });
+
+  it('takes the same left on a finished and a swapped card', () => {
+    for (const view of [FINISHED, { state: 'swapped' } as const]) {
+      const [panel] = elements(StepCard({ view, ...NOOPS, left: 260 }));
+      expect(styleOf(panel!).left, view.state).toBe(260);
+      expect(styleOf(panel!).transform, view.state).toBe('translate(0, -100%)');
+    }
+  });
+
   it('announces its text politely, with no role', () => {
     const live = render(RUNNING).filter((el) => el.props['aria-live'] !== undefined);
     expect(live, 'one live region').toHaveLength(1);
