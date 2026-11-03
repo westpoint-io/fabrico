@@ -25,7 +25,8 @@ import {
   type SceneWireId,
 } from '../transport/transport';
 import { devWsInvoke } from '../transport/devWsInvoke';
-import { applyPacket, beltsDockedTo, isStaleDiff, sceneSnapshot, type FabricoScene } from '../render/sceneState';
+import { beltsDockedTo, sceneSnapshot, type FabricoScene, type SceneState } from '../render/sceneState';
+import { createPacketPipeline } from '../render/packetPipeline';
 import { beltRun, beltRunSignature, type BeltRunEntry } from '../render/beltRun';
 import {
   detectStrandedDocks,
@@ -34,12 +35,11 @@ import {
 } from '../render/strandedDocks';
 import { ringKey, ringStep, type StandingStrand } from '../render/strandLifetime';
 import {
-  DecodeError,
-  decodeRenderPacket,
   encodeGestureFrame,
   encodeGridCommand,
   type NodeView,
   type PortView,
+  type RenderPacket,
 } from '../protocol/decode';
 import { machine_kind } from '../protocol/kinds';
 import { selectedNodePortFlow, type PortFlow } from '../protocol/portFlow';
@@ -3305,10 +3305,14 @@ export function App() {
       // `stats()` is the second read: process-lifetime monotonic decode counters
       // (packetsApplied / decodeErrors) that make the WR-07 silently-dropped
       // DecodeError observable to the live E2E gate - a fresh plain object per
-      // call, no setters, same T-14-FABRICO-RO discipline. The closure counters
-      // die with the effect; the cleanup below nulls the hook.
-      let packetsApplied = 0;
-      let decodeErrors = 0;
+      // call, no setters, same T-14-FABRICO-RO discipline. The counters live in
+      // this mount's packet pipeline (`render/packetPipeline.ts`, D-02) and die
+      // with the effect; the cleanup below nulls the hook. The pipeline's hooks
+      // are the function declarations beside `transport.onPacket` below.
+      const pipeline = createPacketPipeline(() => handle.sceneState, {
+        beforeApply: beforePacket,
+        afterApply: afterPacket,
+      });
       // NAV-01 boot fit, per LOAD since plan 85-06 (DEMO-07, D-12). Re-armed here on
       // every mount, so the StrictMode double-boot frames cleanly per mount, exactly as
       // the old per-mount closure latch did. The board the app boots into is framed by
@@ -3396,7 +3400,7 @@ export function App() {
       window.__fabrico = {
         scene: () => sceneSnapshot(handle.sceneState),
         tutorial: () => tutorialProbeRef.current(),
-        stats: () => ({ packetsApplied, decodeErrors }),
+        stats: () => pipeline.stats(),
         frameTime: () => frameProbe.avg(),
         // MOTION-04 deterministic probe spine: read the effective render frame and
         // pin/unpin the render clock. Always exposed (not DEV-guarded) because it
@@ -3688,345 +3692,338 @@ export function App() {
         // BEFORE decode so even a malformed frame counts as liveness - a stalled
         // producer, not a bad byte, is what the watchdog watches for.
         watchdogRef.current?.onPacket();
-        try {
-          const packet = decodeRenderPacket(bytes);
-          // FAIL-05 (D-09): a diff older than the scene is dropped here, before every reader
-          // below (it must not end an undo hold or clear a wire latch); the watchdog above
-          // already counted its bytes as liveness, and it is not counted as applied.
-          if (isStaleDiff(handle.sceneState, packet)) return;
-          // Review WR-B-02: the ticks a Save, New or example has taken since it was sent; a New's
-          // or an example's work ends at its swap keyframe.
-          hostWorkRef.current?.onPacket(packet.tick, isTimelineRestructure(packet));
-          // Review IN-B-02: an edit whose answer is overdue lost it; it no longer counts as awaited.
-          dropOverdueEdits(editGesturesRef.current, packet.tick, LOAD_TICK_BUDGET);
-          // Decode succeeded: count it BEFORE any downstream handler work, so
-          // the counter reads as decode outcomes only (not handler health).
-          packetsApplied += 1;
-          // Plan 74.1-31: the undo hold ends on the first packet whose tick differs from
-          // the one on screen when Play or Step was requested. Plan 74.1-35: or, after
-          // New, an example or Open, on the swap's own keyframe (a restructure, never a
-          // resync and never a drained tick), which the host emits after discarding the
-          // edits queued on the old board.
-          const queued = queuedEditsRef.current;
-          if (queued !== null) {
-            const landed = queued.foldTick !== null && packet.tick !== queued.foldTick;
-            const discarded = queued.swapRequested && isTimelineRestructure(packet);
-            if (landed || discarded) {
-              queuedEditsRef.current = null;
-              setUndoHeld(false);
-            }
-            // The edits the queued or held notice names no longer exist, so it goes at
-            // once. With a load in flight `resolveKeyframe` below replaces it with
-            // `Loaded` instead, as before.
-            if (discarded && !landed && statusMachineRef.current?.isLoadInFlight() !== true) {
-              setStatus((st) =>
-                st.kind === 'editsQueued' || st.kind === 'undoHeld' ? { kind: 'idle', at: performance.now() } : st,
-              );
-            }
+        // D-02: decode, the stale-diff drop (FAIL-05, D-09: a diff older than the scene reaches
+        // neither hook and is not counted), the counter, `applyPacket` and the catch are the shared
+        // pipeline's, the same function a read-only board on a page calls. The editor work the app
+        // does around apply is `beforePacket` and `afterPacket` below, in the order it always ran.
+        pipeline.handle(bytes);
+      });
+      // The app's work on a packet BEFORE `applyPacket`: everything that has to read the scene as
+      // it was. It returns what `afterPacket` reads from it. The pipeline calls it after the stale
+      // check and after the counter. A function declaration, so the pipeline built beside the
+      // `window.__fabrico` hook above can name it.
+      function beforePacket(packet: RenderPacket) {
+        // Review WR-B-02: the ticks a Save, New or example has taken since it was sent; a New's
+        // or an example's work ends at its swap keyframe.
+        hostWorkRef.current?.onPacket(packet.tick, isTimelineRestructure(packet));
+        // Review IN-B-02: an edit whose answer is overdue lost it; it no longer counts as awaited.
+        dropOverdueEdits(editGesturesRef.current, packet.tick, LOAD_TICK_BUDGET);
+        // Plan 74.1-31: the undo hold ends on the first packet whose tick differs from
+        // the one on screen when Play or Step was requested. Plan 74.1-35: or, after
+        // New, an example or Open, on the swap's own keyframe (a restructure, never a
+        // resync and never a drained tick), which the host emits after discarding the
+        // edits queued on the old board.
+        const queued = queuedEditsRef.current;
+        if (queued !== null) {
+          const landed = queued.foldTick !== null && packet.tick !== queued.foldTick;
+          const discarded = queued.swapRequested && isTimelineRestructure(packet);
+          if (landed || discarded) {
+            queuedEditsRef.current = null;
+            setUndoHeld(false);
           }
-          // D-15 stranded-dock probe (REND-06): diff the incoming packet against
-          // the scene BEFORE applyPacket overwrites the baseline — a rotate-unlink
-          // arrives as "belt re-emitted WITHOUT the dock the scene still holds".
-          // Returns [] on full:true by construction (keyframes re-mint handles;
-          // undo/redo/load restructure legitimately — zero false rings).
-          const stranded = detectStrandedDocks(handle.sceneState, packet);
-          // The keyframe sibling (`detectKeyframeStrand`, widened by 74.1-27 from the
-          // MOTION-06b undo-of-a-turn detector): detectStrandedDocks returns [] on a full
-          // keyframe by construction, and an undo or redo always arrives as one. It
-          // fires when a keyframe that is neither a resync nor a load (tick continuity)
-          // changes one machine's turn or port count and a belt lost its dock to it -
-          // the redo of `Remove output 1` is the case (walk item N5B). Both detectors run
-          // PRE-apply against the same baseline; the keyframe path also carries the
-          // node's structural identity so `strandRingPoints` finds the re-minted node
-          // after the apply (WR-01).
-          const events =
-            stranded.length > 0
-              ? stranded
-              : packet.full
-                ? detectKeyframeStrand(handle.sceneState, packet)
-                : [];
-          // MOTION-06a: classify the edit-clear BEFORE applyPacket overwrites the
-          // baseline (same PRE-apply prev the strand probe needs). Holding the
-          // boolean lets the clear branch below fire ONLY on a genuine
-          // place/remove/rotate/dock-change — a state-only IDLE->WORKING re-emit
-          // (which rides packet.placed with just its `state` byte changed) is
-          // NON-structural, so a fired ring survives a flowing scene instead of
-          // vanishing after ~1 tick (RESEARCH Pitfall 5). Since the 2026-08-30 TTL
-          // retirement "survives" means until a real edit resolves it, which makes
-          // this classification the whole clear side of the ring's lifetime.
-          const structural = isStructuralEdit(handle.sceneState, packet);
-          // SAFE-03: reuse the SAME pre-apply structural classification to maintain
-          // the dirty flag. A genuine NON-keyframe structural edit (place / rotate /
-          // delete / dock via a diff packet) dirties the board; a state-only re-emit
-          // (IDLE->WORKING) or pure item-flow packet does NOT (nonStructural = no
-          // change). Full keyframes are handled by their SOURCE, never here: undo/
-          // redo must not dirty (not user edits) and load/loadDemo CLEAR via their
-          // control handlers — so the packet path only ever flips dirty TRUE, and
-          // only on a real diff-packet edit (T-34-DIRTY-FALSE).
-          if (!packet.full) {
-            // SAVE-05: route through setDirty so a genuine structural edit lights
-            // the toolbar Unsaved badge. Change-guarded inside setDirty, so a
-            // non-structural re-emit (the common per-tick packet) is a no-op and
-            // never re-renders the chrome.
-            setDirty(
-              nextDirty(
-                dirtyRef.current,
-                structural ? 'structuralEdit' : 'nonStructural',
-              ),
+          // The edits the queued or held notice names no longer exist, so it goes at
+          // once. With a load in flight `resolveKeyframe` below replaces it with
+          // `Loaded` instead, as before.
+          if (discarded && !landed && statusMachineRef.current?.isLoadInFlight() !== true) {
+            setStatus((st) =>
+              st.kind === 'editsQueued' || st.kind === 'undoHeld' ? { kind: 'idle', at: performance.now() } : st,
             );
           }
-          // 74.1-27 (N5): the board as it was BEFORE this packet, kept only when a strand
-          // was detected (a shallow copy of the node map; `applyPacket` replaces node
-          // objects rather than mutating them). The vacated nub is resolved against it,
-          // because after a port edit the dock's old key names a different port.
-          const preApply =
-            events.length > 0 || (structural && standingStrandsRef.current.length > 0)
-              ? { nodes: new Map(handle.sceneState.nodes) }
-              : null;
-          // Plan 76-19: the nodes the pending port-edit latches were about, kept only for a
-          // `full` packet with a latch open (a shallow copy; `applyPacket` clears the map).
-          const latchedBefore =
-            packet.full && portEditLatchesRef.current.size > 0 ? new Map(handle.sceneState.nodes) : null;
-          applyPacket(handle.sceneState, packet);
-          // Phase 91 (D-10, CHROME-10): the empty-board hint follows the scene on the packet that
-          // changes it, committed synchronously, so no drawn frame holds both the hint and the
-          // first machine. Only the edge commits; every other packet leaves React alone.
-          const emptyNow = handle.sceneState.nodes.size === 0 && handle.sceneState.belts.size === 0;
-          if (emptyNow !== boardEmptyRef.current) {
-            boardEmptyRef.current = emptyNow;
-            flushSync(() => setBoardEmpty(emptyNow));
-          }
-          // Plan 88-07 (D-09): an accepted claim the scene now shows ends (the scene carries it),
-          // and a claim with no verdict ends on playing ticks only. A swap's keyframe ends them
-          // all: the host discarded every gesture queued on the replaced board.
-          if (claimSwapRef.current && isTimelineRestructure(packet)) {
-            claimSwapRef.current = false;
-            queuedClaimsRef.current.clear();
-            // Phase 88 (T-88-11): and every held belt ends with nothing sent. Its Docks were owed
-            // on the replaced board; named again in this one they could dock a belt the user
-            // never drew here. Before `clearSelection` below, so no frame lands one first. A swap
-            // this page did not ask for (another client's Load) never reaches here; the
-            // controller reads the packet's swap floor for that (T-88-11 re-audit).
-            gesturesRef.current?.onSwap();
-          }
-          queuedClaimsRef.current.onPacket(handle.sceneState, playingRef.current);
-          // NAV-01 / DEMO-07: FRAME EACH LOADED SCENE ONCE (plan 85-06, D-12). The
-          // latch is per LOAD now, not per mount: until 85-06 it fired once at boot and
-          // never again, so an example kept the previous board's zoom and could open with
-          // most of its machines off screen (walk-113).
-          // `fitPendingRef` is armed at boot and by every scene load request (the demo,
-          // an example), cleared on a refused Load, and taken here by the next
-          // TIMELINE-RESTRUCTURE keyframe (full, not a lag resync) that carries a node
-          // (`takeFit`, src/chrome/sceneFit.ts). A diff never takes it, so a manual
-          // placement into an empty floor never yanks the camera onto a lone footprint
-          // (WR-01). New and a user's .fab Open do not arm it: an empty board has nothing
-          // to frame, and a user's own board keeps the camera they had. Between loads
-          // nothing re-fits, so the fit never fights the user's own pan and zoom.
-          if (takeFit(fitPendingRef.current, packet, handle.sceneState.nodes.size)) {
-            // Clear IMMEDIATELY (before the deferred fit runs) so a second keyframe
-            // arriving during the chrome-ready wait cannot schedule a second fit
-            // (WR-01's latch-before-fit order).
-            fitPendingRef.current = false;
-            // IN-03: defer the actual fit until the React chrome DOM has committed
-            // so computeChromeInsets() reads the SAME real insets a Fit click
-            // reads (see fitWhenChromeReady). Fires synchronously if the chrome is
-            // already laid out, otherwise on the first frame it is.
-            fitWhenChromeReady();
-          }
-          // SHELL-07 / D-06: every packet goes to the status machine. A pending Load
-          // resolves 'loaded' ONLY on its own swap keyframe (`isLoadSwap`: full, the swap
-          // floor equal to the generation and above the floor at dispatch), so an Undo's
-          // or Redo's keyframe never stands in for it. Every other packet tells the
-          // machine the host is still answering (its silence window and tick budget).
-          // READ-ONLY observation - no scene/command write, no host echo.
-          // Review WR-B-07: whether the machine still awaited a swap BEFORE this packet. The
-          // pending save target lives exactly as long (`isAwaitingSwap`): a Load the machine
-          // let go of with no swap (a stop, a dispatch it never latched) holds no target.
-          const awaitingSwap = statusMachineRef.current?.isAwaitingSwap() === true;
-          statusMachineRef.current?.resolveKeyframe(packet);
-          // D-02 (phase 90, research Finding K): the same swap test moves the save target to
-          // the opened file and marks the loaded board clean, now that the host confirmed it.
-          const pendingLoad = pendingLoadRef.current;
-          if (pendingLoad !== null && !awaitingSwap) {
-            pendingLoadRef.current = null;
-          } else if (pendingLoad !== null && isLoadSwap(packet, pendingLoad.floorAtDispatch)) {
-            currentFilePathRef.current = pendingLoad.path;
-            setDirty(nextDirty(dirtyRef.current, 'load'));
-            pendingLoadRef.current = null;
-            // D-03 (phase 90): the Open's swap is committed, so an answer to an edit sent
-            // before it belongs to the board it replaced.
-            editGesturesRef.current.clear();
-            // Review WR-B-06 (D-02's "only on host confirm"): the scene badge goes with the
-            // board it named, on the swap, not on the dispatch. A refused Open keeps the demo on
-            // screen, so it keeps `Demo scene` too. A local action now owns the badge, so the
-            // boot-time host echo must not set it back.
-            sceneActedRef.current = true;
-            setLoadedScene(null);
-          }
-          // WR-01 / UNDO-06: a full keyframe (emitted after any undo/redo/load
-          // fold, Pitfall 3) rebuilds the host render-handle table from 0, so a
-          // handle can be REUSED for a DIFFERENT node. Clear the ephemeral
-          // selection UNCONDITIONALLY so a stale handle can never silently retarget
-          // a later Delete at the wrong node (selection is frontend-ephemeral).
-          if (packet.full) {
-            // Plan 76-19 (audit F2): a pending port-edit latch whose handle the keyframe
-            // handed to a machine with another origin cell or kind is dropped with its
-            // evidence, on EVERY full packet. A guard, not the fix: since the 76-19 refuter
-            // round the host sends a lag that spanned a `RenderProducer::reset` as a
-            // restructure (`resync: false`), so the evidence below releases every latch,
-            // including the ones this check cannot see (another Factory on the same cell,
-            // or the user's own edit undone in the lag). See `remintedLatchHandles`.
-            if (latchedBefore !== null) {
-              const latches = portEditLatchesRef.current;
-              for (const h of remintedLatchHandles(latches.keys(), latchedBefore, handle.sceneState.nodes)) {
-                latches.delete(h);
-                keyframeSinceLatchRef.current.delete(h);
-              }
-              if (latches.size === 0) portEditGrace.release();
+        }
+        // D-15 stranded-dock probe (REND-06): diff the incoming packet against
+        // the scene BEFORE applyPacket overwrites the baseline — a rotate-unlink
+        // arrives as "belt re-emitted WITHOUT the dock the scene still holds".
+        // Returns [] on full:true by construction (keyframes re-mint handles;
+        // undo/redo/load restructure legitimately — zero false rings).
+        const stranded = detectStrandedDocks(handle.sceneState, packet);
+        // The keyframe sibling (`detectKeyframeStrand`, widened by 74.1-27 from the
+        // MOTION-06b undo-of-a-turn detector): detectStrandedDocks returns [] on a full
+        // keyframe by construction, and an undo or redo always arrives as one. It
+        // fires when a keyframe that is neither a resync nor a load (tick continuity)
+        // changes one machine's turn or port count and a belt lost its dock to it -
+        // the redo of `Remove output 1` is the case (walk item N5B). Both detectors run
+        // PRE-apply against the same baseline; the keyframe path also carries the
+        // node's structural identity so `strandRingPoints` finds the re-minted node
+        // after the apply (WR-01).
+        const events =
+          stranded.length > 0
+            ? stranded
+            : packet.full
+              ? detectKeyframeStrand(handle.sceneState, packet)
+              : [];
+        // MOTION-06a: classify the edit-clear BEFORE applyPacket overwrites the
+        // baseline (same PRE-apply prev the strand probe needs). Holding the
+        // boolean lets the clear branch below fire ONLY on a genuine
+        // place/remove/rotate/dock-change — a state-only IDLE->WORKING re-emit
+        // (which rides packet.placed with just its `state` byte changed) is
+        // NON-structural, so a fired ring survives a flowing scene instead of
+        // vanishing after ~1 tick (RESEARCH Pitfall 5). Since the 2026-08-30 TTL
+        // retirement "survives" means until a real edit resolves it, which makes
+        // this classification the whole clear side of the ring's lifetime.
+        const structural = isStructuralEdit(handle.sceneState, packet);
+        // SAFE-03: reuse the SAME pre-apply structural classification to maintain
+        // the dirty flag. A genuine NON-keyframe structural edit (place / rotate /
+        // delete / dock via a diff packet) dirties the board; a state-only re-emit
+        // (IDLE->WORKING) or pure item-flow packet does NOT (nonStructural = no
+        // change). Full keyframes are handled by their SOURCE, never here: undo/
+        // redo must not dirty (not user edits) and load/loadDemo CLEAR via their
+        // control handlers — so the packet path only ever flips dirty TRUE, and
+        // only on a real diff-packet edit (T-34-DIRTY-FALSE).
+        if (!packet.full) {
+          // SAVE-05: route through setDirty so a genuine structural edit lights
+          // the toolbar Unsaved badge. Change-guarded inside setDirty, so a
+          // non-structural re-emit (the common per-tick packet) is a no-op and
+          // never re-renders the chrome.
+          setDirty(
+            nextDirty(
+              dirtyRef.current,
+              structural ? 'structuralEdit' : 'nonStructural',
+            ),
+          );
+        }
+        // 74.1-27 (N5): the board as it was BEFORE this packet, kept only when a strand
+        // was detected (a shallow copy of the node map; `applyPacket` replaces node
+        // objects rather than mutating them). The vacated nub is resolved against it,
+        // because after a port edit the dock's old key names a different port.
+        const preApply =
+          events.length > 0 || (structural && standingStrandsRef.current.length > 0)
+            ? { nodes: new Map(handle.sceneState.nodes) }
+            : null;
+        // Plan 76-19: the nodes the pending port-edit latches were about, kept only for a
+        // `full` packet with a latch open (a shallow copy; `applyPacket` clears the map).
+        const latchedBefore =
+          packet.full && portEditLatchesRef.current.size > 0 ? new Map(handle.sceneState.nodes) : null;
+        return { events, structural, preApply, latchedBefore };
+      }
+      // The app's work on a packet AFTER `applyPacket`, handed what `beforePacket` returned.
+      function afterPacket(
+        packet: RenderPacket,
+        _scene: SceneState,
+        { events, structural, preApply, latchedBefore }: ReturnType<typeof beforePacket>,
+      ): void {
+        // Phase 91 (D-10, CHROME-10): the empty-board hint follows the scene on the packet that
+        // changes it, committed synchronously, so no drawn frame holds both the hint and the
+        // first machine. Only the edge commits; every other packet leaves React alone.
+        const emptyNow = handle.sceneState.nodes.size === 0 && handle.sceneState.belts.size === 0;
+        if (emptyNow !== boardEmptyRef.current) {
+          boardEmptyRef.current = emptyNow;
+          flushSync(() => setBoardEmpty(emptyNow));
+        }
+        // Plan 88-07 (D-09): an accepted claim the scene now shows ends (the scene carries it),
+        // and a claim with no verdict ends on playing ticks only. A swap's keyframe ends them
+        // all: the host discarded every gesture queued on the replaced board.
+        if (claimSwapRef.current && isTimelineRestructure(packet)) {
+          claimSwapRef.current = false;
+          queuedClaimsRef.current.clear();
+          // Phase 88 (T-88-11): and every held belt ends with nothing sent. Its Docks were owed
+          // on the replaced board; named again in this one they could dock a belt the user
+          // never drew here. Before `clearSelection` below, so no frame lands one first. A swap
+          // this page did not ask for (another client's Load) never reaches here; the
+          // controller reads the packet's swap floor for that (T-88-11 re-audit).
+          gesturesRef.current?.onSwap();
+        }
+        queuedClaimsRef.current.onPacket(handle.sceneState, playingRef.current);
+        // NAV-01 / DEMO-07: FRAME EACH LOADED SCENE ONCE (plan 85-06, D-12). The
+        // latch is per LOAD now, not per mount: until 85-06 it fired once at boot and
+        // never again, so an example kept the previous board's zoom and could open with
+        // most of its machines off screen (walk-113).
+        // `fitPendingRef` is armed at boot and by every scene load request (the demo,
+        // an example), cleared on a refused Load, and taken here by the next
+        // TIMELINE-RESTRUCTURE keyframe (full, not a lag resync) that carries a node
+        // (`takeFit`, src/chrome/sceneFit.ts). A diff never takes it, so a manual
+        // placement into an empty floor never yanks the camera onto a lone footprint
+        // (WR-01). New and a user's .fab Open do not arm it: an empty board has nothing
+        // to frame, and a user's own board keeps the camera they had. Between loads
+        // nothing re-fits, so the fit never fights the user's own pan and zoom.
+        if (takeFit(fitPendingRef.current, packet, handle.sceneState.nodes.size)) {
+          // Clear IMMEDIATELY (before the deferred fit runs) so a second keyframe
+          // arriving during the chrome-ready wait cannot schedule a second fit
+          // (WR-01's latch-before-fit order).
+          fitPendingRef.current = false;
+          // IN-03: defer the actual fit until the React chrome DOM has committed
+          // so computeChromeInsets() reads the SAME real insets a Fit click
+          // reads (see fitWhenChromeReady). Fires synchronously if the chrome is
+          // already laid out, otherwise on the first frame it is.
+          fitWhenChromeReady();
+        }
+        // SHELL-07 / D-06: every packet goes to the status machine. A pending Load
+        // resolves 'loaded' ONLY on its own swap keyframe (`isLoadSwap`: full, the swap
+        // floor equal to the generation and above the floor at dispatch), so an Undo's
+        // or Redo's keyframe never stands in for it. Every other packet tells the
+        // machine the host is still answering (its silence window and tick budget).
+        // READ-ONLY observation - no scene/command write, no host echo.
+        // Review WR-B-07: whether the machine still awaited a swap BEFORE this packet. The
+        // pending save target lives exactly as long (`isAwaitingSwap`): a Load the machine
+        // let go of with no swap (a stop, a dispatch it never latched) holds no target.
+        const awaitingSwap = statusMachineRef.current?.isAwaitingSwap() === true;
+        statusMachineRef.current?.resolveKeyframe(packet);
+        // D-02 (phase 90, research Finding K): the same swap test moves the save target to
+        // the opened file and marks the loaded board clean, now that the host confirmed it.
+        const pendingLoad = pendingLoadRef.current;
+        if (pendingLoad !== null && !awaitingSwap) {
+          pendingLoadRef.current = null;
+        } else if (pendingLoad !== null && isLoadSwap(packet, pendingLoad.floorAtDispatch)) {
+          currentFilePathRef.current = pendingLoad.path;
+          setDirty(nextDirty(dirtyRef.current, 'load'));
+          pendingLoadRef.current = null;
+          // D-03 (phase 90): the Open's swap is committed, so an answer to an edit sent
+          // before it belongs to the board it replaced.
+          editGesturesRef.current.clear();
+          // Review WR-B-06 (D-02's "only on host confirm"): the scene badge goes with the
+          // board it named, on the swap, not on the dispatch. A refused Open keeps the demo on
+          // screen, so it keeps `Demo scene` too. A local action now owns the badge, so the
+          // boot-time host echo must not set it back.
+          sceneActedRef.current = true;
+          setLoadedScene(null);
+        }
+        // WR-01 / UNDO-06: a full keyframe (emitted after any undo/redo/load
+        // fold, Pitfall 3) rebuilds the host render-handle table from 0, so a
+        // handle can be REUSED for a DIFFERENT node. Clear the ephemeral
+        // selection UNCONDITIONALLY so a stale handle can never silently retarget
+        // a later Delete at the wrong node (selection is frontend-ephemeral).
+        if (packet.full) {
+          // Plan 76-19 (audit F2): a pending port-edit latch whose handle the keyframe
+          // handed to a machine with another origin cell or kind is dropped with its
+          // evidence, on EVERY full packet. A guard, not the fix: since the 76-19 refuter
+          // round the host sends a lag that spanned a `RenderProducer::reset` as a
+          // restructure (`resync: false`), so the evidence below releases every latch,
+          // including the ones this check cannot see (another Factory on the same cell,
+          // or the user's own edit undone in the lag). See `remintedLatchHandles`.
+          if (latchedBefore !== null) {
+            const latches = portEditLatchesRef.current;
+            for (const h of remintedLatchHandles(latches.keys(), latchedBefore, handle.sceneState.nodes)) {
+              latches.delete(h);
+              keyframeSinceLatchRef.current.delete(h);
             }
-            // Plan 76-03 (76-UI-SPEC 5.4): a full keyframe clears the label's
-            // pending-size outline. The selection clear below unmounts the panel,
-            // whose own clear follows; this one does not wait for React.
-            labelResizeRef.current = null;
-            handle.overlay.clearLabelResize();
-            // 73-08 / R-40: record the keyframe for the port-edit latch, which is
-            // fed on the ~10Hz poll rather than here. A keyframe means the timeline
-            // was restructured by something other than our edit, so a pending port
-            // edit's packet index means nothing after it and the latch releases.
-            // Read off the packet itself - never inferred from the key or the
-            // clock. Cleared when the next latch closes (`sendPortEdit`).
-            //
-            // 73-12 (73-REVIEW WR-01): `full` ALONE IS NOT THE RESTRUCTURE SIGNAL,
-            // and reading it as one reopened the releases-too-early direction this
-            // latch exists to close. Both transports resend the CURRENT keyframe -
-            // `full: true` - to a connection that fell past the bounded diff
-            // broadcast, on which the timeline did NOT move and the pending
-            // `RemovePort` may still be unfolded in the host's gesture channel. The
-            // user's obvious response to a released latch is to click again, which
-            // queues the exact duplicate the latch prevents. The host now says which
-            // of the two happened, so this arm asks.
-            // WR-03: recorded for every node that currently holds a pending latch,
-            // because the evidence is per node. A node with no latch gets no entry,
-            // which is what keeps this from growing for the session.
-            if (isTimelineRestructure(packet)) {
-              for (const pending of portEditLatchesRef.current.keys()) {
-                keyframeSinceLatchRef.current.add(pending);
-              }
-            }
-            // CR-01 (plan 76-15): `clearSelection()` below only QUEUES the deselect;
-            // React commits it later. On the frame in between, the controls rendered
-            // for the old selection are still mounted and their closures still hold
-            // the pre-keyframe handle, which now names whatever node the keyframe
-            // reminted onto it. Null the live refs here, synchronously, so every
-            // per-frame, polled or click-time reader of the selection sees the
-            // deselect on THIS frame. This also stops the ~10Hz poll seeding the panel
-            // with the reminted node's ports.
-            selectedNodeRef.current = null;
-            selectedBeltRef.current = null;
-            // The 76-17 refuter round: a remint ends the selection itself, not only the
-            // handle number, so the panels' sends close here on this frame and a reselect
-            // of the node now on the same number starts a new epoch (`selectionEpoch.ts`).
-            liveEpoch.keyframe();
-            gesturesRef.current?.clearSelection();
-            // WR-06: the open delete-guard captured a machine handle (and the
-            // docked belt ids its drain polls) — the SAME wrong-target Delete
-            // class the selection clear above closes (T-21-08). A keyframe
-            // remints handles, so `guard.handle` may now name a DIFFERENT
-            // node: cancel the guard (stop any drain, no command issued)
-            // rather than let deleteAnyway / the drain zero-poll commit a
-            // Delete against a remint.
-            cancelGuard();
-          } else if (packet.placed.length > 0 || packet.belts.length > 0) {
-            // WR-01/WR-02: a Rotate echo re-emits the rotated node and a Dock
-            // echo re-emits the docked belt. If the re-emitted element is the
-            // SELECTED one, its affordances may have moved (effective box /
-            // rotate-handle corner for a node; endpoint handle anchors for a
-            // belt) — re-derive them from the post-apply scene so the drawn
-            // affordance matches the hit-tested one. It does that only when the
-            // current selection is in the packet, and also repaints the armed Belt
-            // tool's rings when a belt is.
-            gesturesRef.current?.refreshSelection(
-              packet.placed.map((n) => n.id),
-              packet.belts.map((b) => b.id),
-            );
+            if (latches.size === 0) portEditGrace.release();
           }
-          // Plan 76-03: a pending label size is re-judged against the scene this
-          // packet left (a neighbour placed or removed while the panel is open turns
-          // the outline red or blue). A no-op unless a label panel holds a pending size.
-          if (!packet.full && labelResizeRef.current !== null) paintLabelResize();
-          if (preApply) {
-            // THE RING LIFETIME (`strandLifetime.ts`, TODO-FANIN option 3, amending 89-UI-SPEC
-            // 4.2): a warning ring stays until its cut is resolved: the cut dock comes back, its
-            // belt end takes another dock, its belt or machine is deleted, or the machine's port
-            // list changes. A full keyframe (undo, redo, load) clears every ring unless the
-            // keyframe detector rang a cut in it. Any other edit leaves the ring, including a turn
-            // that joins nothing: D-08 never joins an end that still holds a dock, so a fan-in
-            // upstream turned back stays cut, and until this rule the turn back wiped its ring
-            // and the board showed a cut port with no warning.
-            //
-            // The ring points (74.1-27, `strandRings.ts`): a fresh cut's vacated nub resolved
-            // against the node as it was BEFORE the packet, and on the post-apply node only when
-            // its port count did not change (a turn moves the nub with the machine); a standing
-            // cut's nub on the post-apply node, where it is now; the orphaned belt end at its end
-            // tile's centre, post-apply (UI-SPEC section 6: both the vacated nub and the orphaned
-            // belt end).
-            //
-            // CONNECT-02: the STRUCTURED hand-off (`step.rings`) runs alongside the paint. The
-            // point list is flat and bare by design - the overlay is paint-only and stays that
-            // way - and the gesture layer cannot see it, so each ring record carries the belt
-            // handle, the event's own recorded BeltEnd (VERBATIM, never assumed from the
-            // geometry, 67-UI-SPEC 4.2, threat T-67-05-02) and the ORPHANED BELT END point only,
-            // the one drag source of the two. The pressable set is driven in the SAME place as
-            // the paint, from the SAME records and the same point objects, so the two never
-            // disagree; on a clear it is handed over EMPTY rather than left alone, because a
-            // retained record could name a DIFFERENT belt after a keyframe re-mints handles
-            // (threat T-67-05-01). `overlay.tick` drives the ring's 1Hz pulse and its settle at
-            // ALERT_SETTLE_MS; it never retires the ring (post-UI-review F2: a stranded
-            // dock is a broken state and must not heal by being ignored).
-            const step = ringStep({
-              standing: standingStrandsRef.current,
-              pre: preApply,
-              post: handle.sceneState,
-              events,
-              full: packet.full,
-              structural,
-              shownKey: shownRingKeyRef.current,
-            });
-            standingStrandsRef.current = step.standing;
-            if (step.paint === 'show') {
-              handle.overlay.showAlertRings(step.pts, performance.now());
-              shownRingKeyRef.current = ringKey(step.pts);
-              gesturesRef.current?.setStrandedRings(step.rings);
-            } else if (step.paint === 'clear') {
-              handle.overlay.clearAlertRings();
-              shownRingKeyRef.current = '';
-              gesturesRef.current?.setStrandedRings([]);
+          // Plan 76-03 (76-UI-SPEC 5.4): a full keyframe clears the label's
+          // pending-size outline. The selection clear below unmounts the panel,
+          // whose own clear follows; this one does not wait for React.
+          labelResizeRef.current = null;
+          handle.overlay.clearLabelResize();
+          // 73-08 / R-40: record the keyframe for the port-edit latch, which is
+          // fed on the ~10Hz poll rather than here. A keyframe means the timeline
+          // was restructured by something other than our edit, so a pending port
+          // edit's packet index means nothing after it and the latch releases.
+          // Read off the packet itself - never inferred from the key or the
+          // clock. Cleared when the next latch closes (`sendPortEdit`).
+          //
+          // 73-12 (73-REVIEW WR-01): `full` ALONE IS NOT THE RESTRUCTURE SIGNAL,
+          // and reading it as one reopened the releases-too-early direction this
+          // latch exists to close. Both transports resend the CURRENT keyframe -
+          // `full: true` - to a connection that fell past the bounded diff
+          // broadcast, on which the timeline did NOT move and the pending
+          // `RemovePort` may still be unfolded in the host's gesture channel. The
+          // user's obvious response to a released latch is to click again, which
+          // queues the exact duplicate the latch prevents. The host now says which
+          // of the two happened, so this arm asks.
+          // WR-03: recorded for every node that currently holds a pending latch,
+          // because the evidence is per node. A node with no latch gets no entry,
+          // which is what keeps this from growing for the session.
+          if (isTimelineRestructure(packet)) {
+            for (const pending of portEditLatchesRef.current.keys()) {
+              keyframeSinceLatchRef.current.add(pending);
             }
-          } else if (structural) {
-            // No cut is ringed and none was found: the shipped clear, which empties a ring this
-            // packet's detectors could not explain (a port-edit cut, which does not stand, see
-            // `StandingStrand`) and the pressable set with it.
+          }
+          // CR-01 (plan 76-15): `clearSelection()` below only QUEUES the deselect;
+          // React commits it later. On the frame in between, the controls rendered
+          // for the old selection are still mounted and their closures still hold
+          // the pre-keyframe handle, which now names whatever node the keyframe
+          // reminted onto it. Null the live refs here, synchronously, so every
+          // per-frame, polled or click-time reader of the selection sees the
+          // deselect on THIS frame. This also stops the ~10Hz poll seeding the panel
+          // with the reminted node's ports.
+          selectedNodeRef.current = null;
+          selectedBeltRef.current = null;
+          // The 76-17 refuter round: a remint ends the selection itself, not only the
+          // handle number, so the panels' sends close here on this frame and a reselect
+          // of the node now on the same number starts a new epoch (`selectionEpoch.ts`).
+          liveEpoch.keyframe();
+          gesturesRef.current?.clearSelection();
+          // WR-06: the open delete-guard captured a machine handle (and the
+          // docked belt ids its drain polls) — the SAME wrong-target Delete
+          // class the selection clear above closes (T-21-08). A keyframe
+          // remints handles, so `guard.handle` may now name a DIFFERENT
+          // node: cancel the guard (stop any drain, no command issued)
+          // rather than let deleteAnyway / the drain zero-poll commit a
+          // Delete against a remint.
+          cancelGuard();
+        } else if (packet.placed.length > 0 || packet.belts.length > 0) {
+          // WR-01/WR-02: a Rotate echo re-emits the rotated node and a Dock
+          // echo re-emits the docked belt. If the re-emitted element is the
+          // SELECTED one, its affordances may have moved (effective box /
+          // rotate-handle corner for a node; endpoint handle anchors for a
+          // belt) — re-derive them from the post-apply scene so the drawn
+          // affordance matches the hit-tested one. It does that only when the
+          // current selection is in the packet, and also repaints the armed Belt
+          // tool's rings when a belt is.
+          gesturesRef.current?.refreshSelection(
+            packet.placed.map((n) => n.id),
+            packet.belts.map((b) => b.id),
+          );
+        }
+        // Plan 76-03: a pending label size is re-judged against the scene this
+        // packet left (a neighbour placed or removed while the panel is open turns
+        // the outline red or blue). A no-op unless a label panel holds a pending size.
+        if (!packet.full && labelResizeRef.current !== null) paintLabelResize();
+        if (preApply) {
+          // THE RING LIFETIME (`strandLifetime.ts`, TODO-FANIN option 3, amending 89-UI-SPEC
+          // 4.2): a warning ring stays until its cut is resolved: the cut dock comes back, its
+          // belt end takes another dock, its belt or machine is deleted, or the machine's port
+          // list changes. A full keyframe (undo, redo, load) clears every ring unless the
+          // keyframe detector rang a cut in it. Any other edit leaves the ring, including a turn
+          // that joins nothing: D-08 never joins an end that still holds a dock, so a fan-in
+          // upstream turned back stays cut, and until this rule the turn back wiped its ring
+          // and the board showed a cut port with no warning.
+          //
+          // The ring points (74.1-27, `strandRings.ts`): a fresh cut's vacated nub resolved
+          // against the node as it was BEFORE the packet, and on the post-apply node only when
+          // its port count did not change (a turn moves the nub with the machine); a standing
+          // cut's nub on the post-apply node, where it is now; the orphaned belt end at its end
+          // tile's centre, post-apply (UI-SPEC section 6: both the vacated nub and the orphaned
+          // belt end).
+          //
+          // CONNECT-02: the STRUCTURED hand-off (`step.rings`) runs alongside the paint. The
+          // point list is flat and bare by design - the overlay is paint-only and stays that
+          // way - and the gesture layer cannot see it, so each ring record carries the belt
+          // handle, the event's own recorded BeltEnd (VERBATIM, never assumed from the
+          // geometry, 67-UI-SPEC 4.2, threat T-67-05-02) and the ORPHANED BELT END point only,
+          // the one drag source of the two. The pressable set is driven in the SAME place as
+          // the paint, from the SAME records and the same point objects, so the two never
+          // disagree; on a clear it is handed over EMPTY rather than left alone, because a
+          // retained record could name a DIFFERENT belt after a keyframe re-mints handles
+          // (threat T-67-05-01). `overlay.tick` drives the ring's 1Hz pulse and its settle at
+          // ALERT_SETTLE_MS; it never retires the ring (post-UI-review F2: a stranded
+          // dock is a broken state and must not heal by being ignored).
+          const step = ringStep({
+            standing: standingStrandsRef.current,
+            pre: preApply,
+            post: handle.sceneState,
+            events,
+            full: packet.full,
+            structural,
+            shownKey: shownRingKeyRef.current,
+          });
+          standingStrandsRef.current = step.standing;
+          if (step.paint === 'show') {
+            handle.overlay.showAlertRings(step.pts, performance.now());
+            shownRingKeyRef.current = ringKey(step.pts);
+            gesturesRef.current?.setStrandedRings(step.rings);
+          } else if (step.paint === 'clear') {
             handle.overlay.clearAlertRings();
             shownRingKeyRef.current = '';
             gesturesRef.current?.setStrandedRings([]);
           }
-        } catch (e) {
-          // The decoder is bounds-checked; drop a malformed frame at the edge
-          // rather than crash the renderer (defense-in-depth, loopback host).
-          // WR-07: ONLY DecodeError is the anticipated, silently-dropped case.
-          // Anything else (stranded-dock probe, applyPacket, ring math) is a
-          // real handler regression — if it were swallowed too, applyPacket
-          // may never run again and the scene would silently freeze with zero
-          // signal. Surface it loudly, but never rethrow into the transport.
-          // The DecodeError branch now increments the stats() counter so the
-          // drop is countable in-page (still no console noise, still no rethrow).
-          if (e instanceof DecodeError) {
-            decodeErrors += 1;
-          } else {
-            console.error('packet handler failed', e);
-          }
+        } else if (structural) {
+          // No cut is ringed and none was found: the shipped clear, which empties a ring this
+          // packet's detectors could not explain (a port-edit cut, which does not stand, see
+          // `StandingStrand`) and the pressable set with it.
+          handle.overlay.clearAlertRings();
+          shownRingKeyRef.current = '';
+          gesturesRef.current?.setStrandedRings([]);
         }
-      });
+      }
 
       // The gesture controller drives 07-07's overlay handle and emits one logged
       // GridCommand per gesture — it never mutates the grid locally.
