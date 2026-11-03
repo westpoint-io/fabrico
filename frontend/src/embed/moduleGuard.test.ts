@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { refusedModule } from './moduleGuard';
+import { moduleRel, refusedModule } from './moduleGuard';
 
 describe('refusedModule: what the read-only board bundle may not carry', () => {
   it('refuses input code', () => {
@@ -32,5 +32,29 @@ describe('refusedModule: what the read-only board bundle may not carry', () => {
 
   it("doesn't take a package whose name only starts like a refused one", () => {
     expect(refusedModule('node_modules/react-is/index.js')).toBeNull();
+  });
+});
+
+describe('moduleRel: the path the rule reads', () => {
+  const root = '/work/frontend';
+
+  it('strips the NUL prefix and the query and takes the path under the root', () => {
+    expect(moduleRel('\0/work/frontend/src/chrome/App.tsx?raw', root)).toBe('src/chrome/App.tsx');
+    expect(moduleRel('/work/frontend/src/render/pixiApp.ts', root)).toBe('src/render/pixiApp.ts');
+  });
+
+  it('names a package file from its last node_modules segment, even outside the root', () => {
+    expect(moduleRel('/elsewhere/frontend/node_modules/react/index.js', root)).toBe('node_modules/react/index.js');
+    expect(refusedModule(moduleRel('/elsewhere/frontend/node_modules/react/index.js', root) ?? '')).toContain(
+      'node_modules/react/',
+    );
+    expect(moduleRel('/work/frontend/node_modules/a/node_modules/scheduler/index.js', root)).toBe(
+      'node_modules/scheduler/index.js',
+    );
+  });
+
+  it('returns null for an id that is not a file path', () => {
+    expect(moduleRel('\0virtual:fabrico-embed-data', root)).toBeNull();
+    expect(moduleRel('commonjsHelpers.js', root)).toBeNull();
   });
 });

@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
-import { refusedModule } from './src/embed/moduleGuard.ts';
+import { moduleRel, refusedModule } from './src/embed/moduleGuard.ts';
 
 const FRONTEND = fileURLToPath(new URL('.', import.meta.url));
 const REPO = path.resolve(FRONTEND, '..');
@@ -80,17 +80,13 @@ function embedDataPlugin(): Plugin {
  *
  * It reads `chunk.modules` in `generateBundle`, the modules actually rendered into each chunk. The
  * source map misses `?raw` imports, so a raw import of a chrome file would pass a map-based check,
- * and the whole module graph includes code that tree-shaking dropped. Ids are cleaned the way
- * `devFixtureGuardPlugin` in vite.config.ts cleans them: drop a leading NUL and the query, use
- * forward slashes, take the path relative to the frontend root, and skip ids that aren't paths.
+ * and the whole module graph includes code that tree-shaking dropped. `moduleRel` cleans each id
+ * the way `devFixtureGuardPlugin` in vite.config.ts does (drop a leading NUL and the query, forward
+ * slashes, relative to the frontend root, skip ids that aren't paths), and names package files
+ * from their last `node_modules/` segment so a linked `node_modules` can't hide one.
  */
 function embedGuardPlugin(): Plugin {
   let root = FRONTEND;
-  const relOf = (id: string): string | null => {
-    const clean = id.replace(/^\0/, '').split('?')[0].replace(/\\/g, '/');
-    if (!path.isAbsolute(clean)) return null;
-    return path.relative(root, clean).replace(/\\/g, '/');
-  };
   return {
     name: 'fab-embed-guard',
     apply: 'build',
@@ -103,7 +99,7 @@ function embedGuardPlugin(): Plugin {
       for (const chunk of Object.values(bundle)) {
         if (chunk.type !== 'chunk') continue;
         for (const id of Object.keys(chunk.modules)) {
-          const rel = relOf(id);
+          const rel = moduleRel(id, root);
           if (rel === null) continue;
           const reason = refusedModule(rel);
           if (reason !== null) refused.add(reason);

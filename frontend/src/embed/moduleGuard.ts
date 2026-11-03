@@ -23,3 +23,19 @@ export function refusedModule(rel: string): string | null {
   }
   return null;
 }
+
+/**
+ * A bundler module id as the path `refusedModule` reads, or null for an id that isn't a file path
+ * (a virtual module, a helper). Drops a leading NUL and the query, uses forward slashes, and takes
+ * the path relative to `root`. A package file is named from its last `node_modules/` segment
+ * instead, because a linked or hoisted `node_modules` resolves to a real path outside the root.
+ */
+export function moduleRel(id: string, root: string): string | null {
+  const clean = id.replace(/^\0/, '').split('?')[0].replace(/\\/g, '/');
+  if (!clean.startsWith('/') && !/^[A-Za-z]:\//.test(clean)) return null;
+  const pkgAt = clean.lastIndexOf('/node_modules/');
+  if (pkgAt >= 0) return clean.slice(pkgAt + 1);
+  const base = root.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (clean.startsWith(`${base}/`)) return clean.slice(base.length + 1);
+  return clean;
+}
