@@ -386,7 +386,8 @@ async function undoButtonsOf(page: Page): Promise<string> {
 /**
  * Press Show me by hand, then check the board and the Undo and Redo buttons stay as they were for
  * `HOLD_TICKS` ticks. Nothing about the camera or the rings is read here, so a Show me that changes
- * the board fails on this check whatever else it does.
+ * the board fails on this check whatever else it does. The ticks count from a read after the press,
+ * because the hand's trip to the button can take longer than the whole watch.
  */
 async function pressShowMeAndHoldBoard(page: Page, what: string): Promise<void> {
   const box = await page.locator(SHOW_ME).boundingBox();
@@ -395,6 +396,7 @@ async function pressShowMeAndHoldBoard(page: Page, what: string): Promise<void> 
   const layout = layoutOf(before);
   const buttons = await undoButtonsOf(page);
   await pressPointByHand(page, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  const pressedAt = (await readScene(page)).tick;
   let changed: string | null = null;
   await expect
     .poll(
@@ -405,7 +407,7 @@ async function pressShowMeAndHoldBoard(page: Page, what: string): Promise<void> 
           changed = was;
           return 'changed';
         }
-        return now.tick >= before.tick + HOLD_TICKS ? 'held' : 'watching';
+        return now.tick >= pressedAt + HOLD_TICKS ? 'held' : 'watching';
       },
       { message: `${what}: the board ran ${HOLD_TICKS} ticks after Show me`, timeout: tickBudgetMs(HOLD_TICKS) + frameBudgetMs(STAGE_FRAMES) },
     )
