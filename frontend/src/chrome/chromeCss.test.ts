@@ -58,13 +58,99 @@ interface Rule {
   decls: { prop: string; value: string }[];
 }
 
+/** An at-rule block cut out of the sheet before the flat parse: `@media (...)` and its body. */
+interface AtBlock {
+  /** The at-keyword, lowercased, without the `@`: `keyframes`, `media`, or anything else found. */
+  keyword: string;
+  /** Everything between the at-keyword and the block's `{`, trimmed: a keyframes name or a media query. */
+  prelude: string;
+  /** The text inside the block's outer braces. */
+  body: string;
+}
+
 /**
- * Parse the stylesheet into selector-scoped declaration blocks.
+ * Cut every at-rule that holds nested rules out of the sheet by balanced braces, and return the rest
+ * of the sheet with each cut blanked in place (newlines kept, so a finding keeps its line).
  *
- * Deliberately a flat, non-nested parse: this stylesheet has exactly two at-rules
- * (`@font-face`), no media queries and no nesting, so a bracket-pair scan is exact
- * rather than approximate. A rule whose "selector" is an at-keyword carries no class
- * and therefore never enters any of the four scopes below.
+ * WHY THE BLOCKS COME OUT FIRST. `parseRules` is a flat bracket-pair scan. The sheet has two
+ * `@font-face` rules (flat, kept for the scan, and harmless: an at-keyword selector carries no class),
+ * the lesson ring's two `@keyframes` and one `@media (prefers-reduced-motion: reduce)`. Fed to the
+ * flat scan, a keyframes block reads as rules named `0%, 100%` and `50%`, and the media block's
+ * `.fab-hint { animation: none; }` reads as a TOP-LEVEL rule that would win the cascade for every user.
+ * So the nested blocks are listed here and checked as blocks, and the flat scan never sees them.
+ *
+ * Every at-rule with a nested block is cut, whatever its keyword, so `atBlockFindings` can report one
+ * nobody expected rather than let its insides leak into the flat parse as top-level rules.
+ */
+function cutAtBlocks(css: string): { rest: string; blocks: AtBlock[] } {
+  const src = stripComments(css);
+  const blocks: AtBlock[] = [];
+  let rest = '';
+  let i = 0;
+  while (i < src.length) {
+    const at = src.indexOf('@', i);
+    if (at < 0) break;
+    const open = src.indexOf('{', at);
+    const semi = src.indexOf(';', at);
+    const keyword = (src.slice(at + 1).match(/^[-\w]+/)?.[0] ?? '').toLowerCase();
+    // A statement at-rule (`@import x;`) or a flat one (`@font-face { ... }`) stays where it is.
+    if (open < 0 || (semi >= 0 && semi < open) || keyword === 'font-face') {
+      rest += src.slice(i, at + 1);
+      i = at + 1;
+      continue;
+    }
+    let depth = 0;
+    let close = open;
+    for (; close < src.length; close++) {
+      if (src[close] === '{') depth++;
+      else if (src[close] === '}' && --depth === 0) break;
+    }
+    if (depth !== 0) throw new Error(`@${keyword} at offset ${at} never closes`);
+    blocks.push({ keyword, prelude: src.slice(at + 1 + keyword.length, open).trim(), body: src.slice(open + 1, close) });
+    rest += src.slice(i, at) + src.slice(at, close + 1).replace(/[^\n]/g, ' ');
+    i = close + 1;
+  }
+  return { rest: rest + src.slice(i), blocks };
+}
+
+/** The pulse's two keyframes, by name, in sheet order. */
+const PULSE_KEYFRAMES = ['fab-hint-pulse', 'fab-hint-pulse-panel'] as const;
+
+/**
+ * What is wrong with a sheet's at-rule blocks, as findings: an empty list when the sheet holds exactly
+ * the pulse's two keyframes, each moving opacity only, and one reduced-motion media block whose body is
+ * the single rule `.fab-hint { animation: none; }`.
+ */
+function atBlockFindings(blocks: readonly AtBlock[]): string[] {
+  const found: string[] = [];
+  for (const b of blocks) {
+    if (b.keyword !== 'keyframes' && b.keyword !== 'media') found.push(`an unexpected at-rule block: @${b.keyword} ${b.prelude}`);
+  }
+  const frames = blocks.filter((b) => b.keyword === 'keyframes');
+  const names = frames.map((b) => b.prelude);
+  if (names.join('|') !== PULSE_KEYFRAMES.join('|')) found.push(`keyframes are [${names.join(', ')}], not [${PULSE_KEYFRAMES.join(', ')}]`);
+  for (const f of frames) {
+    for (const step of parseRules(f.body)) {
+      for (const d of step.decls) {
+        if (d.prop !== 'opacity') found.push(`@keyframes ${f.prelude} ${step.selectors.join(', ')} animates ${d.prop}, not opacity`);
+      }
+    }
+  }
+  const media = blocks.filter((b) => b.keyword === 'media');
+  if (media.length !== 1) found.push(`${media.length} @media blocks, not 1`);
+  for (const m of media) {
+    if (m.prelude !== '(prefers-reduced-motion: reduce)') found.push(`an @media block for ${m.prelude}`);
+    const inner = parseRules(m.body);
+    const shape = inner.map((r) => `${r.selectors.join(', ')} { ${r.decls.map((d) => `${d.prop}: ${d.value}`).join('; ')} }`);
+    if (shape.join(' ') !== '.fab-hint { animation: none }') found.push(`@media ${m.prelude} holds ${shape.length} rule(s): ${shape.join(' ')}`);
+  }
+  return found;
+}
+
+/**
+ * Parse a sheet with no nested blocks into selector-scoped declaration blocks: a flat bracket-pair
+ * scan, exact for what `cutAtBlocks` leaves. A rule whose "selector" is an at-keyword (`@font-face`)
+ * carries no class and therefore never enters any of the four scopes below.
  */
 function parseRules(css: string): Rule[] {
   const out: Rule[] = [];
@@ -87,7 +173,8 @@ function parseRules(css: string): Rule[] {
   return out;
 }
 
-const RULES = parseRules(CHROME_CSS);
+const CUT = cutAtBlocks(CHROME_CSS);
+const RULES = parseRules(CUT.rest);
 
 /**
  * Reduce a selector to the bezel class it targets, or to its raw last compound if it
@@ -200,6 +287,78 @@ describe('the closed bezel class list', () => {
     // rules - the exact shape of a gate that "proves" an absence by looking at nothing.
     expect(RULES.length).toBeGreaterThan(20);
     expect(REGISTERED_RULES.length).toBeGreaterThan(5);
+  });
+});
+
+describe('the at-rule blocks, read as blocks', () => {
+  it('holds the two pulse keyframes and one reduced-motion block, and nothing else nested', () => {
+    expect(CUT.blocks.map((b) => `@${b.keyword} ${b.prelude}`)).toEqual([
+      '@keyframes fab-hint-pulse',
+      '@keyframes fab-hint-pulse-panel',
+      '@media (prefers-reduced-motion: reduce)',
+    ]);
+    expect(atBlockFindings(CUT.blocks)).toEqual([]);
+  });
+
+  it('reads no keyframe step and no media rule as a top-level rule', () => {
+    const selectors = RULES.flatMap((r) => r.selectors);
+    expect(selectors.filter((s) => /^(\d+(\.\d+)?%|from|to)$/.test(s))).toEqual([]);
+    // The one top-level `.fab-hint` rule is the ring's paint, which pulses. The media block's
+    // `animation: none` never reaches the flat parse, or it would stop the pulse for everyone.
+    const hint = RULES.filter((r) => r.selectors.includes('.fab-hint'));
+    expect(hint).toHaveLength(1);
+    expect(hint[0].decls.find((d) => d.prop === 'animation')?.value).toBe('fab-hint-pulse 1600ms ease-in-out infinite');
+    const panel = RULES.filter((r) => r.selectors.includes('.fab-hint--panel'));
+    expect(panel.flatMap((r) => r.decls)).toEqual([{ prop: 'animation-name', value: 'fab-hint-pulse-panel' }]);
+  });
+
+  it('animates opacity only: no top-level hint rule animates or transitions a box property', () => {
+    for (const r of RULES.filter((rule) => rule.selectors.some((sel) => sel.startsWith('.fab-hint')))) {
+      for (const d of r.decls) {
+        expect(d.prop, `${r.selectors.join(', ')} ${d.prop}`).not.toMatch(/^transition/);
+      }
+    }
+  });
+
+  // The mutation cases run the same checks over a sheet built to break each one.
+  const SHEET = `
+    .a { color: red; }
+    @keyframes fab-hint-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    @keyframes fab-hint-pulse-panel { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+    @media (prefers-reduced-motion: reduce) { .fab-hint { animation: none; } }
+    .b { color: blue; }`;
+
+  it('passes the sheet the mutations start from', () => {
+    const cut = cutAtBlocks(SHEET);
+    expect(atBlockFindings(cut.blocks)).toEqual([]);
+    expect(parseRules(cut.rest).map((r) => r.selectors.join(','))).toEqual(['.a', '.b']);
+  });
+
+  it('reports a third at-rule block', () => {
+    const cut = cutAtBlocks(`${SHEET}\n@supports (display: grid) { .c { display: grid; } }`);
+    expect(atBlockFindings(cut.blocks)).toEqual(['an unexpected at-rule block: @supports (display: grid)']);
+    expect(parseRules(cut.rest).map((r) => r.selectors.join(',')), 'and keeps its rule out of the flat parse').toEqual(['.a', '.b']);
+  });
+
+  it('reports a second rule inside the media block', () => {
+    const cut = cutAtBlocks(SHEET.replace('.fab-hint { animation: none; }', '.fab-hint { animation: none; } .fab-cta { animation: none; }'));
+    expect(atBlockFindings(cut.blocks)).toEqual([
+      '@media (prefers-reduced-motion: reduce) holds 2 rule(s): .fab-hint { animation: none } .fab-cta { animation: none }',
+    ]);
+  });
+
+  it('reports a missing media block, and a keyframe that moves more than opacity', () => {
+    const noMedia = cutAtBlocks(SHEET.replace(/@media[^}]*\}\s*\}/, ''));
+    expect(atBlockFindings(noMedia.blocks)).toEqual(['0 @media blocks, not 1']);
+    const grows = cutAtBlocks(SHEET.replace('50% { opacity: 0.6; }', '50% { opacity: 0.6; transform: scale(1.2); }'));
+    expect(atBlockFindings(grows.blocks)).toEqual(['@keyframes fab-hint-pulse 50% animates transform, not opacity']);
+  });
+
+  it("never reads a keyframe's 0% as a selector, which the flat parse alone would", () => {
+    const cut = cutAtBlocks(SHEET);
+    expect(parseRules(cut.rest).flatMap((r) => r.selectors)).not.toContain('0%');
+    // The flat parse over the whole sheet, the reading this cut exists to prevent.
+    expect(parseRules(SHEET).flatMap((r) => r.selectors)).toContain('0%');
   });
 });
 

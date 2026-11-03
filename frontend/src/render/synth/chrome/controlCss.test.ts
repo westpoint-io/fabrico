@@ -14,8 +14,12 @@ import { CHROME_CSS } from '../../../chrome/chromeCss.ts';
  * The sha256 of `CHROME_CSS` measured before the move, in this same test runner (so the
  * two font URLs resolve the same way). If the app's stylesheet is meant to change, this
  * literal moves in the same commit, with the reason.
+ *
+ * Moved once: the lesson ring's opacity pulse, its two keyframes and the reduced-motion rule
+ * were added to `HINT_CSS`. The stylesheet differs from the one measured before the move by
+ * those eleven lines and nothing else.
  */
-const CHROME_CSS_SHA256 = '1c61fb43f6f2807deea2f3cf68dd47ab5ba89c862bfcd7b6765a438a480263c6';
+const CHROME_CSS_SHA256 = '1a698ce5b00b8d77eba3c9e11cc6fda34e3851d8f1146a08ad0dc82a741b71f8';
 
 const GROUPS = Object.entries(controlCss).filter(
   (e): e is [string, string] => typeof e[1] === 'string',

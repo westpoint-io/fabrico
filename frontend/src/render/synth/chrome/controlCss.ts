@@ -118,8 +118,19 @@ export const HINT_CSS = `/* The lesson ring's paint, on the element inside the o
   height: 100%;
   border: 2px solid var(--fab-focus);
   box-shadow: 0 0 0 2px var(--fab-substrate), inset 0 0 0 2px var(--fab-substrate);
+  animation: fab-hint-pulse 1600ms ease-in-out infinite;
 }
-.fab-hint--port { border-radius: 50%; }`;
+.fab-hint--port { border-radius: 50%; }
+/* The pulse moves opacity and nothing else, so the ring's edge stays where the drop check measures
+   it. The board ring fades to 0.6 (3.24:1 on the floor) and a panel ring to 0.8 (3.16:1 on the
+   panel), both above the 3:1 a non-text mark needs. 1600 ms is under one change a second. */
+.fab-hint--panel { animation-name: fab-hint-pulse-panel; }
+@keyframes fab-hint-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@keyframes fab-hint-pulse-panel { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+/* A user who asked for less motion gets the steady ring, at opacity 1. */
+@media (prefers-reduced-motion: reduce) {
+  .fab-hint { animation: none; }
+}`;
 
 export const TOOL_BTN_CSS = `/* Chunky bezel buttons - a raised ring with bevel-driven states.
 

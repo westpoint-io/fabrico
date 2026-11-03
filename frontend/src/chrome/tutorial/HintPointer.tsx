@@ -157,8 +157,12 @@ function portBox(
   return { x: disc.x, y: disc.y, width: disc.width, height: disc.height, zIndex: BOARD_TARGET_Z, hitRadiusPx: disc.hitRadiusPx };
 }
 
-/** The paint class for a ring: the disc's for a port ring on an In port, the square's for anything else. */
-function paintClass(role: PortRoleName | null): string {
+/**
+ * The paint class for a ring: the disc's for a port ring on an In port, the square's for anything else, and
+ * the shallower pulse for a ring on a panel, where the blue has less contrast to spare.
+ */
+function paintClass(on: HintAnchor['on'] | null, role: PortRoleName | null): string {
+  if (on === 'panel') return 'fab-hint fab-hint--panel';
   return role === 'in' ? 'fab-hint fab-hint--port' : 'fab-hint';
 }
 
@@ -279,8 +283,8 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       writeRing(ring, box);
       if (toBox === null) ringTo.style.visibility = 'hidden';
       else writeRing(ringTo, toBox);
-      if (paintElRef.current !== null) paintElRef.current.className = paintClass(hint?.on === 'port' ? hint.role : null);
-      if (paintToElRef.current !== null) paintToElRef.current.className = paintClass(to?.role ?? null);
+      if (paintElRef.current !== null) paintElRef.current.className = paintClass(hint?.on ?? null, hint?.on === 'port' ? hint.role : null);
+      if (paintToElRef.current !== null) paintToElRef.current.className = paintClass(to === undefined ? null : 'port', to?.role ?? null);
       ring.setAttribute('data-fab-hint-stage', target.stageKey);
     };
     project();

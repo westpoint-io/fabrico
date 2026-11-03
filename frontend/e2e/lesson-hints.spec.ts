@@ -165,3 +165,109 @@ test.describe('disc', () => {
     await expect(page.locator('[data-fab-hint-to]'), 'a disc carries its hit radius').toHaveAttribute('data-fab-hit-r', /^\d+(\.\d+)?$/);
   });
 });
+
+// The pulse (HINT-04, UI-SPEC "Pulse"): the ring's paint fades by opacity only, to 0.6 on the board and 0.8
+// on a panel, over 1600 ms, and holds at opacity 1 under prefers-reduced-motion. The reduced run is paired
+// with a no-preference run that shows the animation running, so a ring that never pulsed can't pass. The
+// second run is a fresh page, as `a11y.spec.ts` does it: an emulated preference reaches a page it loads.
+
+/** One read per animation frame of the main ring's paint and the element the frame loop moves. */
+interface PulseSample {
+  opacity: number;
+  running: string[];
+  className: string;
+  box: { x: number; y: number; width: number; height: number };
+}
+
+const PULSE_MS = 1600;
+const SAMPLE_MS = 1700;
+
+async function samplePulse(page: Page): Promise<PulseSample[]> {
+  return page.evaluate(
+    (ms) =>
+      new Promise<PulseSample[]>((done) => {
+        const out: PulseSample[] = [];
+        const start = performance.now();
+        const tick = (): void => {
+          const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
+          const paint = ring?.firstElementChild as HTMLElement | null | undefined;
+          if (ring && paint) {
+            const r = ring.getBoundingClientRect();
+            out.push({
+              opacity: Number(getComputedStyle(paint).opacity),
+              running: paint
+                .getAnimations()
+                .filter((a) => a.playState === 'running')
+                .map((a) => (a as CSSAnimation).animationName ?? ''),
+              className: paint.className,
+              box: { x: r.x, y: r.y, width: r.width, height: r.height },
+            });
+          }
+          if (performance.now() - start < ms) requestAnimationFrame(tick);
+          else done(out);
+        };
+        requestAnimationFrame(tick);
+      }),
+    SAMPLE_MS,
+  );
+}
+
+/** Start lesson 1 and sample the panel ring at source-tool, then the board ring at source-floor. */
+async function sampleBothRings(page: Page): Promise<{ panel: PulseSample[]; board: PulseSample[] }> {
+  const h = await boot(page);
+  await startLesson(page, h);
+  await ringAt(page, 'source-tool');
+  const panel = await samplePulse(page);
+  await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+  await ringAt(page, 'source-floor');
+  const board = await samplePulse(page);
+  return { panel, board };
+}
+
+/** The moving element's box at every sample, against the first, within half a pixel. */
+function expectStill(samples: readonly PulseSample[], what: string): void {
+  const first = samples[0]!.box;
+  const worst = Math.max(
+    ...samples.map((s) => Math.max(Math.abs(s.box.x - first.x), Math.abs(s.box.y - first.y), Math.abs(s.box.width - first.width), Math.abs(s.box.height - first.height))),
+  );
+  expect(worst, `${what}: the ring's edge stays put while it pulses`).toBeLessThanOrEqual(0.5);
+}
+
+test.describe('pulse', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the ring holds at opacity 1 under reduced motion, and pulses by opacity without the preference', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await sampleBothRings(page);
+    for (const [what, samples, cls] of [
+      ['the panel ring', still.panel, 'fab-hint fab-hint--panel'],
+      ['the board ring', still.board, 'fab-hint'],
+    ] as const) {
+      expect(samples.length, `${what}: the sampler ran across ${SAMPLE_MS} ms`).toBeGreaterThan(20);
+      expect(samples[0]!.className, `${what}: its paint class`).toBe(cls);
+      expect([...new Set(samples.flatMap((s) => s.running))], `${what}: no animation runs under reduced motion`).toEqual([]);
+      expect([...new Set(samples.map((s) => s.opacity))], `${what}: opacity stays 1`).toEqual([1]);
+      expectStill(samples, what);
+    }
+
+    // The same lesson on a fresh page with no motion preference.
+    // It shares the first page's storage, where Start left the lesson In progress, so the row would offer
+    // Restart. Clear that before the app reads it.
+    const second = await page.context().newPage();
+    await second.addInitScript(() => localStorage.removeItem('fab.tutorial.v1'));
+    await second.emulateMedia({ reducedMotion: 'no-preference' });
+    const live = await sampleBothRings(second);
+    expect(live.panel.length).toBeGreaterThan(20);
+    expect(live.board.length).toBeGreaterThan(20);
+    expect([...new Set(live.panel.flatMap((s) => s.running))], 'the panel ring runs the shallow pulse').toEqual(['fab-hint-pulse-panel']);
+    expect([...new Set(live.board.flatMap((s) => s.running))], 'the board ring runs the deep pulse').toEqual(['fab-hint-pulse']);
+    const low = (s: readonly PulseSample[]): number => Math.min(...s.map((x) => x.opacity));
+    expect(low(live.board), `the board ring fades below 0.9 within one ${PULSE_MS} ms period`).toBeLessThan(0.9);
+    expect(low(live.board), 'and no lower than 0.6').toBeGreaterThanOrEqual(0.6 - 0.01);
+    expect(low(live.panel), 'the panel ring fades too').toBeLessThan(0.95);
+    expect(low(live.panel), 'but never below 0.79, to keep 3:1 on the panel').toBeGreaterThanOrEqual(0.79);
+    expectStill(live.panel, 'the pulsing panel ring');
+    expectStill(live.board, 'the pulsing board ring');
+    await second.close();
+  });
+});
