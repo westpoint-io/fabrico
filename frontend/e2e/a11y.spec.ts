@@ -7,6 +7,7 @@ import {
   type Harness,
   type PacketOpts,
 } from './support/wire';
+import { CARD, boot, injectRefusal, readProbe, ringAt, startLesson } from './support/lessonMock';
 
 // a11y.spec.ts (TEST-04, Phase 13-04) — an axe accessibility audit of the React
 // chrome ONLY.
@@ -34,6 +35,57 @@ test('React chrome passes axe with zero violations (canvas excluded)', async ({
     .analyze();
 
   expect(results.violations).toEqual([]);
+});
+
+// The lesson chrome (phase 103, HINT-04): the step card and the Lessons panel, with every control the phase
+// added on screen at once. Show me, the refusal note, the list and both reset buttons are each asserted
+// visible first, so the scan can't pass over a scope with nothing new in it.
+test('the lesson card and the Lessons list pass axe with Show me, a refusal note and the reset question showing', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const h = await boot(page);
+  await startLesson(page, h);
+  await ringAt(page, 'source-tool');
+  await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+  await ringAt(page, 'source-floor');
+
+  // Middle-drag the board right until the floor ring leaves the free area, so the off-screen row shows.
+  for (let i = 0; i < 6 && !(await readProbe(page)).offScreen; i++) {
+    await page.mouse.move(420, 320);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(620, 320, { steps: 5 });
+    await page.mouse.move(820, 320, { steps: 5 });
+    await page.mouse.up({ button: 'middle' });
+    await page.waitForTimeout(100);
+  }
+  await expect.poll(async () => (await readProbe(page)).offScreen, { message: 'the ring is out of view' }).toBe(true);
+
+  injectRefusal(h, 'InvalidDock');
+  await expect.poll(async () => (await readProbe(page)).noteKind, { message: 'the refusal note shows' }).toBe('refusal');
+
+  await page.getByRole('button', { name: 'Help', exact: true }).click();
+  await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
+  const panel = page.locator('#fab-lessons-panel');
+  await panel.getByRole('button', { name: 'Reset progress', exact: true }).click();
+
+  const card = page.locator(CARD);
+  // Found by place, not by name, so a Show me that lost its name still counts as on screen and axe reports it.
+  await expect(card.locator('[data-fab-offscreen-row] button'), 'Show me shows').toBeVisible();
+  await expect(card.locator('[data-fab-step-note="refusal"]'), 'the refusal note shows').toBeVisible();
+  await expect(panel, 'the Lessons list shows').toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Keep progress', exact: true }), 'Keep progress shows').toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Clear progress', exact: true }), 'Clear progress shows').toBeVisible();
+
+  const results = await new AxeBuilder({ page })
+    .include('[data-fab-step-card]')
+    .include('#fab-lessons-panel')
+    .exclude('canvas')
+    .analyze();
+  for (const v of results.violations) {
+    console.log(`AXE ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`);
+  }
+  expect(results.violations.map((v) => v.id)).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------
