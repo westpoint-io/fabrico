@@ -47,8 +47,6 @@ const DPR = 1.18;
 const STAGE_FRAMES = 20;
 /** Sim ticks for a released belt to come back from the host with its docks. */
 const DOCK_TICKS = 30;
-/** Sim ticks a release has had to land before its absence is read: four rises of the counter. */
-const SETTLE_TICKS = 4;
 /**
  * One wheel notch, sent with Control held. At device scale 1.18 Chromium hands the page a wheel's deltaY
  * divided by the scale (60 arrives as 50.847), and the camera reads a fractional delta as a trackpad
@@ -141,15 +139,31 @@ function dockedOnIn(scene: SceneFacts, sinkId: number, inIndex: number): boolean
   return scene.belts.some((b) => b.docks.some((d) => d.end === 'Head' && d.node === sinkId && d.port === inIndex));
 }
 
-/** Wait for the board's tick to rise `ticks` times, so a release has had time to come back from the host. */
-async function waitTicks(page: Page, ticks: number): Promise<void> {
+/**
+ * Watch the board for `ticks` sim ticks after a release, or until a belt docks on the Sink's In, and
+ * return the scene that ended the watch. A belt reaches the board before its docks do, so a read a few
+ * ticks after the release can miss a dock that is on its way. The outside drop is watched for as long
+ * as the inside drop is given to dock.
+ */
+async function watchForDock(page: Page, ticks: number, sinkId: number, inIndex: number): Promise<{ docked: boolean; scene: SceneFacts }> {
   const tick0 = (await readScene(page)).tick;
+  let last: SceneFacts | null = null;
   await expect
-    .poll(async () => (await readScene(page)).tick, {
-      message: 'the board kept ticking, so the release has had time to land',
-      timeout: tickBudgetMs(ticks) + frameBudgetMs(STAGE_FRAMES),
-    })
-    .toBeGreaterThanOrEqual(tick0 + ticks);
+    .poll(
+      async () => {
+        last = await readScene(page);
+        if (dockedOnIn(last, sinkId, inIndex)) return 'docked';
+        return last.tick >= tick0 + ticks ? 'quiet' : 'watching';
+      },
+      {
+        message: `the board kept ticking for ${ticks} ticks after the release`,
+        timeout: tickBudgetMs(ticks) + frameBudgetMs(STAGE_FRAMES),
+      },
+    )
+    .not.toBe('watching');
+  const scene = last as SceneFacts | null;
+  if (scene === null) throw new Error('the watch read no scene');
+  return { docked: dockedOnIn(scene, sinkId, inIndex), scene };
 }
 
 /** Press the Undo key by hand until the board holds no belt. Undo takes a belt's docks back before the belt. */
@@ -251,9 +265,8 @@ async function dropTest(page: Page, lo: number, hi: number): Promise<void> {
   const start = { x: pressAt.x + 0.2 * step, y: pressAt.y - 0.15 * step };
   expect(inRect(start, doorRect), 'the press lands inside the doorstep cell').toBe(true);
   await dragByHand(page, start, outside.point);
-  await waitTicks(page, SETTLE_TICKS);
-  const after = await readScene(page);
-  expect(dockedOnIn(after, sink.id, into.index), `a drop ${dist.toFixed(1)} px from the dot (${outside.side}) docked a belt on the Sink's In`).toBe(false);
+  const { docked, scene: after } = await watchForDock(page, DOCK_TICKS, sink.id, into.index);
+  expect(docked, `a drop ${dist.toFixed(1)} px from the dot (${outside.side}) docked a belt on the Sink's In`).toBe(false);
   const held = await readProbe(page);
   console.log(
     `MEASURE disc-outside-result zoom=${scale.toFixed(3)} stage=${held.stageId} belts=${JSON.stringify(after.belts.map((b) => ({ tiles: b.tiles.length, docks: b.docks })))}`,
