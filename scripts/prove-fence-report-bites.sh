@@ -28,7 +28,10 @@
 #      don't pin them, and this property shows that's what the gate does.
 #   7. A MISSING LINE. Each line of the report deleted in turn exits 2 and names the line, the
 #      `FENCE alloc wasm32 ok` line among them.
-#   8. MISSING ARTIFACTS. The gate exits 2 with no artifact folder, with no harness module, with no
+#   8. A TRAP IN THE MEMORY SEARCH. A `FENCE trap memory wasm32 <shape> <size>` line added to the
+#      report, the line the measurement writes when a memory probe traps the instance, exits 1 and
+#      names the shape and the size.
+#   9. MISSING ARTIFACTS. The gate exits 2 with no artifact folder, with no harness module, with no
 #      native tool and with a named report that doesn't exist. This script also exits 2 at its start
 #      when FABRICO_WASM_OUT lacks either artifact.
 #
@@ -184,7 +187,7 @@ field_of() {
 echo "Proving ${GATE} bites, on ${MODULE}."
 
 # --- Property 1: baseline green -------------------------------------------------------
-echo "[1/8] baseline green"
+echo "[1/9] baseline green"
 run_gate "$OUT"
 if [ "$GATE_RC" -ne 0 ]; then
     echo "      FAIL: the gate exited ${GATE_RC} with nothing changed:" >&2
@@ -201,7 +204,7 @@ if [ "$GATE_RC" -ne 0 ]; then
 fi
 
 # --- Property 2: gas ------------------------------------------------------------------
-echo "[2/8] a gas count moved by 1, on each target, in both directions"
+echo "[2/9] a gas count moved by 1, on each target, in both directions"
 NATIVE_GAS="$(awk '$1 == "FENCE" && $2 == "gas" && $3 == "native" { print $4 }' "$GOOD_REPORT")"
 WASM_GAS="$(awk '$1 == "FENCE" && $2 == "gas" && $3 == "wasm32" { print $4 }' "$GOOD_REPORT")"
 case "${NATIVE_GAS}:${WASM_GAS}" in
@@ -223,7 +226,7 @@ for target in native wasm32; do
 done
 
 # --- Property 3: memory pins ----------------------------------------------------------
-echo "[3/8] a memory pin moved by 1, on each target, in both directions"
+echo "[3/9] a memory pin moved by 1, on each target, in both directions"
 for target in wasm32 native; do
     PIN_LINE="$(awk -v t="$target" '$1 == t && NF == 3 { print; exit }' "$PINS")"
     read -r _ shape pin <<<"$PIN_LINE"
@@ -247,7 +250,7 @@ for target in wasm32 native; do
 done
 
 # --- Property 4: stack kind -----------------------------------------------------------
-echo "[4/8] each stack kind field set to trap"
+echo "[4/9] each stack kind field set to trap"
 for key in kind runaway map_kind map_runaway; do
     tamper "FENCE stack wasm32" " ${key}=fault" " ${key}=trap"
     run_report "$TAMPERED"
@@ -255,7 +258,7 @@ for key in kind runaway map_kind map_runaway; do
 done
 
 # --- Property 5: stack size -----------------------------------------------------------
-echo "[5/8] shadow_stack equal to limit"
+echo "[5/9] shadow_stack equal to limit"
 LIMIT="$(field_of "FENCE stack wasm32" limit)"
 SHADOW="$(field_of "FENCE stack wasm32" shadow_stack)"
 if [ -z "$LIMIT" ] || [ -z "$SHADOW" ]; then
@@ -266,7 +269,7 @@ run_report "$TAMPERED"
 expect_exit 1 "shadow_stack=${LIMIT}" "stack wasm32 shadow_stack=${LIMIT} isn't larger than limit=${LIMIT}"
 
 # --- Property 6: no depth pin ---------------------------------------------------------
-echo "[6/8] first_fault and map_first_fault moved by 100 on both targets"
+echo "[6/9] first_fault and map_first_fault moved by 100 on both targets"
 for delta in 100 -100; do
     cp "$GOOD_REPORT" "${SCRATCH}/depths.txt"
     for target in native wasm32; do
@@ -284,7 +287,7 @@ for delta in 100 -100; do
 done
 
 # --- Property 7: a missing line -------------------------------------------------------
-echo "[7/8] each report line deleted in turn"
+echo "[7/9] each report line deleted in turn"
 LINE_COUNT="$(grep -c '^FENCE ' "$GOOD_REPORT")"
 if [ "$LINE_COUNT" -lt 2 ] || ! grep -q -x -F 'FENCE alloc wasm32 ok' "$GOOD_REPORT"; then
     cannot_prove "the report has ${LINE_COUNT} FENCE line(s), or no 'FENCE alloc wasm32 ok' line"
@@ -302,8 +305,20 @@ while IFS= read -r line; do
     expect_exit 2 "'${prefix}' deleted" "has no line for: ${prefix}"
 done <"$GOOD_REPORT"
 
-# --- Property 8: missing artifacts ----------------------------------------------------
-echo "[8/8] missing artifacts"
+# --- Property 8: a trap in the memory search ------------------------------------------
+echo "[8/9] a memory probe that trapped the instance"
+TRAP_SHAPE="$(awk '$1 == "FENCE" && $2 == "memory" && $3 == "wasm32" { print $4; exit }' "$GOOD_REPORT")"
+TRAP_SIZE="$(awk '$1 == "FENCE" && $2 == "memory" && $3 == "wasm32" { print $5; exit }' "$GOOD_REPORT")"
+case "${TRAP_SHAPE:-}:${TRAP_SIZE:-x}" in
+    :* | *:*[!0-9]*) cannot_prove "the report has no 'FENCE memory wasm32 <shape> <count>' line" ;;
+esac
+cp "$GOOD_REPORT" "$TAMPERED"
+echo "FENCE trap memory wasm32 ${TRAP_SHAPE} ${TRAP_SIZE}" >>"$TAMPERED"
+run_report "$TAMPERED"
+expect_exit 1 "${TRAP_SHAPE} trapped at ${TRAP_SIZE}" "FAIL memory wasm32 ${TRAP_SHAPE} trapped at ${TRAP_SIZE}"
+
+# --- Property 9: missing artifacts ----------------------------------------------------
+echo "[9/9] missing artifacts"
 run_gate "${SCRATCH}/no-such-dir"
 expect_exit 2 "no artifact folder" "is missing"
 run_gate "${SCRATCH}/empty-dir"
@@ -335,7 +350,7 @@ fi
 
 echo "PROVEN: ${GATE} bites. It exits 1 on a gas count moved by 1 either way"
 echo "        on either target, on a memory pin moved by 1 either way on either target, on each"
-echo "        stack kind field set to trap and on a shadow stack no larger than the limit. It stays"
-echo "        at 0 when the recursion depths move, and it exits 2 on each missing report line and"
-echo "        each missing artifact."
+echo "        stack kind field set to trap, on a memory probe that trapped, and on a shadow stack no"
+echo "        larger than the limit. It stays at 0 when the recursion depths move, and it exits 2 on"
+echo "        each missing report line and each missing artifact."
 exit 0

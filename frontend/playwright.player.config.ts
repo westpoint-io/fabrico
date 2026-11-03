@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
 // keeps it clear of the mock and live suites on 5173.
 export default defineConfig({
   testDir: './e2e-player',
-  forbidOnly: false,
+  forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: 'list',
   use: {

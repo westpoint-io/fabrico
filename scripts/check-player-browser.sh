@@ -9,11 +9,20 @@
 # This script starts and stops Vite itself, as a child it kills by PID, because Playwright's own
 # server management dies at signal 16 in some restricted shells. CI runs the same script.
 #
+# Playwright's exit code alone can't tell a skipped or focused test from a passing one, so this
+# script also lists the tests, reads the run's JSON stats, and fails unless every listed test ran
+# and passed. Under CI the config also refuses a committed test.only outright.
+#
+# OUTPUT, one line on stdout after Playwright's own output:
+#   PLAYER_TESTS listed=<n> passed=<n>
+#
 # ENVIRONMENT
 #   FABRICO_WASM_OUT  where the module is. Defaults to target/wasm-out under the repo root.
 #
 # EXIT CODES
-#   0  the spec passed.
+#   0  every listed test passed.
+#   1  Playwright passed but fewer tests passed than it listed (one was skipped, focused out, or
+#      flaky), the listed count was 0, or the list or the JSON report couldn't be read.
 #   2  no check: either module is missing or empty, port 5181 is already answering, or Vite didn't
 #      come up within 60 seconds.
 #   Any other non-zero code is Playwright's own.
@@ -43,6 +52,8 @@ if curl -s -o /dev/null --max-time 2 "$URL"; then
 fi
 
 VITE_LOG="$(mktemp)"
+LIST_OUT="$(mktemp)"
+JSON_OUT="$(mktemp)"
 VITE_PID=""
 stop_vite() {
   if [ -n "$VITE_PID" ]; then
@@ -50,7 +61,7 @@ stop_vite() {
     wait "$VITE_PID" 2>/dev/null || true
     VITE_PID=""
   fi
-  rm -f "$VITE_LOG"
+  rm -f "$VITE_LOG" "$LIST_OUT" "$JSON_OUT"
 }
 trap stop_vite EXIT
 
@@ -75,8 +86,40 @@ if ! curl -s -o /dev/null --max-time 2 "$URL"; then
   exit 2
 fi
 
+export FABRICO_PLAYER_WASM="$WASM" FABRICO_CORPUS_WASM="$CORPUS_WASM"
+
+LIST_STATUS=0
+npx playwright test --config=playwright.player.config.ts --list >"$LIST_OUT" 2>&1 || LIST_STATUS=$?
+# The list reporter ends with "Total: <n> tests in <m> files".
+LISTED="$(sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p' "$LIST_OUT")"
+if [ "$LIST_STATUS" -ne 0 ] || [ -z "$LISTED" ]; then
+  echo "check-player-browser: couldn't list the tests (exit $LIST_STATUS). The list output:" >&2
+  cat "$LIST_OUT" >&2
+  if [ "$LIST_STATUS" -ne 0 ]; then exit "$LIST_STATUS"; fi
+  exit 1
+fi
+
 STATUS=0
-FABRICO_PLAYER_WASM="$WASM" FABRICO_CORPUS_WASM="$CORPUS_WASM" npx playwright test --config=playwright.player.config.ts || STATUS=$?
-stop_vite
-trap - EXIT
-exit "$STATUS"
+PLAYWRIGHT_JSON_OUTPUT_FILE="$JSON_OUT" npx playwright test --config=playwright.player.config.ts \
+  --reporter=list,json || STATUS=$?
+
+if ! STATS="$(node -e '
+  const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).stats;
+  console.log(s.expected, s.unexpected, s.flaky, s.skipped);
+' "$JSON_OUT")"; then
+  echo "check-player-browser: the run wrote no readable JSON report" >&2
+  if [ "$STATUS" -ne 0 ]; then exit "$STATUS"; fi
+  exit 1
+fi
+read -r EXPECTED UNEXPECTED FLAKY SKIPPED <<<"$STATS"
+
+echo "PLAYER_TESTS listed=$LISTED passed=$EXPECTED"
+
+if [ "$STATUS" -ne 0 ]; then
+  exit "$STATUS"
+fi
+if [ "$LISTED" -eq 0 ] || [ "$EXPECTED" -ne "$LISTED" ] || [ "$UNEXPECTED" -ne 0 ] || [ "$FLAKY" -ne 0 ] ||
+  [ "$SKIPPED" -ne 0 ]; then
+  echo "check-player-browser: $LISTED tests listed, $EXPECTED passed, $UNEXPECTED failed, $FLAKY flaky, $SKIPPED skipped" >&2
+  exit 1
+fi

@@ -18,10 +18,14 @@
 //     map_kind=<fault|trap> map_runaway=<fault|trap> limit=<bytes> shadow_stack=<bytes>
 //   FENCE limits <target> mem=<bytes> gas=<budget>
 //   FENCE alloc wasm32 ok                        or `failed <reason>`
+//   FENCE trap memory wasm32 <shape> <size>      only when the memory search trapped, see below
 //
 // THE RULES `check` applies:
 //   - Gas: the two gas counts must be equal.
-//   - Memory: each memory count must equal its target's line in the pins file.
+//   - Memory: each memory count must equal its target's line in the pins file. The wasm search
+//     counts a size as faulting only when the engine stopped the call cleanly. A call that traps
+//     the whole instance is no fault: the report gets a `FENCE trap memory` line for the first
+//     size that trapped, and any such line fails the check.
 //   - Limits: mem and gas must be equal on both targets.
 //   - Stack: the wasm line must read kind=fault, runaway=fault, map_kind=fault and map_runaway=fault,
 //     and shadow_stack must be larger than limit. The depths have no pin on either target, because
@@ -150,11 +154,20 @@ function measure(args) {
   const shadowStack = Number(first.__stack_high.value) - Number(first.__stack_low.value);
 
   const lines = [...native];
+  // A gas run that stops is always the engine's own clean fault, so this predicate stays as it was.
   const gas = firstFault(gasHint, GAS_CEILING, (n) => once(GAS_LOOP, n, gasBudget, 0) !== 'ran');
   lines.push(`FENCE gas wasm32 ${gas}`);
+  const traps = [];
   for (const [name, shape, ceiling] of MEMORY_SHAPES) {
-    const count = firstFault(pins.get(`wasm32 ${name}`), ceiling, (n) => once(shape, n, 0, 0) !== 'ran');
+    let trappedAt = null;
+    const faults = (n) => {
+      const result = once(shape, n, 0, 0);
+      if (result === 'trap' && trappedAt === null) trappedAt = n;
+      return result === 'fault';
+    };
+    const count = firstFault(pins.get(`wasm32 ${name}`), ceiling, faults);
     lines.push(`FENCE memory wasm32 ${name} ${count}`);
+    if (trappedAt !== null) traps.push(`FENCE trap memory wasm32 ${name} ${trappedAt}`);
   }
   const stack = (shape) => {
     const at = firstFault(null, RECURSION_CEILING, (n) => once(shape, n, 0, 0) !== 'ran');
@@ -177,6 +190,7 @@ function measure(args) {
     alloc = `failed it trapped: ${error.message}`;
   }
   lines.push(`FENCE alloc wasm32 ${alloc}`);
+  lines.push(...traps);
 
   writeFileSync(args.out, `${lines.join('\n')}\n`);
 }
@@ -249,6 +263,11 @@ function check(args) {
     else if (!(Number(shadow) > Number(limit))) {
       failures.push(`stack wasm32 shadow_stack=${shadow} isn't larger than limit=${limit}`);
     }
+  }
+
+  for (const line of lines.filter((l) => l.startsWith('FENCE trap '))) {
+    const [, , kind, target, shape, size] = line.split(' ');
+    failures.push(`FAIL ${kind} ${target} ${shape} trapped at ${size}`);
   }
 
   const alloc = find('FENCE alloc wasm32');
