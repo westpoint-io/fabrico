@@ -20,6 +20,31 @@ import {
   type InjectBelt,
   type InjectNode,
 } from './support/wire';
+import {
+  CARD,
+  OLD_MACHINE,
+  OUTSET,
+  SINK_ID,
+  SOURCE_ID,
+  STEP_COUNT,
+  armSourceForFloor,
+  boot,
+  boxOf,
+  configuredHost,
+  panBoard,
+  placeBoth,
+  pressRing,
+  pressTimer,
+  readProbe,
+  ringAt,
+  sinkAt,
+  sourceAt,
+  startLesson,
+  stopStream,
+  toBeltDraw,
+  zoomOut,
+  type Box,
+} from './support/lessonMock';
 
 // lessons.spec.ts - the step card and the hint ring, on a mock host.
 //
@@ -28,141 +53,15 @@ import {
 // rect: the probe reports a rect only once the ring has moved for that stage, so a single read
 // straight after a stage change could catch the ring a frame early.
 
-/** The ring's outset on each side of its target. */
-const OUTSET = 4;
 /** How far a rectangle may sit from where it belongs. */
 const TOLERANCE = 1;
-const STEP_COUNT = YOUR_FIRST_LINE.steps.length;
 const PAUSED_SENTENCE = 'The board is paused, so your edits wait. Press Play in the toolbar, or press Space.';
-
-/** The board on screen before the lesson's New. */
-const OLD_MACHINE: InjectNode = { id: 1, kind: 7, cell_x: 12, cell_y: 8 };
-const CARD = '[data-fab-step-card]';
-
-interface Box {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-async function readProbe(page: Page): Promise<TutorialProbe> {
-  return page.evaluate(() => (window as unknown as { __fabrico: { tutorial(): TutorialProbe } }).__fabrico.tutorial());
-}
-
-/** Poll until one read names `stageId` and holds a rect, and return that read's rect. */
-async function ringAt(page: Page, stageId: string): Promise<HintRect> {
-  let rect: HintRect | null = null;
-  await expect
-    .poll(
-      async () => {
-        const probe = await readProbe(page);
-        if (probe.stageId !== stageId) return `on stage ${probe.stageId}`;
-        rect = probe.hint;
-        return rect === null ? 'no rect yet' : 'held';
-      },
-      { message: `the ring was placed for stage ${stageId}` },
-    )
-    .toBe('held');
-  return rect!;
-}
-
-async function boxOf(locator: Locator, what: string): Promise<Box> {
-  const box = await locator.boundingBox();
-  if (box === null) throw new Error(`${what} has no box`);
-  return box;
-}
 
 function expectRingAround(ring: Box, target: Box, what: string): void {
   expect(Math.abs(ring.x - (target.x - OUTSET)), `${what}: left edge`).toBeLessThanOrEqual(TOLERANCE);
   expect(Math.abs(ring.y - (target.y - OUTSET)), `${what}: top edge`).toBeLessThanOrEqual(TOLERANCE);
   expect(Math.abs(ring.width - (target.width + 2 * OUTSET)), `${what}: width`).toBeLessThanOrEqual(TOLERANCE);
   expect(Math.abs(ring.height - (target.height + 2 * OUTSET)), `${what}: height`).toBeLessThanOrEqual(TOLERANCE);
-}
-
-/** Well inside the 800 ms a playing board's silence takes to read as a dropped stream, even on a busy machine. */
-const STREAM_RESEND_MS = 200;
-const streamStops = new WeakMap<Page, () => void>();
-
-/**
- * The same frame as a diff. A full keyframe clears the selection, and a re-sent one would do that to a
- * case that had just selected a machine. The `full` byte comes straight after the tick's varint.
- */
-function asDiff(frame: Buffer): Buffer {
-  let i = 0;
-  while ((frame[i] as number) & 0x80) i += 1;
-  const copy = Buffer.from(frame);
-  copy[i + 1] = 0;
-  return copy;
-}
-
-/**
- * The app reads a playing board's silence as a dropped stream, and the ring hides on one, so a case
- * that waits a moment on a quiet mock would lose its ring. This sends the last packet again until
- * `stopStream`, which leaves the board as it was: same tick, same machines, and a case's `inject` still
- * decides what the board holds.
- */
-function keepStreamAlive(page: Page, h: Harness): void {
-  const inject = h.inject.bind(h);
-  let last: Buffer | null = null;
-  h.inject = (frame: Buffer): void => {
-    last = asDiff(frame);
-    inject(frame);
-  };
-  const timer = setInterval(() => {
-    if (last !== null) inject(last);
-  }, STREAM_RESEND_MS);
-  const stop = (): void => clearInterval(timer);
-  streamStops.set(page, stop);
-  page.once('close', stop);
-}
-
-function stopStream(page: Page): void {
-  streamStops.get(page)?.();
-}
-
-/** Boot on the mock host with one machine on the board. */
-async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>[1] = {}): Promise<Harness> {
-  await page.addInitScript(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
-  const h = await mockRenderSocket(page, opts);
-  await page.goto('/');
-  await waitForChrome(page);
-  await h.connected;
-  keepStreamAlive(page, h);
-  h.inject(buildPacket({ full: true, tick: 3, nodes: [OLD_MACHINE] }));
-  await waitForBoard(page, { machines: 1, tick: 3 });
-  await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  return h;
-}
-
-/** Help, Lessons, Start, then the Starting card, then the empty board the host answers New with. */
-async function startLesson(page: Page, h: Harness): Promise<void> {
-  await page.getByRole('button', { name: 'Help', exact: true }).click();
-  await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
-  await page.getByRole('button', { name: `Start ${YOUR_FIRST_LINE.title}`, exact: true }).click();
-  await expect.poll(() => h.controls, { message: 'Start sent New' }).toContain('new');
-
-  const card = page.locator(CARD);
-  await expect(card, 'the card says the board is on its way').toContainText('Clearing the board.');
-  await expect(card).not.toContainText(/Step \d/);
-  const starting = await readProbe(page);
-  expect(starting.card, 'the lesson waits for the new board').toBe('starting');
-  expect(starting.hint, 'no ring while the board is on its way').toBeNull();
-  await expect(page.locator('[data-fab-hint]'), 'no ring while the board is on its way').toBeHidden();
-
-  h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1 }));
-  await expect.poll(async () => (await readProbe(page)).card, { message: 'the new board started step 1' }).toBe('running');
-  await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
-}
-
-/** Arm the Source and read the floor ring, with the cell it marks. */
-async function armSourceForFloor(page: Page): Promise<{ ring: HintRect; cell: readonly [number, number] }> {
-  await ringAt(page, 'source-tool');
-  await page.getByRole('button', { name: 'Place Source', exact: true }).click();
-  const ring = await ringAt(page, 'source-floor');
-  const cam = await cameraOf(page);
-  const size = CELL * cam.scale;
-  return { ring, cell: [Math.round((ring.x + OUTSET - cam.x) / size), Math.round((ring.y + OUTSET - cam.y) / size)] };
 }
 
 /** The most any edge of the ring sits from `cell` under the camera, both read in one evaluate. */
@@ -578,96 +477,14 @@ test.describe('the step card and the hint ring', () => {
 // THE SIX STEPS, on a mock host. The socket sends a packet only when a case injects one, so the board's
 // tick moves only then, and a step can be read while it waits.
 
-const SOURCE_ID = 2;
-const SINK_ID = 3;
 const BELT_ID = 4;
 /** The port ring's diameter on screen. */
 const PORT_RING = 32;
 /** A little over the layer's query period, so a read has had time to land. */
 const TWO_TRIGGER_READS_MS = 900;
 
-type Trigger = { kind: 'Webhook' } | { kind: 'Timer'; interval_ticks: number };
-
-/** A host whose `machine_config` answer the case can change, counting how often it was asked. */
-function configuredHost(): { opts: Parameters<typeof mockRenderSocket>[1]; set(t: Trigger): void; asked(): number } {
-  let trigger: Trigger = { kind: 'Webhook' };
-  let asked = 0;
-  return {
-    opts: {
-      answerQuery: (verb) => {
-        if (verb !== 'machine_config') return undefined;
-        asked += 1;
-        return { kind: 'Source', trigger };
-      },
-    },
-    set: (t) => {
-      trigger = t;
-    },
-    asked: () => asked,
-  };
-}
-
-function sourceAt(cell: readonly [number, number]): InjectNode {
-  return { id: SOURCE_ID, kind: 0, cell_x: cell[0], cell_y: cell[1], ports: [{ index: 0, cell_x: cell[0], cell_y: cell[1], side: 1, role: 1 }] };
-}
-
-/** The fault port comes first, so a ring that took the first port would sit on it. */
-function sinkAt(cell: readonly [number, number]): InjectNode {
-  return {
-    id: SINK_ID,
-    kind: 7,
-    cell_x: cell[0],
-    cell_y: cell[1],
-    ports: [
-      { index: 0, cell_x: cell[0], cell_y: cell[1], side: 2, role: 2 },
-      { index: 1, cell_x: cell[0], cell_y: cell[1], side: 3, role: 0 },
-    ],
-  };
-}
-
-function cellOfRing(ring: HintRect, cam: { x: number; y: number; scale: number }): readonly [number, number] {
-  const size = CELL * cam.scale;
-  return [Math.round((ring.x + OUTSET - cam.x) / size), Math.round((ring.y + OUTSET - cam.y) / size)];
-}
-
-/** Steps 1 and 2 through the floor rings, with the host's answers injected. The Sink's tool stays armed. */
-async function placeBoth(page: Page, h: Harness): Promise<{ source: InjectNode; sink: InjectNode; tick: number }> {
-  const { cell } = await armSourceForFloor(page);
-  const source = sourceAt(cell);
-  h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [source] }));
-  await ringAt(page, 'sink-tool');
-  await page.getByRole('button', { name: 'Place Sink', exact: true }).click();
-  const sinkRing = await ringAt(page, 'sink-floor');
-  const sink = sinkAt(cellOfRing(sinkRing, await cameraOf(page)));
-  expect([sink.cell_x, sink.cell_y], "the Sink's spot isn't the Source's cell").not.toEqual(cell);
-  h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: [source, sink] }));
-  return { source, sink, tick: 7 };
-}
-
-/** A press at a rect's centre. */
-async function pressRing(page: Page, ring: Box): Promise<void> {
-  await page.mouse.click(ring.x + ring.width / 2, ring.y + ring.height / 2);
-}
-
 const timerButton = (page: Page): Locator => page.locator('[role="group"][aria-label="Trigger"]').getByRole('button', { name: 'Timer', exact: true });
 const applyButton = (page: Page): Locator => page.locator('aside[aria-labelledby="fab-config-heading"]').getByRole('button', { name: 'Apply', exact: true });
-
-/** Put the armed tool down, select the Source through its ring, and press Timer through its ring. */
-async function pressTimer(page: Page): Promise<void> {
-  await ringAt(page, 'tool-down');
-  await page.keyboard.press('Escape');
-  await pressRing(page, await ringAt(page, 'select-source'));
-  await pressRing(page, await ringAt(page, 'press-timer'));
-}
-
-/** From a placed pair to the belt tool armed, with the host answering Timer after Apply. */
-async function toBeltDraw(page: Page, host: ReturnType<typeof configuredHost>): Promise<void> {
-  await pressTimer(page);
-  await pressRing(page, await ringAt(page, 'apply-timer'));
-  host.set({ kind: 'Timer', interval_ticks: 60 });
-  await pressRing(page, await ringAt(page, 'belt-tool'));
-  await ringAt(page, 'belt-draw');
-}
 
 /** Both of the drag's rings from one read, and how far each sits from its port dot under the camera. */
 async function portRingErrors(
@@ -694,24 +511,6 @@ async function portRingErrors(
     },
     [a.x, a.y, b.x, b.y] as const,
   );
-}
-
-/** Zoom out at the window's middle and wait for the camera, then pan with the middle button. */
-async function zoomOut(page: Page): Promise<void> {
-  const before = await cameraOf(page);
-  await page.mouse.move(640, 300);
-  await page.mouse.wheel(0, 240);
-  await expect.poll(async () => (await cameraOf(page)).scale, { message: 'the wheel changed the zoom' }).not.toBe(before.scale);
-}
-
-async function panBoard(page: Page): Promise<void> {
-  const before = await cameraOf(page);
-  await page.mouse.move(640, 300);
-  await page.mouse.down({ button: 'middle' });
-  await page.mouse.move(690, 330, { steps: 5 });
-  await page.mouse.move(730, 340, { steps: 5 });
-  await page.mouse.up({ button: 'middle' });
-  await expect.poll(async () => (await cameraOf(page)).x, { message: 'the middle-drag panned the board' }).not.toBe(before.x);
 }
 
 test.describe('the machine and port rings, and the rest of the lesson', () => {

@@ -22,6 +22,11 @@ export type StepCardView =
       note: readonly PhraseToken[] | null;
       /** What the note is: `refusal`, a lesson note's kind, or empty with no note. The walk reads it. */
       noteKind: string;
+      /**
+       * Kept in layout with `visibility: hidden`, so the card keeps its height: `noteFor` holds a lesson
+       * note back this way while the off-screen row shows.
+       */
+      noteHidden: boolean;
       text: readonly PhraseToken[];
     }
   | { state: 'finished'; text: readonly PhraseToken[] };
@@ -149,7 +154,7 @@ export function StepCard(props: StepCardProps): JSX.Element {
           <>
             {/* No wrapper without a note, so the column's gap doesn't grow the card. */}
             {view.note !== null && (
-              <div data-fab-step-note={view.noteKind}>
+              <div data-fab-step-note={view.noteKind} {...(view.noteHidden ? { style: { visibility: 'hidden' } } : {})}>
                 <Words tokens={view.note} />
               </div>
             )}

@@ -2864,6 +2864,8 @@ export function App() {
       }, REFUSAL_HOLD_MS);
       setRefusalAvoid(flashedCellOnScreen());
 
+      // The lesson card hears every client refusal too, a repeat of one tag included.
+      tutorialRefusalRef.current?.(tag);
       if (shownTagRef.current === tag) return;
       shownTagRef.current = tag;
       setRefusalMessage(CLIENT_REFUSAL_COPY[tag]);

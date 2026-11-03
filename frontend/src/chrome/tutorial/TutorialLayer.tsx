@@ -10,9 +10,12 @@ import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
+import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
+import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
 import type { ArmedTool } from '../Palette';
+import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
 import { LESSONS_PANEL_ID, LessonPanel, focusListClose } from './LessonPanel';
@@ -38,6 +41,10 @@ export interface TutorialProbe {
   hint: HintRect | null;
   hintTo: HintRect | null;
   bound: Record<string, number>;
+  /** The card note slot's kind (`refusal` or a lesson note's kind), or empty when the slot is empty. */
+  noteKind: string;
+  /** The words of a note that shows, or empty when the slot is empty or hidden. */
+  noteText: string;
 }
 
 /** The facts the last frame used. */
@@ -67,13 +74,14 @@ function ringToRectFor(key: string): HintRect | null {
   return { x: r.x, y: r.y, width: r.width, height: r.height, shape: 'circle' };
 }
 
-function probeOf(s: TutorialState, facts: FrameFacts | null): TutorialProbe {
+function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRecord | null): TutorialProbe {
   const lesson = LESSONS.find((l) => l.id === s.lessonId) ?? null;
   const bound: Record<string, number> = {};
   for (const [name, node] of Object.entries(s.bindings)) {
     if (node !== undefined) bound[name] = node.id;
   }
   const stage = facts === null ? null : currentStage(s, facts.board, facts.chrome, LESSONS);
+  const slot = s.card === 'running' && stage !== null ? noteViewOf(s, stage, refusal).slot : null;
   return {
     lessonId: s.lessonId,
     card: s.card,
@@ -84,12 +92,14 @@ function probeOf(s: TutorialState, facts: FrameFacts | null): TutorialProbe {
     hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id), stage.hint?.on === 'port' ? 'circle' : 'square'),
     hintTo: stage?.hint?.on === 'port' && stage.hint.to !== undefined ? ringToRectFor(stageKey(s.stepIndex, stage.id)) : null,
     bound,
+    noteKind: slot?.kind ?? '',
+    noteText: slot === null || slot.hidden ? '' : phrasePlain(slot.tokens),
   };
 }
 
 /** The probe before the layer mounts: no lesson. */
 export function idleTutorialProbe(): TutorialProbe {
-  return probeOf(IDLE, null);
+  return probeOf(IDLE, null, null);
 }
 
 /** The shared dock offset, the top of the panels on the right. */
@@ -133,11 +143,32 @@ export interface RefusalRecord {
   at: string;
 }
 
-/** The stage's coaching line for a refusal tag. Own keys only, so a tag can't match an inherited name. */
-function coachLine(stage: Stage, tag: string): readonly PhraseToken[] | null {
-  const coach = stage.coach;
-  if (coach === undefined || !Object.hasOwn(coach, tag)) return null;
-  return coach[tag] ?? null;
+/** The host and client sentences by tag, as one lookup. The two tag sets don't overlap. */
+const BAND_COPY: Readonly<Record<string, string>> = { ...REFUSAL_COPY, ...CLIENT_REFUSAL_COPY };
+
+/**
+ * What the card says about a refusal at this stage: the lesson's coaching line for the tag if the stage
+ * has one, otherwise the band's own sentence, so a refusal during a lesson always gets words on the
+ * card. A tag in neither table gives nothing, never the word "undefined". Own keys only, so a tag
+ * can't match an inherited name.
+ */
+function refusalWords(stage: Stage, tag: string): readonly PhraseToken[] | null {
+  const coached = coachLine(stage, tag);
+  if (coached !== null) return coached;
+  return Object.hasOwn(BAND_COPY, tag) ? [BAND_COPY[tag] as string] : null;
+}
+
+/**
+ * The running card's note slot and off-screen row, by `noteFor`'s one rule. The off-screen flag is
+ * false until the off-screen row is wired.
+ */
+function noteViewOf(s: TutorialState, stage: Stage, refusal: RefusalRecord | null): NoteView {
+  const pending = refusal !== null && refusal.at === stageKey(s.stepIndex, stage.id) ? refusalWords(stage, refusal.tag) : null;
+  return noteFor({
+    refusal: pending,
+    offScreen: false,
+    lessonNote: s.note === null ? null : { kind: s.note.kind, tokens: noteTokens(s.note) },
+  });
 }
 
 /** What the card shows, or null when it has nothing to show. */
@@ -148,10 +179,9 @@ function cardViewOf(s: TutorialState, stage: Stage | null, refusal: RefusalRecor
   if (s.card === 'finished' && lesson !== undefined) return { state: 'finished', text: lesson.closing };
   if (s.card !== 'running' || stage === null) return null;
   const running = { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, text: stage.text } as const;
-  const coached = refusal !== null && refusal.at === stageKey(s.stepIndex, stage.id) ? coachLine(stage, refusal.tag) : null;
-  if (coached !== null) return { ...running, note: coached, noteKind: 'refusal' };
-  if (s.note === null) return { ...running, note: null, noteKind: '' };
-  return { ...running, note: noteTokens(s.note), noteKind: s.note.kind };
+  const { slot } = noteViewOf(s, stage, refusal);
+  if (slot === null) return { ...running, note: null, noteKind: '', noteHidden: false };
+  return { ...running, note: slot.tokens, noteKind: slot.kind, noteHidden: slot.hidden };
 }
 
 /** A store over this browser's `localStorage`, which a locked-down webview can refuse just by being read. */
@@ -205,7 +235,7 @@ export interface TutorialLayerProps {
   doNewThen: (onSent?: () => void) => void;
   probeRef: MutableRefObject<() => TutorialProbe>;
   /**
-   * App calls this with the tag of each host refusal it shows, so the card can say why the gesture was
+   * App calls this with the tag of each host or client refusal it shows, so the card can say why the gesture was
    * refused. The layer fills it while mounted. It only reads the tag: nothing goes back to the host.
    */
   refusalRef: MutableRefObject<((tag: string) => void) | null>;
@@ -288,7 +318,7 @@ export function TutorialLayer({
   }, [watchedNode]);
 
   useLayoutEffect(() => {
-    probeRef.current = () => probeOf(stateRef.current, factsRef.current);
+    probeRef.current = () => probeOf(stateRef.current, factsRef.current, refusalRecordRef.current);
     return () => {
       probeRef.current = idleTutorialProbe;
     };
@@ -309,6 +339,10 @@ export function TutorialLayer({
       const shown = currentStage(s, facts.board, facts.chrome, LESSONS);
       if (shown === null) return;
       const record = { tag, at: stageKey(s.stepIndex, shown.id) };
+      // A quiet repeat on the same stage changes nothing, so the card's text node stays and the polite
+      // live region doesn't announce it again.
+      const held = refusalRecordRef.current;
+      if (held !== null && held.tag === record.tag && held.at === record.at) return;
       refusalRecordRef.current = record;
       setRefusal(record);
     };

@@ -41,6 +41,7 @@ const RUNNING: StepCardView = {
   stepCount: 6,
   note: null,
   noteKind: '',
+  noteHidden: false,
   text: ['A ', { kind: 0 }, ' makes items.'],
 };
 
@@ -124,6 +125,21 @@ describe('StepCard', () => {
     expect(textOf(StepCard({ view, ...NOOPS })).indexOf('That cell is taken')).toBeLessThan(
       textOf(StepCard({ view, ...NOOPS })).indexOf('Step 1 of 6'),
     );
+  });
+
+  it('keeps a hidden note in layout with visibility hidden', () => {
+    const view: StepCardView = { ...RUNNING, note: ['Step 1 was already done.'], noteKind: 'skippedOne', noteHidden: true };
+    const marked = render(view).filter((el) => el.props['data-fab-step-note'] !== undefined);
+    expect(marked, 'the wrapper stays, so the card keeps its height').toHaveLength(1);
+    expect(marked[0]?.props['data-fab-step-note']).toBe('skippedOne');
+    expect(styleOf(marked[0]!).visibility).toBe('hidden');
+    expect(textOf(marked[0])).toBe('Step 1 was already done.');
+  });
+
+  it('sets no visibility on a note that shows', () => {
+    const view: StepCardView = { ...RUNNING, note: ['Step 1 was already done.'], noteKind: 'skippedOne' };
+    const marked = render(view).filter((el) => el.props['data-fab-step-note'] !== undefined);
+    expect(styleOf(marked[0]!).visibility).toBeUndefined();
   });
 
   it('renders no note wrapper when there is no note', () => {
