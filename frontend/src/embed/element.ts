@@ -74,7 +74,7 @@ import {
   type ErrorCopy,
 } from './errors';
 import { createLabelOverlay, type LabelOverlay } from './labelOverlay';
-import { beltRegion, tickHashes, type BoardProbe } from './probe';
+import { beltTiles, overlayBoxes, tickHashes, type BoardProbe } from './probe';
 import { boardText, bundledInfo, compiledPlayer, manifestEntry, onBoardRegistered, posterAlt, posterFor } from './registry';
 import { pageIsHidden, pageScheduler, prefersReducedMotion, type ScheduledBoard } from './scheduler';
 import { boardStylesheet, injectFonts } from './styles';
@@ -342,7 +342,16 @@ export class FabricoBoardElement extends HTMLElement {
       posterAlt: this.#posterLayer.hidden || this.#poster === null || this.#poster.hidden ? null : this.#poster.alt,
       frames: b?.frames.n ?? 0,
       cameraSnapshot: v?.handle.cameraSnapshot() ?? null,
-      beltRegion: v === null ? null : beltRegion(v.handle.sceneState, v.handle.cam, v.handle.app.canvas),
+      beltTiles:
+        v === null
+          ? []
+          : beltTiles(
+              v.handle.sceneState,
+              (x, y) => v.handle.cam.worldToScreen(x, y),
+              v.handle.app.canvas.getBoundingClientRect(),
+              { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+              overlayBoxes(this.#stage),
+            ),
     };
     if (b === null) {
       return { ...base, tick: 0, endTick: 0, bootTick: 0, playing: false, endHash: null };

@@ -1,14 +1,14 @@
 // The read-only test probe on each `<fabrico-board>`. It returns a fresh plain-data snapshot per
 // call: no setters and no live references, so a test can't change the board through it.
 //
-// `frames` counts Pixi ticker callbacks and `beltRegion` gives coordinates only. A test reads the
+// `frames` counts Pixi ticker callbacks and `beltTiles` gives coordinates only. A test reads the
 // pixels itself, from outside the page, because a board whose WebGL context was taken keeps its
 // ticker (and this frame count) running while it draws nothing.
 
 import { CELL } from '../../shared/geometry';
-import type { Camera } from '../render/camera';
+import { cellsOfFootprint } from '../protocol/footprint';
+import type { Point } from '../render/camera';
 import type { CameraSnapshot } from '../render/pixiApp';
-import type { SceneState } from '../render/sceneState';
 import type { Verdict } from './badge';
 import type { CaptionProbe } from './captions';
 
@@ -18,6 +18,12 @@ export interface ProbeRect {
   y: number;
   width: number;
   height: number;
+}
+
+/** The inner part of one belt tile on screen, and the grid cell it belongs to. */
+export interface BeltTile extends ProbeRect {
+  cellX: number;
+  cellY: number;
 }
 
 /** What the stage shows: the loading line, the running board, or an error card. */
@@ -56,8 +62,13 @@ export interface BoardProbe {
   badgeText: string;
   /** A copy of this board's camera, or null with no renderer. */
   cameraSnapshot: CameraSnapshot | null;
-  /** The longest belt's tiles, projected through this board's camera, or null with no belt. */
-  beltRegion: ProbeRect | null;
+  /**
+   * The inner part of every belt tile on the canvas, in viewport CSS px. Tiles under a machine
+   * footprint or a cable, and tiles that a visible overlay element (a name chip, label words, the
+   * caption ring) touches, are left out, so these pixels change only when a belt or an item draws.
+   * Empty with no renderer or no belt.
+   */
+  beltTiles: BeltTile[];
   /** The error card's heading and body, or null when no card shows. */
   error: { heading: string; body: string } | null;
   /** The caption holding the board, with its ring and the machine's footprint on screen, or null. */
@@ -82,32 +93,108 @@ export function tickHashes(trace: readonly (readonly [number, string])[]): [numb
 }
 
 /**
- * The screen box of the longest belt's tiles, clipped to the canvas, in viewport CSS pixels.
- * Null when the scene has no belt with tiles or the box falls outside the canvas.
+ * How much of a tile's width is cut from each side before sampling it. A machine's port nub and
+ * the chassis edge can reach a few px into the tile next to it; the belt's tread and the item dot
+ * sit in the middle.
  */
-export function beltRegion(scene: SceneState, cam: Camera, canvas: HTMLCanvasElement): ProbeRect | null {
-  let longest: { cell_x: number; cell_y: number }[] = [];
-  for (const belt of scene.belts.values()) {
-    if (belt.tiles.length > longest.length) longest = belt.tiles;
+export const TILE_INSET = 0.2;
+
+interface Cell {
+  cell_x: number;
+  cell_y: number;
+}
+
+/** The scene fields {@link beltTiles} reads. */
+export interface TileScene {
+  belts: ReadonlyMap<number, { tiles: readonly Cell[] }>;
+  nodes: ReadonlyMap<number, Cell & { w: number; h: number; rot: number }>;
+  wires: ReadonlyMap<number, { path: readonly Cell[] }>;
+}
+
+/** A canvas's box in viewport CSS px, as `getBoundingClientRect` gives it. */
+export interface CanvasBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+const overlaps = (a: ProbeRect, b: ProbeRect): boolean =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+/**
+ * The inner part of every belt tile, in viewport CSS px, for a render check to sample.
+ *
+ * Items move along a board's belts, so these pixels change while the board carries items. Other
+ * things that change are kept out: a cell under a machine footprint (its glyph and state colours) or
+ * on a cable's path (its pulse) is skipped, and so is a tile that touches any of `cutouts`, the
+ * overlay elements drawn over the canvas. Each tile is inset by {@link TILE_INSET} of its size on
+ * every side and clipped to the part of `canvas` inside `view` (the viewport, so a screenshot can
+ * see every tile); a tile with less than 2 px left is skipped. Belts go in handle order and tiles
+ * in path order. `worldToScreen` gives canvas px, so the canvas's own top-left is the origin.
+ */
+export function beltTiles(
+  scene: TileScene,
+  worldToScreen: (wx: number, wy: number) => Point,
+  canvas: CanvasBox,
+  view: CanvasBox,
+  cutouts: readonly ProbeRect[],
+): BeltTile[] {
+  const clip: CanvasBox = {
+    left: Math.max(canvas.left, view.left),
+    top: Math.max(canvas.top, view.top),
+    right: Math.min(canvas.right, view.right),
+    bottom: Math.min(canvas.bottom, view.bottom),
+  };
+  const blocked = new Set<string>();
+  const key = (x: number, y: number): string => `${x},${y}`;
+  for (const n of scene.nodes.values()) {
+    for (const [x, y] of cellsOfFootprint(n.cell_x, n.cell_y, n.w, n.h, n.rot)) blocked.add(key(x, y));
   }
-  if (longest.length === 0) return null;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const t of longest) {
-    minX = Math.min(minX, t.cell_x);
-    minY = Math.min(minY, t.cell_y);
-    maxX = Math.max(maxX, t.cell_x + 1);
-    maxY = Math.max(maxY, t.cell_y + 1);
+  for (const w of scene.wires.values()) for (const t of w.path) blocked.add(key(t.cell_x, t.cell_y));
+
+  const out: BeltTile[] = [];
+  const ids = [...scene.belts.keys()].sort((a, b) => a - b);
+  for (const id of ids) {
+    for (const t of scene.belts.get(id)?.tiles ?? []) {
+      const k = key(t.cell_x, t.cell_y);
+      if (blocked.has(k)) continue;
+      blocked.add(k);
+      const a = worldToScreen(t.cell_x * CELL, t.cell_y * CELL);
+      const b = worldToScreen((t.cell_x + 1) * CELL, (t.cell_y + 1) * CELL);
+      const whole: ProbeRect = {
+        x: canvas.left + Math.min(a.x, b.x),
+        y: canvas.top + Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y),
+      };
+      if (cutouts.some((c) => overlaps(whole, c))) continue;
+      const left = Math.max(clip.left, whole.x + whole.width * TILE_INSET);
+      const top = Math.max(clip.top, whole.y + whole.height * TILE_INSET);
+      const right = Math.min(clip.right, whole.x + whole.width * (1 - TILE_INSET));
+      const bottom = Math.min(clip.bottom, whole.y + whole.height * (1 - TILE_INSET));
+      if (right - left < 2 || bottom - top < 2) continue;
+      out.push({ x: left, y: top, width: right - left, height: bottom - top, cellX: t.cell_x, cellY: t.cell_y });
+    }
   }
-  const a = cam.worldToScreen(minX * CELL, minY * CELL);
-  const b = cam.worldToScreen(maxX * CELL, maxY * CELL);
-  const r = canvas.getBoundingClientRect();
-  const left = Math.max(r.left, r.left + Math.min(a.x, b.x));
-  const top = Math.max(r.top, r.top + Math.min(a.y, b.y));
-  const right = Math.min(r.right, r.left + Math.max(a.x, b.x));
-  const bottom = Math.min(r.bottom, r.top + Math.max(a.y, b.y));
-  if (right - left < 1 || bottom - top < 1) return null;
-  return { x: left, y: top, width: right - left, height: bottom - top };
+  return out;
+}
+
+/**
+ * The boxes of the elements drawn over a board's canvas: every visible element inside `stage`
+ * with no child element, other than the canvas. The layers that hold them span the whole stage
+ * and paint nothing themselves, so they're skipped by the no-child rule.
+ */
+export function overlayBoxes(stage: HTMLElement): ProbeRect[] {
+  const out: ProbeRect[] = [];
+  for (const el of stage.querySelectorAll('*')) {
+    if (el instanceof HTMLCanvasElement || el.childElementCount > 0) continue;
+    if (el.closest('[hidden]') !== null) continue;
+    const style = getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.display === 'none') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    out.push({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }
+  return out;
 }

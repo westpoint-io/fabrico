@@ -24,8 +24,12 @@ the page's sections and, for each one:
      enough that a single item crossing a belt stays in view for several snapshots;
   3. reads the board's frame count twice and fails unless it rose by 2 or more;
   4. takes snapshots of the visible view with WebKitWebView.get_snapshot, which reads what
-     WebKitGTK composited rather than anything the page says, and hashes the board's belt region
-     (coordinates from the board's probe) every 500 ms until two hashes differ, at most 20 tries;
+     WebKitGTK composited rather than anything the page says, and hashes each of the board's belt
+     tiles (coordinates from the board's probe, read before and after each snapshot, keeping the
+     tiles in both lists) every 500 ms until one tile's pixels differ, at most 20 tries. The probe
+     leaves out tiles under machines, cables and the DOM chips over the canvas, so the pixels that
+     change are belts and items. A board that doesn't draw is reported and the harness goes on to
+     the next step, so one run names every board that failed;
   5. picks 4x, waits for the end tick, and reads the hash badge's verdict and text, and compares
      the end hash with examples/boards/hashes.manifest read from the repo beside this script.
 
@@ -160,21 +164,45 @@ def manifest_hashes():
     return out
 
 
-def region_hash(surface, rect, scale):
-    """sha256 of the snapshot's pixels inside `rect` (CSS px, viewport-relative)."""
+def tile_key(rect):
+    """A tile's cell and its box on screen. When the page's layout moves the board, its tiles get
+    new keys rather than counting as changed pixels."""
+    return "%d,%d@%.2f,%.2f,%.2f,%.2f" % (rect["cellX"], rect["cellY"], rect["x"], rect["y"], rect["width"], rect["height"])
+
+
+def tile_hashes(surface, tiles, keep, scale):
+    """sha256 of the snapshot's pixels inside each tile (CSS px, viewport-relative) whose key is in
+    `keep`, by tile key."""
     surface.flush()
     width, height, stride = surface.get_width(), surface.get_height(), surface.get_stride()
-    x0 = max(0, int(rect["x"] * scale))
-    y0 = max(0, int(rect["y"] * scale))
-    x1 = min(width, int((rect["x"] + rect["width"]) * scale))
-    y1 = min(height, int((rect["y"] + rect["height"]) * scale))
-    if x1 - x0 < 2 or y1 - y0 < 2:
-        raise Failure("the belt region %r lies outside the %dx%d snapshot" % (rect, width, height))
     data = bytes(surface.get_data())
-    digest = hashlib.sha256()
-    for y in range(y0, y1):
-        digest.update(data[y * stride + x0 * 4 : y * stride + x1 * 4])
-    return digest.hexdigest()
+    out = {}
+    for rect in tiles:
+        key = tile_key(rect)
+        if key not in keep:
+            continue
+        x0 = max(0, int(round(rect["x"] * scale)))
+        y0 = max(0, int(round(rect["y"] * scale)))
+        x1 = min(width, int(round((rect["x"] + rect["width"]) * scale)))
+        y1 = min(height, int(round((rect["y"] + rect["height"]) * scale)))
+        if x1 - x0 < 1 or y1 - y0 < 1:
+            continue
+        digest = hashlib.sha256()
+        for y in range(y0, y1):
+            digest.update(data[y * stride + x0 * 4 : y * stride + x1 * 4])
+        out[key] = digest.hexdigest()
+    return out
+
+
+def fold_sample(seen, sample):
+    """Add each new tile key's hash to `seen`; True when a tile already there has new pixels."""
+    changed = False
+    for key, value in sample.items():
+        if key not in seen:
+            seen[key] = value
+        elif seen[key] != value:
+            changed = True
+    return changed
 
 
 def check_file(pinned, counts):
@@ -219,32 +247,51 @@ def check_file(pinned, counts):
         yield ("js", set_speed_js(name, "0.25"))
         yield ("js", board_js(name, "el.shadowRoot.querySelector('button[data-control=\"restart\"]').click()===undefined"))
 
-        first = (yield ("js", probe_js(name)))["frames"]
+        frames_before = (yield ("js", probe_js(name)))["frames"]
         waited = 0
         while True:
             yield ("sleep", POLL_MS)
             waited += POLL_MS
             frames = (yield ("js", probe_js(name)))["frames"]
-            if frames - first >= 2:
+            if frames - frames_before >= 2:
                 break
             if waited >= FRAMES_TIMEOUT_MS:
-                raise Failure("%s: its frame count went from %d to %d in %d ms" % (name, first, frames, waited))
+                raise Failure("%s: its frame count went from %d to %d in %d ms" % (name, frames_before, frames, waited))
 
-        hashes = []
+        first = None
+        seen = {}
+        samples = 0
+        drew = False
         for _ in range(SNAPSHOT_TRIES):
-            region = (yield ("js", probe_js(name)))["beltRegion"]
-            if region is None:
-                raise Failure("%s: reports no belt region on screen" % name)
+            tiles = (yield ("js", probe_js(name)))["beltTiles"]
+            if not tiles:
+                yield ("sleep", POLL_MS)
+                continue
             surface = yield ("snap",)
-            # The snapshot is in device pixels and the region in CSS px.
-            hashes.append(region_hash(surface, region, surface.get_width() / inner_width))
-            if len(set(hashes)) > 1:
+            still = {tile_key(t) for t in (yield ("js", probe_js(name)))["beltTiles"]}
+            # The snapshot is in device pixels and the tiles in CSS px.
+            sample = tile_hashes(surface, tiles, still, surface.get_width() / inner_width)
+            samples += 1
+            if not sample:
+                # The board moved while the snapshot was taken, so no tile is in both lists.
+                yield ("sleep", POLL_MS)
+                continue
+            if first is None:
+                first = sample
+                seen = dict(sample)
+            elif fold_sample(seen, sample):
+                drew = True
                 break
             yield ("sleep", POLL_MS)
-        if len(set(hashes)) < 2:
-            raise Failure("%s: its belt region showed the same pixels in %d snapshots over %d ms"
-                          % (name, len(hashes), (len(hashes) - 1) * POLL_MS))
-        counts["drawn"] += 1
+        if first is None:
+            counts["failures"].append("%s: reports no belt tiles on screen" % name)
+        elif not drew:
+            counts["failures"].append("%s: its %d belt tiles showed the same pixels in %d snapshots over %d ms"
+                                      % (name, len(seen), samples, (samples - 1) * POLL_MS))
+        else:
+            counts["drawn"] += 1
+        if not drew:
+            print("webkit-offline: %s" % counts["failures"][-1], file=sys.stderr, flush=True)
 
         yield ("js", set_speed_js(name, "4"))
         waited = 0
@@ -273,8 +320,9 @@ def check_file(pinned, counts):
         if errors:
             raise Failure("%s: the page threw: %s" % (name, "; ".join(errors)))
         counts["matched"] += 1
-        print("webkit-offline: %s drew (%d snapshots) and ended on tick %d, %s match, live contexts %d"
-              % (name, len(hashes), p["tick"], want[1][:8], gl["live"]), file=sys.stderr, flush=True)
+        print("webkit-offline: %s %s (%d snapshots) and ended on tick %d, %s match, live contexts %d"
+              % (name, "drew" if drew else "didn't draw", samples, p["tick"], want[1][:8], gl["live"]),
+              file=sys.stderr, flush=True)
 
 
 def main():
@@ -305,7 +353,7 @@ def main():
     window.add(view)
     window.show_all()
 
-    counts = {"boards": 0, "drawn": 0, "matched": 0}
+    counts = {"boards": 0, "drawn": 0, "matched": 0, "failures": []}
     result = {"failure": None}
     gen = check_file(pinned, counts)
 
@@ -374,6 +422,8 @@ def main():
     if result["failure"] is not None:
         print("webkit-offline: %s" % result["failure"], file=sys.stderr, flush=True)
         return 1
+    for failure in counts["failures"]:
+        print("webkit-offline: %s" % failure, file=sys.stderr, flush=True)
     if counts["boards"] == 0 or counts["drawn"] != counts["boards"] or counts["matched"] != counts["boards"]:
         print("webkit-offline: %d boards, %d drew, %d matched" % (counts["boards"], counts["drawn"], counts["matched"]),
               file=sys.stderr, flush=True)

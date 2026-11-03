@@ -2,8 +2,9 @@
 //
 // A board whose WebGL context was taken keeps its Pixi ticker, and so its frame count, rising
 // while it draws nothing. So a board check reads four things: the frame count rises, a compositor
-// screenshot of a belt region changes, no mounted board's canvas got `webglcontextlost`, and the
-// page logged no error. The live-context count comes from an init script that wraps
+// screenshot of the board's belt tiles changes, no mounted board's canvas got `webglcontextlost`,
+// and the page logged no error. The tiles leave out machines, cables and the DOM chips over the
+// canvas, so the pixels that change there are belts and items. The live-context count comes from an init script that wraps
 // `HTMLCanvasElement.prototype.getContext`, never from the embed's own bookkeeping, which would
 // go down on unmount whether or not the context was freed.
 
@@ -12,7 +13,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, type Page } from '@playwright/test';
-import type { BoardProbe } from '../../src/embed/probe.ts';
+// The PNG decoder Playwright already bundles (pngjs). No new dependency.
+import { PNG } from 'playwright-core/lib/utilsBundle';
+import type { BeltTile, BoardProbe } from '../../src/embed/probe.ts';
 import { watchPageErrors } from '../../e2e-live/support/oracle.ts';
 
 export { watchPageErrors };
@@ -156,8 +159,62 @@ const BUDGET_MS = 10_000;
 const POLL_MS = 250;
 
 /**
- * Assert the board is drawing: its frame count rises by at least 2, and a screenshot of its
- * longest belt's region, taken by the browser's compositor, changes within the budget.
+ * A tile's cell and its box on screen. A tile is compared only with itself at the same place: when
+ * the page's layout moves the board (another board's effect log grows, the browser anchors the
+ * scroll), its tiles get new keys rather than counting as changed pixels.
+ */
+const tileKey = (t: BeltTile): string =>
+  `${t.cellX},${t.cellY}@${t.x.toFixed(2)},${t.y.toFixed(2)},${t.width.toFixed(2)},${t.height.toFixed(2)}`;
+
+/**
+ * One sample of a board's belt tiles: a compositor screenshot of the box around them, and a hash
+ * of each tile's pixels, by {@link tileKey}. The probe is read before and after the screenshot and
+ * only tiles in both lists are kept, so neither a chip or ring that appeared over a tile nor a
+ * layout move while the screenshot was taken counts as the tile changing.
+ */
+async function sampleTiles(page: Page, selector: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const before = (await readProbeAt(page, selector)).beltTiles;
+  if (before.length === 0) return out;
+  const x0 = Math.floor(Math.min(...before.map((t) => t.x)));
+  const y0 = Math.floor(Math.min(...before.map((t) => t.y)));
+  const x1 = Math.ceil(Math.max(...before.map((t) => t.x + t.width)));
+  const y1 = Math.ceil(Math.max(...before.map((t) => t.y + t.height)));
+  const clip = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  const png = PNG.sync.read(await page.screenshot({ clip, animations: 'allow' }));
+  const still = new Set((await readProbeAt(page, selector)).beltTiles.map(tileKey));
+  const scale = png.width / clip.width;
+  for (const t of before) {
+    const key = tileKey(t);
+    if (!still.has(key)) continue;
+    const left = Math.max(0, Math.round((t.x - clip.x) * scale));
+    const top = Math.max(0, Math.round((t.y - clip.y) * scale));
+    const right = Math.min(png.width, Math.round((t.x + t.width - clip.x) * scale));
+    const bottom = Math.min(png.height, Math.round((t.y + t.height - clip.y) * scale));
+    const digest = createHash('sha256');
+    for (let y = top; y < bottom; y++) digest.update(png.data.subarray((y * png.width + left) * 4, (y * png.width + right) * 4));
+    out.set(key, digest.digest('hex'));
+  }
+  return out;
+}
+
+/**
+ * Fold a sample into `seen`, the first hash of each tile key. True when a tile already in `seen`
+ * now has different pixels.
+ */
+function foldSample(seen: Map<string, string>, sample: Map<string, string>): boolean {
+  let changed = false;
+  for (const [key, hash] of sample) {
+    const was = seen.get(key);
+    if (was === undefined) seen.set(key, hash);
+    else if (was !== hash) changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Assert the board is drawing: its frame count rises by at least 2, and the pixels of at least one
+ * of its belt tiles, in screenshots taken by the browser's compositor, change within the budget.
  */
 export async function expectBoardDrawing(page: Page, name: string, context: string): Promise<void> {
   await expectBoardDrawingAt(page, `fabrico-board[name="${name}"]`, context, name);
@@ -175,23 +232,17 @@ export async function expectBoardDrawingAt(page: Page, selector: string, context
     .toBeGreaterThanOrEqual(2);
 
   const deadline = Date.now() + BUDGET_MS;
-  let first: string | null = null;
+  const seen = new Map<string, string>();
   let samples = 0;
   while (Date.now() < deadline) {
-    const region = (await readProbeAt(page, selector)).beltRegion;
-    expect(region, `${context}: ${name} reports a belt region on screen`).not.toBeNull();
-    if (region === null) return;
-    const png = await page.screenshot({ clip: region, animations: 'allow' });
     samples += 1;
-    const hash = createHash('sha256').update(png).digest('hex');
-    if (first === null) {
-      first = hash;
-    } else if (hash !== first) {
-      return;
-    }
+    if (foldSample(seen, await sampleTiles(page, selector))) return;
     await page.waitForTimeout(POLL_MS);
   }
-  throw new Error(`${context}: ${name}'s belt region showed the same pixels in ${samples} screenshots over ${BUDGET_MS} ms`);
+  expect(seen.size, `${context}: ${name} reports belt tiles on screen`).toBeGreaterThan(0);
+  throw new Error(
+    `${context}: ${name}'s ${seen.size} belt tiles showed the same pixels in ${samples} screenshots over ${BUDGET_MS} ms`,
+  );
 }
 
 // --- Board files, the manifest and the native per-tick oracle ---
@@ -372,17 +423,23 @@ export async function readProbeAt(page: Page, selector: string): Promise<BoardPr
 
 /**
  * Render health across an action that starts a held board moving, such as Continue. The board is
- * paused before the action, so its belt region holds still; this takes that picture first, runs
- * the action, and passes once the frame count has risen by 2 and a compositor screenshot of the
- * same region differs from the held one. A board whose canvas stopped drawing shows the held
- * picture (or a blank one) forever and fails.
+ * paused before the action, so its belt tiles hold still; this samples them first, runs the
+ * action, and passes once the frame count has risen by 2 and a compositor screenshot shows at
+ * least one of the same tiles with different pixels. A board whose canvas stopped drawing shows
+ * the held picture (or a blank one) forever and fails.
  */
 export async function expectDrawsAfter(page: Page, name: string, action: () => Promise<void>, context: string): Promise<void> {
+  const selector = `fabrico-board[name="${name}"]`;
   const held = await readProbe(page, name);
-  const region = held.beltRegion;
-  expect(region, `${context}: ${name} reports a belt region on screen`).not.toBeNull();
-  if (region === null) return;
-  const before = createHash('sha256').update(await page.screenshot({ clip: region, animations: 'allow' })).digest('hex');
+  // A held board's tiles are still, but the page around it may move while it settles, which leaves
+  // a sample empty; take samples until one holds tiles.
+  let before = await sampleTiles(page, selector);
+  const settle = Date.now() + BUDGET_MS;
+  while (before.size === 0 && Date.now() < settle) {
+    await page.waitForTimeout(50);
+    before = await sampleTiles(page, selector);
+  }
+  expect(before.size, `${context}: ${name} reports belt tiles on screen`).toBeGreaterThan(0);
   await action();
   await expect
     .poll(async () => (await readProbe(page, name)).frames - held.frames, {
@@ -393,13 +450,15 @@ export async function expectDrawsAfter(page: Page, name: string, action: () => P
     .toBeGreaterThanOrEqual(2);
   const deadline = Date.now() + BUDGET_MS;
   let samples = 0;
+  const seen = new Map(before);
   while (Date.now() < deadline) {
-    const png = await page.screenshot({ clip: region, animations: 'allow' });
     samples += 1;
-    if (createHash('sha256').update(png).digest('hex') !== before) return;
+    if (foldSample(seen, await sampleTiles(page, selector))) return;
     await page.waitForTimeout(50);
   }
-  throw new Error(`${context}: ${name}'s belt region kept its held picture in ${samples} screenshots over ${BUDGET_MS} ms`);
+  throw new Error(
+    `${context}: ${name}'s ${before.size} belt tiles kept their held pixels in ${samples} screenshots over ${BUDGET_MS} ms`,
+  );
 }
 
 /** A board's trace, by a CSS selector for the element. Needs the trace init script. */
