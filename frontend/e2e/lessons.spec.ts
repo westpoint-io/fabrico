@@ -7,6 +7,7 @@ import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { noteTokens } from '../src/tutorial/machine';
 import { REAL_TABLES, phrasePlain } from '../src/tutorial/phrase';
 import { nubAnchor } from '../shared/geometry';
+import { doorstepCell, dropHitRadiusWorld } from '../src/protocol/ports';
 import {
   CELL,
   CMD,
@@ -478,39 +479,50 @@ test.describe('the step card and the hint ring', () => {
 // tick moves only then, and a step can be read while it waits.
 
 const BELT_ID = 4;
-/** The port ring's diameter on screen. */
-const PORT_RING = 32;
 /** A little over the layer's query period, so a read has had time to land. */
 const TWO_TRIGGER_READS_MS = 900;
 
 const timerButton = (page: Page): Locator => page.locator('[role="group"][aria-label="Trigger"]').getByRole('button', { name: 'Timer', exact: true });
 const applyButton = (page: Page): Locator => page.locator('aside[aria-labelledby="fab-config-heading"]').getByRole('button', { name: 'Apply', exact: true });
 
-/** Both of the drag's rings from one read, and how far each sits from its port dot under the camera. */
+/**
+ * Both of the drag's rings from one read, each against the spot its gesture accepts: the press ring
+ * a square on the Out port's doorstep cell plus the outset, the release ring a disc on the In port's
+ * dot, `2 * dropHitRadiusWorld(scale) * scale + 4` across. Each number is the worst edge or size error.
+ */
 async function portRingErrors(
   page: Page,
   from: { cell_x: number; cell_y: number; side: number },
   to: { cell_x: number; cell_y: number; side: number },
-): Promise<{ from: number; to: number; size: number }> {
-  const a = nubAnchor(from.cell_x, from.cell_y, from.side);
+): Promise<{ from: number; to: number; shapes: string }> {
+  const read = await page.evaluate(() => {
+    const hook = (window as unknown as { __fabrico: { tutorial(): TutorialProbe; camera(): { x: number; y: number; scale: number } } }).__fabrico;
+    return { probe: hook.tutorial(), cam: hook.camera() };
+  });
+  const { probe, cam } = read;
+  const [dx, dy] = doorstepCell(from);
+  const size = CELL * cam.scale;
+  const square = (r: HintRect | null): number =>
+    r === null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(
+          Math.abs(r.x - (dx * size + cam.x - OUTSET)),
+          Math.abs(r.y - (dy * size + cam.y - OUTSET)),
+          Math.abs(r.width - (size + 2 * OUTSET)),
+          Math.abs(r.height - (size + 2 * OUTSET)),
+        );
   const b = nubAnchor(to.cell_x, to.cell_y, to.side);
-  return page.evaluate(
-    ([ax, ay, bx, by]) => {
-      const hook = (window as unknown as { __fabrico: { tutorial(): TutorialProbe; camera(): { x: number; y: number; scale: number } } }).__fabrico;
-      const probe = hook.tutorial();
-      const cam = hook.camera();
-      const off = (r: HintRect | null, wx: number, wy: number): number =>
-        r === null
-          ? Number.POSITIVE_INFINITY
-          : Math.max(Math.abs(r.x + r.width / 2 - (wx * cam.scale + cam.x)), Math.abs(r.y + r.height / 2 - (wy * cam.scale + cam.y)));
-      return {
-        from: off(probe.hint, ax, ay),
-        to: off(probe.hintTo, bx, by),
-        size: Math.max(probe.hint?.width ?? 0, probe.hintTo?.width ?? 0),
-      };
-    },
-    [a.x, a.y, b.x, b.y] as const,
-  );
+  const d = 2 * dropHitRadiusWorld(cam.scale) * cam.scale + 4;
+  const disc = (r: HintRect | null): number =>
+    r === null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(
+          Math.abs(r.x + r.width / 2 - (b.x * cam.scale + cam.x)),
+          Math.abs(r.y + r.height / 2 - (b.y * cam.scale + cam.y)),
+          Math.abs(r.width - d),
+          Math.abs(r.height - d),
+        );
+  return { from: square(probe.hint), to: disc(probe.hintTo), shapes: `${probe.hint?.shape}/${probe.hintTo?.shape}` };
 }
 
 test.describe('the machine and port rings, and the rest of the lesson', () => {
@@ -557,29 +569,29 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
     expect(read.stageId).toBe('belt-draw');
     expect(read.hint, 'the first ring').not.toBeNull();
     expect(read.hintTo, 'the release ring, from the same read').not.toBeNull();
-    expect(read.hint?.shape).toBe('circle');
-    expect(read.hintTo?.shape).toBe('circle');
+    expect(read.hint?.shape, 'the press ring is a square on the doorstep').toBe('square');
+    expect(read.hintTo?.shape, 'the release ring is a disc on the dot').toBe('circle');
     await expect(page.locator('[data-fab-hint-to]'), 'the release ring is on screen').toBeVisible();
 
     const out = source.ports![0]!;
     const into = sink.ports![1]!;
     const errors = await portRingErrors(page, out, into);
-    expect(errors.from, 'the out ring at the third camera').toBeLessThanOrEqual(TOLERANCE);
-    expect(errors.to, 'the in ring at the third camera').toBeLessThanOrEqual(TOLERANCE);
-    expect(Math.abs(errors.size - PORT_RING), 'a port ring keeps its size on screen').toBeLessThanOrEqual(TOLERANCE);
+    expect(errors.shapes).toBe('square/circle');
+    expect(errors.from, 'the out ring at the third camera, on the doorstep cell').toBeLessThanOrEqual(TOLERANCE);
+    expect(errors.to, 'the in ring at the third camera, the hit circle across').toBeLessThanOrEqual(TOLERANCE);
 
     await zoomOut(page);
     await expect
       .poll(async () => {
         const e = await portRingErrors(page, out, into);
-        return Math.max(e.from, e.to, Math.abs(e.size - PORT_RING));
+        return Math.max(e.from, e.to);
       }, { message: 'the port rings at another zoom level' })
       .toBeLessThanOrEqual(TOLERANCE);
     await panBoard(page);
     await expect
       .poll(async () => {
         const e = await portRingErrors(page, out, into);
-        return Math.max(e.from, e.to, Math.abs(e.size - PORT_RING));
+        return Math.max(e.from, e.to);
       }, { message: 'the port rings after the pan' })
       .toBeLessThanOrEqual(TOLERANCE);
 
