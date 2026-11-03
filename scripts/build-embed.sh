@@ -8,21 +8,23 @@
 # frontend/scripts/capture-posters.ts, which opens that bundle in headless Chromium, runs each
 # board to its end tick and saves its stage as frontend/dist-embed/posters/<board id>.png. Then it
 # builds the bundle again with the posters inlined, and with FABRICO_EMBED_REQUIRE_POSTERS=1, so a
-# board without a poster fails the build. Last, it wraps the bundle into each page under
-# frontend/e2e-embed/pages/ and writes the results to frontend/dist-embed/pages/. Both output
-# folders are gitignored.
+# board without a poster fails the build. Then it wraps the bundle into each page under
+# frontend/e2e-embed/pages/ and writes the results to frontend/dist-embed/pages/. Last, it writes
+# frontend/dist-examples/fabrico-examples.html, the one file that runs every example board when
+# opened from disk, with a section per board file under examples/boards/. Both output folders are
+# gitignored.
 #
 # The poster step needs Playwright's Chromium (`npx playwright install chromium`).
 #
 # OUTPUT, exactly one line on stdout after the build's own output:
-#   EMBED_BUILD bundle=<bytes> boards=<n> pages=<n> posters=<n>
+#   EMBED_BUILD bundle=<bytes> boards=<n> pages=<n> posters=<n> offline=<bytes>
 #
 # ENVIRONMENT
 #   FABRICO_WASM_OUT  where the player module is. Defaults to target/wasm-out under the repo root.
 #                     Build it with scripts/build-wasm.sh.
 #
 # EXIT CODES
-#   0  the bundle, the posters and the pages were built and the line was printed.
+#   0  the bundle, the posters, the pages and the offline file were built and the line was printed.
 #   2  no build: the player module is missing or empty.
 #   Any other non-zero code is Vite's, the poster capture's or the page wrapper's own.
 
@@ -53,9 +55,12 @@ mkdir -p dist-embed/posters
 cp "$POSTER_STAGING"/*.png dist-embed/posters/
 
 node scripts/build-offline.ts --pages e2e-embed/pages dist-embed/pages
+# The offline file reads each board's title from the player module itself.
+FABRICO_PLAYER_WASM="$WASM" node scripts/build-offline.ts
 
 BUNDLE_BYTES="$(wc -c <dist-embed/fabrico-board.js)"
 BOARDS="$(find "$ROOT/examples/boards" -name '*.board.ron' -type f | wc -l)"
 PAGES="$(find dist-embed/pages -maxdepth 1 -name '*.html' -type f | wc -l)"
 POSTERS="$(find dist-embed/posters -maxdepth 1 -name '*.png' -type f | wc -l)"
-echo "EMBED_BUILD bundle=$((BUNDLE_BYTES)) boards=$((BOARDS)) pages=$((PAGES)) posters=$((POSTERS))"
+OFFLINE_BYTES="$(wc -c <dist-examples/fabrico-examples.html)"
+echo "EMBED_BUILD bundle=$((BUNDLE_BYTES)) boards=$((BOARDS)) pages=$((PAGES)) posters=$((POSTERS)) offline=$((OFFLINE_BYTES))"

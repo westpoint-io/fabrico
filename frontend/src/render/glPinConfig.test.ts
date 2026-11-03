@@ -1,6 +1,6 @@
 // The GL-backend pin's config-shape gate (VEC-05, Plan 56-01).
 //
-// WHAT THIS GATE COVERS: that all seven Playwright configs listed below name the SAME GL
+// WHAT THIS GATE COVERS: that all eight Playwright configs listed below name the SAME GL
 // backend, in their ONLY `launchOptions.args` declaration. The "only" is
 // load-bearing and was added by the phase 56 review (WR-04): Playwright replaces
 // `launchOptions` wholesale when a project-level `use` declares it, so a gate
@@ -52,6 +52,7 @@ const CONFIG_FILES = [
   'playwright.walk.config.ts',
   'playwright.embed.config.ts',
   'playwright.player.config.ts',
+  'playwright.offline.config.ts',
 ] as const;
 
 /** cwd-independent resolution (the `src/protocol/route.test.ts` idiom). */
@@ -77,6 +78,12 @@ const configPath = (name: string): string =>
  *
  * Returns an empty array when the config declares no `launchOptions.args` at all,
  * so "missing", "one", and "more than one" are all distinguishable below.
+ *
+ * FIREFOX PROJECTS. The pin is a pair of Chromium arguments. `playwright.offline.config.ts`
+ * also has Firefox projects, whose `launchOptions` carries only `firefoxUserPrefs` and replaces
+ * the top-level object whole, so Firefox launches without the Chromium arguments. Such a
+ * project declares no `args` array and this scan doesn't see it; a Firefox project that did
+ * declare one would count as an extra array below and fail.
  */
 function extractAllLaunchArgs(source: string): Array<readonly string[]> {
   return [...source.matchAll(/launchOptions:\s*\{\s*args:\s*\[([^\]]*)\]/g)].map((m) =>
@@ -156,8 +163,8 @@ describe('the no-WebGL project is the one allowed extra', () => {
 });
 
 describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () => {
-  it('checks exactly 7 configs (a shrinking list cannot pass vacuously)', () => {
-    expect(CONFIG_FILES).toHaveLength(7);
+  it('checks exactly 8 configs (a shrinking list cannot pass vacuously)', () => {
+    expect(CONFIG_FILES).toHaveLength(8);
   });
 
   for (const name of CONFIG_FILES) {
@@ -181,7 +188,7 @@ describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () =>
     });
   }
 
-  it('all 7 configs carry a byte-identical arg array', () => {
+  it('all 8 configs carry a byte-identical arg array', () => {
     const extracted = CONFIG_FILES.map((name) => ({
       name,
       // The pin is the first array; the embed config's no-WebGL project is checked above.
