@@ -3,8 +3,8 @@
 # Opens the offline examples file, frontend/dist-examples/fabrico-examples.html, from disk in three
 # browsers and checks every board in it. Build the file first with scripts/build-embed.sh.
 #
-#   1. Playwright (frontend/playwright.offline.config.ts): Chromium, and Firefox with its stock
-#      file:// policy. The Firefox offline tests depend on a canary that must see a sibling module
+#   1. Playwright (frontend/playwright.offline.config.ts) under xvfb-run: Chromium, and Firefox with
+#      its stock file:// policy. The Firefox offline tests depend on a canary that must see a sibling module
 #      script and a sibling fetch both refused, so they can't pass under Playwright's relaxed
 #      profile. Playwright's exit code alone can't tell a skipped or focused test from a passing
 #      one, so this script also lists the tests, reads the run's JSON stats, and fails unless every
@@ -57,9 +57,14 @@ if [ -z "$LISTED" ]; then
   LISTED=0
 fi
 
+# Headless Firefox on Linux makes a WebGL context only when it has an X display. With none it
+# reports "Exhausted GL driver options", every board shows its no-WebGL poster, and the drawing
+# checks fail. A CI runner has no display, so the run gets its own Xvfb with Mesa's software GL.
+# The Wayland variables are dropped so a desktop session can't take Firefox off that display.
 STATUS=0
-PLAYWRIGHT_JSON_OUTPUT_FILE="$JSON_OUT" npx playwright test --config=playwright.offline.config.ts \
-  --reporter=list,json || STATUS=$?
+env -u WAYLAND_DISPLAY -u MOZ_ENABLE_WAYLAND GDK_BACKEND=x11 PLAYWRIGHT_JSON_OUTPUT_FILE="$JSON_OUT" \
+  xvfb-run -a -s "-screen 0 1280x1024x24" \
+  npx playwright test --config=playwright.offline.config.ts --reporter=list,json || STATUS=$?
 
 EXPECTED=0
 if read -r EXPECTED UNEXPECTED FLAKY SKIPPED < <(node -e '
