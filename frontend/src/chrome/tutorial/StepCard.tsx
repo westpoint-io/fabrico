@@ -178,9 +178,9 @@ export function cardEscape(
   props: Pick<StepCardProps, 'view' | 'onKeepBuilding' | 'onLeave'>,
   e: { key: string; preventDefault(): void; stopPropagation(): void },
 ): void {
-  if (e.key !== 'Escape') return;
-  if (props.view.state === 'finished') props.onKeepBuilding();
-  else if (props.view.state === 'swapped') props.onLeave();
+  const escape = e.key === 'Escape';
+  if (escape && props.view.state === 'finished') props.onKeepBuilding();
+  else if (escape && props.view.state === 'swapped') props.onLeave();
   else return;
   e.preventDefault();
   e.stopPropagation();
