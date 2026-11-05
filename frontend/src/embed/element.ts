@@ -68,6 +68,7 @@ import { createControlBar, type BarState, type ControlBar } from './controls';
 import {
   buildErrorCard,
   classifyPlayerError,
+  drawingDidNotStartCopy,
   engineDidNotStartCopy,
   errorCopy,
   unknownBoardCopy,
@@ -166,7 +167,10 @@ export class FabricoBoardElement extends HTMLElement {
   readonly #noWebGLLine: HTMLParagraphElement;
   /** No WebGL here: the poster stands in for the board and nothing runs. */
   #noWebGL = false;
-  /** The browser couldn't compile or start the player: its card over the poster. */
+  /**
+   * The board can't run here: the browser couldn't compile or start the player, or couldn't start
+   * the board's renderer. Its card sits over the poster.
+   */
   #engineFailed = false;
   /**
    * The board's player instance trapped. Every later call on it throws, so nothing reads it any
@@ -549,9 +553,7 @@ export class FabricoBoardElement extends HTMLElement {
     if (!this.#inSlot) return;
     const generation = this.#generation;
     const run = ++this.#run;
-    void this.#mountView(generation, run).catch((error: unknown) => {
-      console.error(`fabrico-board "${this.#name()}" failed to restart`, error);
-    });
+    void this.#mountView(generation, run).catch((error: unknown) => this.#onMountFailed(generation, run, 'restart', error));
   }
 
   /** Waiting on the page cap, or not any more. */
@@ -609,9 +611,7 @@ export class FabricoBoardElement extends HTMLElement {
     this.#syncPoster();
     const generation = this.#generation;
     const run = ++this.#run;
-    void this.#mountView(generation, run).catch((error: unknown) => {
-      console.error(`fabrico-board "${this.#name()}" failed to redraw`, error);
-    });
+    void this.#mountView(generation, run).catch((error: unknown) => this.#onMountFailed(generation, run, 'redraw', error));
   }
 
   /** Wait for the page to register this name, then mount again. */
@@ -685,9 +685,29 @@ export class FabricoBoardElement extends HTMLElement {
     this.#inSlot = true;
     const generation = this.#generation;
     const run = ++this.#run;
-    void this.#mountView(generation, run).catch((error: unknown) => {
-      console.error(`fabrico-board "${this.#name()}" failed to start`, error);
-    });
+    void this.#mountView(generation, run).catch((error: unknown) => this.#onMountFailed(generation, run, 'start', error));
+  }
+
+  /**
+   * A view boot threw: in Pixi's own init, in a layer set up after it, or in loading the board.
+   * The boot has already freed what it held. The board gives up its slot so a waiting board can
+   * have it, drops its player, and shows its card over the poster. A boot that a leave or a
+   * disconnect already made stale changes nothing.
+   */
+  #onMountFailed(generation: number, run: number, what: string, error: unknown): void {
+    console.error(`fabrico-board "${this.#name()}" failed to ${what}`, error);
+    if (generation !== this.#generation || run !== this.#run) return;
+    pageScheduler().remove(this.#slot);
+    this.#inSlot = false;
+    this.#run += 1;
+    this.#afterRedraw = null;
+    this.#lost = false;
+    this.#teardownView();
+    this.#dropBoard();
+    this.#engineFailed = true;
+    this.#frame.classList.add('no-engine');
+    this.#syncPoster();
+    this.#showError(drawingDidNotStartCopy(error instanceof Error ? error.message : String(error)), 'error');
   }
 
   /** The board left the margin: pause, remember whether it played, and free the WebGL context. */
@@ -756,29 +776,46 @@ export class FabricoBoardElement extends HTMLElement {
       pageScheduler().remove(this.#slot);
       return null;
     }
-    const info = player.boardInfo();
-    const scene = createSceneState();
-    const pipeline = createPacketPipeline(() => scene);
-    const source = createWasmPacketSource(player);
-    source.onPacket((bytes) => pipeline.handle(bytes));
-    // The keyframe the player queued at create, into the kept scene.
-    source.drain();
-    this.#layOut(info);
-    this.#drainEffects(player);
-    const clock = createBoardClock({
-      player,
-      drain: () => {
-        source.drain();
-        this.#drainEffects(player);
-      },
-      onRestart: () => this.#log.clear(),
-      onChange: () => this.#refresh(),
-      onFault: (error) => this.#onFault(name, error),
-      trace: traceRequested(),
-    });
-    clock.setSpeed(this.#speed);
-    this.#board = { player, info, scene, clock, frames: { n: 0 }, started: false };
-    return this.#board;
+    // Everything after create can still throw: a read the player refuses, a trap, or effect bytes
+    // that don't decode. The player is destroyed then, so its instance doesn't outlive the card.
+    try {
+      const info = player.boardInfo();
+      const scene = createSceneState();
+      const pipeline = createPacketPipeline(() => scene);
+      const source = createWasmPacketSource(player);
+      source.onPacket((bytes) => pipeline.handle(bytes));
+      // The keyframe the player queued at create, into the kept scene.
+      source.drain();
+      this.#layOut(info);
+      this.#drainEffects(player);
+      const clock = createBoardClock({
+        player,
+        drain: () => {
+          source.drain();
+          this.#drainEffects(player);
+        },
+        onRestart: () => this.#log.clear(),
+        onChange: () => this.#refresh(),
+        onFault: (error) => this.#onFault(name, error),
+        trace: traceRequested(),
+      });
+      clock.setSpeed(this.#speed);
+      this.#board = { player, info, scene, clock, frames: { n: 0 }, started: false };
+      return this.#board;
+    } catch (error) {
+      try {
+        player.destroy();
+      } catch {
+        // A trapped instance can take no more calls; it goes with the page.
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const kind = classifyPlayerError(message, 'create');
+      // Nothing ran yet, so this is a board that didn't load, even when the player trapped.
+      const copy = errorCopy(kind.kind === 'engine-stopped' ? { kind: 'load-failed' } : kind, { message, tick: 0 });
+      this.#showError(copy, 'error');
+      pageScheduler().remove(this.#slot);
+      return null;
+    }
   }
 
   /** Boot a Pixi app on the board's kept scene and put the layers over it. */
@@ -802,43 +839,59 @@ export class FabricoBoardElement extends HTMLElement {
       this.#showNoWebGL();
       return;
     }
-    const title = board.info.title || this.#name();
-    handle.app.canvas.setAttribute('role', 'img');
-    handle.app.canvas.setAttribute('aria-label', `${title}, a running Fabrico board`);
+    // Pixi is up and holds a WebGL context from here. A throw before the view is kept frees the
+    // renderer and whatever layers were made, or the context would stay counted against the page.
+    const made: { resize?: ResizeObserver; ring?: CaptionRing; labels?: LabelOverlay } = {};
+    let view: View;
+    try {
+      const title = board.info.title || this.#name();
+      handle.app.canvas.setAttribute('role', 'img');
+      handle.app.canvas.setAttribute('aria-label', `${title}, a running Fabrico board`);
 
-    const fit = (): void => {
-      const { width, height } = handle.app.screen;
-      fitToFactory(handle.cam, handle.sceneState, width, height, {
-        top: FIT_INSET,
-        left: FIT_INSET,
-        right: FIT_INSET,
-        bottom: FIT_INSET,
-      });
-    };
-    fit();
-    // Pixi's `resizeTo` only re-reads the stage on a window resize, so watch the stage itself.
-    const resize = new ResizeObserver(() => {
-      handle.app.resize();
+      const fit = (): void => {
+        const { width, height } = handle.app.screen;
+        fitToFactory(handle.cam, handle.sceneState, width, height, {
+          top: FIT_INSET,
+          left: FIT_INSET,
+          right: FIT_INSET,
+          bottom: FIT_INSET,
+        });
+      };
       fit();
-    });
-    resize.observe(this.#stage);
-    handle.app.ticker.add(() => {
-      board.frames.n += 1;
-    });
-    handle.setRenderPace(this.#speed);
-    // The ring layer sits under the labels, so a name chip stays readable over the ring's edge.
-    const ring = createCaptionRing(this.#stage, handle, board.info.captions, () => board.clock.caption());
-    // A context the browser takes: the teardown marker tells it apart from one this board frees.
-    handle.app.canvas.addEventListener('webglcontextlost', (event) => {
-      const canvas = event.target as HTMLCanvasElement;
-      if (canvas.hasAttribute('data-fab-teardown') || this.#view?.handle !== handle) return;
-      this.#onLost();
-    });
-    const labels = createLabelOverlay(this.#stage, handle);
+      // Pixi's `resizeTo` only re-reads the stage on a window resize, so watch the stage itself.
+      const resize = new ResizeObserver(() => {
+        handle.app.resize();
+        fit();
+      });
+      made.resize = resize;
+      resize.observe(this.#stage);
+      handle.app.ticker.add(() => {
+        board.frames.n += 1;
+      });
+      handle.setRenderPace(this.#speed);
+      // The ring layer sits under the labels, so a name chip stays readable over the ring's edge.
+      const ring = createCaptionRing(this.#stage, handle, board.info.captions, () => board.clock.caption());
+      made.ring = ring;
+      // A context the browser takes: the teardown marker tells it apart from one this board frees.
+      handle.app.canvas.addEventListener('webglcontextlost', (event) => {
+        const canvas = event.target as HTMLCanvasElement;
+        if (canvas.hasAttribute('data-fab-teardown') || this.#view?.handle !== handle) return;
+        this.#onLost();
+      });
+      const labels = createLabelOverlay(this.#stage, handle);
+      made.labels = labels;
+      view = { handle, resize, labels, ring };
+    } catch (error) {
+      made.resize?.disconnect();
+      made.ring?.root.remove();
+      made.labels?.root.remove();
+      dispose();
+      throw error;
+    }
     // The poster layer and the status layer (loading line, error cards) stay above the canvas and
     // the labels.
     this.#stage.append(this.#posterLayer, this.#status);
-    this.#view = { handle, resize, labels, ring };
+    this.#view = view;
     if (this.#state === 'loading') {
       this.#state = 'running';
       this.#hideStatus();

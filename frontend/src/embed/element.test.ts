@@ -6,7 +6,7 @@
 // reached only through stubs.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PlayerTrapped, type BoardInfo, type BoardPlayer, type CreateBoardOptions, type PlayerModule } from '../player/playerWasm';
+import { PlayerError, PlayerTrapped, type BoardInfo, type BoardPlayer, type CreateBoardOptions, type PlayerModule } from '../player/playerWasm';
 import type { ScheduledBoard } from './scheduler';
 
 const h = vi.hoisted(() => ({
@@ -22,6 +22,8 @@ const h = vi.hoisted(() => ({
   },
   added: [] as ScheduledBoard[],
   removed: [] as ScheduledBoard[],
+  /** Make the label overlay throw, as a layer that fails after Pixi booted would. */
+  labelsThrow: false,
 }));
 
 vi.mock('../player/playerWasm', async (importOriginal) => {
@@ -63,6 +65,7 @@ vi.mock('./captions', async (importOriginal) => {
 });
 vi.mock('./labelOverlay', () => ({
   createLabelOverlay: (stage: HTMLElement) => {
+    if (h.labelsThrow) throw new Error('label layer failed');
     const root = document.createElement('div');
     stage.append(root);
     return { root, counts: () => ({ chips: 0, words: 0 }) };
@@ -97,6 +100,8 @@ class FakePlayer implements BoardPlayer {
   end = 10;
   trapAt: number | null = null;
   trapped = false;
+  /** Make `boardInfo` refuse, as a read after create that fails would. */
+  infoThrows = false;
   destroyed = false;
   packets: Uint8Array[] = [];
 
@@ -138,6 +143,7 @@ class FakePlayer implements BoardPlayer {
   }
   boardInfo(): BoardInfo {
     this.#check();
+    if (this.infoThrows) throw new PlayerError('board info failed');
     return { title: 'stub', endTick: this.end, captions: [], factories: [], callsOut: false };
   }
   destroy(): void {
@@ -185,6 +191,7 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   h.modules = 0;
+  h.labelsThrow = false;
   h.added.length = 0;
   h.removed.length = 0;
   h.texts.clear();
@@ -319,5 +326,52 @@ describe('a player that traps', () => {
     expect(() => h.core!.report([{ board: slot, near: false }])).not.toThrow();
     expect(h.core!.isLive(slot)).toBe(false);
     expect(el.fabricoProbe().mounted).toBe(false);
+  });
+});
+
+describe('a board whose view or board part fails to boot', () => {
+  it('a renderer that will not boot shows a card, frees the slot and destroys the player', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    h.boot = async () => {
+      throw new Error('context refused');
+    };
+    const { el, slot } = await mountBoard();
+    const probe = el.fabricoProbe();
+    expect(probe.state).toBe('error');
+    expect(probe.error?.heading).toBe('BOARD DID NOT DRAW');
+    expect(probe.error?.body).toContain('context refused');
+    expect(probe.mounted).toBe(false);
+    expect(h.removed).toContain(slot);
+    expect(h.core!.isLive(slot)).toBe(false);
+    expect(players[0].destroyed).toBe(true);
+    expect(control(el, 'restart').disabled).toBe(true);
+  });
+
+  it('a layer that throws after Pixi booted frees the renderer, its canvas and the slot', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    h.labelsThrow = true;
+    const { el, slot } = await mountBoard();
+    expect(handles).toHaveLength(1);
+    expect(handles[0].app.destroy).toHaveBeenCalled();
+    expect(handles[0].app.canvas.isConnected).toBe(false);
+    expect(el.fabricoProbe().error?.heading).toBe('BOARD DID NOT DRAW');
+    expect(h.core!.isLive(slot)).toBe(false);
+  });
+
+  it('a player read that fails after create destroys the player and shows the load card', async () => {
+    h.createBoard = () => {
+      const p = new FakePlayer();
+      p.infoThrows = true;
+      players.push(p);
+      return p;
+    };
+    const { el, slot } = await mountBoard();
+    const probe = el.fabricoProbe();
+    expect(probe.state).toBe('error');
+    expect(probe.error?.heading).toBe('BOARD DID NOT LOAD');
+    expect(probe.error?.body).toContain('board info failed');
+    expect(players[0].destroyed).toBe(true);
+    expect(h.core!.isLive(slot)).toBe(false);
+    expect(handles).toHaveLength(0);
   });
 });

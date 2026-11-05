@@ -1,6 +1,7 @@
 // The error cards a read-only board shows inside its stage: a board name the bundle doesn't know,
 // a board file in an old format, a board file the player refused for another reason, an engine
-// that stopped mid-run, and an engine the browser couldn't start. The stage keeps its size behind every card.
+// that stopped mid-run, an engine the browser couldn't start, and a renderer that didn't start. The
+// stage keeps its size behind every card.
 //
 // Every word is set with `textContent`. A board's name comes from the page and a player error can
 // quote the board file, and both are untrusted text on a docs page.
@@ -48,6 +49,17 @@ export function engineDidNotStartCopy(reason: string): ErrorCopy {
   return {
     heading: 'ENGINE DID NOT START',
     body: `This browser couldn't start the board's engine (${reason}). Reload the page. Until then, the picture shows the board at its last tick.`,
+  };
+}
+
+/**
+ * The card for a board whose renderer didn't start, or failed while its layers were set up. The
+ * board doesn't hold a slot after this, so it never retries on its own.
+ */
+export function drawingDidNotStartCopy(reason: string): ErrorCopy {
+  return {
+    heading: 'BOARD DID NOT DRAW',
+    body: `This browser couldn't start the board's graphics (${reason}). Reload the page to try again.`,
   };
 }
 

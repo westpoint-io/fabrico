@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { buildErrorCard, classifyPlayerError, errorCopy, unknownBoardCopy } from './errors';
+import { buildErrorCard, classifyPlayerError, drawingDidNotStartCopy, errorCopy, unknownBoardCopy } from './errors';
 
 // The player's own error texts, as the Rust crates write them.
 const FORMAT_1 = 'the board file has format 1, and this build reads format 2';
@@ -51,6 +51,13 @@ describe('the card copy', () => {
       body: "The engine stopped at tick 120: the script entry at tick 120 names handle 42, which isn't minted yet. Press Restart to run it again. If it stops at the same tick, report it with this board's name.",
     });
     expect(errorCopy({ kind: 'engine-stopped' }, { message: 'x', tick: 1204 }).body).toContain('at tick 1,204: x.');
+  });
+
+  it('names the reason when the renderer does not start', () => {
+    expect(drawingDidNotStartCopy('context refused')).toEqual({
+      heading: 'BOARD DID NOT DRAW',
+      body: "This browser couldn't start the board's graphics (context refused). Reload the page to try again.",
+    });
   });
 });
 
