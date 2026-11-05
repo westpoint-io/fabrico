@@ -257,3 +257,45 @@ test.describe('Reset progress', () => {
     expect(await stored(page)).toBeNull();
   });
 });
+
+// TUT-06, close and reopen: the page that ran the lesson is closed and a fresh page on the same browser
+// profile boots the app again, which is the closest a mock run gets to quitting and relaunching. The row
+// on the new page can only read Done or In progress if the first page's write reached the shared store.
+test.describe('Progress after a close and reopen', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('a finished lesson reads Done on a fresh page after the first one closes', async ({ page, context }) => {
+    const h = await bootConfigured(page);
+    await startLesson(page, h);
+    await toFinishedCard(page, h);
+    await page.close();
+
+    const reopened = await context.newPage();
+    await boot(reopened);
+    expect(await stored(reopened), 'the store the new page booted on holds Done').toBe(DONE_VALUE);
+    expect((await readProbe(reopened)).card, 'the reopened app shows no lesson card').toBe('none');
+    await openLessons(reopened);
+    await expectRow(reopened, 'Done', [RESTART]);
+  });
+
+  test('a lesson closed midway reads In progress on a fresh page, and Clear progress then sticks across another reopen', async ({ page, context }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await page.close();
+
+    const second = await context.newPage();
+    await boot(second);
+    await openLessons(second);
+    await expectRow(second, 'In progress', [RESTART]);
+    await askReset(second);
+    await clearButton(second).click();
+    await expect(liveLine(second)).toHaveText('Progress cleared.');
+    await second.close();
+
+    const third = await context.newPage();
+    await boot(third);
+    expect(await stored(third), 'the cleared key stays gone').toBeNull();
+    await openLessons(third);
+    await expectRow(third, 'Not started', [START]);
+  });
+});
