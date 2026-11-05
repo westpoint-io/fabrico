@@ -15,7 +15,8 @@ import {
 // when its two groups don't fit on one line, no control leaves the frame, every button and the
 // select measure at least 44 px, name chips stay in the stage and never cover a control, and the
 // loading state shows "Loading board" with every control disabled. A second page,
-// badge-width.html, checks the widest hash badge text at 328, 340 and 360 px.
+// badge-width.html, checks the widest hash badge text and a 4-digit board's transport row at 288,
+// 328, 340 and 360 px.
 
 const PAGE = pageUrl('layout.html');
 // Every board on this page runs at once, so the viewport holds the whole page.
@@ -162,20 +163,25 @@ test('the bar wraps, nothing leaves the frame and every target is 44 px, at 360,
   expect(requests).toEqual([PAGE]);
 });
 
-// The widest badge text, "final state xxxxxxxx order-dependent", at element widths of 328, 340
-// and 360 px (badge-width.html). Martian Mono at 12 px advances 8 px a character in Chromium, so
-// on one line the badge is 306 px: 36 characters, 16 px of padding and a 2 px border. The frame's
-// padding and bezel take 28 px, so the badge needs a 334 px element to sit on one line. 328 px is a
-// docs column on a 360 px phone with 16 px gutters, and 340 px one on a 375 px phone, rounded down.
-// The transport row of a board with a 4-digit end tick is 300 px, so 328 px is also the narrowest
-// element that bar fits in.
+// The widest badge text, "final state xxxxxxxx order-dependent", at element widths of 288, 328,
+// 340 and 360 px (badge-width.html). Martian Mono at 12 px advances 8 px a character in Chromium,
+// so on one line the badge is 302 px: 36 characters with a 4 px gap for the space between the
+// hash and the verdict, 16 px of padding and a 2 px border. The frame's padding and bezel take
+// 28 px, so the badge needs a 330 px element to sit on one line. 288 px is a docs column on a
+// 320 px phone with 16 px gutters, the narrowest viewport WCAG 1.4.10 reflow asks for; 328 px is
+// one on a 360 px phone, and 340 px one on a 375 px phone, rounded down.
+//
+// The same board has a 4-digit end tick, so its transport row (three 44 px buttons, the counter
+// "tick 1,000 / 1,000" and the gaps) is 300 px on one line. That fits a 328 px element and not a
+// 288 px one, where the counter has to drop under the buttons. So every control is checked
+// against the bar's box and every target against 44 px at each width, not only the badge.
 //
 // No bundled board ends off its pin when fed in reverse order, so the test copies the built page
 // and moves docs/script-outcomes' pin in the manifest the bundle inlines. The run, the verdict
 // function, the bar and the stylesheet are the real ones; only the value the run is graded
 // against changes, and the badge then reads what an order-dependent board reads.
 const BADGE_PAGE = pageUrl('badge-width.html');
-const BADGE_WIDTHS = [328, 340, 360] as const;
+const BADGE_WIDTHS = [288, 328, 340, 360] as const;
 const OUTCOMES_PIN = /(examples\/boards\/docs\/script-outcomes\.board\.ron \d+ )([0-9a-f]{64})/g;
 
 /** Every hex digit turned round (0 to f, 1 to e, ...), so the result differs at every place. */
@@ -204,7 +210,7 @@ interface BadgeRead {
   badge: Rect;
   hash: Rect;
   verdictWord: Rect;
-  controls: { name: string; rect: Rect }[];
+  controls: { name: string; rect: Rect; tag: string }[];
   verdict: string;
   text: string;
   /** The badge's content is wider than its box, so part of it is cut off or spills. */
@@ -234,6 +240,7 @@ async function readBadge(page: Page, width: number): Promise<BadgeRead> {
       controls: [...root.querySelectorAll('.bar button, .bar select, .bar .counter, .bar .badge')].map((c) => ({
         name: (c as HTMLElement).dataset.control ?? c.className,
         rect: rect(c),
+        tag: c.tagName,
       })),
       verdict: badge.dataset.verdict ?? '',
       text: badge.textContent ?? '',
@@ -262,7 +269,7 @@ async function badgeAxText(page: Page, width: number): Promise<string> {
   }
 }
 
-test('the order-dependent badge stays inside the bar at 328, 340 and 360 px', async ({ page }, testInfo) => {
+test('the order-dependent badge and every control stay inside the bar at 288, 328, 340 and 360 px', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const errors = watchPageErrors(page);
   const consoleErrors = recordConsoleErrors(page);
@@ -312,7 +319,12 @@ test('the order-dependent badge stays inside the bar at 328, 340 and 360 px', as
       expect(Math.abs(read.verdictWord.left - read.hash.left), `${at}: the wrapped verdict lines up with the hash`).toBeLessThanOrEqual(1);
     }
     for (const c of read.controls) {
+      expect(c.rect.left, `${at}: ${c.name} starts inside the bar`).toBeGreaterThanOrEqual(read.bar.left);
       expect(c.rect.right, `${at}: ${c.name} ends inside the bar`).toBeLessThanOrEqual(read.bar.right);
+      if (c.tag === 'BUTTON' || c.tag === 'SELECT') {
+        expect(c.rect.width, `${at}: ${c.name} is at least 44 px wide`).toBeGreaterThanOrEqual(44);
+        expect(c.rect.height, `${at}: ${c.name} is at least 44 px tall`).toBeGreaterThanOrEqual(44);
+      }
     }
   }
   errors.assertNone('on the badge width page');

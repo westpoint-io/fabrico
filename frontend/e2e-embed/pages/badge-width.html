@@ -15,8 +15,13 @@
 <main>
   <!-- docs/script-outcomes fed in reverse order. layout.spec.ts opens a copy of this page with the
        board's pin moved, so the badge shows the widest text a board can show: "final state
-       xxxxxxxx order-dependent". 328 px is a docs column on a 360 px phone with 16 px gutters,
-       and 340 px one on a 375 px phone, rounded down. -->
+       xxxxxxxx order-dependent". 288 px is a docs column on a 320 px phone with 16 px gutters,
+       the narrowest viewport WCAG reflow asks for. 328 px is one on a 360 px phone, and 340 px
+       one on a 375 px phone, rounded down. -->
+  <section>
+    <h2>288 px</h2>
+    <div data-badge-width="288" style="width: 288px"><fabrico-board name="docs-script-outcomes" order="reversed"></fabrico-board></div>
+  </section>
   <section>
     <h2>328 px</h2>
     <div data-badge-width="328" style="width: 328px"><fabrico-board name="docs-script-outcomes" order="reversed"></fabrico-board></div>

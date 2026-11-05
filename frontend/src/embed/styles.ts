@@ -392,7 +392,11 @@ export const LAYOUT_CSS = `
    the breakpoint follows the board: one row takes about 704 px for a board whose end tick has 4
    digits and less for a shorter one. Wrapped, row 1 holds restart, play, step and the counter,
    and row 2 the speed and the badge. The readout group wraps too, so on a phone-width column the
-   badge takes a third row rather than spilling past the frame. */
+   badge takes a third row rather than spilling past the frame.
+
+   The transport group wraps as well. For a 4-digit board it is 300 px on one line, which needs a
+   328 px element. On a narrower column, such as 288 px on a 320 px phone, the counter drops under
+   the three buttons rather than running past the frame, and the buttons keep their 44 px. */
 .bar {
   display: flex;
   flex-wrap: wrap;
@@ -407,7 +411,7 @@ export const LAYOUT_CSS = `
   flex: none;
   max-width: 100%;
 }
-.group.readout { flex-wrap: wrap; }
+.group.transport, .group.readout { flex-wrap: wrap; }
 /* The app's header reclaim: an icon button measures 44 by 44. */
 .bar .fab-tool-btn {
   padding: var(--fab-bezel-ring) calc(var(--fab-space-sm) + var(--fab-bezel-ring));
