@@ -33,7 +33,7 @@ use fabrico_core::ids::{CommandId, Item, NodeId};
 use fabrico_core::state::HttpMethod;
 use fabrico_core::wire::DEFAULT_WIRE_BUDGET;
 
-use crate::board::{BoardError, BoardFile, ExecutorSpec, OutboundOutcome, ScriptInput, boot_engine, validate};
+use crate::board::{BoardError, BoardFile, ExecutorSpec, OutboundOutcome, ScriptInput, boot_engine, minted_node, validate};
 use crate::engine::{Engine, StepOutput};
 use crate::envelope::{DEFAULT_ENDPOINT_DEADLINE_TICKS, RequestEnvelope, encode_request_envelope};
 use crate::gesture::apply_gesture;
@@ -174,7 +174,7 @@ pub fn script_payload(
     correlation: &mut u64,
 ) -> Result<Option<EventPayload>, BoardError> {
     let resolve = |handle: u64| {
-        minted.get(handle as usize).copied().ok_or(BoardError::UnknownHandle { tick, handle })
+        minted_node(minted, handle).ok_or(BoardError::UnknownHandle { tick, handle })
     };
     match input {
         ScriptInput::Webhook { source, body } => Ok(Some(EventPayload::ManualInject {
@@ -276,7 +276,7 @@ impl BoardRun {
         while let Some(entry) = self.board.script.get(self.cursor).filter(|entry| entry.tick == tick) {
             if let ScriptInput::Edit(cmd) = &entry.input {
                 let minted = &self.minted;
-                apply_gesture(&mut self.engine, cmd.clone(), |h| minted.get(h as usize).copied())
+                apply_gesture(&mut self.engine, cmd.clone(), |h| minted_node(minted, h))
                     .map_err(|source| BoardError::ScriptEditRefused { tick, source })?;
             } else if let Some(payload) = script_payload(&entry.input, tick, &self.minted, &mut self.correlation)? {
                 ingress.push(payload);

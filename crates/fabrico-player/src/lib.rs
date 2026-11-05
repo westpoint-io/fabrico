@@ -27,7 +27,7 @@ use std::fmt;
 
 use fabrico_core::factory::DEFAULT_STACK_LIMIT;
 use fabrico_core::state::{HttpMethod, Node};
-use fabrico_engine::board::{BoardError, OutboundOutcome, parse_board, reverse_same_tick_runs};
+use fabrico_engine::board::{BoardError, OutboundOutcome, minted_node, parse_board, reverse_same_tick_runs};
 use fabrico_engine::gesture::kind_byte;
 use fabrico_engine::render_packet::RenderPacketBuilder;
 use fabrico_engine::scripted::{BoardRun, EffectRecord, EffectSummary};
@@ -208,9 +208,7 @@ fn board_info(run: &BoardRun, builder: &RenderPacketBuilder) -> BoardInfo {
         .map(|caption| CaptionInfo {
             tick: caption.tick,
             highlight: caption.highlight,
-            render_handle: minted
-                .get(caption.highlight as usize)
-                .and_then(|&id| builder.handle_for_node(id)),
+            render_handle: minted_node(minted, caption.highlight).and_then(|id| builder.handle_for_node(id)),
             text: caption.text.clone(),
         })
         .collect();

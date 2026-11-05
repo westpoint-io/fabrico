@@ -405,7 +405,7 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
 pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>, BoardError> {
     let mut minted: Vec<NodeId> = Vec::new();
     for cmd in &board.commands {
-        apply_gesture(engine, cmd.clone(), |h| minted.get(h as usize).copied())?;
+        apply_gesture(engine, cmd.clone(), |h| minted_node(&minted, h))?;
         engine.step(vec![], vec![]);
         minted.extend(engine.core().last_tick.placed.iter().copied());
     }
@@ -418,6 +418,16 @@ pub fn boot_engine(engine: &mut Engine, board: &BoardFile) -> Result<Vec<NodeId>
     let timers = project_timers(engine.session().edit_log());
     engine.set_timers(timers);
     Ok(minted)
+}
+
+/// The node a board's dense handle names, or `None` when the commands minted nothing there.
+///
+/// A handle is a `u64` in the board file, and `usize` is 32 bits on wasm32, so `handle as usize`
+/// would wrap 2^32 + 1 round to handle 1 in a browser while a native build refuses it. Every
+/// lookup of a board handle goes through here, so the two builds agree on which boards load.
+#[must_use]
+pub fn minted_node(minted: &[NodeId], handle: u64) -> Option<NodeId> {
+    usize::try_from(handle).ok().and_then(|i| minted.get(i)).copied()
 }
 
 /// The script with the entries inside each same-tick run in reverse order, and the runs themselves
@@ -435,7 +445,7 @@ pub fn reverse_same_tick_runs(script: &[ScriptEntry]) -> Vec<ScriptEntry> {
 /// commands minted count, so a handle a scripted edit mints later is refused as well.
 fn check_caption_highlights(engine: &Engine, board: &BoardFile, minted: &[NodeId]) -> Result<(), BoardError> {
     for caption in &board.captions {
-        let node = minted.get(caption.highlight as usize).and_then(|&id| engine.core().state.node(id));
+        let node = minted_node(minted, caption.highlight).and_then(|id| engine.core().state.node(id));
         if matches!(node, None | Some(Node::Belt(_) | Node::Wire(_))) {
             return Err(BoardError::CaptionNotAMachine { tick: caption.tick, handle: caption.highlight });
         }
@@ -840,6 +850,23 @@ mod tests {
         for machine in [0, 1, 3, 4] {
             assert!(boot_with_caption(machine).is_ok(), "handle {machine} is a machine");
         }
+    }
+
+    /// A handle past the end of what the commands minted names nothing, however wide it is. On
+    /// wasm32 an `as usize` cast wrapped 2^32 + 1 round to handle 1, so a browser loaded a board
+    /// the native build refused. This pins the checked conversion both builds now share; the
+    /// wasm half is in the player's Node spec.
+    #[test]
+    fn a_handle_past_u32_names_no_minted_node() {
+        let minted = boot_with_caption(0).expect("handle 0 is a machine");
+        assert_eq!(minted_node(&minted, 1), Some(minted[1]));
+        assert_eq!(minted_node(&minted, minted.len() as u64), None);
+        assert_eq!(minted_node(&minted, (1 << 32) + 1), None);
+        assert_eq!(minted_node(&minted, u64::MAX), None);
+        assert_eq!(
+            boot_with_caption((1 << 32) + 1),
+            Err(BoardError::CaptionNotAMachine { tick: 100, handle: (1 << 32) + 1 })
+        );
     }
 
     /// The error names the tick and the handle, so a person can find the line in the file.

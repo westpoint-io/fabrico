@@ -402,6 +402,16 @@ describe('the player interface', () => {
     BOARD_TIMEOUT_MS,
   );
 
+  it('refuses a caption whose highlight is 2^32 past a machine, as the native build does', () => {
+    // usize is 32 bits on wasm32. A cast with `as` turns 2^32 + 1 into handle 1, a real machine,
+    // so the page would load a board the native build refuses.
+    const text = repoFile(DEMO);
+    const wide = text.replace('Caption(tick: 88, highlight: 1,', `Caption(tick: 88, highlight: ${2 ** 32 + 1},`);
+    expect(wide).not.toBe(text);
+    expect(() => module.createBoard(wide)).toThrow(PlayerError);
+    expect(() => module.createBoard(wide)).toThrow(/highlights handle 4294967297/);
+  });
+
   it('answers a destroyed handle with a status error rather than a trap', () => {
     const board = module.createBoard(repoFile(DEMO));
     board.destroy();
