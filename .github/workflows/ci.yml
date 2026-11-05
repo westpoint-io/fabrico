@@ -1143,21 +1143,21 @@ jobs:
   # THE OFFLINE FILE. build-embed.sh also writes frontend/dist-examples/fabrico-examples.html, the
   # one file that runs every example board from disk, and scripts/check-offline-browsers.sh opens
   # it in three browsers: Chromium and Firefox through Playwright (Firefox with its stock file://
-  # policy, proven by a canary first), and WebKitGTK through python gi under Xvfb. The WebKitGTK
+  # policy, proven by a canary first), and WebKitGTK through python gi. Both legs run under Xvfb,
+  # because headless Firefox makes no WebGL context without an X display. The WebKitGTK
   # leg runs on the runner's own /usr/bin/python3, because the gi bindings come from the apt
   # packages, so this job has no setup-python step. libgl1-mesa-dri is listed so Mesa's software
   # GL, which WebGL needs under Xvfb, doesn't depend on what the other packages pull in.
   #
-  # TIME LIMIT. 25 minutes is a first estimate, to be set again from this job's first real run.
-  # Locally the embed build took about 10 seconds, its check about 20 and the three-browser offline
-  # check about 2.5 minutes; the apt and Firefox installs come on top of the Node and Playwright
-  # steps wasm-player also has.
+  # TIME LIMIT. 10 minutes, about 1.7 times this job's first GitHub run: 5 min 55 s in all, of which
+  # the embed build took 17 s, the embed check 163 s, the three-browser offline check 130 s and the
+  # Playwright browser install 24 s.
   embed:
     name: the read-only board embed runs from disk in a browser
     needs: [changes, wasm-player]
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 10
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
     steps:
