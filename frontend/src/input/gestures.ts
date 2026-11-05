@@ -6248,11 +6248,25 @@ export function createGestureController(deps: GestureDeps): GestureController {
         outPress !== null ||
         endPress !== null ||
         rotatePress !== null);
+    // ESCAPE ON A STEP CARD BUTTON RUNS THE WHOLE CHAIN (phase 103 review, iteration 2). Tab
+    // reaches the lesson card's buttons (Keep building, Leave), and the card's rows are the last
+    // of this chain (`onEscapeFallback` ends in TutorialLayer's `escapeRef`). The card used to
+    // take Escape itself while focus was inside it, which skipped every row above it: at the end
+    // of lesson 1 the Belt tool stayed armed and the Source selected while the card closed. With
+    // focus on a card button Escape goes through the same chain as on the page: path, tool,
+    // selection, welcome card, lesson list, then the card.
+    const escapeFromStepCard =
+      matchesShortcut(e, SHORTCUTS.escape) &&
+      !isEditableTarget &&
+      !!active &&
+      typeof active.closest === 'function' &&
+      active.closest('[data-fab-step-card]') !== null;
     // A FOCUSED SCROLL BOX KEEPS ITS KEYS TOO (review WR-B-05): the Help list's box, while it
     // scrolls and has focus, scrolls on Space and the arrows; the board taking Space there toggled
     // play instead. Its attribute is `HelpPanel.tsx`'s `HELP_SCROLL_ATTR`.
     if (
       !boardOwnsEscape &&
+      !escapeFromStepCard &&
       active &&
       (active.tagName === 'BUTTON' ||
         active.tagName === 'INPUT' ||

@@ -2,10 +2,11 @@
 //
 // Docked bottom centre, above the Legend strip when it's open, or moved left of an open inspector
 // that meets that place. It takes no focus and passes the
-// pointer through everywhere but its buttons, so the gesture a step asks for works under it. Its
-// buttons call `preventDefault` on mouse down as the Palette rows do, so a press can't leave focus on
-// a button and trap Space behind the focus guard. Its one key listener is Escape on a finished or
-// swapped card while focus is inside it (see `cardEscape`).
+// pointer through everywhere but its buttons, so the gesture a step asks for works under it. It owns
+// no key listener, and its buttons call `preventDefault` on mouse down as the Palette rows do, so a
+// press can't leave focus on a button and trap Space behind the focus guard. Escape with focus on one
+// of its buttons goes through the board's whole Escape chain (`gestures.ts`, `escapeFromStepCard`),
+// whose last row closes a finished or swapped card.
 //
 // Hook-free, so a node test can call it as a function. `TutorialLayer` holds the state.
 
@@ -166,26 +167,6 @@ function OffScreenRow({ offScreen, drawing, onShowMe }: { offScreen: boolean; dr
   );
 }
 
-/**
- * Escape with focus inside the card. Tab still reaches the card's buttons, and the board's Escape
- * stops at a focused button, so without this a keyboard user on Keep building pressed Escape and
- * nothing happened (review WR-02). A finished card closes as Keep building and a swapped one as
- * Leave, the same rule as TutorialLayer's last row of App's Escape chain. A running card leaves the
- * key alone, so the board still puts an armed tool down: a running lesson ends only on Leave. The
- * press stops here, as `LessonPanel`'s does, so it doesn't also disarm a tool behind the card.
- */
-export function cardEscape(
-  props: Pick<StepCardProps, 'view' | 'onKeepBuilding' | 'onLeave'>,
-  e: { key: string; preventDefault(): void; stopPropagation(): void },
-): void {
-  const escape = e.key === 'Escape';
-  if (escape && props.view.state === 'finished') props.onKeepBuilding();
-  else if (escape && props.view.state === 'swapped') props.onLeave();
-  else return;
-  e.preventDefault();
-  e.stopPropagation();
-}
-
 export function StepCard(props: StepCardProps): JSX.Element {
   const { view } = props;
   // Two buttons don't fit beside the closing sentence, so a finished card sets them under it.
@@ -196,7 +177,6 @@ export function StepCard(props: StepCardProps): JSX.Element {
       {...(view.state === 'running' ? { 'data-fab-offscreen': view.offScreen ? 'true' : 'false' } : {})}
       className="fab-panel"
       aria-label="Lesson step"
-      onKeyDown={(e) => cardEscape(props, e)}
       style={{
         position: 'absolute',
         left: props.left ?? '50%',

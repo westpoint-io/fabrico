@@ -386,45 +386,16 @@ describe('StepCard', () => {
     });
   });
 
-  // Review WR-02: Tab reaches the card's buttons, and the board's Escape stops at a focused button, so the
-  // card's own Escape is the only way a keyboard user there can close a finished or swapped card.
-  describe('Escape with focus inside the card', () => {
-    function press(view: StepCardView, key = 'Escape'): { calls: string[]; prevented: number; stopped: number } {
-      const calls: string[] = [];
-      let prevented = 0;
-      let stopped = 0;
-      const aside = StepCard({
-        view,
-        onLeave: () => calls.push('leave'),
-        onBackToLessons: () => calls.push('back'),
-        onKeepBuilding: () => calls.push('keep'),
-      }) as unknown as El;
-      expect(aside.type).toBe('aside');
-      (aside.props.onKeyDown as (e: unknown) => void)({
-        key,
-        preventDefault: () => (prevented += 1),
-        stopPropagation: () => (stopped += 1),
-      });
-      return { calls, prevented, stopped };
+  // Phase 103 review, iteration 2: the card takes no key itself. Escape with focus on one of its buttons runs the
+  // board's whole chain (`escapeFromStepCard` in gestures.ts), so a tool, a selection or an open list still goes
+  // before the card. A key listener anywhere in the card would take the press ahead of that chain.
+  it('has no key listener on the card or anything inside it, in any state', () => {
+    for (const view of [FINISHED, RUNNING, { state: 'swapped' }, { state: 'starting' }] as StepCardView[]) {
+      const els = elements(StepCard({ view, ...NOOPS }));
+      expect(els.length, `NON-VACUITY: the ${view.state} card renders elements`).toBeGreaterThan(1);
+      const listeners = els.filter((el) => ['onKeyDown', 'onKeyUp', 'onKeyPress'].some((k) => el.props[k] !== undefined));
+      expect(listeners.map((el) => el.type), `the ${view.state} card has no key listener`).toEqual([]);
     }
-
-    it('closes a finished card as Keep building, and stops the press there', () => {
-      expect(press(FINISHED)).toEqual({ calls: ['keep'], prevented: 1, stopped: 1 });
-    });
-
-    it('closes a swapped card as Leave, and stops the press there', () => {
-      expect(press({ state: 'swapped' })).toEqual({ calls: ['leave'], prevented: 1, stopped: 1 });
-    });
-
-    it('leaves a running or starting card alone, so the board still gets the key', () => {
-      expect(press(RUNNING)).toEqual({ calls: [], prevented: 0, stopped: 0 });
-      expect(press({ state: 'starting' })).toEqual({ calls: [], prevented: 0, stopped: 0 });
-    });
-
-    it('does nothing for another key', () => {
-      expect(press(FINISHED, 'Enter')).toEqual({ calls: [], prevented: 0, stopped: 0 });
-      expect(press({ state: 'swapped' }, ' ')).toEqual({ calls: [], prevented: 0, stopped: 0 });
-    });
   });
 
   it('shows the going-back note above the step', () => {

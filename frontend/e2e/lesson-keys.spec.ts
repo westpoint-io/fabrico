@@ -117,6 +117,7 @@ async function toFinishedCard(
   page: Page,
   h: Harness,
   host: ReturnType<typeof configuredHost>,
+  keepHand = false,
 ): Promise<{ source: InjectNode; sink: InjectNode; tick: number }> {
   const { source, sink, tick } = await placeBoth(page, h);
   await toBeltDraw(page, host);
@@ -144,19 +145,24 @@ async function toFinishedCard(
   await expect.poll(async () => (await readProbe(page)).card, { message: 'the delivery finished the lesson' }).toBe('finished');
   await expect(page.locator(CARD).getByRole('heading', { name: 'Lesson done' })).toBeVisible();
   // The lesson leaves the Belt tool in the hand and the Source selected. Put both away, one Escape each, so each
-  // case starts from a finished card with nothing else for Escape to do, and sets up what it needs.
+  // case starts from a finished card with nothing else for Escape to do, and sets up what it needs. A case that
+  // asks to keep the hand gets the card as the lesson leaves it.
   expect(await armedTools(page), 'the lesson left the Belt tool in the hand').toEqual(['Belt']);
   await expect(inspector(page), 'and the Source selected').toBeVisible();
+  if (keepHand) return { source, sink, tick: tick + 4 };
   await escapeTo(page, { armed: [], selected: true, card: 'finished' }, 'the first Escape puts the lesson tool down');
   await escapeTo(page, { armed: [], selected: false, card: 'finished' }, 'the second clears the Source selection');
   return { source, sink, tick: tick + 4 };
 }
 
-async function bootFinished(page: Page): Promise<{ h: Harness; source: InjectNode; sink: InjectNode; tick: number }> {
+async function bootFinished(
+  page: Page,
+  keepHand = false,
+): Promise<{ h: Harness; source: InjectNode; sink: InjectNode; tick: number }> {
   const host = configuredHost();
   const h = await boot(page, host.opts);
   await startLesson(page, h);
-  return { h, ...(await toFinishedCard(page, h, host)) };
+  return { h, ...(await toFinishedCard(page, h, host, keepHand)) };
 }
 
 /**
@@ -269,8 +275,8 @@ test.describe('Escape', () => {
     await expectRow(page, 'In progress', [RESTART]);
   });
 
-  // Review WR-02: Tab reaches the card's buttons, and the board's Escape stops at a focused button. The card
-  // handles Escape itself while focus is inside it.
+  // Review WR-02: Tab reaches the card's buttons. Escape with focus on one runs the board's Escape chain, whose last
+  // row closes a finished or swapped card.
   test('with focus on Keep building, Escape closes the finished card as Keep building', async ({ page }) => {
     await bootFinished(page);
     const keep = page.locator(CARD).getByRole('button', { name: 'Keep building', exact: true });
@@ -281,6 +287,35 @@ test.describe('Escape', () => {
     await expect(page.locator(CARD)).toHaveCount(0);
     await openLessons(page);
     await expectRow(page, 'Done', [RESTART]);
+  });
+
+  // Review iteration 2: Escape on a card button runs the board's whole chain, so the rows above the card go first
+  // there too. Lesson 1 ends with the Belt tool in the hand and the Source selected, which is where a keyboard user
+  // who tabs to Keep building starts. Focus stays on the button for every press, so each one tests that path.
+  test('with focus on Keep building, Escape puts the lesson tool down, then clears the selection, then closes the card', async ({ page }) => {
+    await bootFinished(page, true);
+    const keep = page.locator(CARD).getByRole('button', { name: 'Keep building', exact: true });
+    await keep.focus();
+    await expect(keep, 'focus is on Keep building, as Tab would leave it').toBeFocused();
+
+    await escapeTo(page, { armed: [], selected: true, card: 'finished' }, 'the first Escape puts the Belt tool down');
+    await expect(keep, 'focus is still on Keep building').toBeFocused();
+    await escapeTo(page, { armed: [], selected: false, card: 'finished' }, 'the second clears the Source selection');
+    await expect(keep, 'focus is still on Keep building').toBeFocused();
+    await escapeTo(page, { armed: [], selected: false, card: 'none' }, 'the third closes the card');
+    await openLessons(page);
+    await expectRow(page, 'Done', [RESTART]);
+  });
+
+  test('with focus on Keep building and the lesson list open, Escape closes the list before the card', async ({ page }) => {
+    await bootFinished(page);
+    await openLessons(page);
+    const keep = page.locator(CARD).getByRole('button', { name: 'Keep building', exact: true });
+    await keep.focus();
+    await expect(keep, 'focus is on Keep building, outside the list').toBeFocused();
+
+    await escapeTo(page, { list: false, card: 'finished' }, 'the first Escape closes the list');
+    await escapeTo(page, { list: false, card: 'none' }, 'the second closes the card');
   });
 
   test('with focus on Leave, Escape closes the swapped card as Leave', async ({ page }) => {

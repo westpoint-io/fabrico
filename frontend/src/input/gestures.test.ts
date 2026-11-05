@@ -7180,6 +7180,36 @@ describe('onKey chrome-focus guard (IX-09)', () => {
     expect(rig.overlay.beltPreview.on, 'a BUTTON focused: the first Escape takes the path').toBe(false);
     expect(rig.armedCalls.at(-1), 'and keeps the tool').toEqual({ kind: 'belt' });
   });
+
+  // Phase 103 review, iteration 2: Tab reaches the lesson card's buttons. Escape there runs the whole chain, so
+  // the tool goes first, then the selection, then the fallback that ends in the card's row. A button anywhere
+  // else still keeps Escape once nothing is armed (the N3 case above).
+  it('escape_on_a_step_card_button_runs_the_whole_chain', () => {
+    rig = setupRig(node({ id: 7, cell_x: 2, cell_y: 2 }));
+    selectNode(rig, 2, 2);
+    rig.armBelt();
+    expect(rig.selectedId(), 'NON-VACUITY: a node is selected under the armed Belt').toBe(7);
+    const cardButton = {
+      tagName: 'BUTTON',
+      isContentEditable: false,
+      closest: (sel: string) => (sel === '[data-fab-step-card]' ? {} : null),
+    };
+    setActiveEl(cardButton);
+    fireKey(rig, { key: 'Escape' });
+    expect(rig.armedCalls.at(-1), 'the first Escape puts the Belt down').toBeNull();
+    expect(rig.selectedId(), 'and keeps the selection').toBe(7);
+    fireKey(rig, { key: 'Escape' });
+    expect(rig.selectedId(), 'the second clears the selection').toBeNull();
+    expect(rig.escapeFallback.count, 'and does not reach the card yet').toBe(0);
+    fireKey(rig, { key: 'Escape' });
+    expect(rig.escapeFallback.count, 'the third reaches the fallback, whose last row is the card').toBe(1);
+    // A button outside the card, with the same `closest` shape, keeps Escape: the chain does not run.
+    const outsideButton: typeof cardButton = { ...cardButton };
+    outsideButton.closest = () => null;
+    setActiveEl(outsideButton);
+    fireKey(rig, { key: 'Escape' });
+    expect(rig.escapeFallback.count, 'a button outside the card keeps Escape').toBe(1);
+  });
 });
 
 // IX-07: Escape clears an active node/belt selection when nothing is armed. The
