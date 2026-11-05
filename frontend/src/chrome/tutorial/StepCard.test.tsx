@@ -225,19 +225,37 @@ describe('StepCard', () => {
     );
   });
 
-  it('keeps a hidden note in layout with visibility hidden', () => {
+  // Review WR-03: the note sits inside the atomic live region, where `visibility: hidden` takes it out of the
+  // accessibility tree, and its coming back reads the whole step out again on every pan across the edge.
+  // Opacity hides it from sight and leaves the reader's tree as it was.
+  it('keeps a hidden note in layout and in the accessibility tree, out of sight with opacity 0', () => {
     const view: StepCardView = { ...RUNNING, note: ['Step 1 was already done.'], noteKind: 'skippedOne', noteHidden: true };
     const marked = render(view).filter((el) => el.props['data-fab-step-note'] !== undefined);
     expect(marked, 'the wrapper stays, so the card keeps its height').toHaveLength(1);
     expect(marked[0]?.props['data-fab-step-note']).toBe('skippedOne');
-    expect(styleOf(marked[0]!).visibility).toBe('hidden');
+    expect(styleOf(marked[0]!).opacity).toBe(0);
     expect(textOf(marked[0])).toBe('Step 1 was already done.');
+    for (const el of [marked[0]!, ...elements(marked[0]!.props.children)]) {
+      expect(styleOf(el).visibility, 'nothing in the note leaves the tree by visibility').toBeUndefined();
+      expect(styleOf(el).display, 'or by display').toBeUndefined();
+      expect(el.props['aria-hidden'], 'or by aria-hidden').toBeUndefined();
+    }
   });
 
-  it('sets no visibility on a note that shows', () => {
+  it('gives the live region the same tree with the note hidden or shown, apart from that one opacity', () => {
+    const note = { ...RUNNING, note: ['Step 1 was already done.'], noteKind: 'skippedOne' } as const;
+    const live = (view: StepCardView): El => render(view).find((el) => el.props['aria-live'] === 'polite')!;
+    const shown = live({ ...note, noteHidden: false });
+    const hidden = live({ ...note, noteHidden: true });
+    expect(textOf(hidden)).toBe(textOf(shown));
+    const strip = (el: El): unknown[] => [el.type, Object.keys(el.props).filter((k) => k !== 'children' && k !== 'style')];
+    expect(elements(hidden.props.children).map(strip)).toEqual(elements(shown.props.children).map(strip));
+  });
+
+  it('sets no style on a note that shows', () => {
     const view: StepCardView = { ...RUNNING, note: ['Step 1 was already done.'], noteKind: 'skippedOne' };
     const marked = render(view).filter((el) => el.props['data-fab-step-note'] !== undefined);
-    expect(styleOf(marked[0]!).visibility).toBeUndefined();
+    expect(marked[0]!.props.style).toBeUndefined();
   });
 
   it('renders no note wrapper when there is no note', () => {

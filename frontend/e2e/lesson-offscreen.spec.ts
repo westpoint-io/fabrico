@@ -254,6 +254,41 @@ test.describe('flag', () => {
     await expectFlag(page, false, 'with the Source panned back');
   });
 
+  // Review WR-03: a lesson note held back while the row shows used to leave the accessibility tree with
+  // `visibility: hidden`. Inside the card's atomic live region, its coming back read the whole step out again
+  // on every pan across the edge. The region's tree has to read the same with the flag on and off.
+  test('a held-back lesson note leaves the live region the same for a screen reader as the flag flips', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    const { cell } = await armSourceForFloor(page);
+    h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [sourceAt(cell)] }));
+    await ringAt(page, 'sink-tool');
+    // A keyframe on the same floor with the Source gone: the lesson goes back to step 1 with a note.
+    h.inject(buildPacket({ full: true, tick: 7, generation: 2, swapFloor: 1 }));
+    await expect.poll(async () => (await readProbe(page)).noteKind, { message: 'the going-back note shows' }).toBe('wentBack');
+    if ((await readProbe(page)).stageId === 'source-tool') await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+    const ring = await ringAt(page, 'source-floor');
+    await expectFlag(page, false, 'with the Source spot in view');
+    const NOTE = `${CARD} [data-fab-step-note="wentBack"]`;
+    const LIVE = `${CARD} [aria-live]`;
+    await expect(page.locator(NOTE), 'the note shows').toHaveCSS('opacity', '1');
+    const before = await page.locator(LIVE).ariaSnapshot();
+    expect(before, 'the region holds the note').toContain('needs doing again');
+
+    const free = await freeAreaOf(page);
+    const dx = Math.round(free.left - (ring.x + ring.width) - 20);
+    await panBy(page, dx, 0);
+    await expectFlag(page, true, 'with the Source spot panned out');
+    expect((await readProbe(page)).noteKind, 'the note is still the going-back one').toBe('wentBack');
+    await expect(page.locator(NOTE), 'the note is out of sight').toHaveCSS('opacity', '0');
+    expect(await page.locator(LIVE).ariaSnapshot(), "the reader's tree is the same with the note held back").toBe(before);
+
+    await panBy(page, -dx, 0);
+    await expectFlag(page, false, 'with the Source spot panned back');
+    await expect(page.locator(NOTE), 'the note shows again').toHaveCSS('opacity', '1');
+    expect(await page.locator(LIVE).ariaSnapshot(), 'and the same again with it back').toBe(before);
+  });
+
   test('a port stage: one ring of the drag out of view is enough', async ({ page }) => {
     await toBeltDrawWithSinkOut(page);
     await expectFlag(page, true, "with only the Sink's In disc out of view");

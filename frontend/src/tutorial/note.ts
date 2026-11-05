@@ -8,7 +8,10 @@
 import type { LessonNote } from './machine';
 import type { PhraseToken, Stage } from './types';
 
-/** What the note slot holds. `hidden` keeps it in layout with `visibility: hidden`, so the card's height holds. */
+/**
+ * What the note slot holds. `hidden` keeps it in layout and out of sight (StepCard uses `opacity: 0`,
+ * so a screen reader keeps it), so the card's height holds.
+ */
 export interface NoteSlot {
   /** `refusal`, or a lesson note's kind. */
   kind: string;

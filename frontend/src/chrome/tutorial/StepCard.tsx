@@ -25,8 +25,9 @@ export type StepCardView =
       /** What the note is: `refusal`, a lesson note's kind, or empty with no note. The walk reads it. */
       noteKind: string;
       /**
-       * Kept in layout with `visibility: hidden`, so the card keeps its height: `noteFor` holds a lesson
-       * note back this way while the off-screen row shows.
+       * Kept in layout with `opacity: 0`, so the card keeps its height: `noteFor` holds a lesson note
+       * back this way while the off-screen row shows. Opacity hides it from sight only, so a screen
+       * reader's tree keeps the note and the flag flipping is no live-region change (review WR-03).
        */
       noteHidden: boolean;
       text: readonly PhraseToken[];
@@ -234,7 +235,11 @@ export function StepCard(props: StepCardProps): JSX.Element {
             <>
               {/* No wrapper without a note, so the column's gap doesn't grow the card. */}
               {view.note !== null && (
-                <div data-fab-step-note={view.noteKind} {...(view.noteHidden ? { style: { visibility: 'hidden' } } : {})}>
+                // Hidden from sight with opacity, never `visibility: hidden`: inside this atomic region a
+                // node coming back into the accessibility tree reads the whole step out again, on every
+                // pan across the free area's edge (review WR-03). The note's words don't change, so the
+                // reader has nothing new to say.
+                <div data-fab-step-note={view.noteKind} {...(view.noteHidden ? { style: { opacity: 0 } } : {})}>
                   <Words tokens={view.note} />
                 </div>
               )}
