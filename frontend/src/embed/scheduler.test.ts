@@ -1,5 +1,5 @@
 // The page-wide slot list: at most `cap` boards hold a renderer, the rest wait in arrival order.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createScheduler, createSlots, MAX_LIVE_BOARDS, MOUNT_MARGIN, type ScheduledBoard } from './scheduler';
 
 describe('createSlots', () => {
@@ -191,5 +191,58 @@ describe('createScheduler', () => {
     s.pageHidden(true);
     s.pageHidden(false);
     expect(log).toEqual(['a hidden=true', 'b hidden=true', 'a hidden=false', 'b hidden=false']);
+  });
+
+  it("a board that throws on leave still frees its slot, and the rest of the batch is handled", () => {
+    const log: string[] = [];
+    const s = createScheduler(2);
+    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((n) => fakeBoard(n, log));
+    a.unmount = () => {
+      log.push('a unmount');
+      throw new Error('a trapped player');
+    };
+    for (const board of [a, b, c, d]) s.add(board);
+    s.report([a, b, c].map((board) => ({ board, near: true })));
+    log.length = 0;
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // a and b leave, d comes near: c takes a's slot, then d takes b's.
+      expect(() =>
+        s.report([
+          { board: a, near: false },
+          { board: b, near: false },
+          { board: d, near: true },
+        ]),
+      ).not.toThrow();
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      errors.mockRestore();
+    }
+    expect(log).toEqual(['a unmount', 'c capped=false', 'c mount', 'b unmount', 'd mount']);
+    expect(s.isLive(a)).toBe(false);
+    expect(s.isLive(c)).toBe(true);
+    expect(s.isLive(d)).toBe(true);
+  });
+
+  it('a board that throws on mount or on a tab change leaves the other boards untouched', () => {
+    const log: string[] = [];
+    const s = createScheduler(2);
+    const [a, b] = ['a', 'b'].map((n) => fakeBoard(n, log));
+    a.mount = () => {
+      throw new Error('mount failed');
+    };
+    a.setPageHidden = () => {
+      throw new Error('hide failed');
+    };
+    s.add(a);
+    s.add(b);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      s.report([a, b].map((board) => ({ board, near: true })));
+      s.pageHidden(true);
+    } finally {
+      errors.mockRestore();
+    }
+    expect(log).toEqual(['b mount', 'b hidden=true']);
   });
 });

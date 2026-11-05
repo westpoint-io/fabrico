@@ -58,7 +58,7 @@ import { createPacketPipeline } from '../render/packetPipeline';
 import { createSceneState, type SceneState } from '../render/sceneState';
 import { fitToFactory } from '../render/camera';
 import { bootPixi, type SceneHandle } from '../render/pixiApp';
-import { instantiatePlayer, type BoardFactory, type BoardInfo, type BoardPlayer } from '../player/playerWasm';
+import { instantiatePlayer, PlayerTrapped, type BoardFactory, type BoardInfo, type BoardPlayer } from '../player/playerWasm';
 import { verdictOf, type BadgeState } from './badge';
 import { createCaptionRing, createCaptionStrip, type CaptionRing, type CaptionStrip } from './captions';
 import { createCodeView, type CodeView } from './codeView';
@@ -168,6 +168,11 @@ export class FabricoBoardElement extends HTMLElement {
   #noWebGL = false;
   /** The browser couldn't compile or start the player: its card over the poster. */
   #engineFailed = false;
+  /**
+   * The board's player instance trapped. Every later call on it throws, so nothing reads it any
+   * more, and Restart loads the board on a new instance instead of restarting this one.
+   */
+  #trapped = false;
   /** Waiting for one of the page's slots: the poster with the page-cap line. */
   #capped = false;
   /** The browser took this board's context: the poster with the lost-context line until Play. */
@@ -229,7 +234,8 @@ export class FabricoBoardElement extends HTMLElement {
     this.#stage.append(this.#posterLayer, this.#status);
     this.#bar = createControlBar({
       onRestart: () => {
-        if (this.#lost) this.#redraw((b) => this.#restartBoard(b));
+        if (this.#trapped) this.#reloadTrapped();
+        else if (this.#lost) this.#redraw((b) => this.#restartBoard(b));
         else this.#restart();
       },
       onPlayPause: () => {
@@ -356,10 +362,11 @@ export class FabricoBoardElement extends HTMLElement {
     if (b === null) {
       return { ...base, tick: 0, endTick: 0, bootTick: 0, playing: false, endHash: null };
     }
+    const { tick, endTick } = this.#ticks(b);
     return {
       ...base,
-      tick: b.player.tick(),
-      endTick: b.player.endTick(),
+      tick,
+      endTick,
       bootTick: b.clock.bootTick(),
       playing: b.clock.playing(),
       endHash: b.clock.endHash(),
@@ -496,6 +503,7 @@ export class FabricoBoardElement extends HTMLElement {
   #onFault(name: string, error: unknown): void {
     const fault = this.#board?.clock.fault();
     const message = fault?.message ?? (error instanceof Error ? error.message : String(error));
+    if (error instanceof PlayerTrapped) this.#trapped = true;
     console.warn(`fabrico-board "${name}" stopped`, error);
     this.#showError(errorCopy(classifyPlayerError(message, 'step'), { message, tick: fault?.tick ?? 0 }), 'stopped');
   }
@@ -508,11 +516,42 @@ export class FabricoBoardElement extends HTMLElement {
 
   /** Restart a board with a view: it plays again, unless the reader prefers reduced motion. */
   #restartBoard(b: Board): void {
+    if (this.#trapped) {
+      this.#reloadTrapped();
+      return;
+    }
     if (this.#state === 'stopped') {
       this.#hideStatus();
       this.#state = 'running';
     }
     b.clock.restart(!this.#reducedMotion);
+  }
+
+  /**
+   * Restart a board whose player instance trapped. That instance takes no more calls, so the board
+   * part goes with its renderer, and the board loads again on a new instance. The board keeps its
+   * slot, and plays from its boot tick once loaded unless the reader prefers reduced motion, as
+   * Restart does. Out of the margin, it loads when it next gets a slot.
+   */
+  #reloadTrapped(): void {
+    this.#run += 1;
+    this.#afterRedraw = null;
+    this.#lost = false;
+    this.#wasPlaying = null;
+    this.#resumeOnShow = false;
+    this.#teardownView();
+    this.#dropBoard();
+    this.#state = 'loading';
+    this.#showLoading();
+    this.#error = null;
+    this.#syncPoster();
+    this.#refresh();
+    if (!this.#inSlot) return;
+    const generation = this.#generation;
+    const run = ++this.#run;
+    void this.#mountView(generation, run).catch((error: unknown) => {
+      console.error(`fabrico-board "${this.#name()}" failed to restart`, error);
+    });
   }
 
   /** Waiting on the page cap, or not any more. */
@@ -603,6 +642,21 @@ export class FabricoBoardElement extends HTMLElement {
     this.#view?.handle.setRenderPace(speed);
   }
 
+  /**
+   * The board's tick and end tick. A trapped player can't answer, so those come from the tick the
+   * clock recorded at the fault and the end tick the board booted with.
+   */
+  #ticks(b: Board): { tick: number; endTick: number } {
+    if (!this.#trapped) {
+      try {
+        return { tick: b.player.tick(), endTick: b.player.endTick() };
+      } catch {
+        // Fall through to what the board part already knows.
+      }
+    }
+    return { tick: b.clock.fault()?.tick ?? b.clock.bootTick(), endTick: b.info.endTick };
+  }
+
   /** Bring the control bar in line with the board. */
   #refresh(): void {
     const b = this.#board;
@@ -610,11 +664,12 @@ export class FabricoBoardElement extends HTMLElement {
     // A lost board keeps its controls: pressing one draws it again.
     const waiting = b !== null && this.#view === null && this.#state === 'running' && !this.#lost;
     const state = waiting ? 'loading' : this.#state;
+    const ticks = b === null ? null : this.#ticks(b);
     this.#bar.update({
       state,
-      tick: b?.player.tick() ?? 0,
+      tick: ticks?.tick ?? 0,
       // The bundled info's end tick sizes the tick counter's slot before the player loads.
-      endTick: b?.player.endTick() ?? bundledInfo(this.#name())?.endTick ?? 0,
+      endTick: ticks?.endTick ?? bundledInfo(this.#name())?.endTick ?? 0,
       bootTick: b?.clock.bootTick() ?? 0,
       playing: b?.clock.playing() ?? false,
       holding: (b?.clock.caption() ?? null) !== null,
@@ -820,6 +875,7 @@ export class FabricoBoardElement extends HTMLElement {
     const b = this.#board;
     if (b === null) return;
     this.#board = null;
+    this.#trapped = false;
     b.clock.stop();
     try {
       b.player.destroy();

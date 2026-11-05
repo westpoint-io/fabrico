@@ -104,27 +104,40 @@ export function createScheduler(cap = MAX_LIVE_BOARDS): Scheduler & {
   const slots = createSlots<ScheduledBoard>(cap);
   const watched = new Set<ScheduledBoard>();
 
+  // One board's throw stays with that board: it is logged, and the slot list and every other
+  // board in the batch carry on. A throw here would otherwise end the observer callback's loops
+  // and leave the slot it was freeing taken.
+  const safely = (what: string, call: () => void): void => {
+    try {
+      call();
+    } catch (error) {
+      console.error(`fabrico-board ${what} failed`, error);
+    }
+  };
+
   const grant = (board: ScheduledBoard | null): void => {
     if (board === null) return;
-    board.setCapped(false);
-    board.mount();
+    safely('mount', () => {
+      board.setCapped(false);
+      board.mount();
+    });
   };
 
   const leave = (board: ScheduledBoard): void => {
     if (slots.isQueued(board)) {
       slots.release(board);
-      board.setCapped(false);
+      safely('setCapped', () => board.setCapped(false));
       return;
     }
     if (!slots.isLive(board)) return;
-    board.unmount();
+    safely('unmount', () => board.unmount());
     grant(slots.release(board));
   };
 
   const enter = (board: ScheduledBoard): void => {
     if (slots.isLive(board) || slots.isQueued(board)) return;
-    if (slots.want(board) === 'mount') board.mount();
-    else board.setCapped(true);
+    if (slots.want(board) === 'mount') safely('mount', () => board.mount());
+    else safely('setCapped', () => board.setCapped(true));
   };
 
   return {
@@ -142,7 +155,7 @@ export function createScheduler(cap = MAX_LIVE_BOARDS): Scheduler & {
     },
     isLive: (board) => slots.isLive(board),
     pageHidden(hidden) {
-      for (const board of watched) board.setPageHidden(hidden);
+      for (const board of watched) safely('setPageHidden', () => board.setPageHidden(hidden));
     },
     report(entries) {
       // The last report per board in a batch is the current one. Leaves go first, so a fast
