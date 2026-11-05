@@ -447,18 +447,22 @@ export const LAYOUT_CSS = `
   line-height: 1;
 }
 .badge-glyph { color: var(--fab-destructive); flex: none; }
-/* The hash and the verdict wrap as two words. When the badge can't hold
-   "final state xxxxxxxx order-dependent" on one line, about 306 px, the verdict drops under the
-   hash inside the badge rather than pushing the badge past the frame. Two lines are 28 px, so the
-   badge stays 44 px tall. The verdict's text starts with a space so textContent reads as words;
-   nowrap collapses it at the start of the verdict's line and the gap does the spacing. */
+/* The hash and the verdict are two nowrap words with a real space between them, and ordinary line
+   breaking wraps at that space. When the badge can't hold "final state xxxxxxxx order-dependent"
+   on one line, about 302 px, the verdict drops under the hash inside the badge rather than
+   pushing the badge past the frame. Two lines are 28 px, so the badge stays 44 px tall. The space
+   hangs at the end of the first line, so the wrapped verdict starts flush with the hash, and the
+   accessibility tree keeps it, which a flex gap between the words would not.
+
+   The word spacing takes the space between the two words down from one character to the xs gap.
+   The spans set it back, so "final state" keeps its normal space. */
 .badge-words {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: var(--fab-space-xs);
+  display: block;
+  white-space: normal;
+  word-spacing: calc(var(--fab-space-xs) - 1ch);
   min-width: 0;
 }
-.badge-hash, .badge-verdict { white-space: nowrap; }
+.badge-hash, .badge-verdict { white-space: nowrap; word-spacing: normal; }
 .badge.is-failure .badge-verdict { color: var(--fab-destructive); }
 `;
 

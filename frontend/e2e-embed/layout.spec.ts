@@ -242,6 +242,26 @@ async function readBadge(page: Page, width: number): Promise<BadgeRead> {
   }, width);
 }
 
+/**
+ * The badge's text as Chromium's accessibility tree holds it: the StaticText nodes under the
+ * badge's status node, joined in order. A screen reader announces this, not textContent. The tree
+ * is built from laid-out text, so a space the stylesheet collapses is missing here even though
+ * textContent still has it.
+ */
+async function badgeAxText(page: Page, width: number): Promise<string> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const { result } = await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('[data-badge-width="${width}"] fabrico-board').shadowRoot.querySelector('.bar .badge')`,
+    });
+    expect(result.objectId, `${width} px: the badge element resolves over CDP`).toBeTruthy();
+    const { nodes } = await cdp.send('Accessibility.queryAXTree', { objectId: result.objectId, role: 'StaticText' });
+    return nodes.map((n) => String(n.name?.value ?? '')).join('');
+  } finally {
+    await cdp.detach();
+  }
+}
+
 test('the order-dependent badge stays inside the bar at 328, 340 and 360 px', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const errors = watchPageErrors(page);
@@ -268,9 +288,12 @@ test('the order-dependent badge stays inside the bar at 328, 340 and 360 px', as
     );
     // The widest text is what this case is for, so a badge that reads anything else proves nothing.
     expect(read.verdict, `${at}: the reversed run ends off the moved pin`).toBe('order-dependent');
-    // The run itself ended where it always does. Wrapping is visual only: a screen reader still
-    // hears the words with a space between them.
-    expect(read.text, `${at}: the badge's text`).toBe(`final state ${pin.slice(0, 8)} order-dependent`);
+    // The run itself ended where it always does. The probe reads textContent.
+    const words = `final state ${pin.slice(0, 8)} order-dependent`;
+    expect(read.text, `${at}: the badge's textContent`).toBe(words);
+    // Wrapping is visual only: what a screen reader hears keeps a space between the hash and the
+    // verdict, on one line and wrapped.
+    expect(await badgeAxText(page, w), `${at}: the badge's text in the accessibility tree`).toBe(words);
     // Inside the bar, not only inside the frame's outer edge: a badge that runs into the frame's
     // padding sits against the bezel ring.
     expect(read.badge.left, `${at}: the badge starts inside the bar`).toBeGreaterThanOrEqual(read.bar.left);

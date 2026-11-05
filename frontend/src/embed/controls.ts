@@ -160,10 +160,15 @@ export function createControlBar(handlers: BarHandlers): ControlBar {
   badgeHash.textContent = `${BADGE_LABEL} ${BADGE_PLACEHOLDER}`;
   const badgeVerdict = document.createElement('span');
   badgeVerdict.className = 'badge-verdict';
-  // The two words sit in one span, so the flex gap falls only between the glyph and the text.
+  // A real space between the hash and the verdict, as its own text node. Line breaking wraps the
+  // verdict at it, and the accessibility tree keeps it, so a screen reader hears two words. A
+  // space inside either span would sit at the edge of a nowrap box and collapse out of the tree.
+  // It is empty until there is a verdict, so textContent always equals badgeText().
+  const badgeSpace = document.createTextNode('');
+  // The words sit in one span, so the flex gap falls only between the glyph and the text.
   const badgeWords = document.createElement('span');
   badgeWords.className = 'badge-words';
-  badgeWords.append(badgeHash, badgeVerdict);
+  badgeWords.append(badgeHash, badgeSpace, badgeVerdict);
   badge.append(badgeGlyph, badgeWords);
   readout.append(speedLabel, badge);
 
@@ -227,10 +232,10 @@ export function createControlBar(handlers: BarHandlers): ControlBar {
     const hashPart =
       verdict === null ? full : `${BADGE_LABEL} ${(view.badge.hash ?? '').slice(0, BADGE_HASH_CHARS)}`;
     setText(badgeHash, hashPart);
-    // The space keeps the badge's textContent equal to badgeText() for screen readers and the
-    // probe. The stylesheet collapses it, and the gap between the two words does the spacing, so a
-    // verdict that wraps under the hash starts flush with it.
-    setText(badgeVerdict, verdict === null ? '' : ` ${verdict}`);
+    // A wrapped verdict starts flush with the hash, because the space hangs at the end of the
+    // hash's line.
+    setText(badgeSpace, verdict === null ? '' : ' ');
+    setText(badgeVerdict, verdict === null ? '' : verdict);
     if (verdict !== lastVerdict) {
       lastVerdict = verdict;
       const failure = isFailure(verdict);
