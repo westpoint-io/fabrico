@@ -18,6 +18,10 @@
 // twice" pair: a board whose run doesn't depend on arrival order shows the same hash on both at
 // every tick.
 //
+// `name` picks the board. A page framework that reuses the element changes it in place, so a
+// change on a connected board drops the board it loaded and loads the named one, as a disconnect
+// and a connect would.
+//
 // States: `loading` until the player has booted the board (the stage says "Loading board" and
 // every control is disabled), then `running`. A name with no board, an old board format or a
 // board the player refuses puts an error card in the stage and leaves the controls disabled. An
@@ -147,7 +151,7 @@ interface View {
 
 export class FabricoBoardElement extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ['height', 'no-code'];
+    return ['height', 'no-code', 'name'];
   }
 
   readonly #stage: HTMLDivElement;
@@ -215,6 +219,8 @@ export class FabricoBoardElement extends HTMLElement {
   #stopWaiting: (() => void) | null = null;
   /** Bumped on every connect and disconnect, so a mount that finishes late knows it is stale. */
   #generation = 0;
+  /** Between connectedCallback and disconnectedCallback. */
+  #connected = false;
 
   constructor() {
     super();
@@ -280,6 +286,7 @@ export class FabricoBoardElement extends HTMLElement {
   }
 
   connectedCallback(): void {
+    this.#connected = true;
     injectFonts();
     this.#order = orderOf(this.getAttribute('order'));
     this.#orderStrip.hidden = this.#order === null;
@@ -306,6 +313,7 @@ export class FabricoBoardElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.#connected = false;
     this.#generation += 1;
     this.#stopWaiting?.();
     this.#stopWaiting = null;
@@ -316,9 +324,16 @@ export class FabricoBoardElement extends HTMLElement {
     this.#dropBoard();
   }
 
-  attributeChangedCallback(name: string): void {
+  attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (name === 'height') this.#applyHeight();
     if (name === 'no-code') this.#applyCode();
+    // The badge, the poster and the probe read `name` live, so a board left running under a new
+    // name would be graded against the other board's manifest line. Load the named board instead.
+    // Before the first connect (an upgrade reports every attribute) there is nothing to reload.
+    if (name === 'name' && oldValue !== newValue && this.#connected) {
+      this.disconnectedCallback();
+      this.connectedCallback();
+    }
   }
 
   /** A plain-data snapshot for tests. */

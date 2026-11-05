@@ -177,6 +177,8 @@ function fakeHandle(stage: HTMLElement, scene: unknown) {
 let frames: ((now: number) => void)[] = [];
 let players: FakePlayer[] = [];
 let handles: ReturnType<typeof fakeHandle>[] = [];
+/** The text and order of every board the element created. */
+let created: { text: string; order: string }[] = [];
 
 /** Run every animation frame queued so far, at `now`. */
 function runFrames(now: number): void {
@@ -200,7 +202,9 @@ beforeEach(() => {
   players = [];
   handles = [];
   frames = [];
-  h.createBoard = () => {
+  created = [];
+  h.createBoard = (text, options) => {
+    created.push({ text, order: options?.order ?? 'forward' });
     const p = new FakePlayer();
     players.push(p);
     return p;
@@ -373,5 +377,33 @@ describe('a board whose view or board part fails to boot', () => {
     expect(players[0].destroyed).toBe(true);
     expect(h.core!.isLive(slot)).toBe(false);
     expect(handles).toHaveLength(0);
+  });
+});
+
+describe('the name attribute', () => {
+  it('renaming a connected board loads the new board on a new player', async () => {
+    h.texts.set('other', 'other board text');
+    const { el } = await mountBoard();
+    expect(created.map((c) => c.text)).toEqual(['board text']);
+    el.setAttribute('name', 'other');
+    // The board connects again; the page's observer reports it once at once.
+    const slot = h.added[h.added.length - 1];
+    h.core!.report([{ board: slot, near: true }]);
+    await settle();
+    expect(created.map((c) => c.text)).toEqual(['board text', 'other board text']);
+    expect(players[0].destroyed).toBe(true);
+    const probe = el.fabricoProbe();
+    expect(probe.id).toBe('other');
+    expect(probe.state).toBe('running');
+  });
+
+  it('setting the same name again changes nothing', async () => {
+    const { el } = await mountBoard();
+    const adds = h.added.length;
+    el.setAttribute('name', 'stub');
+    await settle();
+    expect(h.added.length).toBe(adds);
+    expect(players).toHaveLength(1);
+    expect(players[0].destroyed).toBe(false);
   });
 });
