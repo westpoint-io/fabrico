@@ -5,8 +5,13 @@
 //
 // It runs on the board's own `app.ticker`, so it stops when the board's Pixi application is
 // destroyed. The element set is rebuilt in the same frame a keyframe lands (a restart sends one),
-// so no chip ever sits over a node whose handle changed. The stage clips the layer, so a chip at
-// the edge never spills onto the control bar. Text goes in with `textContent` only.
+// so no chip ever sits over a node whose handle changed. A board's script can also edit the grid
+// between keyframes (a Configure, a Delete and a Place on one tick, a Rotate), and each packet
+// that places or removes a node swaps or drops its object in the scene's map. So each frame
+// compares the node objects with the ones it last read: on any change it rebuilds when the set
+// of chips and words differs, and moves every element, since a read-only board's camera never
+// moves to do it. The stage clips the layer, so a chip at the edge never spills onto the control
+// bar. Text goes in with `textContent` only.
 
 import { CELL, INSET } from '../../shared/geometry';
 import { effectiveBox } from '../protocol/footprint';
@@ -62,14 +67,27 @@ export function createLabelOverlay(stage: HTMLElement, handle: SceneHandle): Lab
 
   let entries: Entry[] = [];
   let builtFor = -1;
-  let builtNodes = -1;
+  /** What the elements show: each chip's or words' handle, kind and text, as one string. */
+  let builtShape = '';
+  /** The node objects the overlay last read, by handle. */
+  let seen = new Map<number, OverlayNode>();
   let last: { cam: CameraSnapshot; w: number; h: number } | null = null;
 
   const nodes = (): Map<number, OverlayNode> => handle.sceneState.nodes as unknown as Map<number, OverlayNode>;
 
-  const rebuild = (): void => {
+  /** The chips and words these nodes call for. Equal strings mean the same elements would do. */
+  const shapeOf = (sorted: readonly OverlayNode[]): string =>
+    JSON.stringify(
+      sorted.flatMap((n) => {
+        if (namesChip(n.kind)) return [[n.id, 'chip', n.kind]];
+        const text = n.label?.text ?? '';
+        if (n.kind === machine_kind.LABEL && text !== '') return [[n.id, 'words', n.w, n.h, text]];
+        return [];
+      }),
+    );
+
+  const rebuild = (sorted: readonly OverlayNode[], shape: string): void => {
     const next: Entry[] = [];
-    const sorted = [...nodes().values()].sort((a, b) => a.id - b.id);
     for (const n of sorted) {
       if (namesChip(n.kind)) {
         const el = document.createElement('div');
@@ -91,13 +109,28 @@ export function createLabelOverlay(stage: HTMLElement, handle: SceneHandle): Lab
     }
     root.replaceChildren(...next.map((e) => e.el));
     entries = next;
-    builtFor = handle.sceneState.keyframes;
-    builtNodes = nodes().size;
-    last = null;
+    builtShape = shape;
+  };
+
+  /** Did any node change since the last frame: placed, removed, or re-sent by a packet? */
+  const nodesChanged = (map: Map<number, OverlayNode>): boolean => {
+    if (map.size !== seen.size) return true;
+    for (const [id, n] of map) if (seen.get(id) !== n) return true;
+    return false;
   };
 
   const project = (): void => {
-    if (handle.sceneState.keyframes !== builtFor || nodes().size !== builtNodes) rebuild();
+    const map = nodes();
+    const keyframe = handle.sceneState.keyframes !== builtFor;
+    if (keyframe || nodesChanged(map)) {
+      seen = new Map(map);
+      builtFor = handle.sceneState.keyframes;
+      const sorted = [...map.values()].sort((a, b) => a.id - b.id);
+      const shape = shapeOf(sorted);
+      if (keyframe || shape !== builtShape) rebuild(sorted, shape);
+      // A node may have moved or turned with the camera still, so place every element again.
+      last = null;
+    }
     const cam = handle.cameraSnapshot();
     const w = root.clientWidth;
     const h = root.clientHeight;
@@ -105,7 +138,6 @@ export function createLabelOverlay(stage: HTMLElement, handle: SceneHandle): Lab
       return;
     }
     last = { cam, w, h };
-    const map = nodes();
     for (const e of entries) {
       const n = map.get(e.id);
       if (n === undefined) {
