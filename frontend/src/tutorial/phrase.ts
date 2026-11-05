@@ -78,7 +78,8 @@ function labelPattern(label: string): RegExp {
 }
 
 /**
- * One finding for each table word a lesson types as text. The words on the Timer, Trigger, Apply and
+ * One finding for each table word a lesson types as text, in a stage's text, its coaching lines or the
+ * closing. The words on the Timer, Trigger, Apply and
  * Play controls aren't in either table, so they're allowed: they're the controls' own labels, which
  * the walk test reads off the real controls.
  */
@@ -95,7 +96,15 @@ export function auditLessonWords(lessons: readonly Lesson[], tables: WordTables 
   };
   for (const lesson of lessons) {
     for (const step of lesson.steps) {
-      for (const stage of step.stages) audit(`${lesson.id} step ${step.id} stage ${stage.id}`, stage.text);
+      for (const stage of step.stages) {
+        audit(`${lesson.id} step ${step.id} stage ${stage.id}`, stage.text);
+        // A coaching line is lesson words on the card too (review WR-04). Own keys only, as `coachLine` reads them.
+        const coach = stage.coach ?? {};
+        for (const tag of Object.keys(coach)) {
+          const line = coach[tag];
+          if (line !== undefined) audit(`${lesson.id} step ${step.id} stage ${stage.id} coach ${tag}`, line);
+        }
+      }
     }
     audit(`${lesson.id} closing`, lesson.closing);
   }

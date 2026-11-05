@@ -149,6 +149,26 @@ describe('auditLessonWords: a table word typed as text', () => {
     expect(auditLessonWords([planted])).toHaveLength(1);
   });
 
+  // Review WR-04: a coaching line is lesson words on the card, so a typed machine name there would miss a rename.
+  it('reads a coaching line, and names the stage and the tag', () => {
+    const [step, ...rest] = YOUR_FIRST_LINE.steps;
+    const [stage, ...stages] = step!.stages;
+    const planted: Lesson = {
+      ...YOUR_FIRST_LINE,
+      steps: [{ ...step!, stages: [{ ...stage!, coach: { FootprintCollision: ["That cell is taken, so the Sink wasn't placed."] } }, ...stages] }, ...rest],
+    };
+    const findings = auditLessonWords([planted]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(`stage ${stage!.id} coach FootprintCollision`);
+    expect(findings[0]).toContain('"Sink"');
+  });
+
+  it("finds nothing in a coaching line that names its machine with a token, as lesson 1's does", () => {
+    const coached = YOUR_FIRST_LINE.steps.flatMap((step) => step.stages).filter((stage) => stage.coach !== undefined);
+    expect(coached.length, 'lesson 1 has a coaching line for this case to read').toBeGreaterThan(0);
+    expect(auditLessonWords([YOUR_FIRST_LINE])).toEqual([]);
+  });
+
   it('reads the closing text as well as the stages', () => {
     expect(auditLessonWords([lessonWith(['Well built.'], ['A Belt carries them.'])])).toHaveLength(1);
   });
