@@ -230,6 +230,11 @@ export async function expectBoardDrawingAt(page: Page, selector: string, context
       intervals: [POLL_MS],
     })
     .toBeGreaterThanOrEqual(2);
+  // A dropped packet stops the board with a card, but a decode error has no console line, so
+  // read the counters as well.
+  const packets = await readProbeAt(page, selector);
+  expect(packets.decodeErrors, `${context}: ${name} refused no render packet`).toBe(0);
+  expect(packets.packetsApplied, `${context}: ${name} applied its render packets`).toBeGreaterThan(0);
 
   const deadline = Date.now() + BUDGET_MS;
   const seen = new Map<string, string>();

@@ -58,7 +58,7 @@
 // bar's place, and the caption strip and effect log go, since nothing runs. When the browser can't
 // compile or start the player module, the ENGINE DID NOT START card sits over the poster.
 
-import { createPacketPipeline } from '../render/packetPipeline';
+import { createPacketPipeline, type PacketPipeline } from '../render/packetPipeline';
 import { createSceneState, type SceneState } from '../render/sceneState';
 import { fitToFactory } from '../render/camera';
 import { bootPixi, type SceneHandle } from '../render/pixiApp';
@@ -137,6 +137,8 @@ interface Board {
   clock: BoardClock;
   /** Pixi ticker callbacks across every mount, for the probe. */
   frames: { n: number };
+  /** The path each render packet takes into the scene; its counters go on the probe. */
+  pipeline: PacketPipeline;
   /** Has the board been mounted and started once? The first mount autoplays. */
   started: boolean;
 }
@@ -366,6 +368,7 @@ export class FabricoBoardElement extends HTMLElement {
       posterShown: !this.#posterLayer.hidden && this.#poster !== null && !this.#poster.hidden,
       posterAlt: this.#posterLayer.hidden || this.#poster === null || this.#poster.hidden ? null : this.#poster.alt,
       frames: b?.frames.n ?? 0,
+      ...(b?.pipeline.stats() ?? { packetsApplied: 0, decodeErrors: 0 }),
       cameraSnapshot: v?.handle.cameraSnapshot() ?? null,
       beltTiles:
         v === null
@@ -797,17 +800,36 @@ export class FabricoBoardElement extends HTMLElement {
     try {
       const info = player.boardInfo();
       const scene = createSceneState();
-      const pipeline = createPacketPipeline(() => scene);
+      let dropped: { error: unknown } | null = null;
+      const pipeline = createPacketPipeline(() => scene, {
+        onDropped: (error) => {
+          dropped ??= { error };
+        },
+      });
       const source = createWasmPacketSource(player);
       source.onPacket((bytes) => pipeline.handle(bytes));
+      // Every queued packet into the scene. A packet the scene couldn't take stops the board: a
+      // read-only board has no host to resync from, and a scene missing a diff would draw the
+      // wrong picture under a badge that grades the engine's own hash. The throw reaches the
+      // clock, which stops with the ENGINE STOPPED card; Restart sends a keyframe that resets
+      // the scene.
+      const drainPackets = (): void => {
+        dropped = null;
+        source.drain();
+        const failed = dropped as { error: unknown } | null;
+        if (failed !== null) {
+          const reason = failed.error instanceof Error ? failed.error.message : String(failed.error);
+          throw new Error(`the board couldn't draw a render packet (${reason})`);
+        }
+      };
       // The keyframe the player queued at create, into the kept scene.
-      source.drain();
+      drainPackets();
       this.#layOut(info);
       this.#drainEffects(player);
       const clock = createBoardClock({
         player,
         drain: () => {
-          source.drain();
+          drainPackets();
           this.#drainEffects(player);
         },
         onRestart: () => this.#log.clear(),
@@ -816,7 +838,7 @@ export class FabricoBoardElement extends HTMLElement {
         trace: traceRequested(),
       });
       clock.setSpeed(this.#speed);
-      this.#board = { player, info, scene, clock, frames: { n: 0 }, started: false };
+      this.#board = { player, info, scene, clock, frames: { n: 0 }, pipeline, started: false };
       return this.#board;
     } catch (error) {
       try {

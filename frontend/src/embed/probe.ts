@@ -55,6 +55,13 @@ export interface BoardProbe {
   playing: boolean;
   /** Pixi ticker callbacks, summed over every mount since connect. */
   frames: number;
+  /** Render packets the board's scene applied since connect, the keyframe at create included. */
+  packetsApplied: number;
+  /**
+   * Render packets the decoder refused since connect. Any dropped packet stops the board, so a
+   * healthy board reads 0.
+   */
+  decodeErrors: number;
   endHash: string | null;
   /** The selected speed, 0.25 to 4. */
   speed: number;

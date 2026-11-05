@@ -434,3 +434,32 @@ describe('the badge on a reversed board', () => {
     expect(el.shadowRoot!.querySelector('.badge')!.classList.contains('is-failure')).toBe(true);
   });
 });
+
+describe('a packet the board cannot draw', () => {
+  it('stops the board with a card, counts the drop on the probe, and Restart resyncs', async () => {
+    const { el } = await mountBoard();
+    expect(el.fabricoProbe()).toMatchObject({ packetsApplied: 0, decodeErrors: 0 });
+    // Truncated bytes: the decoder refuses them with a DecodeError.
+    players[0].packets.push(new Uint8Array([]));
+    runFrames(0);
+    runFrames(1000);
+    const probe = el.fabricoProbe();
+    expect(probe.decodeErrors).toBe(1);
+    expect(probe.playing).toBe(false);
+    expect(probe.state).toBe('error');
+    expect(probe.error?.heading).toBe('ENGINE STOPPED');
+    expect(probe.error?.body).toContain("couldn't draw a render packet");
+    expect(control(el, 'restart').disabled).toBe(false);
+    expect(control(el, 'step').disabled).toBe(true);
+
+    // The player is fine, so Restart restarts it on the same instance.
+    control(el, 'restart').click();
+    expect(h.modules).toBe(1);
+    const after = el.fabricoProbe();
+    expect(after.state).toBe('running');
+    expect(after.error).toBeNull();
+    runFrames(0);
+    runFrames(1000);
+    expect(el.fabricoProbe().endHash).toBe(HASH);
+  });
+});

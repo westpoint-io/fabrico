@@ -8,7 +8,9 @@
 // with no console output (the decoder is bounds-checked, and a malformed frame is not a renderer
 // fault). Any other error is a real fault in a hook or in `applyPacket`, so it goes to
 // `console.error`. Nothing is rethrown, because the caller is a transport callback and a throw
-// there would stop every later packet.
+// there would stop every later packet. A caller that must act on a dropped packet passes
+// `onDropped`: the read-only board stops on one, because it has no host to resync from and a
+// scene missing a diff draws the wrong picture. The app passes none and resyncs as before.
 
 import { DecodeError, decodeRenderPacket, type RenderPacket } from '../protocol/decode';
 import { applyPacket, isStaleDiff, type SceneState } from './sceneState';
@@ -20,6 +22,12 @@ import { applyPacket, isStaleDiff, type SceneState } from './sceneState';
 export interface PacketPipelineHooks<C = unknown> {
   beforeApply?(packet: RenderPacket, scene: SceneState): C;
   afterApply?(packet: RenderPacket, scene: SceneState, ctx: C): void;
+  /**
+   * Called with a dropped packet's error, after the pipeline counted or logged it: a
+   * `DecodeError`, or a throw from a hook or from `applyPacket`. It must not throw, since
+   * `handle` never does.
+   */
+  onDropped?(error: unknown): void;
 }
 
 /** The pipeline's two counters, as a fresh plain object per read. */
@@ -60,6 +68,7 @@ export function createPacketPipeline<C = undefined>(
         } else {
           console.error('packet handler failed', e);
         }
+        hooks.onDropped?.(e);
       }
     },
     stats: (): PacketPipelineStats => ({ packetsApplied, decodeErrors }),

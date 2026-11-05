@@ -80,4 +80,29 @@ describe('createPacketPipeline', () => {
     expect(log).toHaveBeenCalledWith('packet handler failed', boom);
     expect(p.stats()).toEqual({ packetsApplied: 1, decodeErrors: 0 });
   });
+
+  it('hands every dropped packet to onDropped, a decode error and any other, after counting it', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dropped: unknown[] = [];
+    const truncated = new DecodeError('truncated');
+    decodeRenderPacket.mockImplementationOnce(() => {
+      throw truncated;
+    });
+    const boom = new Error('apply broke');
+    applyPacket.mockImplementationOnce(() => {
+      throw boom;
+    });
+    decodeRenderPacket.mockReturnValue({ full: true, generation: 0, tick: 0 });
+    const p = createPacketPipeline(() => createSceneState(), {
+      onDropped: (error) => {
+        dropped.push(error);
+        expect(p.stats().decodeErrors).toBe(1);
+      },
+    });
+    p.handle(BYTES);
+    p.handle(BYTES);
+    p.handle(BYTES);
+    expect(dropped).toEqual([truncated, boom]);
+    expect(p.stats()).toEqual({ packetsApplied: 2, decodeErrors: 1 });
+  });
 });
