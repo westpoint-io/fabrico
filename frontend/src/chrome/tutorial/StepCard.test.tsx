@@ -368,6 +368,47 @@ describe('StepCard', () => {
     });
   });
 
+  // Review WR-02: Tab reaches the card's buttons, and the board's Escape stops at a focused button, so the
+  // card's own Escape is the only way a keyboard user there can close a finished or swapped card.
+  describe('Escape with focus inside the card', () => {
+    function press(view: StepCardView, key = 'Escape'): { calls: string[]; prevented: number; stopped: number } {
+      const calls: string[] = [];
+      let prevented = 0;
+      let stopped = 0;
+      const aside = StepCard({
+        view,
+        onLeave: () => calls.push('leave'),
+        onBackToLessons: () => calls.push('back'),
+        onKeepBuilding: () => calls.push('keep'),
+      }) as unknown as El;
+      expect(aside.type).toBe('aside');
+      (aside.props.onKeyDown as (e: unknown) => void)({
+        key,
+        preventDefault: () => (prevented += 1),
+        stopPropagation: () => (stopped += 1),
+      });
+      return { calls, prevented, stopped };
+    }
+
+    it('closes a finished card as Keep building, and stops the press there', () => {
+      expect(press(FINISHED)).toEqual({ calls: ['keep'], prevented: 1, stopped: 1 });
+    });
+
+    it('closes a swapped card as Leave, and stops the press there', () => {
+      expect(press({ state: 'swapped' })).toEqual({ calls: ['leave'], prevented: 1, stopped: 1 });
+    });
+
+    it('leaves a running or starting card alone, so the board still gets the key', () => {
+      expect(press(RUNNING)).toEqual({ calls: [], prevented: 0, stopped: 0 });
+      expect(press({ state: 'starting' })).toEqual({ calls: [], prevented: 0, stopped: 0 });
+    });
+
+    it('does nothing for another key', () => {
+      expect(press(FINISHED, 'Enter')).toEqual({ calls: [], prevented: 0, stopped: 0 });
+      expect(press({ state: 'swapped' }, ' ')).toEqual({ calls: [], prevented: 0, stopped: 0 });
+    });
+  });
+
   it('shows the going-back note above the step', () => {
     const text = textOf(StepCard({ view: { ...RUNNING, note: noteTokens({ kind: 'wentBack', a: 2, b: 2 }) } as StepCardView, ...NOOPS }));
     expect(text).toContain('Step 2 needs doing again, so the lesson went back.');

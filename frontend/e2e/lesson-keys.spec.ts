@@ -269,6 +269,51 @@ test.describe('Escape', () => {
     await expectRow(page, 'In progress', [RESTART]);
   });
 
+  // Review WR-02: Tab reaches the card's buttons, and the board's Escape stops at a focused button. The card
+  // handles Escape itself while focus is inside it.
+  test('with focus on Keep building, Escape closes the finished card as Keep building', async ({ page }) => {
+    await bootFinished(page);
+    const keep = page.locator(CARD).getByRole('button', { name: 'Keep building', exact: true });
+    await keep.focus();
+    await expect(keep, 'focus is on Keep building, as Tab would leave it').toBeFocused();
+
+    await escapeTo(page, { armed: [], selected: false, card: 'none', list: false }, 'Escape closes the finished card');
+    await expect(page.locator(CARD)).toHaveCount(0);
+    await openLessons(page);
+    await expectRow(page, 'Done', [RESTART]);
+  });
+
+  test('with focus on Leave, Escape closes the swapped card as Leave', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    h.inject(swappedBoard(2, 9));
+    await expect(page.locator(CARD)).toContainText('Lesson paused');
+    const leave = page.locator(CARD).getByRole('button', { name: 'Leave', exact: true });
+    await leave.focus();
+    await expect(leave, 'focus is on Leave, as Tab would leave it').toBeFocused();
+
+    await escapeTo(page, { card: 'none', list: false }, 'Escape closes the swapped card');
+    expect(h.controls.filter((c) => c === 'new'), 'and sends no New').toEqual(['new']);
+    await openLessons(page);
+    await expectRow(page, 'In progress', [RESTART]);
+  });
+
+  test('with focus on Leave, Escape leaves a running card running and still puts the tool down', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await ringAt(page, 'source-tool');
+    await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+    await expect.poll(() => armedTools(page), { message: 'the Source tool is in the hand' }).toEqual(['Place Source']);
+    const leave = page.locator(CARD).getByRole('button', { name: 'Leave', exact: true });
+    await leave.focus();
+    await expect(leave).toBeFocused();
+
+    await escapeTo(page, { armed: [], card: 'running' }, 'Escape puts the tool down and the lesson keeps running');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => new Promise<void>((done) => setTimeout(done, 200)));
+    expect((await readProbe(page)).card, 'a second Escape on Leave leaves the lesson running').toBe('running');
+  });
+
   test('with Help over a selection, Escape brings the inspector back, then clears the selection, then closes the card', async ({ page }) => {
     const { source } = await bootFinished(page);
     await select(page, source);
