@@ -48,8 +48,8 @@ pub struct BoardFile {
     pub commands: Vec<GridCommand>,
     /// Scripted inputs in tick order. Entries on one tick apply in file order.
     pub script: Vec<ScriptEntry>,
-    /// Where a viewer stops to explain a tick, in tick order. A viewer reads these and the core
-    /// never does.
+    /// Where a viewer stops to explain a tick, at most one per tick, in tick order. A viewer reads
+    /// these and the core never does.
     pub captions: Vec<Caption>,
     /// What a scripted run answers when the board calls out.
     pub executor: ExecutorSpec,
@@ -75,7 +75,8 @@ pub struct ScriptEntry {
 #[serde(rename = "Caption", deny_unknown_fields)]
 pub struct Caption {
     /// The core tick the viewer pauses on, the tick its counter shows. Later than the boot end,
-    /// at most `end_tick`, and no earlier than the caption before it.
+    /// at most `end_tick`, and later than the caption before it: a viewer holds one caption on a
+    /// tick, so a second one there would never show.
     pub tick: u64,
     /// The dense handle of the machine to highlight. It has to be a machine the board's commands
     /// mint, and not a belt or a cable.
@@ -240,7 +241,8 @@ pub enum BoardError {
         /// The board's end tick.
         end_tick: u64,
     },
-    /// A caption has a lower tick than the one before it.
+    /// A caption's tick is not later than the one before it: lower, or the same tick, where a
+    /// viewer would never show it.
     CaptionOutOfOrder {
         /// The caption's tick.
         tick: u64,
@@ -293,7 +295,7 @@ impl std::fmt::Display for BoardError {
                 write!(f, "a caption at tick {tick} would never show, because the run ends at tick {end_tick}")
             }
             Self::CaptionOutOfOrder { tick } => {
-                write!(f, "the caption at tick {tick} is earlier than the one before it")
+                write!(f, "the caption at tick {tick} is not later than the one before it, and a viewer shows one caption per tick")
             }
             Self::CaptionNotAMachine { tick, handle } => {
                 write!(f, "the caption at tick {tick} highlights handle {handle}, which isn't a machine the board's commands mint")
@@ -372,7 +374,8 @@ pub(crate) fn validate(board: &BoardFile) -> Result<(), BoardError> {
         if caption.tick > board.end_tick {
             return Err(BoardError::CaptionTickAfterEnd { tick: caption.tick, end_tick: board.end_tick });
         }
-        if caption.tick < previous {
+        // Strictly later: the page holds the caption on a tick, so a second one there never shows.
+        if caption.tick <= previous {
             return Err(BoardError::CaptionOutOfOrder { tick: caption.tick });
         }
         previous = caption.tick;
@@ -793,12 +796,18 @@ mod tests {
     }
 
     #[test]
-    fn captions_out_of_tick_order_are_refused_and_two_on_one_tick_are_accepted() {
+    fn captions_out_of_tick_order_or_two_on_one_tick_are_refused() {
         let backwards = format!("{}, {}", caption_at(60, 0), caption_at(50, 0));
         let src = captioned_text(BOARD_FORMAT, ONE_PLACE, "", &backwards, PLAIN_EXECUTOR, 900);
         assert_eq!(parse_board(&src), Err(BoardError::CaptionOutOfOrder { tick: 50 }));
+        // The page holds one caption per tick, so a second one on the same tick would never show.
         let same_tick = format!("{}, {}", caption_at(50, 0), caption_at(50, 0));
-        assert!(parse_board(&captioned_text(BOARD_FORMAT, ONE_PLACE, "", &same_tick, PLAIN_EXECUTOR, 900)).is_ok());
+        assert_eq!(
+            parse_board(&captioned_text(BOARD_FORMAT, ONE_PLACE, "", &same_tick, PLAIN_EXECUTOR, 900)),
+            Err(BoardError::CaptionOutOfOrder { tick: 50 })
+        );
+        let one_apart = format!("{}, {}", caption_at(50, 0), caption_at(51, 0));
+        assert!(parse_board(&captioned_text(BOARD_FORMAT, ONE_PLACE, "", &one_apart, PLAIN_EXECUTOR, 900)).is_ok());
     }
 
     /// The commands mint a Source (0), a Sink (1), a belt (2), a Route (3), an HTTP Handler (4)
