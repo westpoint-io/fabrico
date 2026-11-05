@@ -444,12 +444,22 @@ export const LAYOUT_CSS = `
   background-color: var(--fab-substrate);
   border: 1px solid var(--fab-edge-lit);
   color: var(--fab-ink);
-  white-space: nowrap;
   line-height: 1;
 }
 .badge-glyph { color: var(--fab-destructive); flex: none; }
+/* The hash and the verdict wrap as two words. When the badge can't hold
+   "final state xxxxxxxx order-dependent" on one line, about 306 px, the verdict drops under the
+   hash inside the badge rather than pushing the badge past the frame. Two lines are 28 px, so the
+   badge stays 44 px tall. The verdict's text starts with a space so textContent reads as words;
+   nowrap collapses it at the start of the verdict's line and the gap does the spacing. */
+.badge-words {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--fab-space-xs);
+  min-width: 0;
+}
+.badge-hash, .badge-verdict { white-space: nowrap; }
 .badge.is-failure .badge-verdict { color: var(--fab-destructive); }
-.badge-verdict { white-space: pre; }
 `;
 
 /** The whole stylesheet for one board's shadow root. */

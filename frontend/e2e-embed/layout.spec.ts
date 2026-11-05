@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import {
   autoContinueCaptions,
@@ -12,7 +14,8 @@ import {
 // The demo board at element widths of 360, 600 and 1024 px (layout.html). The control bar wraps
 // when its two groups don't fit on one line, no control leaves the frame, every button and the
 // select measure at least 44 px, name chips stay in the stage and never cover a control, and the
-// loading state shows "Loading board" with every control disabled.
+// loading state shows "Loading board" with every control disabled. A second page,
+// badge-width.html, checks the widest hash badge text at 328, 340 and 360 px.
 
 const PAGE = pageUrl('layout.html');
 // Every board on this page runs at once, so the viewport holds the whole page.
@@ -157,6 +160,140 @@ test('the bar wraps, nothing leaves the frame and every target is 44 px, at 360,
   errors.assertNone('on the layout page');
   expect(consoleErrors).toEqual([]);
   expect(requests).toEqual([PAGE]);
+});
+
+// The widest badge text, "final state xxxxxxxx order-dependent", at element widths of 328, 340
+// and 360 px (badge-width.html). Martian Mono at 12 px advances 8 px a character in Chromium, so
+// on one line the badge is 306 px: 36 characters, 16 px of padding and a 2 px border. The frame's
+// padding and bezel take 28 px, so the badge needs a 334 px element to sit on one line. 328 px is a
+// docs column on a 360 px phone with 16 px gutters, and 340 px one on a 375 px phone, rounded down.
+// The transport row of a board with a 4-digit end tick is 300 px, so 328 px is also the narrowest
+// element that bar fits in.
+//
+// No bundled board ends off its pin when fed in reverse order, so the test copies the built page
+// and moves docs/script-outcomes' pin in the manifest the bundle inlines. The run, the verdict
+// function, the bar and the stylesheet are the real ones; only the value the run is graded
+// against changes, and the badge then reads what an order-dependent board reads.
+const BADGE_PAGE = pageUrl('badge-width.html');
+const BADGE_WIDTHS = [328, 340, 360] as const;
+const OUTCOMES_PIN = /(examples\/boards\/docs\/script-outcomes\.board\.ron \d+ )([0-9a-f]{64})/g;
+
+/** Every hex digit turned round (0 to f, 1 to e, ...), so the result differs at every place. */
+function flipHex(hash: string): string {
+  return [...hash].map((d) => (15 - Number.parseInt(d, 16)).toString(16)).join('');
+}
+
+/** The badge-width page with docs/script-outcomes pinned somewhere its run doesn't end. Returns its URL and the real pin. */
+function pageWithMovedPin(outPath: string): { url: string; pin: string } {
+  const text = readFileSync(fileURLToPath(BADGE_PAGE), 'utf8');
+  const pins = [...text.matchAll(OUTCOMES_PIN)];
+  expect(pins.length, 'the built page inlines docs/script-outcomes\' manifest line once').toBe(1);
+  const pin = pins[0][2];
+  const moved = text.replace(OUTCOMES_PIN, (_line, head: string, hash: string) => `${head}${flipHex(hash)}`);
+  expect(moved, 'the copy moves the pin').not.toBe(text);
+  writeFileSync(outPath, moved);
+  return { url: pathToFileURL(outPath).href, pin };
+}
+
+interface BadgeRead {
+  state: string;
+  tick: number;
+  endTick: number;
+  /** The bar's box, which is the frame's content box: inside the padding and the bezel ring. */
+  bar: Rect;
+  badge: Rect;
+  hash: Rect;
+  verdictWord: Rect;
+  controls: { name: string; rect: Rect }[];
+  verdict: string;
+  text: string;
+  /** The badge's content is wider than its box, so part of it is cut off or spills. */
+  overflows: boolean;
+}
+
+async function readBadge(page: Page, width: number): Promise<BadgeRead> {
+  return page.evaluate((w) => {
+    const rect = (e: Element): Rect => {
+      const r = e.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    const el = document.querySelector(`[data-badge-width="${w}"] fabrico-board`) as HTMLElement & {
+      fabricoProbe(): { state: string; tick: number; endTick: number };
+    };
+    const root = el.shadowRoot as ShadowRoot;
+    const badge = root.querySelector('.bar .badge') as HTMLElement;
+    const probe = el.fabricoProbe();
+    return {
+      state: probe.state,
+      tick: probe.tick,
+      endTick: probe.endTick,
+      bar: rect(root.querySelector('.bar') as Element),
+      badge: rect(badge),
+      hash: rect(badge.querySelector('.badge-hash') as Element),
+      verdictWord: rect(badge.querySelector('.badge-verdict') as Element),
+      controls: [...root.querySelectorAll('.bar button, .bar select, .bar .counter, .bar .badge')].map((c) => ({
+        name: (c as HTMLElement).dataset.control ?? c.className,
+        rect: rect(c),
+      })),
+      verdict: badge.dataset.verdict ?? '',
+      text: badge.textContent ?? '',
+      overflows: badge.scrollWidth > badge.clientWidth,
+    };
+  }, width);
+}
+
+test('the order-dependent badge stays inside the bar at 328, 340 and 360 px', async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  const errors = watchPageErrors(page);
+  const consoleErrors = recordConsoleErrors(page);
+  const { url, pin } = pageWithMovedPin(testInfo.outputPath('badge-width.html'));
+  await autoContinueCaptions(page);
+  await page.goto(url);
+  for (const w of BADGE_WIDTHS) {
+    await expect.poll(async () => (await readBadge(page, w)).state, { timeout: 20_000 }).toBe('running');
+    await page.locator(`[data-badge-width="${w}"] fabrico-board`).locator('select').selectOption({ label: '4x' });
+  }
+  for (const w of BADGE_WIDTHS) {
+    await expect
+      .poll(async () => {
+        const r = await readBadge(page, w);
+        return r.tick === r.endTick;
+      }, { timeout: 30_000 })
+      .toBe(true);
+    await page.locator(`[data-badge-width="${w}"] fabrico-board`).scrollIntoViewIfNeeded();
+    const read = await readBadge(page, w);
+    const at = `${w} px at the end tick`;
+    console.log(
+      `${at}: bar ${Math.round(read.bar.left)} to ${Math.round(read.bar.right)}, badge ${Math.round(read.badge.left)} to ${Math.round(read.badge.right)}, ${Math.round(read.badge.height)} px tall`,
+    );
+    // The widest text is what this case is for, so a badge that reads anything else proves nothing.
+    expect(read.verdict, `${at}: the reversed run ends off the moved pin`).toBe('order-dependent');
+    // The run itself ended where it always does. Wrapping is visual only: a screen reader still
+    // hears the words with a space between them.
+    expect(read.text, `${at}: the badge's text`).toBe(`final state ${pin.slice(0, 8)} order-dependent`);
+    // Inside the bar, not only inside the frame's outer edge: a badge that runs into the frame's
+    // padding sits against the bezel ring.
+    expect(read.badge.left, `${at}: the badge starts inside the bar`).toBeGreaterThanOrEqual(read.bar.left);
+    expect(read.badge.right, `${at}: the badge ends inside the bar`).toBeLessThanOrEqual(read.bar.right);
+    expect(read.badge.height, `${at}: the badge is at least 44 px tall`).toBeGreaterThanOrEqual(44);
+    expect(read.overflows, `${at}: the badge's words fit in its box`).toBe(false);
+    for (const [part, r] of [
+      ['hash', read.hash],
+      ['verdict', read.verdictWord],
+    ] as const) {
+      expect(r.left, `${at}: the ${part} starts inside the badge`).toBeGreaterThanOrEqual(read.badge.left);
+      expect(r.right, `${at}: the ${part} ends inside the badge`).toBeLessThanOrEqual(read.badge.right);
+    }
+    if (read.verdictWord.top >= read.hash.bottom) {
+      // Wrapped: the verdict starts its own line flush with the hash, with no leading space.
+      expect(Math.abs(read.verdictWord.left - read.hash.left), `${at}: the wrapped verdict lines up with the hash`).toBeLessThanOrEqual(1);
+    }
+    for (const c of read.controls) {
+      expect(c.rect.right, `${at}: ${c.name} ends inside the bar`).toBeLessThanOrEqual(read.bar.right);
+    }
+  }
+  errors.assertNone('on the badge width page');
+  expect(consoleErrors).toEqual([]);
 });
 
 test('before the player is ready, the stage says Loading board and every control is disabled', async ({ page }) => {

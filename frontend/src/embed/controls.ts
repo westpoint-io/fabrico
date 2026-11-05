@@ -227,6 +227,9 @@ export function createControlBar(handlers: BarHandlers): ControlBar {
     const hashPart =
       verdict === null ? full : `${BADGE_LABEL} ${(view.badge.hash ?? '').slice(0, BADGE_HASH_CHARS)}`;
     setText(badgeHash, hashPart);
+    // The space keeps the badge's textContent equal to badgeText() for screen readers and the
+    // probe. The stylesheet collapses it, and the gap between the two words does the spacing, so a
+    // verdict that wraps under the hash starts flush with it.
     setText(badgeVerdict, verdict === null ? '' : ` ${verdict}`);
     if (verdict !== lastVerdict) {
       lastVerdict = verdict;
