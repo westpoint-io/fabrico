@@ -648,7 +648,8 @@ export class FabricoBoardElement extends HTMLElement {
   #badgeState(): BadgeState {
     const hash = this.#board?.clock.endHash() ?? null;
     if (hash === null) return { hash: null, verdict: null };
-    return { hash, verdict: verdictOf(hash, manifestEntry(this.#name())) };
+    // The manifest pins the file-order run, so a reversed run is graded as one.
+    return { hash, verdict: verdictOf(hash, manifestEntry(this.#name()), this.#order ?? 'forward') };
   }
 
   #setSpeed(speed: Speed): void {

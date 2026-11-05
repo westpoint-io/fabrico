@@ -407,3 +407,30 @@ describe('the name attribute', () => {
     expect(players[0].destroyed).toBe(false);
   });
 });
+
+describe('the badge on a reversed board', () => {
+  const OTHER = 'cd'.repeat(32);
+
+  async function runToEnd(attrs: Record<string, string>) {
+    h.manifest.set('stub', { endTick: 10, hash: OTHER });
+    const { el } = await mountBoard('stub', attrs);
+    runFrames(0);
+    runFrames(1000);
+    return el;
+  }
+
+  it('reads order-dependent, not a failure, when the reversed run ends off the file-order pin', async () => {
+    const el = await runToEnd({ order: 'reversed' });
+    expect(created[0].order).toBe('reversed');
+    const probe = el.fabricoProbe();
+    expect(probe.verdict).toBe('order-dependent');
+    expect(probe.badgeText).toBe('final state abababab order-dependent');
+    expect(el.shadowRoot!.querySelector('.badge')!.classList.contains('is-failure')).toBe(false);
+  });
+
+  it('still reads mismatch, a failure, for a forward run off its pin', async () => {
+    const el = await runToEnd({ order: 'forward' });
+    expect(el.fabricoProbe().verdict).toBe('mismatch');
+    expect(el.shadowRoot!.querySelector('.badge')!.classList.contains('is-failure')).toBe(true);
+  });
+});
