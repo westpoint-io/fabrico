@@ -331,6 +331,13 @@ describe('StepCard', () => {
       expect(text).not.toMatch(/Step \d/);
     });
 
+    it('reads Lesson paused as a heading, the same as Lesson done', () => {
+      const headings = render(SWAPPED).filter((el) => el.type === 'h2');
+      expect(headings, 'one heading').toHaveLength(1);
+      expect(headings[0]?.props.className).toBe('fab-title');
+      expect(textOf(headings[0])).toBe('Lesson paused');
+    });
+
     it('offers Restart in the accent and Leave beside it', () => {
       const buttons = buttonsOf(render(SWAPPED));
       expect(buttons.map((b) => textOf(b))).toEqual(['Restart', 'Leave']);

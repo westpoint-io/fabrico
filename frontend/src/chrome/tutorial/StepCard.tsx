@@ -201,7 +201,10 @@ export function StepCard(props: StepCardProps): JSX.Element {
           {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
           {view.state === 'swapped' && (
             <>
-              <p style={{ ...textStyle, fontWeight: 700 }}>Lesson paused</p>
+              {/* A heading, as Lesson done is, so a screen reader can jump to it. */}
+              <h2 className="fab-title" style={{ margin: 0 }}>
+                Lesson paused
+              </h2>
               <p style={textStyle}>The board changed, so this lesson stopped. Restart it, or leave it.</p>
             </>
           )}
