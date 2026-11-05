@@ -359,6 +359,9 @@ export const LAYOUT_CSS = `
   top: 0;
   left: 0;
 }
+/* The lesson ring pulses to catch a learner's eye. The caption ring marks a board that has already
+   stopped, so it holds still at full opacity, the same as under reduced motion. */
+.fab-hint.caption-ring { animation: none; }
 .caption-ring[hidden] { display: none; }
 
 /* The caption strip, under the stage. The 3 px rail shows while a caption holds the board. The
