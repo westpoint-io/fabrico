@@ -1519,6 +1519,122 @@ fn the_live_gate_verdict_is_the_red_set_check() {
     );
 }
 
+/// `live_gate_wrong` and `job_classes_wrong` can fail: each break below is planted in a copy of the
+/// real workflow, and the check has to name it.
+#[test]
+fn the_live_gate_check_names_each_way_of_switching_it_off() {
+    const CHECKER_STEP: &str = "      - name: This shard's red set is exactly its declared CUTs\n";
+    const MERGE_STEP: &str =
+        "      - name: The live red set over all shards is exactly the declared CUTs\n";
+    const UPLOAD_STEP: &str = "      - name: Keep this shard's report for the verdict job\n";
+    const VERDICT_HEADER: &str = "    name: live e2e verdict (all shards)\n";
+    const MATRIX: &str = "      fail-fast: false\n      matrix:\n        shard: [1, 2, 3, 4]\n";
+    let lines = live_run_lines();
+    let checker_line = format!("        {}\n", lines.checker);
+    let merge_line = format!("        {}\n", lines.merge);
+    let last_report = format!(" live-reports/live-report-{LIVE_SHARDS}/live-report.json");
+
+    // (what, the planted copy, which check reads it, what it must name)
+    let plants: Vec<(&str, String, fn(&str) -> Vec<String>, String)> = vec![
+        (
+            "the shard-checker step deleted",
+            without_step(CI_YML, CHECKER_STEP),
+            live_gate_wrong,
+            format!("the shard checker's run line `{}` is in job(s) []", lines.checker),
+        ),
+        (
+            "the shard checker given `|| true`",
+            CI_YML.replace(&checker_line, &checker_line.replace(".json\n", ".json || true\n")),
+            live_gate_wrong,
+            "is none of the four pinned live run lines".to_string(),
+        ),
+        (
+            "a step between the suite and the shard checker",
+            CI_YML.replace(CHECKER_STEP, &format!("      - run: echo between\n{CHECKER_STEP}")),
+            live_gate_wrong,
+            "must be the run: line straight after it".to_string(),
+        ),
+        (
+            "`--min-tests 1` on the shard checker",
+            CI_YML.replace(&checker_line, &checker_line.replace("--shard", "--min-tests 1 --shard")),
+            live_gate_wrong,
+            "`--min-tests` lowers the 290-test floor".to_string(),
+        ),
+        (
+            "the merge step deleted",
+            without_step(CI_YML, MERGE_STEP),
+            live_gate_wrong,
+            format!("the merge's run line `{}` is in job(s) []", lines.merge),
+        ),
+        (
+            "the merge given three paths",
+            CI_YML.replace(&merge_line, &merge_line.replace(&last_report, "")),
+            live_gate_wrong,
+            "is none of the four pinned live run lines".to_string(),
+        ),
+        (
+            "continue-on-error on the verdict job",
+            CI_YML.replace(
+                VERDICT_HEADER,
+                &format!("{VERDICT_HEADER}    continue-on-error: true\n"),
+            ),
+            live_gate_wrong,
+            format!("job `{LIVE_VERDICT_JOB}` carries `continue-on-error: true`"),
+        ),
+        (
+            "`if: false` on the merge step",
+            CI_YML.replace(MERGE_STEP, &format!("{MERGE_STEP}        if: false\n")),
+            live_gate_wrong,
+            format!("in job `{LIVE_VERDICT_JOB}` carries `if: false`"),
+        ),
+        (
+            "the matrix grown to five shards",
+            CI_YML.replace(MATRIX, &MATRIX.replace("[1, 2, 3, 4]", "[1, 2, 3, 4, 5]")),
+            live_gate_wrong,
+            format!("job `{LIVE_JOB}` carries `shard: [1, 2, 3, 4]` 0 time(s)"),
+        ),
+        (
+            "`fail-fast: true` on the live matrix",
+            CI_YML.replace(MATRIX, &MATRIX.replace("fail-fast: false", "fail-fast: true")),
+            live_gate_wrong,
+            format!("job `{LIVE_JOB}` carries `fail-fast: false` 0 time(s)"),
+        ),
+        (
+            "the report upload's `if: ${{ !cancelled() }}` removed",
+            CI_YML.replace(
+                &format!("{UPLOAD_STEP}        if: ${{{{ !cancelled() }}}}\n"),
+                UPLOAD_STEP,
+            ),
+            live_gate_wrong,
+            "has no `if: ${{ !cancelled() }}` line".to_string(),
+        ),
+        (
+            "the verdict job's needs line set to `needs: changes`",
+            CI_YML.replace(
+                &format!("    {LIVE_VERDICT_NEEDS}\n"),
+                &format!("    {HEAVY_NEEDS}\n"),
+            ),
+            job_classes_wrong,
+            format!("heavy job `{LIVE_VERDICT_JOB}` is missing `{LIVE_VERDICT_NEEDS}`"),
+        ),
+    ];
+    assert_eq!(plants.len(), 12, "twelve ways of switching the live verdict off");
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, check, must_name) in &plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = check(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the live gate went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
 /// The job that runs the lesson walk.
 const WALK_JOB: &str = "e2e-walk";
 /// The developer's walk command, as the whole of its `run:` line.

@@ -20,10 +20,13 @@ export default defineConfig({
   // instead of a runner killed at the CI job's limit: Playwright stops, marks what is left not
   // run, and writes the JSON report with a top-level "Timed out waiting ... for the test suite
   // to run" error, which scripts/check-live-red-set.sh refuses by name (exit 2, never a pass).
-  // The suite has grown to 335 tests. The one whole CI pass took 96 min, and 3 of the 4 runs on
-  // 2026-11-01 hit the old 100 min ceiling with up to 71 tests not run. The CI job's own limit
-  // is 170 min with about ten of build before the suite starts, so 150.
-  globalTimeout: 150 * 60_000,
+  // CI runs the suite as four shards, one runner each, so this ceiling covers one shard. The
+  // slowest of the four shards took 14.75 min in a local run on 2026-11-07 (885 s for shard 3/4,
+  // which holds the 77 file). CI runs a test up to 2.9 times slower than this machine, and twice
+  // that is the margin: 14.75 x 2.9 x 2 = 85.6, rounded up to 90 min. The e2e-live job's limit
+  // in ci.yml is this plus 15 min of build before the suite starts. The four local shards added up
+  // to 51 min, so an unsharded local run still fits; an unsharded run on CI would not.
+  globalTimeout: 90 * 60_000,
   // ONE mutable host process is shared by every spec: serialize everything
   // (Pitfall 4 - a parallel worker would mutate the scene under another spec).
   fullyParallel: false,

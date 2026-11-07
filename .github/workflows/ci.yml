@@ -1314,7 +1314,11 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
-    timeout-minutes: 170
+    # The limit is per leg. The slowest shard took 14.75 min locally (shard 3/4, 2026-11-07); CI
+    # runs a test up to 2.9 times slower, and twice that rounds up to the 90 min `globalTimeout`
+    # in frontend/playwright.live.config.ts. Plus 15 min of build before the suite is 105, so a
+    # shard that overruns writes its report before the runner is killed.
+    timeout-minutes: 105
     steps:
       - name: Checkout
         uses: actions/checkout@v4
