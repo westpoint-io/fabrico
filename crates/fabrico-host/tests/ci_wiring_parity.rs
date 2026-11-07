@@ -1535,7 +1535,8 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
     let last_report = format!(" live-reports/live-report-{LIVE_SHARDS}/live-report.json");
 
     // (what, the planted copy, which check reads it, what it must name)
-    let plants: Vec<(&str, String, fn(&str) -> Vec<String>, String)> = vec![
+    type WorkflowCheck = fn(&str) -> Vec<String>;
+    let plants: Vec<(&str, String, WorkflowCheck, String)> = vec![
         (
             "the shard-checker step deleted",
             without_step(CI_YML, CHECKER_STEP),
