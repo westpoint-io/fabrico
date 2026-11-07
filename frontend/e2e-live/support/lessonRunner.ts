@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type JSHandle, type Page } from '@playwright/test';
 import { addFrameBudget, addWaitBudget, frameBudgetMs, tickBudgetMs } from '../../e2e/support/frameSampler';
 import { CELL } from '../../shared/geometry';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
@@ -319,42 +319,67 @@ export async function captureWithGhostGone(
   return captureClip(page, clip);
 }
 
-/** One period of the ring's pulse (`.fab-hint` in `chromeCss.ts`). */
-const PULSE_PERIOD_MS = 1600;
+/** Drawn frames after the freeze, so the held opacity reaches the compositor before the capture. */
+const FREEZE_FRAMES = 2;
 
-/** How far before the top of its fade a ring's capture may start: the fade is flat there, above 0.98. */
-const PEAK_LEAD_MS = 100;
+/** The ring's animations as the freeze held them, how many there were, and the opacity they hold. */
+interface FrozenRing {
+  handle: JSHandle<Animation[]>;
+  count: number;
+  opacity: number;
+}
 
 /**
- * Resolve on the first frame where the ring paint under `selector` is within PEAK_LEAD_MS of the top of
- * its pulse, so the capture that follows lands while the ring is at full strength. A capture of a ring
- * mid-fade can miss the focus colour, most of all at a fractional device scale, where the walk measured
- * reads that needed the ring at its peak. A paint with no running animation resolves at once. The wait
- * is bounded by the animation's own clock, one period of it, not by wall time: a slow page takes longer
- * to play a period, and the test's limit grows by one period's frame budget to cover that.
+ * Hold the ring paint under `selector` at the top of its pulse for one capture. The ring pulses for the
+ * user, and a slow machine can take its screenshot anywhere in the fade, where the border is too far
+ * from the focus colour to read. So the walk pauses the ring's own running animations and sets each to
+ * the start of its current cycle, where the first keyframe holds opacity 1. The cycle length comes from
+ * the animation itself, so a later change to the keyframes' duration can't put the capture off the top.
+ * Only this element is touched: emulating reduced motion would also pin the belt and item clock the
+ * walk reads, and Playwright's `animations: 'disabled'` stops every animation on the page and fires
+ * the app's `transitionend` handlers. `count` is how many animations were held, and `opacity` the
+ * element's computed opacity two frames later, or -1 when the element is gone.
  */
-async function waitForPulsePeak(page: Page, selector: string): Promise<void> {
-  addWaitBudget(frameBudgetMs(0, PULSE_PERIOD_MS), 'the wait for the top of the ring pulse');
-  await page.evaluate(
-    ([sel, period, lead]) =>
-      new Promise<void>((done) => {
-        let first: number | null = null;
-        const check = (): void => {
-          const el = document.querySelector(sel);
-          const anim = el === null ? undefined : el.getAnimations().find((a) => a.playState === 'running');
-          if (anim === undefined) {
-            done();
+async function freezeRingAtPeak(page: Page, selector: string): Promise<FrozenRing> {
+  addFrameBudget(FREEZE_FRAMES, 'the ring held at the top of its pulse for one capture');
+  const handle = await page.evaluateHandle((sel) => {
+    const el = document.querySelector(sel);
+    const running = el === null ? [] : el.getAnimations().filter((a) => a.playState === 'running');
+    for (const a of running) {
+      const d = Number(a.effect?.getComputedTiming().duration);
+      const t = Number(a.currentTime ?? 0);
+      a.pause();
+      if (d > 0) a.currentTime = Math.floor(t / d) * d;
+    }
+    return running;
+  }, selector);
+  const opacity = await page.evaluate(
+    ([sel, frames]) =>
+      new Promise<number>((done) => {
+        let left = frames;
+        const step = (): void => {
+          left -= 1;
+          if (left > 0) {
+            requestAnimationFrame(step);
             return;
           }
-          const t = Number(anim.currentTime ?? 0);
-          first ??= t;
-          if (t % period >= period - lead || t - first >= period) done();
-          else requestAnimationFrame(check);
+          const el = document.querySelector(sel);
+          done(el === null ? -1 : Number(getComputedStyle(el).opacity));
         };
-        check();
+        requestAnimationFrame(step);
       }),
-    [selector, PULSE_PERIOD_MS, PEAK_LEAD_MS] as const,
+    [selector, FREEZE_FRAMES] as const,
   );
+  const count = await handle.evaluate((a) => a.length);
+  return { handle, count, opacity };
+}
+
+/** Let the ring's held animations run again, so later steps see the pulse the user sees. */
+async function resumeRing(frozen: FrozenRing): Promise<void> {
+  await frozen.handle.evaluate((anims) => {
+    for (const a of anims) a.play();
+  });
+  await frozen.handle.dispose();
 }
 
 /** The focus colour the ring's stylesheet paints with, as the page resolves it. */
@@ -368,7 +393,10 @@ async function focusColour(page: Page): Promise<number> {
  * `elementFromPoint` passes through a ring that takes no press, so this reads a capture of the ring's
  * own border. It runs once per kind of ring in a walk, because a capture is slow on a CI runner. A read
  * that a fresh probe says outlived its stage judges nothing, and the next stage of that kind reads it.
- * The ring pulses, so a read may take several captures across one pulse period; the log says how many.
+ * The ring pulses for the user. For its one capture the walk holds the ring's own animation at the top
+ * of its cycle (`freezeRingAtPeak`), then lets it run again and checks that it does, so a slow machine
+ * can't land the capture mid-fade and the walk can't leave the pulse stopped. The colour tolerance stays
+ * as it is: a wider one would also pass a ring painted the wrong colour.
  */
 async function expectRingPainted(
   page: Page,
@@ -382,8 +410,8 @@ async function expectRingPainted(
   if (kind === undefined || state.ringsRead.has(kind)) return;
   const colour = await focusColour(page);
   const reads: string[] = [];
-  // Which pulse the paint runs, and its opacity, as the captures start: the record that the read below
-  // saw the ring with the pulse running, at whatever point of the fade the capture caught.
+  // Which pulse the paint runs, and its opacity, before the reads: the record that the ring was pulsing
+  // for the user when the walk held it for its capture.
   const pulse = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('[data-fab-hint] > div, [data-fab-hint-to] > div')]
       .filter((el) => (el.parentElement as HTMLElement).style.visibility === 'visible')
@@ -393,7 +421,7 @@ async function expectRingPainted(
       })
       .join(' '),
   );
-  let captures = 0;
+  const frozenReads: string[] = [];
   for (const [index, rect] of rects.entries()) {
     // The rects come in the probe's order: the main ring, then the ring where a drag ends.
     const paint = index === 0 ? '[data-fab-hint] > div' : '[data-fab-hint-to] > div';
@@ -403,25 +431,28 @@ async function expectRingPainted(
       width: Math.ceil(rect.x + rect.width) - Math.floor(rect.x),
       height: Math.ceil(rect.y + rect.height) - Math.floor(rect.y),
     };
-    // A capture can still land past the top of the pulse, where the border is too far from the focus colour
-    // to read. The pulse returns to full opacity once a period, so the read captures again until the border
-    // reads or one period has gone by. The tolerance stays as it is: a wider one would also pass a ring painted in
-    // the wrong colour.
-    const deadline = Date.now() + addWaitBudget(frameBudgetMs(0, PULSE_PERIOD_MS), `${label}: the ring read across one pulse period`);
+    // One capture, with the ring held at the top of its pulse and let go again in the `finally`.
+    const frozen = await freezeRingAtPeak(page, paint);
     let read: ReturnType<typeof ringOnCanvas>;
-    for (;;) {
-      await waitForPulsePeak(page, paint);
+    try {
+      expect(frozen.opacity, `${label}: the ring, held at the top of its pulse for the capture, reads opacity 1`).toBe(1);
       const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
-      captures += 1;
       if ((await probeAtStage(page, stepIndex, stage.id)) === null) return;
       read = ringOnCanvas(img, rect.shape, colour, img.width / clip.width);
-      if (read.seen || Date.now() >= deadline) break;
+    } finally {
+      await resumeRing(frozen);
     }
+    const running = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      return el === null ? -1 : el.getAnimations().filter((a) => a.playState === 'running').length;
+    }, paint);
+    expect(running, `${label}: the ring pulses again after the read`).toBe(frozen.count);
+    frozenReads.push(`${frozen.count}@${frozen.opacity.toFixed(2)}`);
     reads.push(`${read.ink}/${Math.round(read.floor)} sides ${read.sideInk.join(',')}`);
     expect(read.seen, `${label}: the ring's border shows on every side in the focus colour, around (${clip.x},${clip.y}), side ink ${read.sideInk.join(',')} against ${read.sideFloor.map(Math.round).join(',')}`).toBe(true);
   }
   state.ringsRead.add(kind);
-  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')} pulse=${pulse} captures=${captures}`);
+  console.log(`MEASURE ring ${kind} ink/floor=${reads.join(' ')} pulse=${pulse} frozen=${frozenReads.join(',')}`);
 }
 
 /**
