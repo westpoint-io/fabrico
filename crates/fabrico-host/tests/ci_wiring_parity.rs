@@ -425,9 +425,24 @@ const HEAVY_GATE: &str = "if: ${{ !cancelled() && needs.changes.outputs.docs_onl
 /// The heavy jobs' dependency on the classifier.
 const HEAVY_NEEDS: &str = "needs: changes";
 
-/// The `embed` job's dependency: the classifier, and the job whose module it takes. It is the one
-/// heavy job allowed a `needs:` line other than `HEAVY_NEEDS`, and it has to be exactly this one.
+/// The `embed` job's dependency: the classifier, and the job whose module it takes.
 const EMBED_NEEDS: &str = "needs: [changes, wasm-player]";
+
+/// The heavy jobs whose `needs:` line is not `HEAVY_NEEDS`, each with the one line it must carry.
+/// Each of these jobs reads what an earlier job made, so it needs that job as well as the
+/// classifier. Every other heavy job carries `HEAVY_NEEDS` and nothing else.
+const JOB_NEEDS: [(&str, &str); 2] = [
+    (EMBED_JOB, EMBED_NEEDS),
+    (LIVE_VERDICT_JOB, LIVE_VERDICT_NEEDS),
+];
+
+/// The `needs:` line heavy job `id` must carry.
+fn needs_of(id: &str) -> &'static str {
+    JOB_NEEDS
+        .iter()
+        .find(|(job, _)| *job == id)
+        .map_or(HEAVY_NEEDS, |(_, needs)| needs)
+}
 
 /// Linux only on pull_request, all three legs on every other event. The Linux leg is
 /// pinned to `ubuntu-24.04` (2026-10-12, plan 84-01): `ubuntu-latest` moves to Ubuntu 26
@@ -438,7 +453,7 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// repository root when measured on 2026-09-30. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 9] = [
+const HEAVY_JOBS: [&str; 10] = [
     "determinism",
     "headless-build",
     "wasm-player",
@@ -446,6 +461,7 @@ const HEAVY_JOBS: [&str; 9] = [
     "golden-corpus",
     "e2e",
     "e2e-live",
+    "e2e-live-verdict",
     "e2e-walk",
     "unit",
 ];
@@ -542,7 +558,7 @@ fn job_blocks_in(yml: &str) -> Vec<(&str, Vec<&str>)> {
 
 /// Everything wrong with how `yml` classes its jobs: every job is heavy or always-on, each heavy
 /// job carries its `needs:` line and the exact docs-only gate, and no always-on job carries either.
-/// The `embed` job's `needs:` line is `EMBED_NEEDS` and nothing else. Empty means right.
+/// A heavy job's `needs:` line is the one `JOB_NEEDS` gives it, or `HEAVY_NEEDS`. Empty means right.
 fn job_classes_wrong(yml: &str) -> Vec<String> {
     let mut wrong: Vec<String> = Vec::new();
     let blocks = job_blocks_in(yml);
@@ -564,11 +580,7 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
         ));
     }
     for (id, lines) in &blocks {
-        let needs = if *id == EMBED_JOB {
-            EMBED_NEEDS
-        } else {
-            HEAVY_NEEDS
-        };
+        let needs = needs_of(id);
         let has_needs = lines.contains(&needs);
         let has_gate = lines.contains(&HEAVY_GATE);
         if HEAVY_JOBS.contains(id) && !(has_needs && has_gate) {
@@ -578,7 +590,8 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
                  never skips or skips on the wrong verdict."
             ));
         }
-        let has_any_needs = lines.contains(&HEAVY_NEEDS) || lines.contains(&EMBED_NEEDS);
+        let has_any_needs = lines.contains(&HEAVY_NEEDS)
+            || JOB_NEEDS.iter().any(|(_, needs)| lines.contains(needs));
         if ALWAYS_ON_JOBS.contains(id) && (has_any_needs || has_gate) {
             wrong.push(format!(
                 "always-on job `{id}` carries a `needs:` line on the classifier or the docs-only \
@@ -1202,136 +1215,295 @@ fn ci_spend_controls_are_wired_fail_safe() {
     );
 }
 
-/// The developer's live command, byte-identical in CI.
+/// The developer's live command. Each leg of the live job runs it with its own `--shard`.
 const LIVE_SUITE: &str = "npm run e2e:live";
 /// The live suite's verdict: its failed set is exactly the declared CUTs.
 const LIVE_RED_SET_CHECKER: &str = "scripts/check-live-red-set.sh";
 /// The checker's bite proof over hand-made reports.
 const LIVE_RED_SET_BITES: &str = "scripts/prove-live-red-set-bites.sh";
+/// The job that runs the live suite, one leg per shard.
+const LIVE_JOB: &str = "e2e-live";
+/// The job that grades every shard's report together.
+const LIVE_VERDICT_JOB: &str = "e2e-live-verdict";
+/// The verdict job's dependency: the classifier, and every leg of the live job.
+const LIVE_VERDICT_NEEDS: &str = "needs: [changes, e2e-live]";
+/// How many shards the live suite runs as. The matrix and every pinned run line are built from it.
+const LIVE_SHARDS: usize = 4;
+/// The artifact each leg uploads its raw report as, by its `name:` line.
+const LIVE_REPORT_ARTIFACT: &str = "name: live-report-${{ matrix.shard }}";
+/// Where the leg's report is, by the upload step's `path:` line.
+const LIVE_REPORT_PATH: &str = "path: frontend/test-results/live-report.json";
+/// The verdict job takes every leg's artifact by this pattern, into this folder.
+const LIVE_REPORT_PATTERN: &str = "pattern: live-report-*";
+const LIVE_REPORTS_DIR: &str = "path: live-reports";
 
-/// The live job's verdict is the red-set check, not the suite's exit code (plan 84-02,
-/// GATE-01, GATE-07).
+/// The four pinned run lines of the live gate, whole, built from `LIVE_SHARDS`.
+struct LiveRunLines {
+    /// The bite proof, in `LIVE_JOB`, before the suite.
+    bites: String,
+    /// This leg's shard of the suite, its exit code swallowed because the CUT makes it 1.
+    suite: String,
+    /// This leg's verdict, the run line straight after the suite.
+    checker: String,
+    /// The merged verdict in `LIVE_VERDICT_JOB`, over every shard's report in shard order.
+    merge: String,
+}
+
+fn live_run_lines() -> LiveRunLines {
+    let n = LIVE_SHARDS;
+    let shard = "${{ matrix.shard }}";
+    let reports = (1..=n)
+        .map(|i| format!("live-reports/live-report-{i}/live-report.json"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    LiveRunLines {
+        bites: format!("run: bash {LIVE_RED_SET_BITES}"),
+        suite: format!(
+            "run: {LIVE_SUITE} -- --shard={shard}/{n} || echo \"live shard exited $?; the red-set \
+             check below decides\""
+        ),
+        checker: format!(
+            "run: bash ../{LIVE_RED_SET_CHECKER} --shard {shard}/{n} test-results/live-report.json"
+        ),
+        merge: format!("run: bash {LIVE_RED_SET_CHECKER} --merge {n} {reports}"),
+    }
+}
+
+/// Everything wrong with how `yml` wires the live gate's verdict. Empty means right.
+fn live_gate_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let lines = live_run_lines();
+    let job_lines = |job: &str| -> Option<Vec<&str>> {
+        blocks
+            .iter()
+            .find(|(id, _)| *id == job)
+            .map(|(_, lines)| lines.clone())
+    };
+    let pinned: [(&str, &str, &str); 4] = [
+        ("the bite proof", &lines.bites, LIVE_JOB),
+        ("the suite", &lines.suite, LIVE_JOB),
+        ("the shard checker", &lines.checker, LIVE_JOB),
+        ("the merge", &lines.merge, LIVE_VERDICT_JOB),
+    ];
+
+    // Each pinned line once in the workflow, in its own job, as the whole of its line. A whole-line
+    // match is what refuses `|| true`, a dropped report path or a lowered floor.
+    for (what, line, job) in pinned {
+        let homes: Vec<&str> = blocks
+            .iter()
+            .flat_map(|(id, lines)| {
+                lines
+                    .iter()
+                    .filter(move |l| step_key(l) == line)
+                    .map(move |_| *id)
+            })
+            .collect();
+        if homes != [job] {
+            wrong.push(format!(
+                "{what}'s run line `{line}` is in job(s) {homes:?}, expected exactly once, in \
+                 [\"{job}\"]. Without it, or with it anywhere else, the live gate can go green \
+                 without its verdict."
+            ));
+        }
+    }
+
+    // Every run line that names the suite, the checker or its proof is one of the four.
+    for (id, job) in &blocks {
+        for line in job
+            .iter()
+            .map(|l| step_key(l))
+            .filter(|l| l.starts_with("run:"))
+        {
+            let names_live = [LIVE_SUITE, LIVE_RED_SET_CHECKER, LIVE_RED_SET_BITES]
+                .iter()
+                .any(|needle| line.contains(needle));
+            if names_live && !pinned.iter().any(|(_, p, _)| *p == line) {
+                wrong.push(format!(
+                    "job `{id}` runs `{line}`, which is none of the four pinned live run lines. A \
+                     second suite run, a checker with another argument or a swallowed exit code \
+                     would let a red shard pass."
+                ));
+            }
+        }
+    }
+
+    // No checker line lowers the floor. --min-tests also switches off the terminal checks.
+    for (id, job) in &blocks {
+        for line in job.iter().map(|l| step_key(l)).filter(|l| {
+            l.starts_with("run:") && l.contains(LIVE_RED_SET_CHECKER) && l.contains("--min-tests")
+        }) {
+            wrong.push(format!(
+                "job `{id}` runs the checker as `{line}`. `--min-tests` lowers the 290-test floor \
+                 and switches off the terminal checks, so a filtered or partial run could pass as \
+                 the gate."
+            ));
+        }
+    }
+
+    match job_lines(LIVE_JOB) {
+        None => wrong.push(format!("there is no job `{LIVE_JOB}` under `jobs:`.")),
+        Some(job) => {
+            // The proof before the suite, and the shard checker the run line straight after it.
+            let runs: Vec<&str> = job
+                .iter()
+                .map(|l| step_key(l))
+                .filter(|l| l.starts_with("run:"))
+                .collect();
+            let at = |expected: &str| runs.iter().position(|l| *l == expected);
+            if let (Some(b), Some(s), Some(c)) =
+                (at(&lines.bites), at(&lines.suite), at(&lines.checker))
+                && !(b < s && s + 1 == c)
+            {
+                wrong.push(format!(
+                    "the bite proof, the suite and the shard checker are `run:` lines {b}, {s} and \
+                     {c} of job `{LIVE_JOB}`. The proof must come before the suite, and the \
+                     checker must be the run: line straight after it, because the suite's exit \
+                     code is swallowed and nothing else decides the leg."
+                ));
+            }
+
+            // One leg per shard, and a red leg cancels none of the others.
+            let shard_list = format!(
+                "shard: [{}]",
+                (1..=LIVE_SHARDS)
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            for key in ["fail-fast: false", shard_list.as_str()] {
+                let found = job.iter().filter(|l| **l == key).count();
+                if found != 1 {
+                    wrong.push(format!(
+                        "job `{LIVE_JOB}` carries `{key}` {found} time(s), expected 1. The suite \
+                         is split into {LIVE_SHARDS} shards, every pinned run line names that \
+                         count, and a leg cancelled by another's failure leaves no report."
+                    ));
+                }
+            }
+
+            // Each leg uploads its raw report, red or not, and fails when there is none.
+            let uploads: Vec<usize> = job
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| step_key(l) == LIVE_REPORT_ARTIFACT)
+                .map(|(i, _)| i)
+                .collect();
+            match uploads.as_slice() {
+                [at] => {
+                    let step = step_around(&job, *at);
+                    for key in [
+                        "uses: actions/upload-artifact@v4",
+                        "if: ${{ !cancelled() }}",
+                        LIVE_REPORT_PATH,
+                        "if-no-files-found: error",
+                    ] {
+                        if !step.iter().any(|l| step_key(l) == key) {
+                            wrong.push(format!(
+                                "the step carrying `{LIVE_REPORT_ARTIFACT}` in job `{LIVE_JOB}` \
+                                 has no `{key}` line. Without it a red shard's report never \
+                                 reaches the verdict job, or a missing report goes unnoticed."
+                            ));
+                        }
+                    }
+                    let suite = job.iter().position(|l| step_key(l) == lines.suite);
+                    if let Some(s) = suite
+                        && s > *at
+                    {
+                        wrong.push(format!(
+                            "job `{LIVE_JOB}` uploads `{LIVE_REPORT_ARTIFACT}` before the suite \
+                             writes the report."
+                        ));
+                    }
+                }
+                found => wrong.push(format!(
+                    "`{LIVE_REPORT_ARTIFACT}` appears {} time(s) in job `{LIVE_JOB}`, expected 1.",
+                    found.len()
+                )),
+            }
+        }
+    }
+
+    match job_lines(LIVE_VERDICT_JOB) {
+        None => wrong.push(format!("there is no job `{LIVE_VERDICT_JOB}` under `jobs:`.")),
+        Some(job) => {
+            // The reports are downloaded, into the folder the merge reads, before the merge.
+            let downloads: Vec<usize> = job
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| step_key(l) == LIVE_REPORT_PATTERN)
+                .map(|(i, _)| i)
+                .collect();
+            match downloads.as_slice() {
+                [at] => {
+                    let step = step_around(&job, *at);
+                    for key in ["uses: actions/download-artifact@v4", LIVE_REPORTS_DIR] {
+                        if !step.iter().any(|l| step_key(l) == key) {
+                            wrong.push(format!(
+                                "the step carrying `{LIVE_REPORT_PATTERN}` in job \
+                                 `{LIVE_VERDICT_JOB}` has no `{key}` line, so the merge would \
+                                 read no report."
+                            ));
+                        }
+                    }
+                    let merge = job.iter().position(|l| step_key(l) == lines.merge);
+                    if let Some(m) = merge
+                        && m < *at
+                    {
+                        wrong.push(format!(
+                            "job `{LIVE_VERDICT_JOB}` runs the merge before it takes the reports."
+                        ));
+                    }
+                }
+                found => wrong.push(format!(
+                    "`{LIVE_REPORT_PATTERN}` appears {} time(s) in job `{LIVE_VERDICT_JOB}`, \
+                     expected 1.",
+                    found.len()
+                )),
+            }
+        }
+    }
+
+    // Neither job swallows a failure, and no verdict step or proof can be skipped.
+    wrong.extend(step_guards_wrong(
+        yml,
+        LIVE_JOB,
+        &[lines.bites.as_str(), lines.checker.as_str()],
+    ));
+    wrong.extend(step_guards_wrong(
+        yml,
+        LIVE_VERDICT_JOB,
+        &[lines.merge.as_str()],
+    ));
+    wrong
+}
+
+/// The live suite's verdict is the red-set check, not the suite's exit code, and nothing can switch
+/// it off.
 ///
 /// # Why
 ///
-/// The live suite carries a CUT that throws forever (77 D-15, D-20), so `npm run e2e:live`
-/// exits 1 on every run, and the job swallows that exit code. Once it is swallowed, the
-/// ONLY thing standing between a broken live suite and a green job is the checker step
-/// after it. Dropping that step, moving it to another job, putting a step between the two,
-/// or marking the job `continue-on-error` would each turn the live gate off without a
-/// single red line anywhere. So the adjacency is pinned here, where `cargo test` runs it.
+/// The live suite carries a CUT that throws on every run, so `npm run e2e:live` exits 1 and the job
+/// swallows that exit code. Once it is swallowed, the ONLY thing between a broken live suite and a
+/// green run is the checker. Dropping it, moving it, putting a step between the suite and it, or
+/// marking a job `continue-on-error` would each turn the live gate off without a red line anywhere,
+/// so the wiring is pinned here, where `cargo test` runs it.
+///
+/// # Why the rule pins two jobs
+///
+/// The suite runs as `LIVE_SHARDS` shards on separate runners, one leg of `LIVE_JOB` each, because
+/// one worker against one host made it the slowest job in the workflow. So its verdict has two
+/// halves. Each leg grades its own shard with `--shard i/n` on the run line straight after the
+/// suite, and uploads its raw report. `LIVE_VERDICT_JOB` needs every leg, takes the reports and
+/// grades them together with `--merge n`. This rule used to allow exactly one checker line, in one
+/// job; it now pins all four run lines whole, the order inside the leg, the matrix, the upload and
+/// download between the two jobs, and the guards on both. The verdict job's `needs:` line and its
+/// docs-only gate are pinned by `job_classes_wrong`.
 ///
 /// Every wrong fact is collected before the single assert, so one run names them all.
 #[test]
 fn the_live_gate_verdict_is_the_red_set_check() {
-    let mut wrong: Vec<String> = Vec::new();
-
-    // (a) - (c): each invoked exactly once.
-    wrong.extend(check_run_invocations(
-        LIVE_SUITE,
-        1,
-        "The live job runs the byte-identical developer command exactly once; its exit code \
-         is no longer the verdict, the red-set check on the next `run:` line is.",
-    ));
-    wrong.extend(check_run_invocations(
-        LIVE_RED_SET_CHECKER,
-        1,
-        "The red-set check is the live job's only verdict. Without it, a job that swallows \
-         the suite's exit code is green whatever the suite did.",
-    ));
-    wrong.extend(check_run_invocations(
-        LIVE_RED_SET_BITES,
-        1,
-        "The checker's bite proof runs once, before the suite, so a checker drifted towards \
-         OK fails the job before it can pass a broken suite.",
-    ));
-
-    // (b): the checker is the run: line IMMEDIATELY after the suite.
-    let runs = run_lines();
-    let suite_at = indices_of_invocation(LIVE_SUITE);
-    let checker_at = indices_of_invocation(LIVE_RED_SET_CHECKER);
-    if let ([s], [c]) = (suite_at.as_slice(), checker_at.as_slice())
-        && s + 1 != *c
-    {
-        wrong.push(format!(
-            "`{LIVE_SUITE}` is `run:` line {s} and `{LIVE_RED_SET_CHECKER}` is {c} (of {}); \
-             the checker must be the run: line IMMEDIATELY after the suite, because the \
-             suite's exit code is swallowed and nothing else decides the job.",
-            runs.len()
-        ));
-    }
-
-    // (d): all three live in job `e2e-live`; (e): no continue-on-error there.
-    let blocks = job_blocks();
-    for needle in [LIVE_SUITE, LIVE_RED_SET_CHECKER, LIVE_RED_SET_BITES] {
-        let homes: Vec<&str> = blocks
-            .iter()
-            .filter(|(_, lines)| {
-                lines
-                    .iter()
-                    .any(|line| line.starts_with("run:") && line.contains(needle))
-            })
-            .map(|(id, _)| *id)
-            .collect();
-        if homes != ["e2e-live"] {
-            wrong.push(format!(
-                "`{needle}` is invoked from job(s) {homes:?}, expected only [\"e2e-live\"]. \
-                 The suite, its verdict and the verdict's proof are one gate and must share \
-                 one job."
-            ));
-        }
-    }
-    match blocks.iter().find(|(id, _)| *id == "e2e-live") {
-        None => wrong.push("there is no job `e2e-live` under `jobs:`.".to_string()),
-        Some((_, lines)) => {
-            for line in lines.iter().filter(|l| l.starts_with("continue-on-error")) {
-                wrong.push(format!(
-                    "job `e2e-live` carries `{line}`. The suite's exit code is already \
-                     swallowed; continue-on-error would swallow the red-set check too, and the \
-                     live gate would be green whatever happened."
-                ));
-            }
-            // (f): no step-level `if:` on the checker's step or the bite proof's step (review
-            // 84 WR-07). `if: false`, or any condition that is false on a push, skips the only
-            // verdict while the suite's exit code is swallowed, and the job is green.
-            for needle in [LIVE_RED_SET_CHECKER, LIVE_RED_SET_BITES] {
-                for line in step_of(lines, needle)
-                    .iter()
-                    .filter(|l| l.starts_with("if:"))
-                {
-                    wrong.push(format!(
-                        "the step that runs `{needle}` in job `e2e-live` carries `{line}`. A \
-                         condition on it can skip the live verdict or its proof while the job \
-                         stays green; it must run whenever the job does."
-                    ));
-                }
-            }
-            // (g): the checker keeps its own floor of tests (review 84 WR-07).
-            for line in lines.iter().filter(|l| {
-                l.starts_with("run:")
-                    && l.contains(LIVE_RED_SET_CHECKER)
-                    && l.contains("--min-tests")
-            }) {
-                wrong.push(format!(
-                    "job `e2e-live` runs the checker as `{line}`. `--min-tests` lowers the \
-                     170-test floor, so a filtered or partial run could pass as the gate."
-                ));
-            }
-        }
-    }
-
-    // (h): the bite proof runs before the suite, as its message in (a) - (c) says.
-    let bites_at = indices_of_invocation(LIVE_RED_SET_BITES);
-    if let ([b], [s]) = (bites_at.as_slice(), suite_at.as_slice())
-        && b >= s
-    {
-        wrong.push(format!(
-            "`{LIVE_RED_SET_BITES}` is `run:` line {b} and `{LIVE_SUITE}` is {s}; the bite \
-             proof must run BEFORE the suite, so a checker drifted towards OK fails the job \
-             before the suite's 70 minutes are spent and before it can pass a broken suite."
-        ));
-    }
-
+    let wrong = live_gate_wrong(CI_YML);
     assert!(
         wrong.is_empty(),
         "{} fact(s) about the live gate's verdict are wrong:\n\n{}\n\n\

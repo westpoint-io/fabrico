@@ -88,7 +88,8 @@ jobs:
   # decides it.
   #
   # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
-  # golden-corpus, e2e, e2e-live, e2e-walk and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
+  # embed, golden-corpus, e2e, e2e-live, e2e-live-verdict, e2e-walk and unit. ALWAYS
+  # RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
   # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
   # private-residue and neutrality. Each always-on job either reads files a docs-only
   # change can edit or costs about one minute, so gating it would save little and risk a
@@ -1257,28 +1258,61 @@ jobs:
   # it. AMENDED 2026-10-12 (plan 84-02): the 2026-10-09 CI run executed it on
   # GitHub: 180 tests, 1 worker, 46.8 min, 156 passed, 9 failed, 15 did not run.
   #
-  # THE VERDICT IS THE RED SET, NOT THE EXIT CODE (2026-10-12, plan 84-02, GATE-01,
-  # GATE-07). The suite deliberately carries a CUT, a test titled `CUT - leg <n> ...`
-  # whose body throws its reason (77 D-15, D-20), so `npm run e2e:live` exits 1 on
-  # every run and an exit-code gate here is either always red or switched off. The
-  # suite step still runs the byte-identical developer command, and its exit code is
-  # swallowed with `|| echo` so the JSON report it writes
-  # (`frontend/test-results/live-report.json`) reaches the next step. That next step,
-  # `scripts/check-live-red-set.sh`, is the job's ONLY verdict: it passes only when the
-  # failed set is exactly the declared CUTs. A CUT that passed or did not run (a failed
-  # serial leg ahead of it hides it), any skip, flake or `test.fail()`, a partial run
-  # under 170 tests, or a report with top-level errors are all red. Its bite proof runs
-  # before the suite, and `ci_wiring_parity.rs`
-  # (`the_live_gate_verdict_is_the_red_set_check`) pins the checker to the run: line
-  # immediately after the suite, in this job, with no `continue-on-error`.
+  # THE VERDICT IS THE RED SET, NOT THE EXIT CODE. The suite deliberately carries a CUT, a
+  # test titled `CUT - leg <n> ...` whose body throws its reason, so `npm run e2e:live` exits 1
+  # on every run and an exit-code gate here is either always red or switched off. The suite
+  # step still runs the developer command, and its exit code is swallowed with `|| echo` so the
+  # JSON report it writes (`frontend/test-results/live-report.json`) reaches the checker,
+  # `scripts/check-live-red-set.sh`. The checker passes only when the failed set is exactly the
+  # declared CUTs. A CUT that passed or did not run (a failed serial leg ahead of it hides it),
+  # any skip, flake or `test.fail()`, a partial run under 290 tests, or a report with top-level
+  # errors are all red.
   #
-  # REQUIRED CHECK: mark `e2e-live` a REQUIRED status check in branch protection
-  # for `master` (alongside `determinism`). Branch protection is a repository
-  # setting and cannot be expressed in this YAML.
+  # FOUR SHARDS ON FOUR RUNNERS. With one worker against one host, this job took 96 to 128
+  # minutes. The suite now runs as `--shard=<i>/4`, one leg per runner, each leg with its own
+  # dev host, so each leg runs about a quarter of the tests. Playwright cuts shards at file
+  # boundaries, so a serial file (the CUT's included) stays whole in one shard. Playwright also
+  # adds the terminal spec (`90-sim-fatal.terminal.spec.ts`, the teardown that ends the host)
+  # back into every shard, so every leg ends its own host last, and its 4 tests run 4 times.
+  #
+  # ONE VERDICT IN TWO HALVES. In each leg, the run: line straight after the suite is
+  # `check-live-red-set.sh --shard <i>/4`. It refuses a report from another shard, keeps the
+  # checks that the terminal spec ran and ran last, and applies a floor of its own to the
+  # shard. The leg then uploads its raw report as `live-report-<i>` unless the run was
+  # cancelled, and the upload fails if there is no report. The `e2e-live-verdict` job below
+  # needs every leg. It takes the four reports and runs the checker's `--merge 4` mode over
+  # them in shard order: each shard must grade OK on its own, no test outside the terminal spec
+  # may appear in two shards, and the shards together must hold at least 290 tests with the
+  # terminal tests counted once. A missing report means the verdict could not be made, and the
+  # job goes red.
+  #
+  # WHY THE MERGE READS THE RAW REPORTS. Playwright's merge-reports would join the four into
+  # one report, but its start times would come from four machines whose clocks aren't ordered
+  # against each other, so the check that the terminal spec started after every other test
+  # ended would compare times that can't be compared. The joined report would also hold four
+  # copies of the terminal spec under four different ids. Grading each raw report keeps every
+  # time comparison inside one machine.
+  #
+  # The bite proof runs in every leg before the suite. `ci_wiring_parity.rs`
+  # (`the_live_gate_verdict_is_the_red_set_check`) pins the four run lines, their jobs and
+  # order, the matrix, the report upload and download, and that neither job carries
+  # `continue-on-error` and no verdict step carries a condition.
+  #
+  # REQUIRED CHECK: if branch protection is turned on for `main`, make `e2e-live-verdict`
+  # (`live e2e verdict (all shards)`) a REQUIRED status check, alongside `determinism`. Each
+  # leg's check name carries its shard number, and the verdict job is the one check that
+  # stands for the whole suite. Branch protection is a repository setting and cannot be
+  # expressed in this YAML.
   e2e-live:
     name: live e2e gate (real headless host)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    # One leg per shard. A red leg must not cancel the others: the verdict job reads every
+    # shard's report, and a cancelled leg leaves none.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
     timeout-minutes: 170
     steps:
@@ -1337,23 +1371,60 @@ jobs:
       - name: Live red-set checker bites
         run: bash scripts/prove-live-red-set-bites.sh
 
-      # THE developer command, byte-identical (the inner cargo build is a warm-cache
-      # no-op). Its exit code is not the verdict: the CUT makes it 1 on every run.
-      - name: Run live e2e gate (the JSON report is the input; the next step is the verdict)
+      # The developer command with this leg's shard (the inner cargo build is a warm-cache
+      # no-op). Its exit code is not the verdict: the CUT makes it 1 on whichever shard holds it.
+      - name: Run this live shard (the JSON report is the input; the next step is the verdict)
         working-directory: frontend
-        run: npm run e2e:live || echo "live suite exited $?; the red-set check below decides"
+        run: npm run e2e:live -- --shard=${{ matrix.shard }}/4 || echo "live shard exited $?; the red-set check below decides"
 
-      - name: Live red set is exactly the declared CUTs
+      - name: This shard's red set is exactly its declared CUTs
         working-directory: frontend
-        run: bash ../scripts/check-live-red-set.sh test-results/live-report.json
+        run: bash ../scripts/check-live-red-set.sh --shard ${{ matrix.shard }}/4 test-results/live-report.json
+
+      # The verdict job grades all four reports together. A red shard's report is uploaded too,
+      # and a leg with no report fails here.
+      - name: Keep this shard's report for the verdict job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-report-${{ matrix.shard }}
+          path: frontend/test-results/live-report.json
+          if-no-files-found: error
+          retention-days: 14
+
       # A failing run's traces go nowhere otherwise, and a red that only CI shows needs them.
-      - name: Keep the traces of a red live run
+      - name: Keep the traces of a red live shard
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: live-test-results
+          name: live-test-results-${{ matrix.shard }}
           path: frontend/test-results/
           retention-days: 14
+
+  # THE LIVE VERDICT OVER ALL SHARDS. It needs every leg of `e2e-live` and runs under the same
+  # docs-only gate, whose `!cancelled()` lets it run after a leg went red. It takes each leg's
+  # raw report and grades the four together; the comment above `e2e-live` gives the rules and
+  # why it reads raw reports rather than a joined one. The bite proof ran in every leg before
+  # its suite, so it has run before this job reads anything.
+  e2e-live-verdict:
+    name: live e2e verdict (all shards)
+    needs: [changes, e2e-live]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Each artifact lands in its own folder, live-reports/live-report-<i>/.
+      - name: Take every shard's report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: live-report-*
+          path: live-reports
+
+      - name: The live red set over all shards is exactly the declared CUTs
+        run: bash scripts/check-live-red-set.sh --merge 4 live-reports/live-report-1/live-report.json live-reports/live-report-2/live-report.json live-reports/live-report-3/live-report.json live-reports/live-report-4/live-report.json
 
   # THE LESSON WALK, in a job of its own. The live job has hundreds of tests, runs past its limit
   # and may leave tests unstarted, so a lesson test there could never start and would add to the
@@ -1487,7 +1558,7 @@ jobs:
   # then read a markdown design note.
   #
   # REQUIRED CHECK: mark `unit` a REQUIRED status check in branch protection for
-  # `master` (alongside `determinism` and `e2e-live`). Branch protection is a
+  # `master` (alongside `determinism` and `e2e-live-verdict`). Branch protection is a
   # repository setting and cannot be expressed in this YAML.
   unit:
     name: frontend unit (vitest + tsc)
