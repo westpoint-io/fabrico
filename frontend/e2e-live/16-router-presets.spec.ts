@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   DEMO_NODE_COUNT,
+  DRAWN_STATE_FRAMES,
   armAndPlaceAt,
   beltEndInstructionsOn,
   drawFaultBeltThroughCells,
@@ -18,6 +19,7 @@ import {
   watchPageErrors,
   type SceneFacts,
 } from './support/oracle';
+import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // CHROME-09 (phase 91 D-09): the one-name leg reads the shared kind-name map, the same
 // pure module `11-machine-labels.spec.ts` imports, so the expected name is the map's and
 // is never retyped as a second copy.
@@ -488,8 +490,18 @@ test.describe('ROUTE-06 live: the surviving Router preset seeds the ONE engine a
     const docked = await readScene(page);
     const belt = docked.belts.find((b) => !beltsBefore.has(b.id))!;
     // And the paint half: a docked end plots a stem and a role cap, an undocked end
-    // plots nothing, so a belt whose ends are drawn reads above zero here.
-    expect(await beltEndInstructionsOn(page, belt.id), 'the docked belt ends are drawn').toBeGreaterThan(0);
+    // plots nothing, so a belt whose ends are drawn reads above zero here. This read
+    // polls because the model fold above and the next drawn frame are separate events:
+    // on a slow runner a frame can fall between them, and a single read then sees the
+    // ends before the renderer has drawn them. The poll is bounded by the frame budget,
+    // so a renderer that never draws the ends still reads 0 and fails here.
+    await expect
+      .poll(async () => beltEndInstructionsOn(page, belt.id), {
+        timeout: addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), 'the docked belt ends drawn after the dock fold'),
+        intervals: [100, 250, 500],
+        message: 'the docked belt ends are drawn',
+      })
+      .toBeGreaterThan(0);
     expect(docked.nodes.length, 'the leg added exactly two machines, the Router and the Sink').toBe(
       before.nodes.length + 2,
     );
