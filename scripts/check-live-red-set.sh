@@ -55,10 +55,13 @@
 #        - the report has no `suites` array
 #        - the report has a non-empty top-level `errors` (a webServer that never came
 #          up, a config error, a worker crash outside any test)
-#        - zero tests, or fewer than the floor (MIN_TESTS, or --min-tests)
-#        - a full run (no --min-tests) with no test from a TERMINAL_FILES spec, or one that
-#          started such a spec before another test ended
+#        - zero tests, or fewer than the floor (MIN_TESTS, or --min-tests, or the shard floor)
+#        - a full run or a shard (no --min-tests) with no test from a TERMINAL_FILES spec, or
+#          one that started such a spec before another test ended
 #        - a test status this script does not recognise
+#        - --shard <i>/<n> that is not two whole numbers with n at least 2 and i from 1 to n,
+#          --shard given twice, or --shard together with --min-tests
+#        - a --shard report whose `config.shard` is missing or is not i/n
 #
 # A STALE REPORT. This script cannot tell a report from this run from one an earlier run
 # left behind. `npm run e2e:live` therefore deletes test-results/live-report.json before it
@@ -66,10 +69,32 @@
 # leftover would certify a run that never happened. A run started any other way (the
 # webServer-less reuse config) must delete the report first too.
 #
+# ONE SHARD OF A SPLIT RUN (`--shard <i>/<n>`). CI splits the live suite with Playwright's
+# `--shard`, one runner per shard, each with its own dev host. One shard holds a slice of the
+# suite, so the full floor of 290 can't apply to it, and `--min-tests` is the wrong tool:
+# it lowers the floor AND switches off the terminal checks, which would let a shard run the
+# fatal spec first, or not at all, without a word. So the shard mode has its own floor and
+# keeps the terminal checks:
+#   - the report must carry `config.shard` equal to i/n, so a report from another shard (or
+#     an unsharded run) can't stand in for this one;
+#   - the floor is MIN_TESTS / (2 * n), rounded down, counted over the tests outside
+#     TERMINAL_FILES. Playwright cuts shards at file boundaries, so a shard can sit well
+#     under an even share; half of one still catches a shard that ran one spec or crashed
+#     early;
+#   - the terminal spec must be present and must run last inside the shard. Playwright adds
+#     the terminal project back to every shard as the teardown of `live`, so every shard
+#     runs it on its own host.
+# Start times are only ever compared inside one report: two reports come from two machines
+# whose clocks are not one clock.
+#
 # The last stdout line is always:
 #   LIVE RED SET total=<n> passed=<n> failed=<n> skipped=<n> did_not_run=<n> flaky=<n> cut_failed=<n> verdict=<OK|RED|UNMEASURED>
+# In shard mode the line before the verdict lines includes:
+#   SHARD <i>/<n> live=<tests outside TERMINAL_FILES> terminal=<tests in TERMINAL_FILES>
 #
-# USAGE: check-live-red-set.sh [--min-tests <n>] <report.json>
+# USAGE:
+#   check-live-red-set.sh [--min-tests <n>] <report.json>
+#   check-live-red-set.sh --shard <i>/<n> <report.json>
 
 set -u
 
@@ -77,15 +102,17 @@ set -u
 # `live`, 4 in `live-terminal`); a report below 290 is a filtered or partial run (one spec, a
 # --grep, a crashed worker, `--project live` alone) being used as the gate, which measures some
 # other suite. A deliberate partial run, such as the tracer over one spec, lowers it with
-# --min-tests. Until review pass 2 the floor was 170 against a 297-test suite, so a run that
+# --min-tests (which no CI line passes). A shard uses MIN_TESTS / (2 * n) instead, see above.
+# Until review pass 2 the floor was 170 against a 297-test suite, so a run that
 # dropped the whole terminal project still read OK (90-REVIEW.md WR-C-01).
 MIN_TESTS=290
 
 # THE TERMINAL SPECS A FULL PASS MUST HOLD, AND RUN LAST (phase 90 review WR-C-01). The fatal sim
 # error spec ends the one shared dev host, so it runs in its own `live-terminal` project after every
-# other test. A full run (no --min-tests) whose report holds no test from one of these files did not
-# grade FAIL-01 at all, and one that started any of them before another test ended stopped the host
-# under the rest of the suite: both are exit 2. A partial run (--min-tests) skips this check.
+# other test. A full run or a shard (no --min-tests) whose report holds no test from one of these
+# files did not grade FAIL-01 at all, and one that started any of them before another test ended
+# stopped the host under the rest of the suite: both are exit 2. A partial run (--min-tests) skips
+# this check.
 TERMINAL_FILES=('90-sim-fatal.terminal.spec.ts')
 
 # The CUT title form, the same as the vitest audit's CUT_TITLE (/^CUT - leg \d/).
@@ -111,7 +138,11 @@ unmeasured() {
 }
 
 min="$MIN_TESTS"
+min_given=0
 full=1
+shard=""
+shard_i=0
+shard_n=0
 report=""
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -122,7 +153,30 @@ while [ $# -gt 0 ]; do
             esac
             min=$((10#$2))
             [ "$min" -ge 1 ] || unmeasured "--min-tests must be at least 1"
+            min_given=1
             full=0
+            shift 2
+            ;;
+        --shard)
+            [ $# -ge 2 ] || unmeasured "--shard needs <i>/<n>"
+            [ -z "$shard" ] || unmeasured "--shard given twice ('$shard', '$2')"
+            # Exactly one slash with a whole number on each side: 2/4, never 2, 2/, /4 or 2/4/1.
+            case "$2" in
+                */*) ;;
+                *) unmeasured "--shard needs <i>/<n> as two whole numbers, got '$2'" ;;
+            esac
+            case "${2%%/*}" in
+                '' | *[!0-9]*) unmeasured "--shard needs <i>/<n> as two whole numbers, got '$2'" ;;
+            esac
+            case "${2#*/}" in
+                '' | *[!0-9]*) unmeasured "--shard needs <i>/<n> as two whole numbers, got '$2'" ;;
+            esac
+            shard_i=$((10#${2%%/*}))
+            shard_n=$((10#${2#*/}))
+            [ "$shard_n" -ge 2 ] || unmeasured "--shard $2: n must be at least 2"
+            [ "$shard_i" -ge 1 ] && [ "$shard_i" -le "$shard_n" ] \
+                || unmeasured "--shard $2: i must be from 1 to $shard_n"
+            shard="$shard_i/$shard_n"
             shift 2
             ;;
         -*)
@@ -136,7 +190,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$report" ] || unmeasured "no report path given (usage: check-live-red-set.sh [--min-tests <n>] <report.json>)"
+# THE FLOOR AND THE TERMINAL CHECKS DO NOT SHARE ONE SWITCH IN SHARD MODE. --min-tests drops the
+# terminal checks, so a shard graded with it would run the fatal spec first and still read OK.
+if [ -n "$shard" ] && [ "$min_given" = 1 ]; then
+    unmeasured "--shard and --min-tests cannot be combined: a shard has its own floor and keeps the terminal checks"
+fi
+
+[ -n "$report" ] || unmeasured "no report path given (usage: check-live-red-set.sh [--min-tests <n> | --shard <i>/<n>] <report.json>)"
 command -v jq >/dev/null 2>&1 || unmeasured "jq not found on the PATH"
 [ -e "$report" ] || unmeasured "report '$report' does not exist"
 [ -s "$report" ] || unmeasured "report '$report' is empty"
@@ -150,82 +210,131 @@ if [ "$errs" != "0" ]; then
     unmeasured "the report carries $errs top-level error(s)"
 fi
 
-# One tab-separated row per test: category, is-CUT, name, last result status.
-rows="$(jq -r --arg cut "$CUT_PATTERN" '
-  def clean: tostring | gsub("[\t\r\n]"; " ");
-  def walk_tests(chain):
-    ( (.specs // [])[] as $s
-      | ($s.tests // [])[] as $t
-      | ($t.results // []) as $rs
-      | ($t.expectedStatus // "passed") as $ex
-      | [ ( if ($rs | length) == 0 then "did_not_run"
-            elif $t.status == "skipped" then (if $ex == "skipped" then "skipped" else "did_not_run" end)
-            elif $t.status == "flaky" then "flaky"
-            elif $t.status == "expected" then (if $ex == "passed" then "passed" else "expected_fail" end)
-            elif $t.status == "unexpected" then "failed"
-            else "unknown:" + ($t.status | clean) end ),
-          ( if ($s.title | clean | test($cut)) then "1" else "0" end ),
-          ( ($s.file | clean) + ":" + ($s.line | clean) + " > "
-            + ((chain + [$s.title]) | map(clean) | join(" > ")) ),
-          ( ($rs | last | .status) // "none" | clean ) ]
-      | join("\t") ),
-    ( (.suites // [])[] as $su | $su | walk_tests(chain + [$su.title]) );
-  .suites[] | walk_tests([])
-' "$report" 2>/dev/null)" || unmeasured "jq could not walk the report's suites"
+# A SHARD REPORT MUST BE THE SHARD IT CLAIMS TO BE. Playwright writes `config.shard`
+# {current, total} into every JSON report (null when the run was not split), so a report left
+# from another shard, or from an unsharded run, is refused here instead of graded as this one.
+if [ -n "$shard" ]; then
+    got="$(jq -r 'if (.config.shard | type) == "object"
+                  then "\(.config.shard.current)/\(.config.shard.total)" else "none" end' \
+        "$report" 2>/dev/null)" || unmeasured "cannot read the report's config.shard"
+    if [ "$got" = none ]; then
+        unmeasured "report '$report' carries no config.shard (an unsharded run), but --shard asked for $shard"
+    fi
+    [ "$got" = "$shard" ] \
+        || unmeasured "report '$report' carries config.shard $got, but --shard asked for $shard"
+fi
 
-while IFS=$'\t' read -r cat is_cut name last; do
-    [ -n "$cat" ] || continue
-    total=$((total + 1))
-    case "$cat" in
-        passed)
-            passed=$((passed + 1))
-            if [ "$is_cut" = 1 ]; then
-                echo "RED [CUT passed] $name"
+# The TERMINAL_FILES list as a JSON array, for jq.
+terminal_json="$(printf '%s\n' "${TERMINAL_FILES[@]}" | jq -R . | jq -s -c .)" \
+    || unmeasured "could not hand TERMINAL_FILES to jq"
+
+# report_rows REPORT: one tab-separated row per test: category, is-CUT, is-terminal (its file is
+# in TERMINAL_FILES), identity (spec id and project name), name, last result status. Every mode
+# classifies through this one function.
+report_rows() {
+    jq -r --arg cut "$CUT_PATTERN" --argjson tf "$terminal_json" '
+      def clean: tostring | gsub("[\t\r\n]"; " ");
+      def walk_tests(chain):
+        ( (.specs // [])[] as $s
+          | ($s.tests // [])[] as $t
+          | ($t.results // []) as $rs
+          | ($t.expectedStatus // "passed") as $ex
+          | [ ( if ($rs | length) == 0 then "did_not_run"
+                elif $t.status == "skipped" then (if $ex == "skipped" then "skipped" else "did_not_run" end)
+                elif $t.status == "flaky" then "flaky"
+                elif $t.status == "expected" then (if $ex == "passed" then "passed" else "expected_fail" end)
+                elif $t.status == "unexpected" then "failed"
+                else "unknown:" + ($t.status | clean) end ),
+              ( if ($s.title | clean | test($cut)) then "1" else "0" end ),
+              ( if ([$s.file] | inside($tf)) then "1" else "0" end ),
+              ( (($s.id // (($s.file | clean) + ":" + ($s.line | clean) + ":" + ($s.title | clean))) | clean)
+                + " @ " + (($t.projectName // "") | clean) ),
+              ( ($s.file | clean) + ":" + ($s.line | clean) + " > "
+                + ((chain + [$s.title]) | map(clean) | join(" > ")) ),
+              ( ($rs | last | .status) // "none" | clean ) ]
+          | join("\t") ),
+        ( (.suites // [])[] as $su | $su | walk_tests(chain + [$su.title]) );
+      .suites[] | walk_tests([])
+    ' "$1" 2>/dev/null
+}
+
+live_count=0
+terminal_count=0
+
+# tally ROWS: count every row into the totals above and print each offender.
+tally() {
+    local cat is_cut is_term name last label
+    while IFS=$'\t' read -r cat is_cut is_term _ name last; do
+        [ -n "$cat" ] || continue
+        total=$((total + 1))
+        if [ "$is_term" = 1 ]; then
+            terminal_count=$((terminal_count + 1))
+        else
+            live_count=$((live_count + 1))
+        fi
+        case "$cat" in
+            passed)
+                passed=$((passed + 1))
+                if [ "$is_cut" = 1 ]; then
+                    echo "RED [CUT passed] $name"
+                    offenders=$((offenders + 1))
+                fi
+                ;;
+            failed)
+                failed=$((failed + 1))
+                if [ "$is_cut" = 1 ]; then
+                    cut_failed=$((cut_failed + 1))
+                    echo "CUT failed as declared: $name"
+                else
+                    echo "RED [failed: $last] $name"
+                    offenders=$((offenders + 1))
+                fi
+                ;;
+            expected_fail)
+                failed=$((failed + 1))
+                echo "RED [marked test.fail(), last result $last] $name"
                 offenders=$((offenders + 1))
-            fi
-            ;;
-        failed)
-            failed=$((failed + 1))
-            if [ "$is_cut" = 1 ]; then
-                cut_failed=$((cut_failed + 1))
-                echo "CUT failed as declared: $name"
-            else
-                echo "RED [failed: $last] $name"
+                ;;
+            # THE SKIPPED-OR-DID-NOT-RUN RULE. A test that never ran proves nothing, and a
+            # CUT that never ran is a hidden red leg ahead of it, not a CUT gone green.
+            skipped | did_not_run)
+                if [ "$cat" = skipped ]; then
+                    skipped=$((skipped + 1))
+                    label="skipped"
+                else
+                    did_not_run=$((did_not_run + 1))
+                    label="did not run"
+                fi
+                [ "$is_cut" = 1 ] && label="$label, CUT"
+                echo "RED [$label] $name"
                 offenders=$((offenders + 1))
-            fi
-            ;;
-        expected_fail)
-            failed=$((failed + 1))
-            echo "RED [marked test.fail(), last result $last] $name"
-            offenders=$((offenders + 1))
-            ;;
-        # THE SKIPPED-OR-DID-NOT-RUN RULE. A test that never ran proves nothing, and a
-        # CUT that never ran is a hidden red leg ahead of it, not a CUT gone green.
-        skipped | did_not_run)
-            if [ "$cat" = skipped ]; then
-                skipped=$((skipped + 1))
-                label="skipped"
-            else
-                did_not_run=$((did_not_run + 1))
-                label="did not run"
-            fi
-            [ "$is_cut" = 1 ] && label="$label, CUT"
-            echo "RED [$label] $name"
-            offenders=$((offenders + 1))
-            ;;
-        flaky)
-            flaky=$((flaky + 1))
-            echo "RED [flaky, failed then passed] $name"
-            offenders=$((offenders + 1))
-            ;;
-        *)
-            unmeasured "unrecognised test status '$cat' for $name"
-            ;;
-    esac
-done <<< "$rows"
+                ;;
+            flaky)
+                flaky=$((flaky + 1))
+                echo "RED [flaky, failed then passed] $name"
+                offenders=$((offenders + 1))
+                ;;
+            *)
+                unmeasured "unrecognised test status '$cat' for $name"
+                ;;
+        esac
+    done <<< "$1"
+}
+
+rows="$(report_rows "$report")" || unmeasured "jq could not walk the report's suites"
+tally "$rows"
 
 [ "$total" -gt 0 ] || unmeasured "the report holds zero tests"
-[ "$total" -ge "$min" ] || unmeasured "the report holds $total tests, below the floor of $min (a partial run is not the gate)"
+if [ -n "$shard" ]; then
+    # THE SHARD FLOOR: MIN_TESTS / (2 * n), over the tests outside TERMINAL_FILES, because every
+    # shard carries its own copy of the terminal spec and those copies must not pad the count.
+    shard_floor=$((MIN_TESTS / (2 * shard_n)))
+    echo "SHARD $shard live=$live_count terminal=$terminal_count"
+    [ "$live_count" -ge "$shard_floor" ] \
+        || unmeasured "shard $shard holds $live_count tests outside the terminal spec, below the shard floor of $shard_floor (MIN_TESTS / (2 * $shard_n)); a shard that ran one spec or crashed early is not the gate"
+else
+    [ "$total" -ge "$min" ] || unmeasured "the report holds $total tests, below the floor of $min (a partial run is not the gate)"
+fi
 
 if [ "$full" = 1 ]; then
     for tf in "${TERMINAL_FILES[@]}"; do

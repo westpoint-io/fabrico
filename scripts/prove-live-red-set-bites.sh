@@ -40,6 +40,12 @@
 #   F1  a full-size run, the fatal spec last           -> exit 0, verdict=OK (phase 90 review WR-C-01)
 #   U10 the same run without the fatal spec            -> exit 2, the file named (a `--project live` run)
 #   U11 the fatal spec started before another test ended -> exit 2
+#   S1  one shard (--shard 2/4), the fatal spec last    -> exit 0, verdict=OK
+#   S2  that shard with the fatal spec started early    -> exit 2
+#   S3  a shard 3/4 report read with --shard 2/4        -> exit 2, both named
+#   S4  --shard together with --min-tests               -> exit 2
+#   S5  a shard without the fatal spec                  -> exit 2, the file named
+#   S6  a shard below its floor of 290 / (2 * 4) = 36   -> exit 2
 #
 # Every K case except K1 runs with `--min-tests 1`, so the floor cannot be what turns it
 # red; K1 also passes `--min-tests 4`, the fixture's exact count. Every exit-1 case must
@@ -284,7 +290,60 @@ run_case "U8 no argument" 2 "verdict=UNMEASURED"
 # U9 an unknown option.
 run_case "U9 an unknown option" 2 "verdict=UNMEASURED" --everything-is-fine "$BASE"
 
-DECLARED_TOTAL=23
+# make_shard OUT CURRENT TOTAL FILLER TERMINALS WITH_BASE PREFIX: one shard's report, the way
+# Playwright writes it under --shard. `config.shard` is CURRENT/TOTAL; FILLER passing tests in
+# the shard's own file (ids start with PREFIX, so no two shards share one), all ended by
+# 07:00:02; then TERMINALS tests of the fatal spec, started at 07:10, with the same ids in every
+# shard, because every shard runs its own copy as the teardown of `live`. WITH_BASE 1 keeps the
+# base report's four tests (the three legs and the failed CUT), 0 drops them.
+make_shard() {
+    jq --arg tf "$TERMINAL" --argjson cur "$2" --argjson tot "$3" --argjson nf "$4" \
+        --argjson nt "$5" --argjson base "$6" --arg pre "$7" '
+      def r(start): [ { workerIndex: 0, parallelIndex: 0, status: "passed", duration: 1000, errors: [],
+                        stdout: [], stderr: [], retry: 0, startTime: start, annotations: [], attachments: [] } ];
+      def spec(file; id; i; project; start): { title: ("t" + (i|tostring)), ok: true, tags: [],
+        id: (id + (i|tostring)), file: file, line: (i + 1), column: 1,
+        tests: [ { timeout: 90000, annotations: [], expectedStatus: "passed", projectId: project,
+                   projectName: project, results: r(start), status: "expected" } ] };
+      ($pre + "filler.spec.ts") as $ff
+      | .config.shard = { current: $cur, total: $tot }
+      | .suites = (if $base == 1 then .suites else [] end)
+          + [ { title: $ff, file: $ff, line: 0, column: 0,
+                specs: [ range($nf) as $i | spec($ff; $pre; $i; "live"; "2026-10-12T07:00:00.500Z") ],
+                suites: [] } ]
+          + (if $nt == 0 then [] else
+              [ { title: $tf, file: $tf, line: 0, column: 0,
+                  specs: [ range($nt) as $i | spec($tf; "fatal-"; $i; "live-terminal"; "2026-10-12T07:10:00.000Z") ],
+                  suites: [] } ] end)' \
+        "$BASE" > "$1" || {
+        echo "prove-live-red-set-bites: could not build shard report $1; COULD NOT PROVE" >&2
+        exit 2
+    }
+}
+
+# S1 to S6: one shard read with --shard. The shard floor at n=4 is 290 / 8 = 36 tests outside
+# the fatal spec.
+#   S1 a valid shard: the base's 4 tests, 40 filler, the fatal spec last -> exit 0
+#   S2 the fatal spec started before a filler test ended                  -> exit 2, must run last
+#   S3 a report carrying shard 3/4, read as --shard 2/4                    -> exit 2, 3/4 named
+#   S4 --shard together with --min-tests                                   -> exit 2
+#   S5 a shard with no test from the fatal spec                            -> exit 2, the file named
+#   S6 the base's 4 tests and 30 filler, 34 in all                         -> exit 2, under 36
+S1="$TMP/s1.json"
+make_shard "$S1" 2 4 40 4 1 "s2-"
+run_case "S1 a valid shard with the fatal spec last" 0 "verdict=OK" --shard 2/4 "$S1"
+jq --arg tf "$TERMINAL" '(.suites[] | select(.file == $tf) | .specs[0].tests[0].results[0].startTime) = "2026-10-12T07:00:01.000Z"' \
+    "$S1" > "$TMP/s2.json"
+run_case "S2 a shard whose fatal spec started early" 2 "must run last" --shard 2/4 "$TMP/s2.json"
+make_shard "$TMP/s3.json" 3 4 40 4 1 "s3-"
+run_case "S3 a shard 3/4 report read as 2/4" 2 "config.shard 3/4, but --shard asked for 2/4" --shard 2/4 "$TMP/s3.json"
+run_case "S4 --shard with --min-tests" 2 "cannot be combined" --shard 2/4 --min-tests 1 "$S1"
+make_shard "$TMP/s5.json" 2 4 40 0 1 "s2-"
+run_case "S5 a shard without the fatal spec" 2 "$TERMINAL" --shard 2/4 "$TMP/s5.json"
+make_shard "$TMP/s6.json" 2 4 30 4 1 "s2-"
+run_case "S6 a shard below its floor" 2 "below the shard floor of 36" --shard 2/4 "$TMP/s6.json"
+
+DECLARED_TOTAL=29
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then
     failures+=("ran $executed cases, declared $DECLARED_TOTAL")
 fi
