@@ -46,6 +46,17 @@
 #   S4  --shard together with --min-tests               -> exit 2
 #   S5  a shard without the fatal spec                  -> exit 2, the file named
 #   S6  a shard below its floor of 290 / (2 * 4) = 36   -> exit 2
+#   M1  four valid shards (--merge 4), CUT in shard 3   -> exit 0, cut_failed=1 verdict=OK
+#   M2  shard 3's report missing                        -> exit 2, the path named
+#   M3  shard 2's report again at position 3            -> exit 2
+#   M4  four shards summing to 244                      -> exit 2, below the floor of 290
+#   M5  shard 4 without the fatal spec                  -> exit 2
+#   M6  a non-CUT test failed in shard 2                -> exit 1, the test named
+#   M7  shard 4 stopped by the global timeout           -> exit 2
+#   M8  one test id in shards 1 and 2                   -> exit 2
+#   M9  shard 2 with 3 of the fatal spec's 4 tests      -> exit 2
+#   M10 --merge 4 with three paths                      -> exit 2
+#   M11 four valid shards and no CUT                    -> exit 0, cut_failed=0 verdict=OK
 #
 # Every K case except K1 runs with `--min-tests 1`, so the floor cannot be what turns it
 # red; K1 also passes `--min-tests 4`, the fixture's exact count. Every exit-1 case must
@@ -343,7 +354,59 @@ run_case "S5 a shard without the fatal spec" 2 "$TERMINAL" --shard 2/4 "$TMP/s5.
 make_shard "$TMP/s6.json" 2 4 30 4 1 "s2-"
 run_case "S6 a shard below its floor" 2 "below the shard floor of 36" --shard 2/4 "$TMP/s6.json"
 
-DECLARED_TOTAL=29
+# M1 to M11: four shards read with --merge 4. The valid set V1 to V4: 73 tests outside the fatal
+# spec in each shard (shard 3 holds the base's 4 tests, the failed CUT among them, and 69
+# filler), 292 in all, plus the fatal spec's 4 tests last in every shard, counted once: 296.
+#   M1  the valid set                                      -> exit 0, cut_failed=1 verdict=OK
+#   M2  shard 3's report path does not exist                -> exit 2, the path named
+#   M3  shard 2's report given again at position 3          -> exit 2
+#   M4  60 per shard, 244 in all                            -> exit 2, below the floor of 290
+#   M5  shard 4 without the fatal spec                      -> exit 2
+#   M6  a filler test failed in shard 2                     -> exit 1, the test named
+#   M7  shard 4 stopped by the suite's global timeout       -> exit 2
+#   M8  one test id in shards 1 and 2                       -> exit 2, both shards named
+#   M9  shard 2 with 3 tests of the fatal spec, not 4       -> exit 2
+#   M10 --merge 4 with three paths                          -> exit 2
+#   M11 the valid set without the CUT                       -> exit 0, cut_failed=0 verdict=OK
+V1="$TMP/v1.json"; V2="$TMP/v2.json"; V3="$TMP/v3.json"; V4="$TMP/v4.json"
+make_shard "$V1" 1 4 73 4 0 "v1-"
+make_shard "$V2" 2 4 73 4 0 "v2-"
+make_shard "$V3" 3 4 69 4 1 "v3-"
+make_shard "$V4" 4 4 73 4 0 "v4-"
+run_case "M1 four valid shards, the CUT failed in shard 3" 0 \
+    "LIVE RED SET total=296 passed=295 failed=1 skipped=0 did_not_run=0 flaky=0 cut_failed=1 verdict=OK" \
+    --merge 4 "$V1" "$V2" "$V3" "$V4"
+run_case "M2 shard 3's report is missing" 2 "m2-shard-3-never-uploaded.json" \
+    --merge 4 "$V1" "$V2" "$TMP/m2-shard-3-never-uploaded.json" "$V4"
+run_case "M3 shard 2's report at position 3" 2 "shard 3: check-live-red-set: report '$V2' carries config.shard 2/4, but --shard asked for 3/4" \
+    --merge 4 "$V1" "$V2" "$V2" "$V4"
+for k in 1 2 4; do make_shard "$TMP/m4-$k.json" "$k" 4 60 4 0 "m4-$k-"; done
+make_shard "$TMP/m4-3.json" 3 4 56 4 1 "m4-3-"
+run_case "M4 four shards below the summed floor" 2 "244 in all, below the floor of 290" \
+    --merge 4 "$TMP/m4-1.json" "$TMP/m4-2.json" "$TMP/m4-3.json" "$TMP/m4-4.json"
+make_shard "$TMP/m5-4.json" 4 4 73 0 0 "v4-"
+run_case "M5 shard 4 without the fatal spec" 2 "shard 4: check-live-red-set: the report holds no test from $TERMINAL" \
+    --merge 4 "$V1" "$V2" "$V3" "$TMP/m5-4.json"
+M6_TITLE='shard two filler that failed'
+jq --arg t "$M6_TITLE" '(.suites[] | select(.file == "v2-filler.spec.ts") | .specs[5]) |=
+    (.title = $t | .ok = false | .tests[0].status = "unexpected" | .tests[0].results[0].status = "failed")' \
+    "$V2" > "$TMP/m6-2.json"
+run_case "M6 a failed test in shard 2" 1 "$M6_TITLE" --merge 4 "$V1" "$TMP/m6-2.json" "$V3" "$V4"
+jq '.errors = [ { message: "Timed out waiting 5400s for the test suite to run" } ]' "$V4" > "$TMP/m7-4.json"
+run_case "M7 shard 4 hit the global timeout" 2 "shard 4:   top-level error: Timed out waiting 5400s for the test suite to run" \
+    --merge 4 "$V1" "$V2" "$V3" "$TMP/m7-4.json"
+jq '(.suites[] | select(.file == "v2-filler.spec.ts") | .specs[0].id) = "v1-0"' "$V2" > "$TMP/m8-2.json"
+run_case "M8 one test id in two shards" 2 "(shards 1 and 2)" --merge 4 "$V1" "$TMP/m8-2.json" "$V3" "$V4"
+make_shard "$TMP/m9-2.json" 2 4 73 3 0 "v2-"
+run_case "M9 shard 2 ran 3 of the fatal spec's 4 tests" 2 "terminal=4,3,4,4" \
+    --merge 4 "$V1" "$TMP/m9-2.json" "$V3" "$V4"
+run_case "M10 --merge 4 with three paths" 2 "needs 4 report paths" --merge 4 "$V1" "$V2" "$V3"
+make_shard "$TMP/m11-3.json" 3 4 73 4 0 "v3-"
+run_case "M11 four valid shards and no CUT" 0 \
+    "LIVE RED SET total=296 passed=296 failed=0 skipped=0 did_not_run=0 flaky=0 cut_failed=0 verdict=OK" \
+    --merge 4 "$V1" "$V2" "$TMP/m11-3.json" "$V4"
+
+DECLARED_TOTAL=40
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then
     failures+=("ran $executed cases, declared $DECLARED_TOTAL")
 fi
