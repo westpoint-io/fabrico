@@ -880,7 +880,14 @@ jobs:
         if: matrix.leg == 'main'
         run: bash scripts/check-no-usize-state.sh
 
+      # The proof runs on the Linux leg only. It builds nothing: it runs the guard above
+      # against planted probe files, and those runs show the guard's logic bites, which one
+      # platform shows as well as three. On Windows it cost 2 to 3 minutes per push. The
+      # guard itself still runs on all three operating systems, and it keeps to POSIX awk
+      # and ERE so the macOS (BSD awk) and Windows (Git Bash) runs read the source the way
+      # the Linux run does; scripts/check-no-usize-state.sh says the same at its rule list.
       - name: Pointer-width guard, non-vacuity proof (gate bites)
+        if: runner.os == 'Linux'
         run: bash scripts/prove-no-usize-state-bites.sh
 
       # Gate 4/4 — the full certification suite (criteria 1-5 + existing suites)

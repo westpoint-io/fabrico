@@ -2279,6 +2279,75 @@ fn both_certification_suites_run_on_every_operating_system() {
     );
 }
 
+/// `certification_suites_wrong` can fail: each break below is planted in a copy of the real
+/// workflow, and the check has to name it.
+#[test]
+fn the_certification_split_check_names_each_way_of_dropping_a_suite() {
+    const ALL_STEP: &str = "      - name: Certification suite - all features (PROPTEST_CASES=1024)\n";
+    let default_cases = format!("          {CERT_CASES}\n        {CERT_DEFAULT_RUN}\n");
+    let default_cond = format!(
+        "        {CERT_DEFAULT_IF}\n        env:\n          {CERT_CASES}\n        {CERT_DEFAULT_RUN}\n"
+    );
+    let macos_exclude = "          - os: macos-latest\n            leg: all-features\n";
+    let legs_line = format!("        {DETERMINISM_LEGS}\n");
+    let save_if = format!("        with:\n          {DETERMINISM_CACHE_SAVE_IF}\n");
+
+    // (what, the planted copy, what the check must name)
+    let plants: Vec<(&str, String, String)> = vec![
+        (
+            "the all-features suite deleted",
+            without_step(CI_YML, ALL_STEP),
+            format!("expected exactly [(\"{DETERMINISM_JOB}\", \"{CERT_ALL_RUN}\")]"),
+        ),
+        (
+            "PROPTEST_CASES dropped from the shipped-default suite",
+            CI_YML.replace(&default_cases, &format!("        {CERT_DEFAULT_RUN}\n")),
+            format!("the step running `{CERT_DEFAULT_RUN}` has no `{CERT_CASES}` line"),
+        ),
+        (
+            "the shipped-default suite moved to the all-features leg",
+            CI_YML.replace(
+                &default_cond,
+                &default_cond.replace(CERT_DEFAULT_IF, "if: matrix.leg == 'all-features'"),
+            ),
+            format!("the step running `{CERT_DEFAULT_RUN}` carries the condition(s)"),
+        ),
+        (
+            "a Windows leg excluded",
+            CI_YML.replace(
+                macos_exclude,
+                &format!("{macos_exclude}          - os: windows-latest\n            leg: all-features\n"),
+            ),
+            format!("job `{DETERMINISM_JOB}` excludes a `windows-latest` leg"),
+        ),
+        (
+            "the leg key removed",
+            CI_YML.replace(&legs_line, ""),
+            format!("job `{DETERMINISM_JOB}` carries `{DETERMINISM_LEGS}` 0 time(s)"),
+        ),
+        (
+            "the cache step's save-if removed",
+            CI_YML.replace(&save_if, ""),
+            format!("has no `{DETERMINISM_CACHE_SAVE_IF}` line"),
+        ),
+    ];
+    assert_eq!(plants.len(), 6, "six ways of dropping a certification suite in ci.yml");
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, must_name) in &plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = certification_suites_wrong(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the certification split went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
 /// The trimmed lines of the step in `job_lines` whose `run:` line invokes `needle`: from the
 /// step's own `- ` line to the line before the next step's. Empty when no step runs it.
 fn step_of<'a>(job_lines: &[&'a str], needle: &str) -> Vec<&'a str> {

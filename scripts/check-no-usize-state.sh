@@ -88,8 +88,11 @@
 # banned type names written into the patterns below can never become a
 # self-invalidating gate. No Rust build runs here, so it completes in well under a
 # second on every OS runner under `shell: bash`. Only POSIX awk and ERE are used (no
-# `\b`, no gawk functions, no `grep -P`), because the macOS (BSD awk) and Windows
-# (Git Bash) runners run this too.
+# `\b`, no gawk functions, no `grep -P`), because CI runs this guard on the Linux,
+# macOS (BSD awk) and Windows (Git Bash) legs. Its bite proof,
+# scripts/prove-no-usize-state-bites.sh, runs on the Linux leg only, so the planted
+# shapes are seen red under Linux's awk. The macOS and Windows runs rest on this guard
+# passing there and on the same POSIX-only rule.
 
 set -euo pipefail
 
