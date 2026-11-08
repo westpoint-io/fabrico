@@ -664,13 +664,23 @@ export function gestureSubject(frame: Buffer): { cmd?: string; node?: number } {
   return {};
 }
 
+/**
+ * What `answerQuery` returns to refuse a query: the page's `invoke` rejects with `error`, as it
+ * does when the host answers `{ok: false}` (a Factory's `validate_factory_js` on code that won't parse).
+ */
+export class QueryRefusal {
+  constructor(readonly error: string) {}
+}
+
 /** Options for `mockRenderSocket` - every member optional and defaulted, so all
  *  existing call sites compile and behave unchanged. */
 export interface MockSocketOpts {
   /** Answer a dev-WS `query\n{reqId,verb,args}` TEXT frame (the devWsInvoke.ts
    *  grammar). Return a value to reply `{reqId, ok: true, value}` (routed back
-   *  through `resolveDevWsReply` on the page); return undefined to ignore the
-   *  frame - its promise stays pending, which only gates the UI awaiting it. */
+   *  through `resolveDevWsReply` on the page); return a {@link QueryRefusal} to reply
+   *  `{reqId, ok: false, error}`, the way the host answers a query it refuses; return
+   *  undefined to ignore the frame - its promise stays pending, which only gates the
+   *  UI awaiting it. */
   answerQuery?: (verb: string, args: Record<string, unknown>) => unknown | undefined;
   /**
    * Answer a page→server BINARY gesture frame the way the host answers it
@@ -815,7 +825,9 @@ export async function mockRenderSocket(page: Page, opts: MockSocketOpts = {}): P
           `mockRenderSocket: answerQuery threw for verb "${req.verb}": ${String(err)}`,
         );
       }
-      if (value !== undefined) {
+      if (value instanceof QueryRefusal) {
+        ws.send(JSON.stringify({ reqId: req.reqId, ok: false, error: value.error }));
+      } else if (value !== undefined) {
         ws.send(JSON.stringify({ reqId: req.reqId, ok: true, value }));
       }
     });

@@ -15,8 +15,10 @@ import { YOUR_FIRST_LINE } from '../../src/tutorial/lessons/yourFirstLine';
 import type { Lesson } from '../../src/tutorial/types';
 import {
   CELL,
+  QueryRefusal,
   buildPacket,
   cameraOf,
+  gestureSubject,
   mockRenderSocket,
   waitForBoard,
   waitForChrome,
@@ -186,32 +188,83 @@ export const SOURCE_WEBHOOK: MachineConfig = { kind: 'Source', trigger: { kind: 
 export const SOURCE_TIMER: MachineConfig = { kind: 'Source', trigger: { kind: 'Timer', interval_ticks: 60 } };
 export const SINK_DEBUG: MachineConfig = { kind: 'Sink', target: { kind: 'Debug' } };
 
+/** The handler a new Factory holds, as `crates/fabrico-core/src/edit.rs` gives it. */
+export const DEFAULT_FACTORY_SOURCE = 'export default function (input, ctx) { ctx.emit(0, input); }';
+
+export function factoryConfig(source: string = DEFAULT_FACTORY_SOURCE): MachineConfig {
+  return { kind: 'Factory', source };
+}
+
+/**
+ * The mock's stand-in for the host's `validate_factory_js`: does the source parse? The handler is
+ * `export default <function>`, which `new Function` can't take, so it parses the function as the
+ * value of a `return`. It only parses and never runs the code. Null when it parses, otherwise the
+ * parser's message.
+ */
+export function factoryParseError(source: string): string | null {
+  const body = source.replace(/^\s*export\s+default\s+/, '');
+  try {
+    // A parse check on the Node side: the function it builds is never called.
+    new Function(`return (${body}\n);`);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 /**
  * A host whose `machine_config` answer comes from a table the case sets by handle, the way the real
  * host answers about the machine it's asked about. Undo re-mints handles, so a case sets the new ones
  * when it injects the keyframe. A handle the table doesn't hold is answered with no config, never left
  * unanswered: the layer asks every bound machine at once and waits for all the answers.
+ *
+ * A Factory's code goes through the host's two steps. `validate_factory_js` is refused for code that
+ * doesn't parse, and the panel then shows its own error row and sends nothing. Code that parses is
+ * held, and the Configure frame that follows, naming a Factory in the table and carrying that code,
+ * puts it in the table, so the next `machine_config` answer holds it, as the host's does.
  */
 export function configByNode(): {
   opts: Parameters<typeof mockRenderSocket>[1];
   set(node: number, config: MachineConfig | null): void;
+  get(node: number): MachineConfig | null;
   answers(node: number): number;
+  validated(): string[];
 } {
   const table = new Map<number, MachineConfig | null>();
   const counts = new Map<number, number>();
+  const validated: string[] = [];
   return {
     opts: {
       answerQuery: (verb, args) => {
+        if (verb === 'validate_factory_js') {
+          const source = String(args.source);
+          const error = factoryParseError(source);
+          if (error !== null) return new QueryRefusal(error);
+          validated.push(source);
+          return null;
+        }
         if (verb !== 'machine_config') return undefined;
         const node = Number(args.node);
         counts.set(node, (counts.get(node) ?? 0) + 1);
         return table.get(node) ?? null;
       },
+      answerGesture: (frame) => {
+        const subject = gestureSubject(frame);
+        if (subject.cmd !== 'Configure' || subject.node === undefined) return undefined;
+        if (table.get(subject.node)?.kind !== 'Factory') return undefined;
+        const source = [...validated].reverse().find((s) => frame.includes(Buffer.from(s)));
+        if (source !== undefined) table.set(subject.node, factoryConfig(source));
+        // No verdict frame: the panel's Apply reads the config back, and the rest of the suite's
+        // gestures go unanswered too.
+        return undefined;
+      },
     },
     set: (node, config) => {
       table.set(node, config);
     },
+    get: (node) => table.get(node) ?? null,
     answers: (node) => counts.get(node) ?? 0,
+    validated: () => [...validated],
   };
 }
 
@@ -219,10 +272,31 @@ export function sourceAt(cell: readonly [number, number]): InjectNode {
   return { id: SOURCE_ID, kind: 0, cell_x: cell[0], cell_y: cell[1], ports: [{ index: 0, cell_x: cell[0], cell_y: cell[1], side: 1, role: 1 }] };
 }
 
+export const FACTORY_ID = 4;
+/** The `machine_kind` byte for a Factory. */
+export const FACTORY_KIND = 2;
+
+/**
+ * A 3 by 3 Factory with its top left at `cell`, its ports as the host gives a new one: the In at local
+ * (0, 1) facing west, the Out at (2, 1) east and the Fault at (1, 2) south, indices 0 to 2. With
+ * `outs: 2` the second Out sits at (2, 2) east, index 3, the slot `+ Add output` takes on a 3-long side
+ * (`protocol/addOutput.ts`), and the box stays 3 by 3.
+ */
+export function factoryAt(cell: readonly [number, number], outs: 1 | 2 = 1, id: number = FACTORY_ID): InjectNode {
+  const [x, y] = cell;
+  const ports = [
+    { index: 0, cell_x: x, cell_y: y + 1, side: 3, role: 0 },
+    { index: 1, cell_x: x + 2, cell_y: y + 1, side: 1, role: 1 },
+    { index: 2, cell_x: x + 1, cell_y: y + 2, side: 2, role: 2 },
+  ];
+  if (outs === 2) ports.push({ index: 3, cell_x: x + 2, cell_y: y + 2, side: 1, role: 1 });
+  return { id, kind: FACTORY_KIND, cell_x: x, cell_y: y, w: 3, h: 3, ports };
+}
+
 /** The fault port comes first, so a ring that took the first port would sit on it. */
-export function sinkAt(cell: readonly [number, number]): InjectNode {
+export function sinkAt(cell: readonly [number, number], id: number = SINK_ID): InjectNode {
   return {
-    id: SINK_ID,
+    id,
     kind: 7,
     cell_x: cell[0],
     cell_y: cell[1],
@@ -260,6 +334,41 @@ export function beltBetween(id: number, from: InjectNode, to: InjectNode, itemSl
     itemSlots,
     docks: [
       { end: 'Tail', node: from.id, port: out.index },
+      { end: 'Head', node: to.id, port: into.index },
+    ],
+  };
+}
+
+/** Do the cell and the machine's footprint (rot 0) meet? */
+function covers(n: InjectNode, x: number, y: number): boolean {
+  return x >= n.cell_x && x < n.cell_x + (n.w ?? 1) && y >= n.cell_y && y < n.cell_y + (n.h ?? 1);
+}
+
+/**
+ * The belt a straight draw from the Out port with index `outIndex` on `from` to the In port with index
+ * `inIndex` on `to` leaves, docked at both ends, Tail first along the row the two doorsteps share. The
+ * Tail dock names the output by its place among `from`'s Outs, as the host writes it and `dockPort`
+ * reads it, and the Head dock names the In by its index.
+ */
+export function beltFromPort(id: number, from: InjectNode, outIndex: number, to: InjectNode, inIndex: number, itemSlots: number[] = []): InjectBelt {
+  const outs = (from.ports ?? []).filter((p) => p.role === 1);
+  const ordinal = outs.findIndex((p) => p.index === outIndex);
+  const into = to.ports?.find((p) => p.index === inIndex && p.role === 0);
+  if (ordinal < 0 || into === undefined) throw new Error(`beltFromPort needs Out ${outIndex} on machine ${from.id} and In ${inIndex} on machine ${to.id}`);
+  const [ax, ay] = doorstepCell(outs[ordinal]!);
+  const [bx, by] = doorstepCell(into);
+  if (ay !== by) throw new Error(`beltFromPort draws along one row, and the doorsteps sit on rows ${ay} and ${by}`);
+  const step = bx >= ax ? 1 : -1;
+  const tiles: [number, number][] = [];
+  for (let x = ax; x !== bx + step; x += step) tiles.push([x, ay]);
+  const crossed = [from, to].find((n) => tiles.some(([x, y]) => covers(n, x, y)));
+  if (crossed !== undefined) throw new Error(`beltFromPort's row runs through the machine at (${crossed.cell_x},${crossed.cell_y})`);
+  return {
+    id,
+    tiles,
+    itemSlots,
+    docks: [
+      { end: 'Tail', node: from.id, port: ordinal },
       { end: 'Head', node: to.id, port: into.index },
     ],
   };
