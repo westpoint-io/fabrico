@@ -318,7 +318,7 @@ test.describe('lesson 3 on the mock host', () => {
     const probe = await readProbe(page);
     expect(probe.noteKind, 'the card says the lesson went back').toBe('wentBack');
     await expect(page.locator(CARD), 'with the note lesson 1 uses').toContainText(noteWords('wentBack', 3));
-    await expect(page.locator(CARD)).toContainText(`Step 3 of ${STEPS}`);
+    await expect(page.locator(CARD), 'the card is back on step 3').toContainText(`Step 3 of ${STEPS}`);
   });
 
   test('an Undo that takes the whole belt at once is not a delete either', async ({ page }) => {
@@ -334,7 +334,7 @@ test.describe('lesson 3 on the mock host', () => {
     await expect
       .poll(async () => (await readProbe(page)).stepId, { message: 'a belt undone, not deleted, sends the lesson back to the draw instead of on to the Sink' })
       .toBe(STEP.drawBelt);
-    await expect(page.locator(CARD)).toContainText(noteWords('wentBack', 3));
+    await expect(page.locator(CARD), 'the card says step 3 needs doing again').toContainText(noteWords('wentBack', 3));
   });
 
   test('a Delete moves the lesson on with no note', async ({ page }) => {
@@ -346,7 +346,7 @@ test.describe('lesson 3 on the mock host', () => {
     await page.waitForTimeout(500);
     const probe = await readProbe(page);
     expect(probe.noteKind, 'still no note a few frames later').toBe('');
-    expect(probe.stepId).toBe(STEP.deleteSink);
+    expect(probe.stepId, 'the card stays on the Sink step').toBe(STEP.deleteSink);
     await expect(card.locator('[data-fab-step-note]')).toHaveCount(0);
     await expect(card).not.toContainText('went back');
   });
@@ -363,7 +363,7 @@ test.describe('lesson 3 on the mock host', () => {
     h.inject(buildPacket({ full: false, tick: board.tick + 1, generation: 1, swapFloor: FLOOR, removed: [board.sink.id, BELT_ID], canUndo: true }));
     await expectAt(page, STEP.bringBack, STAGE.undoSink, 'the Sink and its belt gone finished both delete steps');
     const card = page.locator(CARD);
-    expect((await readProbe(page)).noteKind).toBe('skippedOne');
+    expect((await readProbe(page)).noteKind, 'the card says step 5 was already done, as one step').toBe('skippedOne');
     await expect(card, 'the note says step 5 was already done').toContainText(noteWords('skippedOne', 5));
     await expect(card).toContainText(`Step 6 of ${STEPS}`);
 
@@ -412,7 +412,7 @@ test.describe('lesson 3 on the mock host', () => {
     });
     const tiles = read.belts.find((b) => b.id === BELT_ID)?.tiles ?? [];
     expect(tiles.length, 'the drawn belt is five tiles long').toBe(5);
-    expect(board.belt.tiles.length).toBe(5);
+    expect(board.belt.tiles.length, 'the belt the case injected is the one the scene holds').toBe(5);
     const middle = tiles[Math.floor(tiles.length / 2)]!;
     const size = CELL * read.cam.scale;
     const want = { x: middle.cell_x * size + read.cam.x - OUTSET, y: middle.cell_y * size + read.cam.y - OUTSET, width: size + 2 * OUTSET, height: size + 2 * OUTSET };
