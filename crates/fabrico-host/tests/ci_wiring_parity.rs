@@ -2095,6 +2095,190 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
     );
 }
 
+/// The job that runs both certification suites.
+const DETERMINISM_JOB: &str = "determinism";
+/// The shipped-default certification suite, as the whole of its `run:` line.
+const CERT_DEFAULT_RUN: &str = "run: cargo test --workspace --no-fail-fast";
+/// The all-features certification suite, as the whole of its `run:` line.
+const CERT_ALL_RUN: &str = "run: cargo test --workspace --all-features --no-fail-fast";
+/// The case count both suites run their proptests at.
+const CERT_CASES: &str = "PROPTEST_CASES: 1024";
+/// The shipped-default suite's condition: the `main` leg, which every operating system has.
+const CERT_DEFAULT_IF: &str = "if: matrix.leg == 'main'";
+/// The all-features suite's condition: its own leg on Windows, the `main` leg everywhere else.
+const CERT_ALL_IF: &str = "if: matrix.leg == 'all-features' || runner.os != 'Windows'";
+/// The determinism job's second matrix key.
+const DETERMINISM_LEGS: &str = "leg: [main, all-features]";
+/// The exclude entries that leave Ubuntu and macOS one leg each, as (os, leg).
+const DETERMINISM_EXCLUDES: [(&str, &str); 2] =
+    [("ubuntu-24.04", "all-features"), ("macos-latest", "all-features")];
+/// The determinism job's cache step: only the `main` leg saves the shared entry.
+const DETERMINISM_CACHE_STEP: &str = "uses: Swatinem/rust-cache@v2";
+const DETERMINISM_CACHE_SAVE_IF: &str = "save-if: ${{ matrix.leg != 'all-features' }}";
+
+/// The `exclude:` entries of a job's matrix, as (os, leg) pairs, read from the lines after the
+/// job's `exclude:` line for as long as they are `os:` or `leg:` keys. `None` when the job has no
+/// `exclude:` line.
+fn matrix_excludes<'a>(job: &[&'a str]) -> Option<Vec<(&'a str, &'a str)>> {
+    let at = job.iter().position(|l| *l == "exclude:")?;
+    let mut entries: Vec<(&str, &str)> = Vec::new();
+    for line in &job[at + 1..] {
+        let (starts_entry, rest) = match line.strip_prefix("- ") {
+            Some(rest) => (true, rest),
+            None => (false, *line),
+        };
+        let Some((key, value)) = rest.split_once(": ") else {
+            break;
+        };
+        if key != "os" && key != "leg" {
+            break;
+        }
+        if starts_entry || entries.is_empty() {
+            entries.push(("", ""));
+        }
+        let entry = entries.last_mut().expect("an entry was just pushed");
+        if key == "os" {
+            entry.0 = value;
+        } else {
+            entry.1 = value;
+        }
+    }
+    Some(entries)
+}
+
+/// Everything wrong with how `yml` runs the two certification suites. Empty means right.
+fn certification_suites_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+
+    // Each suite exactly once in the whole file, in the determinism job, as the whole of its line.
+    for (expected, needle) in [
+        (CERT_DEFAULT_RUN, "cargo test --workspace --no-fail-fast"),
+        (CERT_ALL_RUN, "cargo test --workspace --all-features --no-fail-fast"),
+    ] {
+        let found: Vec<(&str, &str)> = blocks
+            .iter()
+            .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
+            .filter(|(_, line)| line.starts_with("run:") && line.contains(needle))
+            .collect();
+        if found != [(DETERMINISM_JOB, expected)] {
+            wrong.push(format!(
+                "the `run:` lines invoking `{needle}` are {found:?}, expected exactly \
+                 [(\"{DETERMINISM_JOB}\", \"{expected}\")]. Without it a platform runs one \
+                 certification suite, or none, and the job stays green."
+            ));
+        }
+    }
+
+    let Some((_, job)) = blocks.iter().find(|(id, _)| *id == DETERMINISM_JOB) else {
+        wrong.push(format!("there is no job `{DETERMINISM_JOB}` under `jobs:`."));
+        return wrong;
+    };
+
+    // Each suite's step keeps the CI case count and exactly its own leg condition.
+    for (run, cond) in [(CERT_DEFAULT_RUN, CERT_DEFAULT_IF), (CERT_ALL_RUN, CERT_ALL_IF)] {
+        let Ok((_, step)) = one_step_with(job, run, DETERMINISM_JOB) else {
+            continue;
+        };
+        if !step.contains(&CERT_CASES) {
+            wrong.push(format!(
+                "the step running `{run}` has no `{CERT_CASES}` line, so its proptests fall back \
+                 to 256 cases."
+            ));
+        }
+        let conditions: Vec<&str> = step
+            .iter()
+            .map(|l| step_key(l))
+            .filter(|l| l.starts_with("if:"))
+            .collect();
+        if conditions != [cond] {
+            wrong.push(format!(
+                "the step running `{run}` carries the condition(s) {conditions:?}, expected \
+                 exactly [\"{cond}\"]. Any other condition can leave an operating system \
+                 without this suite, or run it twice."
+            ));
+        }
+    }
+
+    // The matrix that makes the legs: the leg key once, and exactly the two excludes.
+    for key in [DETERMINISM_LEGS, "exclude:"] {
+        let found = job.iter().filter(|l| **l == key).count();
+        if found != 1 {
+            wrong.push(format!(
+                "job `{DETERMINISM_JOB}` carries `{key}` {found} time(s), expected 1. The legs \
+                 decide which operating system runs which certification suite."
+            ));
+        }
+    }
+    if let Some(excludes) = matrix_excludes(job) {
+        if excludes.iter().any(|(os, _)| *os == "windows-latest") {
+            wrong.push(format!(
+                "job `{DETERMINISM_JOB}` excludes a `windows-latest` leg ({excludes:?}). Windows \
+                 runs its two certification suites on its two legs, so dropping one drops a \
+                 suite."
+            ));
+        }
+        if excludes != DETERMINISM_EXCLUDES {
+            wrong.push(format!(
+                "job `{DETERMINISM_JOB}` has the exclude entries {excludes:?}, expected exactly \
+                 {DETERMINISM_EXCLUDES:?}. Without them Ubuntu and macOS run the all-features \
+                 suite twice, and a pull request runs two legs."
+            ));
+        }
+    }
+
+    // Only the `main` leg saves the cache entry the two Windows legs share.
+    match one_step_with(job, DETERMINISM_CACHE_STEP, DETERMINISM_JOB) {
+        Err(message) => wrong.push(message),
+        Ok((_, step)) => {
+            if !step.contains(&DETERMINISM_CACHE_SAVE_IF) {
+                wrong.push(format!(
+                    "the cache step in job `{DETERMINISM_JOB}` has no \
+                     `{DETERMINISM_CACHE_SAVE_IF}` line, so both Windows legs race to save one \
+                     cache entry."
+                ));
+            }
+        }
+    }
+
+    for line in job
+        .iter()
+        .filter(|line| step_key(line).starts_with("continue-on-error"))
+    {
+        wrong.push(format!(
+            "job `{DETERMINISM_JOB}` carries `{}`, so a red certification suite would leave the \
+             job green.",
+            step_key(line)
+        ));
+    }
+    wrong
+}
+
+/// Every operating system runs both certification suites, at the CI case count.
+///
+/// # Why
+///
+/// Nothing pinned the two certification lines before, and splitting them across matrix legs
+/// puts a condition on each. A wrong condition, a deleted step or a dropped `PROPTEST_CASES`
+/// line would each lose a suite or most of its cases with every other test still green. On
+/// Linux and macOS the job has one leg, `main`, which runs both suites. On Windows the `main`
+/// leg runs the shipped-default suite and the `all-features` leg runs the other, in parallel,
+/// because back to back they made Windows the slowest leg of the workflow. This rule pins the
+/// two run lines, their case count, their conditions, the leg key, the two exclude entries
+/// and the cache step's `save-if`.
+#[test]
+fn both_certification_suites_run_on_every_operating_system() {
+    let wrong = certification_suites_wrong(CI_YML);
+    assert!(
+        wrong.is_empty(),
+        "{} fact(s) about the certification suites are wrong:\n\n{}\n\n\
+         Update the WORKFLOW to match this test. Do NOT re-point this test at whatever the \
+         workflow currently says: these assertions keep both suites on every operating system.",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+}
+
 /// The trimmed lines of the step in `job_lines` whose `run:` line invokes `needle`: from the
 /// step's own `- ` line to the line before the next step's. Empty when no step runs it.
 fn step_of<'a>(job_lines: &[&'a str], needle: &str) -> Vec<&'a str> {

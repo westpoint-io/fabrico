@@ -571,13 +571,31 @@ jobs:
     name: determinism gate
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
-    # WHICH LEGS RUN ON WHICH EVENT (a spend control). pull_request: ubuntu-24.04 only.
-    # push to master/main, workflow_dispatch and any other event: ubuntu-24.04,
-    # macos-latest and windows-latest. The Linux label is pinned because `ubuntu-latest`
-    # moves between Ubuntu releases and the apt package names in the step below were
-    # checked for 24.04 only. macOS is billed at 10x Linux and Windows at 2x, so the macOS
-    # leg dominates the cost of a full run. An unexpected event resolves to all three legs
-    # (the fail-safe direction).
+    # WHICH LEGS RUN ON WHICH EVENT (a spend control). A leg is one (os, leg) pair of the
+    # matrix below.
+    #   pull_request: one leg, (ubuntu-24.04, main).
+    #   push to master/main, workflow_dispatch and any other event: four legs,
+    #   (ubuntu-24.04, main), (macos-latest, main), (windows-latest, main) and
+    #   (windows-latest, all-features).
+    # The Linux label is pinned because `ubuntu-latest` moves between Ubuntu releases and
+    # the apt package names in the step below were checked for 24.04 only. macOS is billed
+    # at 10x Linux and Windows at 2x, so the macOS leg dominates the cost of a full run. An
+    # unexpected event resolves to every operating system (the fail-safe direction).
+    #
+    # WHY WINDOWS ALONE SPLITS. Every operating system runs both certification suites
+    # (shipped-default and all-features) exactly once. On Linux and macOS both run on the
+    # one `main` leg, one after the other. On Windows they took 16.3 plus 13.6 minutes in
+    # one measured run and 23.6 plus 20.0 in another, back to back, which made Windows the
+    # longest leg of the workflow. So Windows runs the shipped-default suite and every
+    # other gate on its `main` leg, and the all-features suite alone on its `all-features`
+    # leg, in parallel. The step conditions below say which step runs on which leg. The
+    # `exclude:` entries drop the all-features leg on Ubuntu and macOS. GitHub ignores an
+    # exclude entry that matches no leg, so a pull request (Ubuntu only) still gets one.
+    # Splitting costs no coverage: both suites keep PROPTEST_CASES=1024, and no proptest
+    # fixes a seed, so each run still draws its own 1024 cases per property.
+    #
+    # CHECK NAMES CARRY THE LEG: `determinism gate (ubuntu-24.04, main)`,
+    # `determinism gate (windows-latest, all-features)` and so on.
     #
     # THE TRADE: a platform-only break is found after merge, on the master run, not on
     # the PR.
@@ -590,6 +608,12 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["ubuntu-24.04","macos-latest","windows-latest"]') }}
+        leg: [main, all-features]
+        exclude:
+          - os: ubuntu-24.04
+            leg: all-features
+          - os: macos-latest
+            leg: all-features
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 30 }}
     # Use bash for EVERY run step across the matrix so the windows-latest runner
@@ -740,8 +764,15 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/prove-toolchain-pin-bites.sh
 
+      # Both Windows legs share this job's one cache entry: the key is the job id, the
+      # runner's OS and architecture and a hash of the toolchain and lockfiles, and the leg is
+      # not part of it. Both restore it, and only the `main` leg saves it, so the two never
+      # race to write one entry. The all-features leg builds the same test binaries (see the
+      # certification comment below), so the cache `main` saves is warm for it too.
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ matrix.leg != 'all-features' }}
 
       # Build gate (Phase-04) — fail FAST on the first C-toolchain runtime dep.
       # `rquickjs` vendors quickjs-ng and `cc`-compiles it (gcc on ubuntu, clang on
@@ -757,12 +788,16 @@ jobs:
       # `--all-features` added 2026-08-17 alongside the certification-suite fix below,
       # for one reason: this step is a FAIL-FAST PREVIEW of the target set the later
       # steps compile, and a preview that builds a smaller set than the thing it
-      # previews is not one. fabrico-core's only feature is `test-support`, which gates
+      # previews is not one. fabrico-core's `test-support` feature gates
       # real code (the hostile-snapshot forge the host's tests use); without the flag a
       # break inside it surfaces minutes later, deep in the certification run, which is
       # the failure mode this step was written to avoid. `-p fabrico-core` is KEPT on
       # purpose - the point is to hit the vendored C compile early, not to widen scope.
+      #
+      # `main` leg only: on Windows the all-features leg runs its certification suite and
+      # nothing else, and that suite compiles the same C code before its first test.
       - name: Build (vendored quickjs-ng C toolchain gate)
+        if: matrix.leg == 'main'
         run: cargo build -p fabrico-core --all-targets --all-features
 
       # Gate 1/4 — determinism lints at deny level. THIS is the load-bearing
@@ -815,10 +850,15 @@ jobs:
       # pass with this step sitting at the bottom of the job doing nothing - and because
       # its earlier form, a grep over `run:` lines, was structurally unable to see the
       # clippy invocation that lives inside a script (WR-02 of the same review).
+      #
+      # Both pin-check steps carry no condition, so they run on every leg, the Windows
+      # all-features leg included: that leg's certification verdict comes from the pinned
+      # compiler too.
       - name: Toolchain pin check (refuse a verdict from the wrong compiler)
         run: bash scripts/check-toolchain-pin.sh
 
       - name: Clippy (determinism lints, -D warnings)
+        if: matrix.leg == 'main'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       # Gate 2/4 — prove the clippy gate actually BITES on a determinism-killer
@@ -831,11 +871,13 @@ jobs:
         run: bash scripts/check-toolchain-pin.sh
 
       - name: Determinism negative-test (gate bites)
+        if: matrix.leg == 'main'
         run: bash scripts/determinism-gate-negative-test.sh
 
       # Gate 3/4 — pointer-width serialized-field forward guard (cross-platform
       # postcard width-trap, T-3-WIDTH).
       - name: Pointer-width serialized-field guard
+        if: matrix.leg == 'main'
         run: bash scripts/check-no-usize-state.sh
 
       - name: Pointer-width guard, non-vacuity proof (gate bites)
@@ -864,13 +906,18 @@ jobs:
       # `cargo test --workspace --locked --all-features --no-fail-fast` for the same
       # reason - CI was the odd one out.
       #
-      # THE REASON FOR THE FLAG WAS RE-MEASURED AT PLAN 68-07 (2026-08-30) AND IT
-      # CHANGED. Phase 68 removed the development pace switch outright (BELT-05,
-      # `68-CONTEXT.md` D-68-12), which deleted BOTH of the features that motivated the
-      # paragraph above and the gated target they compiled. The workspace now declares
-      # exactly ONE feature: `test-support` in fabrico-core. That is the whole remaining
-      # reason for this flag, and it is a real one - `test-support` gates forge-invalid
-      # -state helpers whose tests are otherwise never built here.
+      # WHAT THE TREE DECLARES TODAY, re-read when the Windows suites were split into two
+      # legs. The development pace switch and both of the features that motivated the
+      # paragraph above are gone. The workspace declares three features: `redb` and
+      # `test-support` in fabrico-core, and `dev-seams` in fabrico-host. `redb` and
+      # `dev-seams` are on by default. `test-support` is off by default, but fabrico-core
+      # and fabrico-host both list fabrico-core with it as a dev-dependency, and
+      # `cargo test --workspace` builds dev-dependencies, so Cargo's feature unification
+      # turns it on in the default run too. The two runs below therefore build the same
+      # test binaries with the same features on, which is why running them on two parallel
+      # legs costs no coverage. The flag still earns its place: the day a feature is
+      # declared that no default and no dev-dependency turns on, only the all-features run
+      # compiles what it gates.
       #
       # **KEEP THE FLAG. The prose is what was stale, not the flag.** A silently stale
       # justification is how the next reader concludes a flag is decorative and drops it,
@@ -881,8 +928,9 @@ jobs:
       #
       # WHAT `--all-features` CHANGES ABOUT WHAT THIS JOB PROVES, stated rather than
       # glossed: it certifies the union of every workspace feature rather than the
-      # shipped default set alone. Since 68-07 that union differs from the default set by
-      # `test-support` only, and `test-support` is a TEST surface rather than a shipped
+      # shipped default set alone. Today that union and the default test build are the
+      # same (see above), and `test-support`, the one feature that reaches the default run
+      # only through a dev-dependency, is a TEST surface rather than a shipped
       # capability - so the gap this paragraph used to warn about (a run proving a build
       # the shipped app must never be) no longer exists. The default build is still
       # covered on its own by the SHIPPED-default step below, by the `Build` step above
@@ -928,25 +976,36 @@ jobs:
       # rather than left as an inherited habit. Since the removal there are no
       # `#[cfg(not(feature = ...))]` guards left that `--all-features` could compile out,
       # so the specific trap above is closed and the two runs report identical counts
-      # today. They are kept because the ONLY thing keeping them identical is that the
-      # workspace's one remaining feature is a test-support surface; the moment a feature
+      # today. They are kept because the ONLY thing keeping them identical is that every
+      # declared feature is on by default or turned on by a dev-dependency; the moment a feature
       # gates real behaviour again, the default-feature run is the one that measures what
       # ships, and re-adding a step under pressure is how coverage gets lost. Two cheap
       # runs are the price of not having to notice.
+      #
+      # WHICH LEG RUNS WHICH SUITE. On Linux and macOS the job has one leg, `main`, and it
+      # runs both steps below, the shipped-default one first. On Windows the `main` leg runs
+      # the shipped-default step and the `all-features` leg runs the all-features step, in
+      # parallel (WHY WINDOWS ALONE SPLITS, at the top of this job, has the measured
+      # minutes). `crates/fabrico-host/tests/ci_wiring_parity.rs` pins both run lines, their
+      # PROPTEST_CASES, these two conditions and the matrix that makes the legs.
       - name: Certification suite - SHIPPED default features (PROPTEST_CASES=1024)
+        if: matrix.leg == 'main'
         env:
           PROPTEST_CASES: 1024
         run: cargo test --workspace --no-fail-fast
 
       - name: Certification suite - all features (PROPTEST_CASES=1024)
+        if: matrix.leg == 'all-features' || runner.os != 'Windows'
         env:
           PROPTEST_CASES: 1024
         run: cargo test --workspace --all-features --no-fail-fast
 
       # cargo hides a passing test's output, and the first-fault depth has to reach this log on
-      # every leg, because the recursion test holds only coarse bounds on it.
+      # every operating system, because the recursion test holds only coarse bounds on it. The
+      # `main` leg is the one each operating system runs, so it runs there; on the Windows
+      # all-features leg it would print the same depth a second time.
       - name: First-fault recursion depth on this runner
-        if: ${{ always() }}
+        if: ${{ always() && matrix.leg == 'main' }}
         run: cargo test -p fabrico-core --test factory_memory_pin shallow_recursion -- --nocapture
 
       # Disk and memory after the certification suite, on Linux only and whatever the
