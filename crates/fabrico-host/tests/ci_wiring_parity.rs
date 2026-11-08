@@ -431,9 +431,10 @@ const EMBED_NEEDS: &str = "needs: [changes, wasm-player]";
 /// The heavy jobs whose `needs:` line is not `HEAVY_NEEDS`, each with the one line it must carry.
 /// Each of these jobs reads what an earlier job made, so it needs that job as well as the
 /// classifier. Every other heavy job carries `HEAVY_NEEDS` and nothing else.
-const JOB_NEEDS: [(&str, &str); 2] = [
+const JOB_NEEDS: [(&str, &str); 3] = [
     (EMBED_JOB, EMBED_NEEDS),
     (LIVE_VERDICT_JOB, LIVE_VERDICT_NEEDS),
+    (WALK_VERDICT_JOB, WALK_VERDICT_NEEDS),
 ];
 
 /// The `needs:` line heavy job `id` must carry.
@@ -453,7 +454,7 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// repository root when measured on 2026-09-30. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 10] = [
+const HEAVY_JOBS: [&str; 11] = [
     "determinism",
     "headless-build",
     "wasm-player",
@@ -463,6 +464,7 @@ const HEAVY_JOBS: [&str; 10] = [
     "e2e-live",
     "e2e-live-verdict",
     "e2e-walk",
+    "e2e-walk-verdict",
     "unit",
 ];
 
@@ -1636,15 +1638,36 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
     );
 }
 
-/// The job that runs the lesson walk.
+/// The job that runs the lesson walk, one leg per shard.
 const WALK_JOB: &str = "e2e-walk";
-/// The developer's walk command, as the whole of its `run:` line.
+/// The job that merges the walk's shards and grades the merged report.
+const WALK_VERDICT_JOB: &str = "e2e-walk-verdict";
+/// The walk verdict job's dependency: the classifier, and every leg of the walk.
+const WALK_VERDICT_NEEDS: &str = "needs: [changes, e2e-walk]";
+/// The number of shards the walk runs as.
+const WALK_SHARDS: usize = 3;
+/// The developer's walk command, as the whole of its `run:` line. The shard comes from the step's
+/// env, so this line is the same in every leg and on a developer's machine.
 const WALK_SUITE_RUN: &str = "run: npm run e2e:walk";
+/// The walk step's env line that picks this leg's shard.
+const WALK_SHARD_ENV: &str = "FABRICO_WALK_SHARD: ${{ matrix.shard }}/3";
+/// The merge of every leg's blob into one JSON report, as the whole of its `run:` line.
+const WALK_MERGE_RUN: &str = "run: npx playwright merge-reports --config=playwright.walk.config.ts --reporter=json all-blob";
+/// The merge step's env line that sends the JSON report where the checker reads it.
+const WALK_MERGE_OUTPUT: &str = "PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/walk-report.json";
 /// The walk's report check, as the whole of its `run:` line.
 const WALK_CHECKER_RUN: &str =
     "run: bash ../scripts/check-walk-report.sh test-results/walk-report.json";
 /// The report check's bite proof, as the whole of its `run:` line.
 const WALK_BITES_RUN: &str = "run: bash scripts/prove-walk-report-bites.sh";
+/// The artifact each walk leg uploads its blob report as.
+const WALK_BLOB_ARTIFACT: &str = "name: walk-blob-${{ matrix.shard }}";
+/// Where a walk leg's blob report is.
+const WALK_BLOB_PATH: &str = "path: frontend/blob-report/";
+/// The download of every leg's blob in the verdict job.
+const WALK_BLOB_PATTERN: &str = "pattern: walk-blob-*";
+/// Where the verdict job puts the blobs, which is the folder the merge reads.
+const WALK_BLOBS_DIR: &str = "path: frontend/all-blob";
 /// `frontend/package.json`, because `e2e:walk` can swallow an exit code there just as well.
 const FRONTEND_PACKAGE_JSON: &str = include_str!("../../../frontend/package.json");
 
@@ -1653,74 +1676,193 @@ fn step_key(line: &str) -> &str {
     line.strip_prefix("- ").unwrap_or(line)
 }
 
+/// The one step in `job` holding a line equal to `key` (after `step_key`), and the line's index;
+/// or a message naming how many there were.
+fn one_step_with<'a>(job: &[&'a str], key: &str, job_id: &str) -> Result<(usize, Vec<&'a str>), String> {
+    let found: Vec<usize> = job
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| step_key(l) == key)
+        .map(|(i, _)| i)
+        .collect();
+    match found.as_slice() {
+        [at] => Ok((*at, step_around(job, *at))),
+        _ => Err(format!(
+            "`{key}` appears {} time(s) in job `{job_id}`, expected 1.",
+            found.len()
+        )),
+    }
+}
+
 /// Everything wrong with how `yml` and `package_json` wire the walk's verdict. Empty means right.
 fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
     let mut wrong: Vec<String> = Vec::new();
     let blocks = job_blocks_in(yml);
     let runs = [
-        (WALK_BITES_RUN, "scripts/prove-walk-report-bites.sh"),
-        (WALK_SUITE_RUN, "npm run e2e:walk"),
-        (WALK_CHECKER_RUN, "scripts/check-walk-report.sh"),
+        (WALK_SUITE_RUN, "npm run e2e:walk", WALK_JOB),
+        (WALK_BITES_RUN, "scripts/prove-walk-report-bites.sh", WALK_VERDICT_JOB),
+        (WALK_MERGE_RUN, "merge-reports", WALK_VERDICT_JOB),
+        (WALK_CHECKER_RUN, "scripts/check-walk-report.sh", WALK_VERDICT_JOB),
     ];
 
-    // Each one exactly once, in the walk's job, as the whole of its line. A whole-line match is what
+    // Each one exactly once, in its own job, as the whole of its line. A whole-line match is what
     // refuses `|| true`, `; true` and a pipe, each of which turns the step's failure into a pass.
-    for (expected, needle) in runs {
+    for (expected, needle, job) in runs {
         let found: Vec<(&str, &str)> = blocks
             .iter()
             .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
             .filter(|(_, line)| line.starts_with("run:") && line.contains(needle))
             .collect();
-        if found != [(WALK_JOB, expected)] {
+        if found != [(job, expected)] {
             wrong.push(format!(
                 "the `run:` lines invoking `{needle}` are {found:?}, expected exactly \
-                 [(\"{WALK_JOB}\", \"{expected}\")]. With anything else on that line, or the step \
-                 moved or gone, the walk's job can go green without the walk's verdict."
+                 [(\"{job}\", \"{expected}\")]. With anything else on that line, or the step \
+                 moved or gone, the walk can go green without its verdict."
             ));
         }
     }
 
-    match blocks.iter().find(|(id, _)| *id == WALK_JOB) {
+    let job_lines = |job: &str| -> Option<Vec<&str>> {
+        blocks
+            .iter()
+            .find(|(id, _)| *id == job)
+            .map(|(_, lines)| lines.clone())
+    };
+
+    match job_lines(WALK_JOB) {
         None => wrong.push(format!("there is no job `{WALK_JOB}` under `jobs:`.")),
-        Some((_, lines)) => {
-            let walk_runs: Vec<&str> = lines
-                .iter()
-                .map(|line| step_key(line))
-                .filter(|line| line.starts_with("run:"))
-                .collect();
-            let at = |expected: &str| walk_runs.iter().position(|line| *line == expected);
-            if let (Some(b), Some(s), Some(c)) =
-                (at(WALK_BITES_RUN), at(WALK_SUITE_RUN), at(WALK_CHECKER_RUN))
-                && !(b < s && s + 1 == c)
-            {
-                wrong.push(format!(
-                    "the bite proof, the walk and the report check are `run:` lines {b}, {s} and \
-                     {c} of job `{WALK_JOB}`. The proof must come before the walk, and the check \
-                     must be the line straight after it."
-                ));
-            }
-            for line in lines
-                .iter()
-                .filter(|line| step_key(line).starts_with("continue-on-error"))
-            {
-                wrong.push(format!(
-                    "job `{WALK_JOB}` carries `{line}`, so a failed walk or a failed report check \
-                     would leave the job green."
-                ));
-            }
-            for (_, needle) in runs {
-                for line in step_of(lines, needle)
-                    .iter()
-                    .filter(|line| step_key(line).starts_with("if:"))
-                {
+        Some(job) => {
+            // One leg per shard, and a red leg cancels none of the others.
+            let shard_list = format!(
+                "shard: [{}]",
+                (1..=WALK_SHARDS)
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            for key in ["fail-fast: false", shard_list.as_str()] {
+                let found = job.iter().filter(|l| **l == key).count();
+                if found != 1 {
                     wrong.push(format!(
-                        "the step that runs `{needle}` in job `{WALK_JOB}` carries `{line}`. A \
-                         condition can skip it while the job stays green."
+                        "job `{WALK_JOB}` carries `{key}` {found} time(s), expected 1. The walk \
+                         is split into {WALK_SHARDS} shards, its env line names that count, and a \
+                         leg cancelled by another's failure leaves no blob."
                     ));
+                }
+            }
+
+            // The walk step picks its shard from the matrix. Without the env line every leg runs
+            // the whole walk and writes no blob.
+            let suite_step = step_of(&job, "npm run e2e:walk");
+            if !suite_step.is_empty() && !suite_step.contains(&WALK_SHARD_ENV) {
+                wrong.push(format!(
+                    "the walk step in job `{WALK_JOB}` has no `{WALK_SHARD_ENV}` line, so each \
+                     leg would run the whole walk and leave no blob for the verdict job."
+                ));
+            }
+
+            // Each leg uploads its blob, red or not, and fails when there is none.
+            match one_step_with(&job, WALK_BLOB_ARTIFACT, WALK_JOB) {
+                Err(message) => wrong.push(message),
+                Ok((at, step)) => {
+                    for key in [
+                        "uses: actions/upload-artifact@v4",
+                        "if: ${{ !cancelled() }}",
+                        WALK_BLOB_PATH,
+                        "if-no-files-found: error",
+                    ] {
+                        if !step.iter().any(|l| step_key(l) == key) {
+                            wrong.push(format!(
+                                "the step carrying `{WALK_BLOB_ARTIFACT}` in job `{WALK_JOB}` has \
+                                 no `{key}` line. Without it a red shard's blob never reaches the \
+                                 verdict job, or a missing blob goes unnoticed."
+                            ));
+                        }
+                    }
+                    if let Some(s) = job.iter().position(|l| step_key(l) == WALK_SUITE_RUN)
+                        && s > at
+                    {
+                        wrong.push(format!(
+                            "job `{WALK_JOB}` uploads `{WALK_BLOB_ARTIFACT}` before the walk \
+                             writes it."
+                        ));
+                    }
                 }
             }
         }
     }
+
+    match job_lines(WALK_VERDICT_JOB) {
+        None => wrong.push(format!("there is no job `{WALK_VERDICT_JOB}` under `jobs:`.")),
+        Some(job) => {
+            // The proof before the merge, and the check the run line straight after the merge.
+            let verdict_runs: Vec<&str> = job
+                .iter()
+                .map(|line| step_key(line))
+                .filter(|line| line.starts_with("run:"))
+                .collect();
+            let at = |expected: &str| verdict_runs.iter().position(|line| *line == expected);
+            if let (Some(b), Some(m), Some(c)) =
+                (at(WALK_BITES_RUN), at(WALK_MERGE_RUN), at(WALK_CHECKER_RUN))
+                && !(b < m && m + 1 == c)
+            {
+                wrong.push(format!(
+                    "the bite proof, the merge and the report check are `run:` lines {b}, {m} and \
+                     {c} of job `{WALK_VERDICT_JOB}`. The proof must come before the merge, and \
+                     the check must be the line straight after it."
+                ));
+            }
+
+            // Every leg's blob is downloaded, side by side into the folder the merge reads,
+            // before the merge.
+            match one_step_with(&job, WALK_BLOB_PATTERN, WALK_VERDICT_JOB) {
+                Err(message) => wrong.push(message),
+                Ok((at, step)) => {
+                    for key in [
+                        "uses: actions/download-artifact@v4",
+                        "merge-multiple: true",
+                        WALK_BLOBS_DIR,
+                    ] {
+                        if !step.iter().any(|l| step_key(l) == key) {
+                            wrong.push(format!(
+                                "the step carrying `{WALK_BLOB_PATTERN}` in job \
+                                 `{WALK_VERDICT_JOB}` has no `{key}` line, so the merge would \
+                                 not find the blobs."
+                            ));
+                        }
+                    }
+                    if let Some(m) = job.iter().position(|l| step_key(l) == WALK_MERGE_RUN)
+                        && m < at
+                    {
+                        wrong.push(format!(
+                            "job `{WALK_VERDICT_JOB}` runs the merge before it takes the blobs."
+                        ));
+                    }
+                }
+            }
+
+            // The merge writes the JSON report where the checker reads it.
+            let merge_step = step_of(&job, "merge-reports");
+            if !merge_step.is_empty() && !merge_step.contains(&WALK_MERGE_OUTPUT) {
+                wrong.push(format!(
+                    "the merge step in job `{WALK_VERDICT_JOB}` has no `{WALK_MERGE_OUTPUT}` \
+                     line, so the checker would read no merged report."
+                ));
+            }
+        }
+    }
+
+    // Neither job swallows a failure, and no walk, proof, merge or check can be skipped.
+    wrong.extend(step_guards_wrong(yml, WALK_JOB, &["npm run e2e:walk"]));
+    wrong.extend(step_guards_wrong(
+        yml,
+        WALK_VERDICT_JOB,
+        &[
+            "scripts/prove-walk-report-bites.sh",
+            "merge-reports",
+            "scripts/check-walk-report.sh",
+        ],
+    ));
 
     // The npm script deletes the old report first, so a failed build leaves nothing to read, ends in
     // the unfiltered walk, and can't swallow an exit code on the way.
@@ -1748,11 +1890,24 @@ fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
     wrong
 }
 
-/// The walk's verdict is its exit code and its report, and nothing can switch either off.
+/// The walk's verdict is its exit code and its merged report, and nothing can switch either off.
+///
+/// # Why
 ///
 /// `ci.yml` says so in a comment, and a comment can't fail. Changing the run line to
 /// `npm run e2e:walk || true`, adding `continue-on-error: true` or deleting a step would each leave
-/// the job green forever, so those facts are pinned here, where `cargo test` runs them.
+/// the walk green forever, so those facts are pinned here, where `cargo test` runs them.
+///
+/// # Why the rule pins two jobs
+///
+/// The walk runs as `WALK_SHARDS` shards on separate runners, one leg of `WALK_JOB` each, because
+/// one worker against one host made it take up to 43 minutes. One leg's report holds a third of
+/// the walk and falls under the checker's floor, so the legs upload blob reports and
+/// `WALK_VERDICT_JOB` merges them and grades the result. This rule used to pin the proof, the walk
+/// and the checker in one job; it now pins the walk and its shard env line in `WALK_JOB`, the blob
+/// upload between the jobs, and the proof, the download, the merge and the checker in
+/// `WALK_VERDICT_JOB`, with the guards on both. The verdict job's `needs:` line and its docs-only
+/// gate are pinned by `job_classes_wrong`.
 #[test]
 fn the_walk_gate_verdict_cannot_be_switched_off() {
     let wrong = walk_gate_wrong(CI_YML, FRONTEND_PACKAGE_JSON);
@@ -1766,91 +1921,144 @@ fn the_walk_gate_verdict_cannot_be_switched_off() {
     );
 }
 
-/// `walk_gate_wrong` can fail: each of these breaks is planted in a copy of the real files.
+/// `walk_gate_wrong` and `job_classes_wrong` can fail: each of these breaks is planted in a copy of
+/// the real files, and the check has to name it.
 #[test]
 fn the_walk_gate_check_names_each_way_of_switching_it_off() {
     const SUITE_STEP: &str = "      - name: Run the lesson walk\n";
     const CHECKER_STEP: &str = "      - name: Every walk test ran and passed\n";
-    let job_header = "    name: lesson walk (real headless host)\n";
+    const MERGE_STEP: &str = "      - name: Merge the walk shards\n";
+    const UPLOAD_STEP: &str = "      - name: Keep this shard's blob report for the verdict job\n";
+    const WALK_HEADER: &str = "    name: lesson walk (real headless host)\n";
+    const VERDICT_HEADER: &str = "    name: lesson walk verdict (all shards)\n";
+    const MATRIX: &str = "      fail-fast: false\n      matrix:\n        shard: [1, 2, 3]\n";
     let suite_line = format!("        {WALK_SUITE_RUN}\n");
     let checker_line = format!("        {WALK_CHECKER_RUN}\n");
     let bites_line = format!("        {WALK_BITES_RUN}\n");
+    let shard_env_line = format!("          {WALK_SHARD_ENV}\n");
 
-    let planted: Vec<(&str, String, &str)> = vec![
+    // (what, the planted copy, which check reads it, what it must name)
+    type WorkflowCheck = fn(&str) -> Vec<String>;
+    let walk: WorkflowCheck = |yml| walk_gate_wrong(yml, FRONTEND_PACKAGE_JSON);
+    let plants: Vec<(&str, String, WorkflowCheck, String)> = vec![
         (
             "the walk's exit code swallowed",
-            suite_line.replace("e2e:walk", "e2e:walk || true"),
-            "npm run e2e:walk",
+            CI_YML.replace(&suite_line, &suite_line.replace("e2e:walk", "e2e:walk || true")),
+            walk,
+            "npm run e2e:walk".to_string(),
         ),
-        ("the walk step deleted", String::new(), "npm run e2e:walk"),
+        (
+            "the walk step deleted",
+            CI_YML.replace(&suite_line, ""),
+            walk,
+            "npm run e2e:walk".to_string(),
+        ),
         (
             "the walk as a block",
-            "        run: |\n          npm run e2e:walk\n".to_string(),
-            "npm run e2e:walk",
+            CI_YML.replace(&suite_line, "        run: |\n          npm run e2e:walk\n"),
+            walk,
+            "npm run e2e:walk".to_string(),
         ),
-    ];
-    for (what, replacement, must_name) in planted {
-        let yml = CI_YML.replace(&suite_line, &replacement);
-        assert_ne!(yml, CI_YML, "{what}: the plant landed");
-        let wrong = walk_gate_wrong(&yml, FRONTEND_PACKAGE_JSON).join("\n");
-        assert!(
-            wrong.contains(must_name),
-            "{what}: named `{must_name}` in: {wrong}"
-        );
-    }
-
-    let by_replacing: Vec<(&str, String, String, &str)> = vec![
         (
             "the report check's exit code swallowed",
-            checker_line.clone(),
-            checker_line.replace(".json", ".json || true"),
-            "scripts/check-walk-report.sh",
+            CI_YML.replace(&checker_line, &checker_line.replace(".json", ".json || true")),
+            walk,
+            "scripts/check-walk-report.sh".to_string(),
         ),
         (
             "the report check deleted",
-            checker_line.clone(),
-            String::new(),
-            "scripts/check-walk-report.sh",
+            CI_YML.replace(&checker_line, ""),
+            walk,
+            "scripts/check-walk-report.sh".to_string(),
         ),
         (
             "the bite proof deleted",
-            bites_line.clone(),
-            String::new(),
-            "scripts/prove-walk-report-bites.sh",
+            CI_YML.replace(&bites_line, ""),
+            walk,
+            "scripts/prove-walk-report-bites.sh".to_string(),
         ),
         (
-            "continue-on-error on the job",
-            job_header.to_string(),
-            format!("{job_header}    continue-on-error: true\n"),
-            "continue-on-error",
+            "continue-on-error on the walk job",
+            CI_YML.replace(WALK_HEADER, &format!("{WALK_HEADER}    continue-on-error: true\n")),
+            walk,
+            format!("job `{WALK_JOB}` carries `continue-on-error: true`"),
+        ),
+        (
+            "continue-on-error on the verdict job",
+            CI_YML.replace(
+                VERDICT_HEADER,
+                &format!("{VERDICT_HEADER}    continue-on-error: true\n"),
+            ),
+            walk,
+            format!("job `{WALK_VERDICT_JOB}` carries `continue-on-error: true`"),
         ),
         (
             "continue-on-error as a step's first key",
-            SUITE_STEP.to_string(),
-            "      - continue-on-error: true\n        name: Run the lesson walk\n".to_string(),
-            "continue-on-error",
+            CI_YML.replace(
+                SUITE_STEP,
+                "      - continue-on-error: true\n        name: Run the lesson walk\n",
+            ),
+            walk,
+            format!("job `{WALK_JOB}` carries `continue-on-error: true`"),
         ),
         (
             "a condition on the report check",
-            CHECKER_STEP.to_string(),
-            format!("{CHECKER_STEP}        if: false\n"),
-            "carries `if: false`",
+            CI_YML.replace(CHECKER_STEP, &format!("{CHECKER_STEP}        if: false\n")),
+            walk,
+            format!("in job `{WALK_VERDICT_JOB}` carries `if: false`"),
         ),
         (
-            "a step between the walk and the report check",
-            CHECKER_STEP.to_string(),
-            format!("      - run: echo between\n{CHECKER_STEP}"),
-            "the line straight after it",
+            "a step between the merge and the report check",
+            CI_YML.replace(CHECKER_STEP, &format!("      - run: echo between\n{CHECKER_STEP}")),
+            walk,
+            "the line straight after it".to_string(),
+        ),
+        (
+            "the shard env line removed",
+            CI_YML.replace(&shard_env_line, ""),
+            walk,
+            format!("has no `{WALK_SHARD_ENV}` line"),
+        ),
+        (
+            "the blob upload's `if: ${{ !cancelled() }}` removed",
+            CI_YML.replace(
+                &format!("{UPLOAD_STEP}        if: ${{{{ !cancelled() }}}}\n"),
+                UPLOAD_STEP,
+            ),
+            walk,
+            "has no `if: ${{ !cancelled() }}` line".to_string(),
+        ),
+        (
+            "the walk matrix grown to four shards",
+            CI_YML.replace(MATRIX, &MATRIX.replace("[1, 2, 3]", "[1, 2, 3, 4]")),
+            walk,
+            format!("job `{WALK_JOB}` carries `shard: [1, 2, 3]` 0 time(s)"),
+        ),
+        (
+            "the merge step deleted",
+            without_step(CI_YML, MERGE_STEP),
+            walk,
+            "the `run:` lines invoking `merge-reports` are []".to_string(),
+        ),
+        (
+            "the verdict job's needs line set to `needs: changes`",
+            CI_YML.replace(
+                &format!("    {WALK_VERDICT_NEEDS}\n"),
+                &format!("    {HEAVY_NEEDS}\n"),
+            ),
+            job_classes_wrong,
+            format!("heavy job `{WALK_VERDICT_JOB}` is missing `{WALK_VERDICT_NEEDS}`"),
         ),
     ];
-    for (what, from, to, must_name) in by_replacing {
-        let yml = CI_YML.replace(&from, &to);
+    assert_eq!(plants.len(), 16, "sixteen ways of switching the walk verdict off in ci.yml");
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, check, must_name) in &plants {
         assert_ne!(yml, CI_YML, "{what}: the plant landed");
-        let wrong = walk_gate_wrong(&yml, FRONTEND_PACKAGE_JSON).join("\n");
-        assert!(
-            wrong.contains(must_name),
-            "{what}: named `{must_name}` in: {wrong}"
-        );
+        let named = check(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
     }
 
     for (what, from, to) in [
@@ -1875,12 +2083,16 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
             package_json, FRONTEND_PACKAGE_JSON,
             "{what}: the plant landed"
         );
-        let wrong = walk_gate_wrong(CI_YML, &package_json).join("\n");
-        assert!(
-            wrong.contains("the `e2e:walk` script is"),
-            "{what}: named the script in: {wrong}"
-        );
+        let named = walk_gate_wrong(CI_YML, &package_json).join("\n");
+        if !named.contains("the `e2e:walk` script is") {
+            missed.push(format!("{what}: expected the script named, got: {named:?}"));
+        }
     }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the walk gate went unnamed:\n{}",
+        missed.join("\n")
+    );
 }
 
 /// The trimmed lines of the step in `job_lines` whose `run:` line invokes `needle`: from the

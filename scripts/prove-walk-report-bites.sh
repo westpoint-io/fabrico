@@ -3,9 +3,10 @@
 # prove-walk-report-bites.sh - the bite proof for scripts/check-walk-report.sh, which decides whether
 # the lesson walk really ran.
 #
-# WHY IT RUNS IN CI, BEFORE THE WALK. A checker that has drifted towards "OK" would let a skipped or
-# missing walk test through. So the `e2e-walk` job runs this first, and if the checker no longer bites
-# the job fails before the walk's minutes are spent.
+# WHY IT RUNS IN CI, BEFORE THE MERGE. A checker that has drifted towards "OK" would let a skipped or
+# missing walk test through. The walk runs as shards, and the `e2e-walk-verdict` job merges their blob
+# reports into one JSON report for the checker. That job runs this first, so if the checker no longer
+# bites the job fails before the merged report is read.
 #
 # Every report is hand-made under `mktemp -d`, in the shape of a real Playwright 1.61 report: a file
 # suite with top-level specs, and a nested describe with more. So the checker has to walk the same
@@ -32,6 +33,8 @@
 #   U9  no argument                                     -> exit 2
 #   U10 two reports                                     -> exit 2
 #   U11 an attempt to lower the floor with --min-tests  -> exit 2
+#   WM1 a merged report with one shard's files missing  -> exit 2, the floor named
+#   WM2 a merged report carrying a shard's timeout      -> exit 2, the error named
 #
 # THE CHECKER UNDER TEST is `WALK_REPORT_CHECKER`, default the tracked scripts/check-walk-report.sh.
 # The override exists so a deliberately broken copy can be run through this proof and seen to turn it
@@ -222,8 +225,34 @@ run_case "U10 two reports" 2 "more than one report" "$BASE" "$BASE"
 
 run_case "U11 an attempt to lower the floor" 2 "unknown option" --min-tests 1 "$BELOW_FLOOR"
 
-# The number of cases above, K1 to U11. It counts cases, not tests, so it doesn't follow the floor.
-DECLARED_TOTAL=21
+# A MERGED REPORT, as the walk verdict job reads it: one file suite per walk file, from three shards.
+# The FLOOR tests are spread over three files, one file per shard, so each case below loses or breaks
+# one shard's part of the walk.
+SHARD_ONE=$((FLOOR / 3))
+SHARD_TWO=$((FLOOR / 3))
+SHARD_THREE=$((FLOOR - SHARD_ONE - SHARD_TWO))
+MERGED="$TMP/merged.json"
+jq --argjson a "$SHARD_ONE" --argjson b "$SHARD_TWO" --argjson c "$SHARD_THREE" '
+  .suites[0].specs[0] as $t
+  | def file(name; n): { title: name, file: name, line: 0, column: 0,
+                         specs: [ range(n) as $i | $t | .file = name | .title = "test \($i)" | .line = (10 + $i) ] };
+  .suites = [ file("shard-one.walk.ts"; $a), file("shard-two.walk.ts"; $b), file("shard-three.walk.ts"; $c) ]' \
+    "$BASE" > "$MERGED"
+
+# WM1: a shard's blob never reached the merge (its leg crashed before writing it, or the download
+# missed it), so the merged report holds the other two shards' files only.
+jq '.suites |= map(select(.file != "shard-two.walk.ts"))' "$MERGED" > "$TMP/wm1.json"
+run_case "WM1 a merged report with one shard's files missing" 2 \
+    "the report holds $((FLOOR - SHARD_TWO)) tests, below the floor of $FLOOR" "$TMP/wm1.json"
+
+# WM2: a shard hit the walk config's globalTimeout. Its blob carries the run's top-level error, and
+# the merge copies it into the merged report.
+jq '.errors = [ { message: "Timed out waiting 3300s for the test suite to run" } ]' "$MERGED" > "$TMP/wm2.json"
+run_case "WM2 a merged report carrying a shard's timeout" 2 \
+    "top-level error: Timed out waiting 3300s for the test suite to run" "$TMP/wm2.json"
+
+# The number of cases above, K1 to WM2. It counts cases, not tests, so it doesn't follow the floor.
+DECLARED_TOTAL=23
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then
     failures+=("ran $executed cases, declared $DECLARED_TOTAL")
 fi

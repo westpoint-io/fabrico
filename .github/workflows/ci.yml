@@ -88,8 +88,8 @@ jobs:
   # decides it.
   #
   # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
-  # embed, golden-corpus, e2e, e2e-live, e2e-live-verdict, e2e-walk and unit. ALWAYS
-  # RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
+  # embed, golden-corpus, e2e, e2e-live, e2e-live-verdict, e2e-walk, e2e-walk-verdict and
+  # unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
   # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
   # private-residue and neutrality. Each always-on job either reads files a docs-only
   # change can edit or costs about one minute, so gating it would save little and risk a
@@ -1430,30 +1430,42 @@ jobs:
       - name: The live red set over all shards is exactly the declared CUTs
         run: bash scripts/check-live-red-set.sh --merge 4 live-reports/live-report-1/live-report.json live-reports/live-report-2/live-report.json live-reports/live-report-3/live-report.json live-reports/live-report-4/live-report.json
 
-  # THE LESSON WALK, in a job of its own. The live job has hundreds of tests, runs past its limit
-  # and may leave tests unstarted, so a lesson test there could never start and would add to the
-  # overrun. The walk's files are named *.walk.ts, which neither live config matches, so they stay
-  # out of the live suite's test count too.
+  # THE LESSON WALK, in a job of its own. The live job has hundreds of tests and a lesson test
+  # there would only add to its time. The walk's files are named *.walk.ts, which neither live config
+  # matches, so they stay out of the live suite's test count too.
   #
-  # ITS VERDICT IS ITS EXIT CODE AND ITS REPORT. The live job swallows its suite's exit code because
-  # that suite carries a declared red. The walk has none, so a failed test stops the job at the run
-  # step. Playwright also exits 0 on a skipped test or a deleted walk file, so
-  # `scripts/check-walk-report.sh` reads the report on the next run line and fails on a test that
-  # didn't run and pass, or on fewer than its floor of tests. Its bite proof runs before the walk, and
-  # `ci_wiring_parity.rs` pins all three steps.
+  # THREE LEGS. One worker against one host made the walk take 19 to 43 minutes, so it runs as three
+  # legs, one shard each, on separate runners. The shard comes from FABRICO_WALK_SHARD on the walk
+  # step, which frontend/playwright.walk.config.ts reads, so the run line stays the developer's whole
+  # `npm run e2e:walk`. The config keeps `fullyParallel: false`, so Playwright splits by whole file:
+  # the walk's tests share one mutable host, and a file's tests run in order on it. That puts
+  # lesson-variants.walk.ts alone in leg 2, and the other two legs hold two files each.
   #
-  # THE LIMIT. The walk holds 25 tests, which took 690 seconds unthrottled in a local run. When it
-  # held 12 tests, two CPUs at a 100% quota made it 6.7 times slower than unthrottled, and that ratio
-  # puts the 25 tests at 78 minutes. Plus about 10 minutes of build before the suite is 88, and twice
-  # that is 176. The `globalTimeout` in frontend/playwright.walk.config.ts is 166, the limit less
-  # those 10 minutes, so an overrun writes a report before the runner is killed. These are local
-  # numbers: a recorded CI run replaces them.
+  # ITS VERDICT IS ITS EXIT CODE AND ITS MERGED REPORT. The walk declares no red, so a failed test
+  # stops its leg at the run step. Playwright also exits 0 on a skipped test or a deleted walk file,
+  # so `scripts/check-walk-report.sh` reads what ran. One leg's report holds a third of the walk and
+  # would fall under the checker's floor, so each leg uploads a blob report instead, red or not, and
+  # `e2e-walk-verdict` merges the three into one JSON report and runs the checker on it.
+  #
+  # A LOST SHARD READS RED TWICE. A leg with no blob fails its upload (`if-no-files-found: error`),
+  # and the merged report then holds too few tests: the checker's MIN_TESTS equals the walk's test
+  # count, so any missing shard puts the total under it and the verdict exits 2. The checker's bite
+  # proof runs in the verdict job, before the merge. `ci_wiring_parity.rs` pins both jobs.
+  #
+  # THE LIMIT. In CI run 42083745921 the whole walk took 42 minutes, and lesson-variants.walk.ts
+  # alone 26.2 of them. Twice that, rounded up, is the 55 minute `globalTimeout` in the walk config,
+  # so an overrun writes a report before the runner is killed. This job's limit is those 55 plus
+  # 15 for the build.
   e2e-walk:
     name: lesson walk (real headless host)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 176
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1484,13 +1496,75 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      - name: Run the lesson walk
+        working-directory: frontend
+        env:
+          FABRICO_WALK_SHARD: ${{ matrix.shard }}/3
+        run: npm run e2e:walk
+
+      # The verdict job merges all three blobs. A red leg's blob is uploaded too, and a leg with
+      # no blob fails here.
+      - name: Keep this shard's blob report for the verdict job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: walk-blob-${{ matrix.shard }}
+          path: frontend/blob-report/
+          if-no-files-found: error
+          retention-days: 14
+
+      # A failing run's traces go nowhere otherwise, and a red that only CI shows needs them.
+      - name: Keep the traces of a red walk shard
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walk-test-results-${{ matrix.shard }}
+          path: frontend/test-results/
+          retention-days: 14
+
+  # THE WALK VERDICT OVER ALL SHARDS. It needs every leg of `e2e-walk` and runs under the same
+  # docs-only gate, whose `!cancelled()` lets it run after a leg went red. The comment above
+  # `e2e-walk` gives the rules. The checker's bite proof runs here, before the merge, so the
+  # checker is seen to bite before it reads the merged report.
+  e2e-walk-verdict:
+    name: lesson walk verdict (all shards)
+    needs: [changes, e2e-walk]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # merge-reports comes with the pinned Playwright.
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
       # The checker must be seen to bite before it is trusted with the report.
       - name: Walk report checker bites
         run: bash scripts/prove-walk-report-bites.sh
 
-      - name: Run the lesson walk
+      # All three blobs land side by side in frontend/all-blob/.
+      - name: Take every shard's blob report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: walk-blob-*
+          merge-multiple: true
+          path: frontend/all-blob
+
+      - name: Merge the walk shards
         working-directory: frontend
-        run: npm run e2e:walk
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/walk-report.json
+        run: npx playwright merge-reports --config=playwright.walk.config.ts --reporter=json all-blob
 
       - name: Every walk test ran and passed
         working-directory: frontend

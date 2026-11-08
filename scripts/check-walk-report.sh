@@ -7,6 +7,12 @@
 # `test.fail()` that failed, and on a suite with a whole file deleted. The walk's job would stay green
 # with the parity test skipped or gone. This script reads what ran.
 #
+# WHICH REPORT. CI runs the walk as shards, one leg each, and each leg uploads a blob report. The
+# `e2e-walk-verdict` job merges the blobs with `playwright merge-reports` into one JSON report and runs
+# this script on it, so it grades the whole walk and never one shard. A shard that was lost, because
+# its leg crashed or its blob never reached the merge, leaves its tests out of the merged report. The
+# total then falls under MIN_TESTS, which equals the walk's test count, and that is exit 2.
+#
 # WHY NOT check-live-red-set.sh. That one lets tests titled `CUT - leg <n>` fail, because the live
 # suite declares them. The walk declares none, so a walk test with that title failing is a failure
 # here. It also takes --min-tests, which this script refuses, so nothing on the CI line can lower the
@@ -24,7 +30,8 @@
 #
 # A STALE REPORT. This script can't tell this run's report from an earlier one. `npm run e2e:walk`
 # deletes test-results/walk-report.json before it builds, so a failed build leaves no report to read.
-# A run started any other way has to delete it first too.
+# A run started any other way has to delete it first too. In CI the verdict job starts from a fresh
+# checkout, so the only report there is the one its merge step writes.
 #
 # EXIT CODES:
 #   0  at least MIN_TESTS tests, and all of them ran and passed
@@ -38,7 +45,8 @@
 #
 # USAGE: check-walk-report.sh <report.json>
 #
-# scripts/prove-walk-report-bites.sh runs this over hand-made reports before the walk starts.
+# scripts/prove-walk-report-bites.sh runs this over hand-made reports in the walk verdict job, before
+# the merge.
 
 set -u
 
