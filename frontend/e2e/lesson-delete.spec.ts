@@ -4,7 +4,7 @@ import { EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
 import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { noteTokens } from '../src/tutorial/machine';
 import { phrasePlain } from '../src/tutorial/phrase';
-import { CELL, buildPacket, screenCellCentre, type Harness } from './support/wire';
+import { CELL, buildPacket, screenCellCentre, type Harness, type InjectBelt } from './support/wire';
 import {
   CARD,
   LINE_BELT_ID,
@@ -92,6 +92,8 @@ const STAGE = {
 };
 
 const BELT_ID = LINE_BELT_ID;
+/** A belt handle no step of the lesson uses, for a stray belt a case draws. */
+const STRAY_BELT_ID = 8;
 type Board = LineBoard;
 const FLOOR = 1;
 
@@ -225,6 +227,51 @@ test.describe('lesson 3 on the mock host', () => {
       'Source',
       'unread',
     ]);
+  });
+
+  test("a stray belt drawn from the Source's output after the belt's delete doesn't let one Undo finish the lesson", async ({ page }) => {
+    const { h, host, board } = await toSelectBelt(page);
+    await deleteBelt(page, h, board);
+    // Three tiles from the Source's output going south: the Tail docked to the Source, the first tile
+    // on the deleted belt's first tile, and nothing at the other end.
+    const [x, y] = board.belt.tiles[0]!;
+    const stray: InjectBelt = { id: STRAY_BELT_ID, tiles: [[x, y], [x, y + 1], [x, y + 2]], docks: [{ end: 'Tail', node: board.source.id, port: 0 }] };
+    board.tick += 1;
+    h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: FLOOR, belts: [stray], canUndo: true }));
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __fabrico: { scene(): { belts: unknown[] } } }).__fabrico.scene().belts.length), {
+        message: 'the stray is on the board',
+      })
+      .toBe(1);
+    await page.waitForTimeout(300);
+    let probe = await readProbe(page);
+    expect(probe.stepId, 'the stray leaves the lesson on the Sink step').toBe(STEP.deleteSink);
+    expect(probe.noteKind, 'with no note').toBe('');
+    await deleteSink(page, h, board);
+
+    // The first Undo puts the Sink back, and the keyframe re-mints the Source, the Sink and the stray.
+    await pressRing(page, await ringAt(page, STAGE.undoSink));
+    await expect.poll(() => undosSent(h), { message: 'the Undo button sent an Undo' }).toBe(1);
+    const first = reminted({ nodes: [board.source, board.sink], belts: [stray] }, 10);
+    host.set(first.nodes[0]!.id, SOURCE_WEBHOOK);
+    host.set(first.nodes[1]!.id, SINK_DEBUG);
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 2, swapFloor: FLOOR, nodes: first.nodes, belts: first.belts, canUndo: true, canRedo: true }));
+    await expectAt(page, STEP.bringBack, STAGE.undoBelt, 'with the original belt still gone, the card asks for it');
+    // Give the config answers about the new handles time to come, and the card still waits for the belt.
+    await page.waitForTimeout(1000);
+    probe = await readProbe(page);
+    expect(probe.card, 'one Undo with the original belt still gone does not finish the lesson').toBe('running');
+    const card = page.locator(CARD);
+    await expect(card).toContainText(wordsOf(STEP.bringBack, STAGE.undoBelt));
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toHaveCount(0);
+
+    // A keyframe with the original belt back and no stray finishes it.
+    const back = reminted({ nodes: [board.source, board.sink], belts: [board.belt] }, 20);
+    host.set(back.nodes[0]!.id, SOURCE_WEBHOOK);
+    host.set(back.nodes[1]!.id, SINK_DEBUG);
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 3, swapFloor: FLOOR, nodes: back.nodes, belts: back.belts, canUndo: true, canRedo: true }));
+    await expect.poll(async () => (await readProbe(page)).card, { message: 'the original belt back finished the lesson' }).toBe('finished');
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
   });
 
   test('an Undo of the draw at select-belt is not a delete: the lesson goes back to step 3 and says so', async ({ page }) => {

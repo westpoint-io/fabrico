@@ -11,7 +11,7 @@ import {
   BINDING_NAMES,
   beltJoining,
   boundBeltIds,
-  boundBeltJoining,
+  boundGone,
   boundMachineKeys,
   evaluateCheck,
   freeOutputs,
@@ -25,7 +25,7 @@ import {
   type ShapeCapture,
 } from './check';
 import type { Progress } from './progress';
-import { beltTilesIn, boardShape, handlesByKey, withConfigs } from './shape';
+import { boardShape, handlesByKey, withConfigs } from './shape';
 import type {
   BindingName,
   BoardFacts,
@@ -174,19 +174,6 @@ export function noteTokens(note: LessonNote): readonly PhraseToken[] {
   return [`The board was already running, so step ${note.a} is done. `, { key: 'playPause' }, ' pauses it.'];
 }
 
-/** Is the bound thing off the board? A belt with a capture is gone once no belt tile sits on a tile it had then. */
-function boundGone(name: BindingName, board: BoardFacts, s: Pick<TutorialState, 'bindings' | 'capture'>): boolean {
-  const bound = s.bindings[name];
-  if (bound === undefined) return false;
-  const ends = BELT_ENDS[name];
-  if (ends === undefined) return !board.nodes.some((n) => nodeKey(n) === bound.nodeKey);
-  const a = s.bindings[ends[0]];
-  const b = s.bindings[ends[1]];
-  const tiles = s.capture === null || a === undefined || b === undefined ? null : beltTilesIn(s.capture.shape, a.nodeKey, b.nodeKey);
-  if (tiles === null) return boundBeltJoining(board, s.bindings, name) === undefined;
-  return !board.belts.some((belt) => belt.tiles.some((t) => tiles.some((c) => c.cell_x === t.cell_x && c.cell_y === t.cell_y)));
-}
-
 function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<TutorialState, 'bindings' | 'capture' | 'baseline'>): boolean {
   const { armed } = chrome;
   const { bindings } = s;
@@ -219,7 +206,7 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
       if (BELT_ENDS[when.of] !== undefined) return chrome.selectedBelt === null || chrome.selectedBelt !== bindings[when.of]?.id;
       return chrome.selectedNode === null || chrome.selectedNode !== bindings[when.of]?.id;
     case 'gone':
-      return boundGone(when.of, board, s);
+      return boundGone(when.of, board, bindings, s.capture);
     case 'triggerNotPressed':
       return chrome.triggerPressed !== when.trigger;
     case 'triggerNotApplied':
@@ -562,7 +549,7 @@ function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: 
     // A delete step's result is its target staying gone.
     case 'nodeGone':
     case 'beltGone':
-      return boundGone(check.of, board, s);
+      return boundGone(check.of, board, s.bindings, s.capture);
   }
 }
 
@@ -583,7 +570,7 @@ function deliberatelyGone(s: TutorialState, steps: readonly Step[], board: Board
   if (s.baseline === null || board.generation !== s.baseline.generation) return names;
   for (const step of steps.slice(s.stepIndex)) {
     if (!isDeleteCheck(step.done)) break;
-    if (boundGone(step.done.of, board, s)) names.add(step.done.of);
+    if (boundGone(step.done.of, board, s.bindings, s.capture)) names.add(step.done.of);
   }
   return names;
 }

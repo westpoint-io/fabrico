@@ -6,7 +6,7 @@
 
 import { PORT_ROLE, beltEndPort, doorstepCell } from '../protocol/ports';
 import type { BoundNode, StepBaseline, TutorialState } from './machine';
-import { boardShape, sameShape, type BoardShape } from './shape';
+import { beltTilesIn, boardShape, sameShape, type BoardShape } from './shape';
 import type { BindingName, BoardBelt, BoardFacts, BoardNode, Check, ChromeFacts } from './types';
 
 /**
@@ -312,6 +312,34 @@ export function boundBeltJoining(board: Pick<BoardFacts, 'belts'>, bindings: Tut
   return a === undefined || b === undefined ? undefined : beltJoining(board, a.id, b.id);
 }
 
+/**
+ * Is the bound thing off the board? The one rule for "gone", read by the delete steps' checks, by the
+ * test that a delete step's result still stands, and by the gone stage, so the three can't disagree.
+ * A machine is gone when no node holds its `nodeKey`. A belt is on the board when a belt joins the two
+ * machines `BELT_ENDS` names for it, found through the current bindings, or, when the capture holds that
+ * belt, when one belt's tiles include every tile the captured belt had: that's the original back without
+ * its docks, which an Undo of the draw leaves. A belt that shares only some of those tiles, such as a
+ * stray drawn from the Source's output, doesn't count. Gone is the opposite.
+ */
+export function boundGone(
+  name: BindingName,
+  board: Pick<BoardFacts, 'nodes' | 'belts'>,
+  bindings: TutorialState['bindings'],
+  capture: ShapeCapture | null,
+): boolean {
+  const bound = bindings[name];
+  if (bound === undefined) return false;
+  const ends = BELT_ENDS[name];
+  if (ends === undefined) return !board.nodes.some((n) => nodeKey(n) === bound.nodeKey);
+  if (boundBeltJoining(board, bindings, name) !== undefined) return false;
+  const a = bindings[ends[0]];
+  const b = bindings[ends[1]];
+  const tiles = capture === null || a === undefined || b === undefined ? null : beltTilesIn(capture.shape, a.nodeKey, b.nodeKey);
+  if (tiles === null || tiles.length === 0) return true;
+  const back = board.belts.some((belt) => tiles.every((c) => belt.tiles.some((t) => t.cell_x === c.cell_x && t.cell_y === c.cell_y)));
+  return !back;
+}
+
 export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
   const { board, baseline, chrome, bindings, capture } = ctx;
   switch (check.is) {
@@ -350,13 +378,13 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
     case 'nodeGone': {
       const bound = bindings[check.of];
       if (bound === undefined || board.generation !== baseline.generation) return NOT_DONE;
-      return board.nodes.some((n) => nodeKey(n) === bound.nodeKey) ? NOT_DONE : DONE;
+      return boundGone(check.of, board, bindings, capture) ? DONE : NOT_DONE;
     }
     case 'beltGone': {
       const ends = BELT_ENDS[check.of];
       if (bindings[check.of] === undefined || ends === undefined || bindings[ends[0]] === undefined || bindings[ends[1]] === undefined) return NOT_DONE;
       if (board.generation !== baseline.generation) return NOT_DONE;
-      return boundBeltJoining(board, bindings, check.of) === undefined ? DONE : NOT_DONE;
+      return boundGone(check.of, board, bindings, capture) ? DONE : NOT_DONE;
     }
     case 'restored':
       return capture !== null && capture.since === check.since && sameShape(boardShape(board, chrome.appliedConfigs, boundMachineKeys(bindings)), capture.shape)

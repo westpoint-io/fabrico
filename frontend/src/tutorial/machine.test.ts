@@ -1343,6 +1343,104 @@ describe('lesson 3: Delete and Undo', () => {
     expect(twice(s, { ...reminted(90), generation: 2 }).card).toBe('finished');
   });
 
+  /** A 3-tile belt drawn from the Source's output going south: its Tail docked to the Source, its first tile on the line's first tile. */
+  const stray = (id: number, from: number): BoardBelt => ({
+    id,
+    items: 0,
+    occupiedSlots: [],
+    tiles: [
+      { cell_x: 3, cell_y: 2, kind: { Corner: { from: 3, to: 2 } } },
+      { cell_x: 3, cell_y: 3, kind: { Straight: { axis: 1 } } },
+      { cell_x: 3, cell_y: 4, kind: { Straight: { axis: 1 } } },
+    ],
+    docks: [{ end: 'Tail', node: from, port: 0 }],
+  });
+  /** A belt from the Source to the Sink that dips a row south on the way: a redraw, on tiles the first belt didn't have. */
+  const detour = (id: number, from: number, to: number): BoardBelt => ({
+    id,
+    items: 0,
+    occupiedSlots: [],
+    tiles: [
+      [3, 2],
+      [3, 3],
+      [4, 3],
+      [5, 3],
+      [6, 3],
+      [7, 3],
+      [7, 2],
+    ].map(([x, y]) => ({ cell_x: x as number, cell_y: y as number, kind: STRAIGHT })),
+    docks: [
+      { end: 'Tail', node: from, port: 0 },
+      { end: 'Head', node: to, port: 1 },
+    ],
+  });
+  const stageOn = (s: TutorialState, b: Partial<BoardFacts>): string | undefined =>
+    currentStage(s, board(b), chrome({ appliedConfigs: answersFor(s, b) }), LESSONS)?.id;
+
+  it("a stray belt drawn from the Source's output at delete-sink neither rewinds the lesson nor lets it finish without the belt", () => {
+    let s = frame(atDU(4), { nodes: [SRC, SNK], belts: [stray(20, SRC.id)] });
+    expect(step(s), 'the stray leaves the lesson on delete-sink').toBe('delete-sink');
+    expect(s.note, 'with no note').toBeNull();
+    expect(s.capture?.shape.belts.map((b) => b.tiles.map((t) => [t.cell_x, t.cell_y])), "the capture still holds the original belt's five tiles").toEqual([
+      [
+        [3, 2],
+        [4, 2],
+        [5, 2],
+        [6, 2],
+        [7, 2],
+      ],
+    ]);
+    s = frame(s, { nodes: [SRC], belts: [stray(20, SRC.id)] });
+    expect(step(s)).toBe('bring-back');
+    // The first Undo puts the Sink back. The Source, the Sink and the stray all come back re-minted.
+    const sinkBack = { nodes: [{ ...SRC, id: 40 }, { ...SNK, id: 41 }], belts: [stray(42, 40)], generation: 2 };
+    s = twice(s, sinkBack);
+    expect(s.card, 'one Undo with the original belt still gone does not finish the lesson').toBe('running');
+    expect(stageOn(s, sinkBack)).toBe('undo-belt');
+    // The second Undo takes the stray off, and the original belt is still gone.
+    const strayGone = { nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], belts: [], generation: 3 };
+    s = twice(s, strayGone);
+    expect(s.card).toBe('running');
+    expect(stageOn(s, strayGone)).toBe('undo-belt');
+    // The third puts the original back, and only that finishes.
+    expect(twice(s, { ...reminted(60), generation: 4 }).card).toBe('finished');
+  });
+
+  it('a belt redrawn between the Source and the Sink at delete-sink sends the lesson back to delete-belt, and it can still be finished', () => {
+    let s = frame(atDU(4), { nodes: [SRC, SNK], belts: [detour(20, SRC.id, SNK.id)] });
+    expect(step(s)).toBe('delete-belt');
+    expect(s.note).toEqual({ kind: 'wentBack', a: 4, b: 4 });
+    expect(phrasePlain(noteTokens(s.note!))).toBe('Step 4 needs doing again, so the lesson went back.');
+    expect(s.capture?.shape.belts.map((b) => b.tiles.length), 'the capture holds the redrawn belt').toEqual([7]);
+    s = frame(s, { nodes: [SRC, SNK], belts: [] });
+    expect(step(s)).toBe('delete-sink');
+    s = frame(s, { nodes: [SRC], belts: [] });
+    expect(step(s)).toBe('bring-back');
+    s = twice(s, { nodes: [{ ...SRC, id: 40 }, { ...SNK, id: 41 }], belts: [], generation: 2 });
+    expect(s.card).toBe('running');
+    expect(twice(s, { nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], belts: [detour(52, 50, 51)], generation: 3 }).card).toBe('finished');
+  });
+
+  describe("delete-belt's beltGone and the gone stage give the same answer", () => {
+    const boards: [string, BoardBelt[]][] = [
+      ['the original belt joined', [BELT]],
+      ['the original back on its tiles with no docks', [beltBetween(9, SRC.id, SNK.id, false)]],
+      ['only a stray that shares the first tile', [stray(20, SRC.id)]],
+      ['no belt at all', []],
+    ];
+    for (const [name, belts] of boards) {
+      it(`on the board with ${name}`, () => {
+        const atDelete = atDU(3);
+        const atRestore = atDU(5);
+        const b = { nodes: [SRC, SNK], belts };
+        const ctx = { board: board(b), baseline: atDelete.baseline!, chrome: chrome(), bindings: atDelete.bindings, capture: atDelete.capture };
+        const beltGone = evaluateCheck({ is: 'beltGone', of: 'belt' }, ctx).done;
+        const goneStage = stageOn(atRestore, b) === 'undo-belt';
+        expect(goneStage, `${name}: beltGone says ${beltGone}, the gone stage says ${goneStage}`).toBe(beltGone);
+      });
+    }
+  });
+
   it("a second Source from a repeat floor click doesn't stop bring-back", () => {
     // The Source tool stays armed after a place, so a second floor click puts down a second Source.
     // The lesson binds the lower handle, and the config poll never asks about the other one.

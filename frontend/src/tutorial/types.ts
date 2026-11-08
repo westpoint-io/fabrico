@@ -119,8 +119,10 @@ export type StageWhen =
   | { is: 'lineStuck'; from: BindingName; to: BindingName }
   | { is: 'notSelected'; of: BindingName }
   /**
-   * The bound thing is off the board. A machine: no node holds its `nodeKey`. A belt: no belt tile sits
-   * on any tile it had in the restored check's capture, or with no capture, no belt joins its two machines.
+   * The bound thing is off the board, by `boundGone` in check.ts, the rule the delete checks read too. A
+   * machine: no node holds its `nodeKey`. A belt: no belt joins its two machines, and no belt's tiles
+   * include every tile it had in the restored check's capture. A belt sharing only some of them is a
+   * different belt.
    */
   | { is: 'gone'; of: BindingName }
   | { is: 'triggerNotPressed'; trigger: 'Timer' }
