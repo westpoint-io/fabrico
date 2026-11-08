@@ -127,14 +127,20 @@ function boardRingRects(stage: Stage, key: string): DOMRect[] | null {
  * This frame's off-screen flag, by `offScreenFlag`'s rule. A panel target or no target is never out of
  * view. A board ring still placed for the previous stage keeps the last value, because its rect belongs
  * to that stage; one that tried the shown stage and found no box reads false.
+ *
+ * `triedNow` says the ring's try this frame used this frame's bindings. The ring paints from the last
+ * frame's target, so on the frame a keyframe re-mints handles it looks for the old ones and finds
+ * nothing, though the lesson finds every machine again in the same frame. That miss says nothing about
+ * the target, so it counts as no try, and the flag keeps its value instead of dropping the row for one
+ * frame and taking focus off Show me.
  */
-function offScreenNow(stage: Stage | null, key: string | null, free: ChromeFacts['view']['freeArea'], last: boolean): boolean {
+function offScreenNow(stage: Stage | null, key: string | null, free: ChromeFacts['view']['freeArea'], last: boolean, triedNow: boolean): boolean {
   const onBoard = stage !== null && key !== null && stage.hint !== null && stage.hint.on !== 'panel';
   const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
   return offScreenFlag({
     shownKey: onBoard ? key : null,
     placedKey: ring?.getAttribute('data-fab-hint-stage') ?? null,
-    triedKey: ring?.getAttribute('data-fab-hint-tried') ?? null,
+    triedKey: triedNow ? (ring?.getAttribute('data-fab-hint-tried') ?? null) : null,
     rects: onBoard ? boardRingRects(stage, key) : null,
     free,
     last,
@@ -551,6 +557,8 @@ export function TutorialLayer({
     if (!active) return undefined;
     let raf = 0;
     const frame = (): void => {
+      // The target the ring paints with this frame, kept to tell whether its bindings were still current.
+      const painted = targetRef.current;
       paintRingRef.current?.();
       const handle = handleRef.current;
       const camera = readCamera();
@@ -591,7 +599,8 @@ export function TutorialLayer({
         // The off-screen flag, against this frame's free area. A ring hidden because the board isn't
         // live has nothing to bring into view.
         const shownKey = next.card === 'running' && shown !== null ? stageKey(next.stepIndex, shown.id) : null;
-        const out = boardLiveRef.current && offScreenNow(shown, shownKey, chrome.view.freeArea, offScreenRef.current);
+        const triedNow = painted !== null && painted.bindings === next.bindings;
+        const out = boardLiveRef.current && offScreenNow(shown, shownKey, chrome.view.freeArea, offScreenRef.current, triedNow);
         if (out !== offScreenRef.current) {
           offScreenRef.current = out;
           setOffScreen(out);

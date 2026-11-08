@@ -22,6 +22,7 @@ import {
   factoryConfig,
   pressRing,
   readProbe,
+  reminted,
   ringAt,
   sinkAt,
   sourceAt,
@@ -801,6 +802,51 @@ test.describe('lesson 4 when a ring loses its target (103 review IN-01)', () => 
     expect(probe.offScreen, 'the flag stays false').toBe(false);
     await expect(row, 'the off-screen row hides').toBeHidden();
     await expect(showMe, "Show me isn't in the accessibility tree").toHaveCount(0);
+  });
+
+  // The ring paints from the last frame's target, so on the frame a keyframe re-mints every handle it
+  // looks for the old ones and finds nothing, while the lesson finds each machine again in that frame.
+  // That miss isn't a lost target: the row and Show me stay, and so does the focus on Show me.
+  test('a keyframe that re-mints every handle keeps the off-screen row and the focus on Show me', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 2 });
+    await expectAt(page, STEP.beltOut2, STAGE.beltDraw, 'the second belt finished belt-out, and the Belt tool is still armed');
+    const cam = await cameraOf(page);
+    const size = CELL * cam.scale;
+    await zoomInto(page, { x: (board.source.cell_x + 0.5) * size + cam.x, y: (board.source.cell_y + 0.5) * size + cam.y }, 3, 3.6);
+    await expect.poll(async () => (await readProbe(page)).offScreen, { message: 'zoomed in, the drag rings are out of view' }).toBe(true);
+    const showMe = page.getByRole('button', { name: 'Show me', exact: true });
+    await showMe.focus();
+    await expect(showMe, 'Show me holds the focus, as after a Tab').toBeFocused();
+
+    await recordFrames(page);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as { __fabFrames: unknown[] }).__fabFrames.length)) > 0).toBe(true);
+    const next = reminted({ nodes: [board.source, board.factory, board.sink, board.sink2], belts: board.belts }, 10);
+    for (const [node, config] of [
+      [next.nodes[0]!.id, SOURCE_TIMER],
+      [next.nodes[1]!.id, factoryConfig()],
+      [next.nodes[2]!.id, SINK_DEBUG],
+      [next.nodes[3]!.id, SINK_DEBUG],
+    ] as const) {
+      host.set(node, config);
+    }
+    const tick = ++board.tick;
+    h.inject(buildPacket({ full: true, tick, generation: 2, swapFloor: FLOOR, nodes: next.nodes, belts: next.belts, canUndo: true, canRedo: true }));
+    await waitForBoard(page, { machines: 4, tick });
+    await expect.poll(async () => (await readProbe(page)).bound.sink2, { message: 'the second Sink binding follows its new handle' }).toBe(next.nodes[3]!.id);
+    await twoFrames(page);
+    await twoFrames(page);
+    const frames = await stopFrames(page);
+    const held = frames.findIndex((f) => f.tick === tick);
+    expect(held, 'the recorder drew a frame with the keyframe in the model').toBeGreaterThanOrEqual(0);
+    const after = frames.slice(held);
+    expect(after.every((f) => f.stage === STAGE.beltDraw), 'the card stays on the drag through the keyframe').toBe(true);
+    expect(
+      after.every((f) => f.off && f.showMe),
+      `the row and Show me stay on every frame of the keyframe (frames ${JSON.stringify(after.slice(0, 4))})`,
+    ).toBe(true);
+    await expect(showMe, 'Show me still holds the focus').toBeFocused();
+    expect((await readProbe(page)).hint, 'the drag ring is placed again on the new handles').not.toBeNull();
   });
 });
 
