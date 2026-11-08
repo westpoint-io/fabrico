@@ -924,6 +924,10 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   let beltClip: { cell: readonly [number, number]; clip: { x: number; y: number; width: number; height: number } } | null = null;
   let beltBefore: Buffer | null = null;
 
+  // The handles bound as a restored step begins, so the log shows whether Undo's keyframe handed the
+  // restored things new numbers. On a board whose handles come back in the same order they don't change,
+  // and then only the unit cases can tell a check that compares handles from one that doesn't.
+  const handlesBefore = step.done.is === 'restored' ? (await readProbe(page)).bound : null;
   // What a delete step is to take off the board, named so a re-minted handle can't stand in for it.
   const goneTarget = step.done.is === 'nodeGone' || step.done.is === 'beltGone' ? await deleteTargetOf(page, lesson, stepIndex, step) : null;
 
@@ -1058,6 +1062,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     expect(node?.kind, `${label}: the bound ${step.done.bind} is on the board with the right kind`).toBe(step.done.kind);
   }
   if (goneTarget !== null) await expectTargetGone(page, label, goneTarget);
+  if (handlesBefore !== null) {
+    const after = (await readProbe(page)).bound;
+    const list = (b: Record<string, number>): string => Object.entries(b).map(([k, v]) => `${k}:${v}`).join(',');
+    console.log(`MEASURE restored-handles ${lesson.id} before=${list(handlesBefore)} after=${list(after)}`);
+  }
   if (cellClip !== null && beforePixels !== null) {
     const afterPixels = await captureWithGhostGone(page, cellClip);
     expect(
