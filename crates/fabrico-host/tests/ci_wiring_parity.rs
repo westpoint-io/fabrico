@@ -2283,6 +2283,204 @@ fn the_mock_config_check_names_each_way_of_dropping_the_warm_up() {
     );
 }
 
+/// The job that runs the mock e2e suite, one leg per shard.
+const MOCK_JOB: &str = "e2e";
+/// The number of shards the mock suite runs as.
+const MOCK_SHARDS: usize = 4;
+/// The mock config's retry count, whole: a test that fails once fails its leg.
+const MOCK_RETRIES: &str = "retries: 0,";
+
+/// The mock suite's run line, whole, built from `MOCK_SHARDS`.
+fn mock_run_line() -> String {
+    let shard = "${{ matrix.shard }}";
+    format!("run: npm run test:e2e -- --shard={shard}/{MOCK_SHARDS}")
+}
+
+/// Everything wrong with how `yml` runs the mock suite's shards. Empty means right.
+fn mock_gate_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let run_line = mock_run_line();
+
+    // The suite once in the whole file, in its own job, as the whole of its line. The `/4` is all
+    // that makes 4 legs cover the suite: with `/5` a fifth of it runs nowhere and every leg is green.
+    let found: Vec<(&str, &str)> = blocks
+        .iter()
+        .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
+        .filter(|(_, line)| line.starts_with("run:") && line.contains("test:e2e"))
+        .collect();
+    if found != [(MOCK_JOB, run_line.as_str())] {
+        wrong.push(format!(
+            "the `run:` lines invoking `test:e2e` are {found:?}, expected exactly \
+             [(\"{MOCK_JOB}\", \"{run_line}\")]. The mock job has no report checker, so its exit \
+             code and this line are the whole verdict."
+        ));
+    }
+
+    match blocks.iter().find(|(id, _)| *id == MOCK_JOB) {
+        None => wrong.push(format!("there is no job `{MOCK_JOB}` under `jobs:`.")),
+        Some((_, job)) => {
+            // One leg per shard, and a red leg cancels none of the others.
+            let shard_list = format!(
+                "shard: [{}]",
+                (1..=MOCK_SHARDS)
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            for key in ["fail-fast: false", shard_list.as_str()] {
+                let n = job.iter().filter(|l| **l == key).count();
+                if n != 1 {
+                    wrong.push(format!(
+                        "job `{MOCK_JOB}` carries `{key}` {n} time(s), expected 1. The suite runs \
+                         as {MOCK_SHARDS} shards, its run line names that count, and a dropped \
+                         leg leaves its share of the tests unrun with every other leg green."
+                    ));
+                }
+            }
+        }
+    }
+
+    wrong.extend(step_guards_wrong(yml, MOCK_JOB, &["npm run test:e2e"]));
+    wrong
+}
+
+/// Everything wrong with the mock config's retry count. Empty means right.
+fn mock_retries_wrong(config: &str) -> Vec<String> {
+    let retries: Vec<&str> = config
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//") && line.starts_with("retries"))
+        .collect();
+    if retries == [MOCK_RETRIES] {
+        Vec::new()
+    } else {
+        vec![format!(
+            "frontend/playwright.config.ts sets retries with {retries:?}, expected exactly \
+             [\"{MOCK_RETRIES}\"]. A retry passes a test that failed once as flaky, and no mock \
+             gate reads the flaky line, so the leg stays green."
+        )]
+    }
+}
+
+/// The mock suite runs every test once, across exactly its 4 shards, with no retry.
+///
+/// # Why
+///
+/// The mock job has no report checker and no test floor, so its exit code is its whole verdict.
+/// The shard list and the `/4` in its run line are all that make the 4 legs cover the suite: with
+/// `shard: [1, 2, 3]` or `/5`, part of the 606 tests runs nowhere and every leg is green. And
+/// `retries: 0` in `playwright.config.ts` is what makes a test that fails once fail its leg. Each
+/// of these is one edit away, so they're pinned here, where `cargo test` runs them.
+#[test]
+fn the_mock_suite_runs_every_test_once_with_no_retry() {
+    let mut wrong = mock_gate_wrong(CI_YML);
+    wrong.extend(mock_retries_wrong(MOCK_CONFIG));
+    assert!(
+        wrong.is_empty(),
+        "{} fact(s) about the mock suite are wrong:\n\n{}\n\n\
+         Update the WORKFLOW or the CONFIG to match this test.",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+}
+
+/// `mock_gate_wrong` and `mock_retries_wrong` can fail: each break below is planted in a copy of
+/// the real files, and the check has to name it.
+#[test]
+fn the_mock_gate_check_names_each_way_of_losing_tests() {
+    const MOCK_HEADER: &str = "    name: frontend e2e (Playwright + axe)\n";
+    const MOCK_STEP: &str = "      - name: Run e2e (Playwright + axe)\n";
+    const MATRIX: &str = "      fail-fast: false\n      matrix:\n        shard: [1, 2, 3, 4]\n";
+    let run_line = format!("        {}\n", mock_run_line());
+
+    // (what, the planted workflow, what the check must name)
+    let yml_plants: Vec<(&str, String, String)> = vec![
+        (
+            "the matrix cut to three shards",
+            CI_YML.replace(MATRIX, &MATRIX.replace("[1, 2, 3, 4]", "[1, 2, 3]")),
+            format!("job `{MOCK_JOB}` carries `shard: [1, 2, 3, 4]` 0 time(s)"),
+        ),
+        (
+            "the run line's denominator set to 5",
+            CI_YML.replace(&run_line, &run_line.replace("}}/4", "}}/5")),
+            "the `run:` lines invoking `test:e2e` are".to_string(),
+        ),
+        (
+            "the run line's denominator set to 3",
+            CI_YML.replace(&run_line, &run_line.replace("}}/4", "}}/3")),
+            "the `run:` lines invoking `test:e2e` are".to_string(),
+        ),
+        (
+            "the suite's exit code swallowed",
+            CI_YML.replace(&run_line, &run_line.replace("/4\n", "/4 || true\n")),
+            "the `run:` lines invoking `test:e2e` are".to_string(),
+        ),
+        (
+            "fail-fast left on",
+            CI_YML.replace(MATRIX, &MATRIX.replace("fail-fast: false", "fail-fast: true")),
+            format!("job `{MOCK_JOB}` carries `fail-fast: false` 0 time(s)"),
+        ),
+        (
+            "continue-on-error on the mock job",
+            CI_YML.replace(MOCK_HEADER, &format!("{MOCK_HEADER}    continue-on-error: true\n")),
+            format!("job `{MOCK_JOB}` carries `continue-on-error: true`"),
+        ),
+        (
+            "a condition on the suite step",
+            CI_YML.replace(MOCK_STEP, &format!("{MOCK_STEP}        if: false\n")),
+            format!("in job `{MOCK_JOB}` carries `if: false`"),
+        ),
+    ];
+    // (what, the planted config)
+    let config_plants: Vec<(&str, String)> = vec![
+        (
+            "retries 2",
+            MOCK_CONFIG.replace(&format!("  {MOCK_RETRIES}\n"), "  retries: 2,\n"),
+        ),
+        (
+            "the old CI retry put back",
+            MOCK_CONFIG.replace(
+                &format!("  {MOCK_RETRIES}\n"),
+                "  retries: process.env.CI ? 1 : 0,\n",
+            ),
+        ),
+        (
+            "a second retries line that overrides the first",
+            MOCK_CONFIG.replace(
+                &format!("  {MOCK_RETRIES}\n"),
+                &format!("  {MOCK_RETRIES}\n  retries: 2,\n"),
+            ),
+        ),
+    ];
+    assert_eq!(
+        yml_plants.len() + config_plants.len(),
+        10,
+        "ten ways of losing mock tests or hiding a failure"
+    );
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, must_name) in &yml_plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = mock_gate_wrong(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    for (what, config) in &config_plants {
+        assert_ne!(config, MOCK_CONFIG, "{what}: the plant landed");
+        let named = mock_retries_wrong(config).join("\n");
+        if !named.contains("sets retries with") {
+            missed.push(format!("{what}: expected the retries named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the mock gate went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
 /// The job that runs both certification suites.
 const DETERMINISM_JOB: &str = "determinism";
 /// The shipped-default certification suite, as the whole of its `run:` line.

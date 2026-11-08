@@ -1284,7 +1284,10 @@ jobs:
   # NO VERDICT JOB. This suite has no report checker and no test floor, so each leg's exit
   # code is its verdict, as the single job's was. `fail-fast: false` keeps the other legs
   # running after one goes red, and any red or cancelled leg turns the run red. GitHub runs
-  # every leg the matrix names, so a leg can't drop out unseen.
+  # every leg the matrix names, so a leg can't drop out unseen at run time. What the legs cover is
+  # set by `shard: [1, 2, 3, 4]` and the `/4` in the run line, and an edit to either could leave
+  # part of the suite unrun with every leg green, so `ci_wiring_parity.rs` pins both, along with
+  # `fail-fast: false`, no condition on the suite step, and `retries: 0` in playwright.config.ts.
   #
   # NO RETRY. `playwright.config.ts` sets `retries: 0`, so a test that fails once fails its
   # leg instead of passing as flaky, and `trace: 'retain-on-failure'` keeps the trace of
