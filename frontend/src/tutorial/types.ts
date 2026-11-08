@@ -125,6 +125,13 @@ export type StageWhen =
    * different belt.
    */
   | { is: 'gone'; of: BindingName }
+  /**
+   * The board matches the capture taken when step `since` began in everything but config answers still
+   * on their way: at least one read machine has no answer yet, on either side, and the two shapes are
+   * equal once those machines' configs are set aside. An Undo keyframe re-mints every handle, so the
+   * answers about the new ones come a poll or more after the board is back.
+   */
+  | { is: 'configsPending'; since: string }
   | { is: 'triggerNotPressed'; trigger: 'Timer' }
   | { is: 'triggerNotApplied'; trigger: 'Timer' }
   /**

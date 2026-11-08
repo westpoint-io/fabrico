@@ -25,7 +25,7 @@ import {
   type ShapeCapture,
 } from './check';
 import type { Progress } from './progress';
-import { boardShape, handlesByKey, withConfigs } from './shape';
+import { awaitingConfigs, boardShape, handlesByKey, withConfigs } from './shape';
 import type {
   BindingName,
   BoardFacts,
@@ -207,6 +207,12 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
       return chrome.selectedNode === null || chrome.selectedNode !== bindings[when.of]?.id;
     case 'gone':
       return boundGone(when.of, board, bindings, s.capture);
+    case 'configsPending':
+      return (
+        s.capture !== null &&
+        s.capture.since === when.since &&
+        awaitingConfigs(s.capture.shape, boardShape(board, chrome.appliedConfigs, boundMachineKeys(bindings)))
+      );
     case 'triggerNotPressed':
       return chrome.triggerPressed !== when.trigger;
     case 'triggerNotApplied':

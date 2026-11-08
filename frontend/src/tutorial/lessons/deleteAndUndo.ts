@@ -133,7 +133,17 @@ export const DELETE_AND_UNDO: Lesson = {
           gesture: { do: 'key', shortcut: 'undo' },
           text: ['Press ', { key: 'undo' }, ' once more, and the ', { kind: BELT_KIND }, ' comes back joined at both ends.'],
         },
-        // Only shows if Undo went past the delete, into the draw: the board then matches no capture.
+        // The board is back but the host's answers about the re-minted handles haven't come, or a query
+        // failed. The card says so and marks nothing, so a user who did it right never reads too-far.
+        {
+          id: 'checking',
+          when: { is: 'configsPending', since: 'delete-belt' },
+          hint: null,
+          gesture: { do: 'none' },
+          text: ['The ', { kind: SINK_KIND }, ' and ', { kind: BELT_KIND }, ' are back. Checking them against the board from before the delete.'],
+        },
+        // Only shows once every answer has come and the board still differs from the capture, as when
+        // Undo went past the delete into the draw.
         {
           id: 'too-far',
           when: { is: 'always' },

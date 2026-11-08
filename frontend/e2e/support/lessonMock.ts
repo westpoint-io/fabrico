@@ -225,16 +225,23 @@ export function factoryParseError(source: string): string | null {
  * doesn't parse, and the panel then shows its own error row and sends nothing. Code that parses is
  * held, and the Configure frame that follows, naming a Factory in the table and carrying that code,
  * puts it in the table, so the next `machine_config` answer holds it, as the host's does.
+ *
+ * `hold(node)` makes the host refuse every `machine_config` query about that handle until
+ * `release(node)`, as a failed host query would. Each query is still counted, and the page's query
+ * rejects, so the layer keeps no answer about the handle.
  */
 export function configByNode(): {
   opts: Parameters<typeof mockRenderSocket>[1];
   set(node: number, config: MachineConfig | null): void;
   get(node: number): MachineConfig | null;
   answers(node: number): number;
+  hold(node: number): void;
+  release(node: number): void;
   validated(): string[];
 } {
   const table = new Map<number, MachineConfig | null>();
   const counts = new Map<number, number>();
+  const held = new Set<number>();
   const validated: string[] = [];
   return {
     opts: {
@@ -249,6 +256,7 @@ export function configByNode(): {
         if (verb !== 'machine_config') return undefined;
         const node = Number(args.node);
         counts.set(node, (counts.get(node) ?? 0) + 1);
+        if (held.has(node)) return new QueryRefusal(`machine_config ${node} held by the case`);
         return table.get(node) ?? null;
       },
       answerGesture: (frame) => {
@@ -267,6 +275,12 @@ export function configByNode(): {
     },
     get: (node) => table.get(node) ?? null,
     answers: (node) => counts.get(node) ?? 0,
+    hold: (node) => {
+      held.add(node);
+    },
+    release: (node) => {
+      held.delete(node);
+    },
     validated: () => [...validated],
   };
 }

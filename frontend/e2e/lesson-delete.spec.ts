@@ -109,6 +109,27 @@ async function hitAt(page: Page, at: { x: number; y: number }): Promise<{ tag: s
   }, [at.x, at.y] as const);
 }
 
+/**
+ * Start recording whether the card ever holds `words`, on any change to the page from now on, and
+ * return a reader. A poll can miss a line that shows for a frame or two; a mutation observer can't.
+ */
+async function watchCardFor(page: Page, words: string): Promise<() => Promise<boolean>> {
+  const key = `__fabSeen${Math.random().toString(36).slice(2)}`;
+  await page.evaluate(
+    ([card, w, k]) => {
+      const flags = window as unknown as Record<string, boolean>;
+      flags[k] = false;
+      const look = (): void => {
+        if (document.querySelector(card)?.textContent?.includes(w) === true) flags[k] = true;
+      };
+      look();
+      new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true });
+    },
+    [CARD, words, key] as const,
+  );
+  return () => page.evaluate((k) => (window as unknown as Record<string, boolean>)[k] === true, key);
+}
+
 /** The words of a lesson note, through the real tables. */
 function noteWords(kind: 'wentBack' | 'skippedOne', step: number): string {
   return phrasePlain(noteTokens({ kind, a: step, b: step }));
@@ -215,10 +236,11 @@ test.describe('lesson 3 on the mock host', () => {
     await page.keyboard.press('Escape');
     await deleteBelt(page, h, board);
     await deleteSink(page, h, board);
+    const tooFar = await watchCardFor(page, wordsOf(STEP.bringBack, 'too-far'));
     await undoBoth(page, h, host, board);
     const card = page.locator(CARD);
     await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
-    await expect(card).not.toContainText(wordsOf(STEP.bringBack, 'too-far'));
+    expect(await tooFar(), 'the card never held the too-far words through both Undos').toBe(false);
     // The capture lists machines by key, which sorts as text, so the kinds are compared sorted.
     const capture = (await readProbe(page)).capture;
     expect(capture?.machines, 'the capture holds all three machines').toBe(3);
@@ -227,6 +249,45 @@ test.describe('lesson 3 on the mock host', () => {
       'Source',
       'unread',
     ]);
+  });
+
+  test("after the second Undo the card says it's checking, with no ring, until the config answers come", async ({ page }) => {
+    const { h, host, board } = await toSelectBelt(page);
+    await deleteBelt(page, h, board);
+    await deleteSink(page, h, board);
+    const tooFar = await watchCardFor(page, wordsOf(STEP.bringBack, 'too-far'));
+    await pressRing(page, await ringAt(page, STAGE.undoSink));
+    await expect.poll(() => undosSent(h), { message: 'the Undo button sent an Undo' }).toBe(1);
+    const first = reminted({ nodes: [board.source, board.sink] }, 10);
+    for (const n of first.nodes) host.set(n.id, n.kind === board.sink.kind ? SINK_DEBUG : SOURCE_WEBHOOK);
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 2, swapFloor: FLOOR, nodes: first.nodes, canUndo: true, canRedo: true }));
+    await expectAt(page, STEP.bringBack, STAGE.undoBelt, 'the Sink back moved the card to the belt');
+
+    // The second Undo's keyframe, with the host refusing every config query about the new handles.
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => undosSent(h), { message: 'Ctrl+Z sent the second Undo' }).toBe(2);
+    const second = reminted({ nodes: [board.source, board.sink], belts: [board.belt] }, 20);
+    for (const n of second.nodes) {
+      host.set(n.id, n.kind === board.sink.kind ? SINK_DEBUG : SOURCE_WEBHOOK);
+      host.hold(n.id);
+    }
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 3, swapFloor: FLOOR, nodes: second.nodes, belts: second.belts, canUndo: true, canRedo: true }));
+    for (const n of second.nodes) {
+      await expect.poll(() => host.answers(n.id), { message: `the layer asked about the new handle ${n.id}` }).toBeGreaterThanOrEqual(1);
+    }
+    const card = page.locator(CARD);
+    const text = page.locator(`${CARD} [data-fab-step-text]`);
+    expect(await tooFar(), 'the card never held the too-far words while the answers were held back').toBe(false);
+    await expect(text, 'the card says it is checking').toHaveText(wordsOf(STEP.bringBack, 'checking'));
+    const probe = await readProbe(page);
+    expect(probe.stageId).toBe('checking');
+    expect(probe.card).toBe('running');
+    await expect(page.locator('[data-fab-hint]'), 'no ring while checking').toBeHidden();
+
+    for (const n of second.nodes) host.release(n.id);
+    await expect.poll(async () => (await readProbe(page)).card, { message: 'the answers came and finished the lesson' }).toBe('finished');
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
+    expect(await tooFar(), 'and the too-far words never showed at any point').toBe(false);
   });
 
   test("a stray belt drawn from the Source's output after the belt's delete doesn't let one Undo finish the lesson", async ({ page }) => {

@@ -143,6 +143,22 @@ export function sameShape(a: BoardShape, b: BoardShape): boolean {
 }
 
 /**
+ * Is `now` the captured board in all but config answers still on their way? True when at least one
+ * machine on either side has no answer yet and the two shapes are equal once those machines' configs are
+ * set aside on both sides. A config that differs where both sides answered, or any other difference,
+ * makes it false, and so do two complete shapes, which `sameShape` decides on its own.
+ */
+export function awaitingConfigs(capture: BoardShape, now: BoardShape): boolean {
+  const pending = new Set([...capture.machines, ...now.machines].filter((m) => m.config === null).map((m) => m.nodeKey));
+  if (pending.size === 0) return false;
+  const aside = (shape: BoardShape) => ({
+    machines: shape.machines.map((m) => (pending.has(m.nodeKey) ? { ...m, config: null } : m)),
+    belts: shape.belts,
+  });
+  return stableJson(aside(capture)) === stableJson(aside(now));
+}
+
+/**
  * The tiles the belt docked to these two machines had in the shape, found by the machines' keys, or null
  * when the shape holds no such belt. A belt joined through pieces names each machine on a different piece,
  * so only a belt docked to both counts here.

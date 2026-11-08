@@ -1376,6 +1376,45 @@ describe('lesson 3: Delete and Undo', () => {
   });
   const stageOn = (s: TutorialState, b: Partial<BoardFacts>): string | undefined =>
     currentStage(s, board(b), chrome({ appliedConfigs: answersFor(s, b) }), LESSONS)?.id;
+  /** One frame, and the stage the card shows on it, read with the same chrome the frame carried. */
+  const shown = (prev: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts> = {}): { s: TutorialState; stage: string | undefined } => {
+    const ch = chrome({ appliedConfigs: answersFor(prev, b), ...c });
+    const s = reduce(prev, { type: 'frame', board: board(b), chrome: ch }, LESSONS);
+    return { s, stage: currentStage(s, board(b), ch, LESSONS)?.id };
+  };
+
+  it("on the second Undo's keyframe bring-back says it's checking, and stays so until both answers come", () => {
+    const back = { ...reminted(80), generation: 3 };
+    const sinkBack = { nodes: [{ ...SRC, id: 70 }, { ...SNK, id: 71 }], belts: [], generation: 2 };
+    let s = twice(atDU(5), sinkBack);
+    // The keyframe frame carries no answer about the re-minted handles.
+    let r = shown(s, back);
+    expect(r.stage, 'the keyframe frame shows the checking stage').toBe('checking');
+    s = r.s;
+    // More frames with no answer, as when a query fails: still checking.
+    for (let i = 0; i < 3; i++) {
+      r = shown(s, back, { appliedConfigs: [] });
+      expect(r.s.card).toBe('running');
+      expect(r.stage, `frame ${i + 2} with no answer`).toBe('checking');
+      s = r.s;
+    }
+    // Only the Source answered: still checking.
+    r = shown(s, back, { appliedConfigs: answersFor(s, back).slice(0, 1) });
+    expect(r.stage).toBe('checking');
+    // Both answered: done.
+    expect(shown(r.s, back).s.card).toBe('finished');
+  });
+
+  it('a restored board whose bound Sink answers another config shows too-far, not checking, because no answer is missing', () => {
+    const back = { ...reminted(80), generation: 3 };
+    const s = frame(atDU(5), back);
+    const http = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } } as const;
+    const other = answersFor(s, back).map((a) => (a.node === 81 ? { ...a, config: http } : a));
+    expect(other.length, 'both machines answered').toBe(2);
+    const r = shown(s, back, { appliedConfigs: other });
+    expect(r.s.card).toBe('running');
+    expect(r.stage).toBe('too-far');
+  });
 
   it("a stray belt drawn from the Source's output at delete-sink neither rewinds the lesson nor lets it finish without the belt", () => {
     let s = frame(atDU(4), { nodes: [SRC, SNK], belts: [stray(20, SRC.id)] });
@@ -1462,14 +1501,14 @@ describe('lesson 3: Delete and Undo', () => {
     // The second Undo: the belt back joined at both ends, every handle new again.
     const back = { nodes: [{ ...SRC, id: 50 }, { ...EXTRA, id: 51 }, { ...SNK, id: 52 }], belts: [beltBetween(53, 50, 52)], generation: 3 };
     expect(back.nodes.length, 'three machines at the second Undo').toBe(3);
-    s = frame(s, back);
     const stages: (string | undefined)[] = [];
     for (let i = 0; i < 2 && s.card === 'running'; i++) {
-      s = frame(s, back);
-      stages.push(currentStage(s, board(back), chrome({ appliedConfigs: answersFor(s, back) }), LESSONS)?.id);
+      const r = shown(s, back);
+      s = r.s;
+      stages.push(r.stage);
     }
     expect(s.card, `finished within two frames of the board being back; it read stages ${JSON.stringify(stages)}`).toBe('finished');
-    expect(stages, 'no frame after the second keyframe shows the too-far stage').not.toContain('too-far');
+    expect(stages, 'no frame from the second keyframe on shows the too-far stage').not.toContain('too-far');
   });
 
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { nodeKey } from './check.ts';
-import { beltTilesIn, boardShape, handlesByKey, sameShape, stableJson, withConfigs } from './shape.ts';
+import { awaitingConfigs, beltTilesIn, boardShape, handlesByKey, sameShape, stableJson, withConfigs } from './shape.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode } from './types.ts';
 
 const SOURCE = 0;
@@ -178,6 +178,29 @@ describe('withConfigs', () => {
     // An answer from another generation, or about another handle, leaves it as it was.
     expect(withConfigs(partial, handles, answered(BEFORE).map((a) => ({ ...a, generation: GEN + 1 })), GEN)).toBe(partial);
     expect(withConfigs(partial, handles, [{ node: 77, generation: GEN, config: DEBUG }], GEN)).toBe(partial);
+  });
+});
+
+describe('awaitingConfigs', () => {
+  const after = line({ source: 40, sink: 41, belt: 42 });
+  const http: AppliedConfig['config'] = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } };
+
+  it('is true for equal shapes with one answer still missing', () => {
+    expect(awaitingConfigs(shapeOf(BEFORE), shapeOf(after, answered(after).slice(0, 1)))).toBe(true);
+    expect(awaitingConfigs(shapeOf(BEFORE), shapeOf(after, []))).toBe(true);
+  });
+
+  it("is false when a bound machine's config differs while another is missing", () => {
+    expect(awaitingConfigs(shapeOf(BEFORE), shapeOf(after, answered(after, { 41: http }).slice(1)))).toBe(false);
+  });
+
+  it('is false for complete equal shapes, which the restored check already matches', () => {
+    expect(awaitingConfigs(shapeOf(BEFORE), shapeOf(after))).toBe(false);
+  });
+
+  it('is false with the belt missing, whatever the answers', () => {
+    const noBelt = { nodes: after.nodes, belts: [] };
+    expect(awaitingConfigs(shapeOf(BEFORE), shapeOf(noBelt, answered(noBelt).slice(0, 1)))).toBe(false);
   });
 });
 
