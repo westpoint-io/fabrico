@@ -438,14 +438,17 @@ test.describe('lesson 3 on the mock host', () => {
     await expect(bin, 'the selected Sink shows its bin').toBeVisible();
     const box = await bin.boundingBox();
     if (box === null) throw new Error('the bin has no box');
-    const overlap = {
-      x: Math.min(ring.x + ring.width, box.x + box.width) - Math.max(ring.x, box.x),
-      y: Math.min(ring.y + ring.height, box.y + box.height) - Math.max(ring.y, box.y),
-    };
-    console.log(`MEASURE bin ring=${JSON.stringify(ring)} bin=${JSON.stringify(box)} overlap=${JSON.stringify(overlap)}`);
+    // The Sink's ring starts 4 px left of the cell and the bin ends 6 px left of the selection ring, so
+    // at this zoom the ring's left edge runs a pixel or so under the bin's right edge. The bin paints over
+    // the ring layer, and the layer takes no press, so the bin takes the press at its centre and on that strip.
+    const overlap = Math.min(ring.x + ring.width, box.x + box.width) - Math.max(ring.x, box.x);
+    expect(overlap, `the Sink's ring crosses the bin's edge at this zoom (ring ${JSON.stringify(ring)}, bin ${JSON.stringify(box)})`).toBeGreaterThan(0);
     const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-    const hit = await hitAt(page, centre);
-    expect(hit.bin, `elementFromPoint at the bin's centre returns the bin, not the ring layer (got ${hit.tag}, in the ring layer: ${hit.inLayer})`).toBe(true);
+    const strip = { x: Math.max(ring.x, box.x) + overlap / 2, y: centre.y };
+    for (const [where, at] of [["the bin's centre", centre], ['where the ring crosses the bin', strip]] as const) {
+      const hit = await hitAt(page, at);
+      expect(hit.bin, `a press at ${where} lands on the bin (it read ${hit.tag}, in the ring layer: ${hit.inLayer})`).toBe(true);
+    }
     await page.mouse.click(centre.x, centre.y);
     await expect.poll(() => deletesSent(h), { message: "the bin sent the Sink's delete" }).toEqual([BELT_ID, board.sink.id]);
     h.inject(buildPacket({ full: false, tick: board.tick + 1, generation: 1, swapFloor: FLOOR, removed: [board.sink.id], canUndo: true }));
