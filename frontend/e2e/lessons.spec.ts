@@ -366,7 +366,7 @@ test.describe('the step card and the hint ring', () => {
     expect(h.sent[sentBeforeCard]?.[0], 'the command is a Place').toBe(CMD.Place);
   });
 
-  test('the card sits above the open Legend', async ({ page }) => {
+  test('the card goes over the open Legend: it stays at the bottom and its Leave button takes the press', async ({ page }) => {
     const h = await boot(page);
     await startLesson(page, h);
     const card = page.locator(CARD);
@@ -374,19 +374,32 @@ test.describe('the step card and the hint ring', () => {
     const legend = page.locator('#fab-legend-panel');
     await expect(legend).toBeVisible();
 
-    const gap = async (): Promise<number> => {
-      const c = await boxOf(card, 'the card');
-      const l = await boxOf(legend, 'the Legend');
-      return l.y - (c.y + c.height);
-    };
     for (const size of [
       { width: 1280, height: 800 },
       { width: 1024, height: 768 },
     ]) {
       await page.setViewportSize(size);
+      const at = `at ${size.width}x${size.height}`;
       await expect
-        .poll(async () => Math.abs((await gap()) - 8), { message: `at ${size.width}x${size.height} the card ends 8 px above the Legend` })
+        .poll(async () => {
+          const c = await boxOf(card, 'the card');
+          return Math.abs(size.height - (c.y + c.height) - 24);
+        }, { message: `${at} the card ends 24 px above the window's bottom, as with the Legend closed` })
         .toBeLessThanOrEqual(TOLERANCE);
+      const c = await boxOf(card, 'the card');
+      const l = await boxOf(legend, 'the Legend');
+      const overlap = Math.min(c.x + c.width, l.x + l.width) - Math.max(c.x, l.x) > 0 && Math.min(c.y + c.height, l.y + l.height) - Math.max(c.y, l.y) > 0;
+      expect(overlap, `${at} the card overlaps the Legend's rect (card ${JSON.stringify(c)}, Legend ${JSON.stringify(l)})`).toBe(true);
+      const leave = card.getByRole('button', { name: 'Leave', exact: true });
+      const b = await boxOf(leave, 'the Leave button');
+      const onTop = await page.evaluate(
+        ([x, y]) => {
+          const el = document.elementFromPoint(x, y);
+          return el?.closest('button')?.textContent?.trim() ?? el?.tagName ?? 'none';
+        },
+        [b.x + b.width / 2, b.y + b.height / 2] as const,
+      );
+      expect(onTop, `${at} the centre of the card's Leave button finds Leave, so the card paints over the Legend`).toBe('Leave');
     }
   });
 

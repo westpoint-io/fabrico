@@ -206,16 +206,23 @@ function inspectorReservePx(): number {
 
 /**
  * The part of the window no panel covers or will cover: right of the palette, left of where the
- * inspector opens, under the toolbar, above the card.
+ * inspector opens, under the toolbar, and above the card or the open Legend, whichever is higher. The
+ * card goes over the Legend, so with the Legend open a ring under it reads as out of view, Show me
+ * frames the target above it, and floor spots are chosen above it. Help hides the Legend with
+ * `display: none`, which reads as an empty rect and counts as closed.
  */
 function readFreeArea(): ChromeFacts['view']['freeArea'] {
   const dock = document.querySelector<HTMLElement>('[data-fab-left-dock]');
   const card = document.querySelector<HTMLElement>('[data-fab-step-card]');
+  // Legend.tsx's LEGEND_PANEL_ID, read by its value so this layer doesn't import the Legend.
+  const legend = document.querySelector<HTMLElement>('#fab-legend-panel');
+  const legendBox = legend === null ? null : legend.getBoundingClientRect();
+  const legendTop = legendBox === null || legendBox.width === 0 || legendBox.height === 0 ? window.innerHeight : legendBox.top;
   return {
     left: dock === null ? 0 : dock.getBoundingClientRect().right,
     right: window.innerWidth - FREE_AREA_RIGHT_INSET_PX - inspectorReservePx(),
     top: FREE_AREA_TOP_PX,
-    bottom: card === null ? window.innerHeight : card.getBoundingClientRect().top,
+    bottom: Math.min(card === null ? window.innerHeight : card.getBoundingClientRect().top, legendTop),
   };
 }
 

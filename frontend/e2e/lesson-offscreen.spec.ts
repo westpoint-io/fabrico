@@ -47,17 +47,20 @@ interface Free {
 /**
  * The free area by the rule `readFreeArea` in TutorialLayer.tsx uses, worked out again here from the
  * page: the palette dock's right edge, the window less 24 and the inspector's reserve of
- * `min(420, 33vw) + 52`, 116 from the top, and the card's top.
+ * `min(420, 33vw) + 52`, 116 from the top, and the card's top or the open Legend's top, whichever is
+ * higher.
  */
 async function freeAreaOf(page: Page): Promise<Free> {
   return page.evaluate(() => {
     const dock = document.querySelector('[data-fab-left-dock]');
     const card = document.querySelector('[data-fab-step-card]');
+    const legend = document.querySelector('#fab-legend-panel')?.getBoundingClientRect() ?? null;
+    const legendTop = legend === null || legend.width === 0 || legend.height === 0 ? window.innerHeight : legend.top;
     return {
       left: dock === null ? 0 : dock.getBoundingClientRect().right,
       right: window.innerWidth - 24 - (Math.min(420, 0.33 * window.innerWidth) + 2 * 22 + 8),
       top: 116,
-      bottom: card === null ? window.innerHeight : card.getBoundingClientRect().top,
+      bottom: Math.min(card === null ? window.innerHeight : card.getBoundingClientRect().top, legendTop),
     };
   });
 }
@@ -374,6 +377,39 @@ test.describe('show me', () => {
     const { scale } = await cameraOf(page);
     await showMeSendsNothing(page, h, () => page.locator(SHOW_ME).click());
     await expectFramed(page, 'sink-floor', scale, 'the floor stage');
+  });
+
+  test('with the Legend open, a floor ring under the Legend reads out of view, and Show me frames it above the Legend', async ({ page }) => {
+    const h = await boot(page);
+    await startLesson(page, h);
+    await page.getByRole('button', { name: 'Legend' }).click();
+    const legend = page.locator('#fab-legend-panel');
+    await expect(legend).toBeVisible();
+    await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+    await ringAt(page, 'source-tool');
+    await zoomInto(page, PAN_FROM, 0.9, 1.1);
+    await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+    const ring = await ringAt(page, 'source-floor');
+    const free = await freeAreaOf(page);
+    expect(inside(ring, free), 'the Source spot starts above the Legend').toBe(true);
+    await expectFlag(page, false, 'with the Source spot above the Legend');
+
+    // Down by just enough to put the ring wholly under the Legend's top and still above the card's, so
+    // only the Legend's part of the rule can read it out of view.
+    const legendBox = await boxOf(legend, 'the Legend');
+    const cardBox = await boxOf(page.locator(CARD), 'the card');
+    const dy = Math.round(legendBox.y - ring.y + 6);
+    expect(ring.y + dy + ring.height, 'the moved ring stays above the card').toBeLessThan(cardBox.y);
+    await panBy(page, 0, dy);
+    const under = await ringAfterMove(page, 'source-floor', await cameraOf(page));
+    expect(under.y, "the ring's top is under the Legend's top").toBeGreaterThan(legendBox.y);
+    await expectFlag(page, true, 'with the Source spot under the Legend');
+
+    const { scale } = await cameraOf(page);
+    await showMeSendsNothing(page, h, () => page.locator(SHOW_ME).click());
+    await expectFramed(page, 'source-floor', scale, 'the floor stage under the Legend');
+    const framed = (await readProbe(page)).hint!;
+    expect(framed.y + framed.height, "after Show me the ring ends above the Legend's top").toBeLessThanOrEqual((await boxOf(legend, 'the Legend')).y);
   });
 
   test('a machine stage: Show me brings the Source back and sends nothing', async ({ page }) => {

@@ -64,9 +64,8 @@ describe('StepCard', () => {
     expect(panel?.props.className).toBe('fab-panel');
     expect(panel?.props['aria-label']).toBe('Lesson step');
     expect(styleOf(panel!).left).toBe('50%');
-    expect(styleOf(panel!).top).toBe(
-      'min(calc(100% - var(--fab-space-lg)), calc(var(--fab-legend-top, 100000px) - var(--fab-space-sm)))',
-    );
+    // The bottom anchor reads no Legend variable: the card goes over an open Legend.
+    expect(styleOf(panel!).top).toBe('calc(100% - var(--fab-space-lg))');
     expect(styleOf(panel!).transform).toBe('translate(-50%, -100%)');
     expect(styleOf(panel!).zIndex).toBe(3);
   });
