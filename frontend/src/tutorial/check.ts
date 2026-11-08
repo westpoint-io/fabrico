@@ -36,9 +36,15 @@ type UnlistedBinding = Exclude<BindingName, (typeof BINDING_NAMES)[number]>;
 /** True only while `BINDING_NAMES` lists every member of `BindingName`. */
 export const BINDING_NAMES_COMPLETE: [UnlistedBinding] extends [never] ? true : false = true;
 
-/** The board's shape captured when the step `since` began, for the restored check. */
+/**
+ * The board's shape captured when the step `since` began, for the restored check. A machine whose config
+ * answer hadn't come yet takes it later from the answer about its handle then, at `generation`, so
+ * `handles` keeps those handles by `nodeKey`. It never goes into the shape.
+ */
 export interface ShapeCapture {
   since: string;
+  generation: number;
+  handles: Readonly<Record<string, number>>;
   shape: BoardShape;
 }
 
@@ -257,6 +263,6 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       return boundBeltJoining(board, bindings, check.of) === undefined ? DONE : NOT_DONE;
     }
     case 'restored':
-      return capture !== null && capture.since === check.since && sameShape(boardShape(board), capture.shape) ? DONE : NOT_DONE;
+      return capture !== null && capture.since === check.since && sameShape(boardShape(board, chrome.appliedConfigs), capture.shape) ? DONE : NOT_DONE;
   }
 }

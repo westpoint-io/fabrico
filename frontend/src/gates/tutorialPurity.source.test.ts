@@ -4,9 +4,9 @@
 // for React, Pixi or the DOM. The tutorial's two folders also can't send anything to the host: the one
 // thing a lesson asks for is New, through a callback the app hands it, so a transport call, a network
 // call or a press on the app's own controls in either folder is a lesson finishing a step for the user.
-// The one thing a lesson reads from the host is the bound Source's trigger, and `triggerRead.ts` is the
-// only file holding a host bridge. It hands the bridge to `loadConfig` and to nothing else, and exports
-// the answer, so no other file can get hold of a value that can send any command. Lesson text must never
+// The one thing a lesson reads from the host is a bound machine's applied config, and `triggerRead.ts`
+// is the only file holding a host bridge. It hands the bridge to `loadConfig` and to nothing else, and
+// exports the answer, so no other file can get hold of a value that can send any command. Lesson text must never
 // be able to become HTML. `src/render/` ships in the docs embed, which has no tutorial, so it can't
 // import one.
 //
@@ -129,6 +129,9 @@ const THE_ONE_READ = new RegExp(
   'g',
 );
 
+/** The reader's two answers: the config, and the trigger projected from it. Each is an async function. */
+const READER_EXPORT = /^export async function (readAppliedConfig|readAppliedTrigger)\(/;
+
 /**
  * The reader may import a bridge and pass it to `loadConfig`. A bridge anywhere else could send a
  * command, and any export but the answer could hand a bridge out.
@@ -143,8 +146,10 @@ function hostReaderBreaches(path: string, stripped: string): string[] {
     }
   });
   const exported = [...stripped.matchAll(/\bexport\b[^\n]*/g)].map((m) => m[0]);
-  if (exported.length !== 1 || !exported[0]?.startsWith('export async function readAppliedTrigger(')) {
-    findings.push(`${path}: exports ${exported.length} things, and it must export readAppliedTrigger alone`);
+  const answers = exported.map((line) => READER_EXPORT.exec(line)?.[1] ?? null);
+  const named = answers.filter((name): name is string => name !== null);
+  if (exported.length === 0 || named.length !== exported.length || new Set(named).size !== named.length) {
+    findings.push(`${path}: exports ${exported.length} things, and it may export readAppliedConfig and readAppliedTrigger, once each, and nothing else`);
   }
   if (!stripped.includes('loadConfig(')) findings.push(`${path}: makes no loadConfig read, which is all this file is for`);
   return findings;
@@ -373,6 +378,11 @@ describe('the tutorial stays a reader of the app', () => {
         expect(auditTutorialSources([reader('export { tauriInvoke };')]).join('\n')).toContain('uses a host bridge outside loadConfig');
       });
 
+      it('an export under a name the reader has no use for, or one of its two names twice', () => {
+        expect(auditTutorialSources([reader('export async function readAnything(node) { return null; }')]).join('\n')).toContain('exports 2 things');
+        expect(auditTutorialSources([reader(read)]).join('\n')).toContain('exports 2 things');
+      });
+
       it('no read at all', () => {
         expect(auditTutorialSources([{ path: HOST_READER, source: 'export async function readAppliedTrigger() { return null; }' }]).join('\n')).toContain('makes no loadConfig read');
       });
@@ -448,7 +458,8 @@ describe('the tutorial stays a reader of the app', () => {
         "import { devWsInvoke } from '../../transport/devWsInvoke';",
         "import { transportKind } from '../../transport/transport';",
         "import { loadConfig, tauriInvoke } from '../ConfigPanel';",
-        "export async function readAppliedTrigger(node) { return loadConfig(node, transportKind() === 'dev' ? devWsInvoke : tauriInvoke); }",
+        "export async function readAppliedConfig(node) { return loadConfig(node, transportKind() === 'dev' ? devWsInvoke : tauriInvoke); }",
+        'export async function readAppliedTrigger(node) { const c = await readAppliedConfig(node); return c?.kind === "Source" ? c.trigger : null; }',
       ].join('\n');
       expect(auditTutorialSources([{ path: HOST_READER, source }])).toEqual([]);
     });

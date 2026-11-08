@@ -14,7 +14,7 @@ import {
 } from './machine.ts';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
-import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
+import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -29,7 +29,7 @@ const VIEW: ChromeFacts['view'] = {
 };
 
 function chrome(over: Partial<ChromeFacts> = {}): ChromeFacts {
-  return { armed: null, selectedNode: null, selectedBelt: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, view: VIEW, ...over };
+  return { armed: null, selectedNode: null, selectedBelt: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, appliedConfigs: [], view: VIEW, ...over };
 }
 
 function board(over: Partial<BoardFacts> = {}): BoardFacts {
@@ -1180,6 +1180,14 @@ describe('lesson 3: Delete and Undo', () => {
     return { nodes: [source, sink], belts: [beltBetween(base + 2, source.id, sink.id)] };
   };
   const step = (s: TutorialState): string | undefined => LESSONS.find((l) => l.id === DU)?.steps[s.stepIndex]?.id;
+  const WEBHOOK = { kind: 'Source', trigger: { kind: 'Webhook' } } as const;
+  const DEBUG = { kind: 'Sink', target: { kind: 'Debug' } } as const;
+  /** The host's answer for every machine on the board, at the board's generation, as the layer's poll hands them over. */
+  const answersFor = (b: Partial<BoardFacts>): AppliedConfig[] =>
+    (b.nodes ?? []).map((n) => ({ node: n.id, generation: b.generation ?? 1, config: n.kind === SOURCE ? WEBHOOK : DEBUG }));
+  /** A frame of lesson 3 with every machine's config answered, unless the chrome says otherwise. */
+  const frame = (s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts> = {}): TutorialState =>
+    reduce(s, { type: 'frame', board: board(b), chrome: chrome({ appliedConfigs: answersFor(b), ...c }) }, LESSONS);
 
   function startedDU(): TutorialState {
     const sent = reduce(IDLE, { type: 'newSent', lessonId: DU, floorAtSend: FLOOR }, LESSONS);
@@ -1279,6 +1287,44 @@ describe('lesson 3: Delete and Undo', () => {
     expect(currentStage(s, b, chrome({ selectedBelt: BELT.id }), LESSONS)?.id).toBe('press-delete');
     expect(currentStage(s, b, chrome({ selectedNode: BELT.id }), LESSONS)?.id).toBe('select-belt');
   });
+  it('bring-back waits for an answer about each re-minted handle, at the new generation', () => {
+    const back = { ...reminted(80), generation: 3 };
+    // No answer yet about the new handles: the line is back and the lesson still waits.
+    const waiting = frame(atDU(5), back, { appliedConfigs: [] });
+    expect(waiting.card).toBe('running');
+    expect(step(waiting)).toBe('bring-back');
+    // Answers about the new handles, but asked before the keyframe: they don't count.
+    expect(frame(waiting, back, { appliedConfigs: answersFor({ ...back, generation: 1 }) }).card).toBe('running');
+    // Only the Source answered at the new generation: still waiting.
+    expect(frame(waiting, back, { appliedConfigs: answersFor(back).slice(0, 1) }).card).toBe('running');
+    // Both answered at the new generation: done.
+    expect(frame(waiting, back).card).toBe('finished');
+  });
+
+  it('bring-back stays open when a restored Sink has another config', () => {
+    const back = { ...reminted(80), generation: 3 };
+    const http = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } } as const;
+    const other = answersFor(back).map((a) => (a.node === 81 ? { ...a, config: http } : a));
+    expect(frame(atDU(5), back, { appliedConfigs: other }).card).toBe('running');
+  });
+
+  it('a capture read before the answers came takes them later at its own generation, and keeps the belt deleted meanwhile', () => {
+    let s = startedDU();
+    s = frame(s, { nodes: [SRC] });
+    s = frame(s, { nodes: [SRC, SNK] });
+    // The belt finishes draw-belt on a frame with no answers, so the capture at delete-belt is incomplete.
+    s = frame(s, { nodes: [SRC, SNK], belts: [BELT] }, { appliedConfigs: [] });
+    expect(step(s)).toBe('delete-belt');
+    expect(s.capture?.shape.complete).toBe(false);
+    // The belt goes, and only then do the answers arrive.
+    s = frame(s, { nodes: [SRC, SNK], belts: [] });
+    expect(s.capture?.shape.complete).toBe(true);
+    expect(s.capture?.shape.belts.length).toBe(1);
+    s = frame(s, { nodes: [SRC], belts: [] });
+    expect(step(s)).toBe('bring-back');
+    expect(frame(s, { ...reminted(90), generation: 2 }).card).toBe('finished');
+  });
+
 });
 
 describe('rebound: every binding follows a re-mint', () => {

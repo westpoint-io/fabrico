@@ -18,7 +18,7 @@ import {
   type ShapeCapture,
 } from './check';
 import type { Progress } from './progress';
-import { beltTilesIn, boardShape } from './shape';
+import { beltTilesIn, boardShape, handlesByKey, withConfigs } from './shape';
 import type {
   BindingName,
   BoardFacts,
@@ -304,12 +304,31 @@ function isDeleteCheck(check: Check | undefined): check is Extract<Check, { is: 
   return check?.is === 'nodeGone' || check?.is === 'beltGone';
 }
 
+/** The board's shape as it stands, captured for the step `since`. */
+function captureOf(since: string, board: BoardFacts, chrome: ChromeFacts): ShapeCapture {
+  return { since, generation: board.generation, handles: handlesByKey(board), shape: boardShape(board, chrome.appliedConfigs) };
+}
+
 /** The capture to hold once step `stepIndex` begins: a fresh one if a later `restored` check names it, else the one held. */
-function captureAt(lesson: Lesson, stepIndex: number, board: BoardFacts, held: ShapeCapture | null): ShapeCapture | null {
+function captureAt(lesson: Lesson, stepIndex: number, board: BoardFacts, chrome: ChromeFacts, held: ShapeCapture | null): ShapeCapture | null {
   const id = lesson.steps[stepIndex]?.id;
   if (id === undefined) return held;
   const named = lesson.steps.some((step) => step.done.is === 'restored' && step.done.since === id);
-  return named ? { since: id, shape: boardShape(board) } : held;
+  return named ? captureOf(id, board, chrome) : held;
+}
+
+/**
+ * A capture still missing a machine's config stays open. At its own generation it takes each missing
+ * config from the answer about the handle that machine had when the capture was read, so a belt deleted
+ * meanwhile stays in it. A generation change first, which only an Undo or a board swap makes, takes the
+ * capture again from the board as it stands.
+ */
+function withCaptureFilled(s: TutorialState, board: BoardFacts, chrome: ChromeFacts): TutorialState {
+  const held = s.capture;
+  if (held === null || held.shape.complete) return s;
+  if (board.generation !== held.generation) return { ...s, capture: captureOf(held.since, board, chrome) };
+  const shape = withConfigs(held.shape, held.handles, chrome.appliedConfigs, held.generation);
+  return shape === held.shape ? s : { ...s, capture: { ...held, shape } };
 }
 
 /** `deliberate` once a step with this check has finished on this frame. Only a delete step adds to it. */
@@ -349,7 +368,7 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
       stepIndex,
       bindings,
       baseline: baselineFor(isLast ? undefined : lesson.steps[stepIndex], knownKeys, board, chrome, bindings),
-      capture: isLast ? next.capture : captureAt(lesson, stepIndex, board, next.capture),
+      capture: isLast ? next.capture : captureAt(lesson, stepIndex, board, chrome, next.capture),
       deliberate: withDeliberate(next.deliberate, step.done, board),
     };
   }
@@ -457,7 +476,7 @@ function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings),
     spot: null,
     note: { kind: 'wentBack', a: gone + 1, b: gone + 1 },
-    capture: captureAt(lesson, gone, board, s.capture),
+    capture: captureAt(lesson, gone, board, chrome, s.capture),
     deliberate: null,
   };
 }
@@ -507,7 +526,7 @@ function awaitsTriggerAnswer(s: TutorialState, chrome: ChromeFacts, lessons: rea
 function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
   // An Undo or a board swap raises the generation, and either one ends what a Delete took on purpose.
   const settled = s.deliberate !== null && s.deliberate.generation !== board.generation ? { ...s, deliberate: null } : s;
-  const found = rebound(settled, board);
+  const found = rebound(withCaptureFilled(settled, board, chrome), board);
   const checked = withGoingBack(found, board, chrome, lessons);
   let next = advance(checked, board, chrome, lessons);
   // A machine moved to another cell has a new key, so its step goes back and finishes again in this one
@@ -548,7 +567,7 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
       stepIndex: 0,
       floor: e.board.swapFloor,
       baseline: baselineFor(lesson?.steps[0], [], e.board, e.chrome, s.bindings),
-      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, null),
+      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, e.chrome, null),
     };
     return runFrame(running, e.board, e.chrome, lessons);
   }

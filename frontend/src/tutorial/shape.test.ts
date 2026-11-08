@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { beltTilesIn, boardShape, sameShape, stableJson } from './shape.ts';
-import type { BoardBelt, BoardFacts, BoardNode } from './types.ts';
+import { beltTilesIn, boardShape, handlesByKey, sameShape, stableJson, withConfigs } from './shape.ts';
+import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode } from './types.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -43,23 +43,37 @@ function line(ids: { source: number; sink: number; belt: number }, over: Partial
 
 const BEFORE = line({ source: 4, sink: 5, belt: 9 });
 
+const GEN = 1;
+const WEBHOOK: AppliedConfig['config'] = { kind: 'Source', trigger: { kind: 'Webhook' } };
+const DEBUG: AppliedConfig['config'] = { kind: 'Sink', target: { kind: 'Debug' } };
+
+/** The host's answer for every machine on `b`, at generation `GEN`: the Source on Webhook and the Sink on Debug. */
+function answered(b: Pick<BoardFacts, 'nodes'>, over: Partial<Record<number, AppliedConfig['config']>> = {}): AppliedConfig[] {
+  return b.nodes.map((n) => ({ node: n.id, generation: GEN, config: n.id in over ? (over[n.id] ?? null) : n.kind === SOURCE ? WEBHOOK : DEBUG }));
+}
+
+/** The shape of `b` at generation `GEN`, every machine answered unless `answers` says otherwise. */
+function shapeOf(b: Pick<BoardFacts, 'nodes' | 'belts'>, answers: readonly AppliedConfig[] = answered(b)) {
+  return boardShape({ ...b, generation: GEN }, answers);
+}
+
 describe('boardShape', () => {
   it('reads the same for the same line under re-minted handles, so Undo can match it', () => {
     const after = line({ source: 40, sink: 41, belt: 42 });
-    expect(sameShape(boardShape(after), boardShape(BEFORE))).toBe(true);
+    expect(sameShape(shapeOf(after), shapeOf(BEFORE))).toBe(true);
     // Handles in a different order on the board change nothing either.
     const shuffled = { nodes: [...after.nodes].reverse(), belts: after.belts };
-    expect(sameShape(boardShape(shuffled), boardShape(BEFORE))).toBe(true);
+    expect(sameShape(shapeOf(shuffled), shapeOf(BEFORE))).toBe(true);
   });
 
   it('holds no handle anywhere', () => {
-    const text = stableJson(boardShape(line({ source: 1234, sink: 5678, belt: 9012 })));
+    const text = stableJson(shapeOf(line({ source: 1234, sink: 5678, belt: 9012 })));
     for (const handle of ['1234', '5678', '9012']) expect(text).not.toContain(handle);
   });
 
   it('reads a different shape for a turned Sink, whose ports sit on other sides', () => {
     const turned = line({ source: 40, sink: 41, belt: 42 }, {}, true);
-    expect(sameShape(boardShape(turned), boardShape(BEFORE))).toBe(false);
+    expect(sameShape(shapeOf(turned), shapeOf(BEFORE))).toBe(false);
   });
 
   it("reads a different shape for a belt whose Head docks another port", () => {
@@ -69,22 +83,49 @@ describe('boardShape', () => {
         { end: 'Head', node: 41, port: 0 },
       ],
     });
-    expect(sameShape(boardShape(other), boardShape(BEFORE))).toBe(false);
+    expect(sameShape(shapeOf(other), shapeOf(BEFORE))).toBe(false);
   });
 
   it('reads a different shape for a belt with its Head dock missing', () => {
     const loose = line({ source: 40, sink: 41, belt: 42 }, { docks: [{ end: 'Tail', node: 40, port: 0 }] });
-    expect(sameShape(boardShape(loose), boardShape(BEFORE))).toBe(false);
+    expect(sameShape(shapeOf(loose), shapeOf(BEFORE))).toBe(false);
   });
 
   it('reads a different shape for a tile of another kind', () => {
     const tiles = BEFORE.belts[0]!.tiles.map((t, i) => (i === 4 ? { ...t, kind: { Corner: { from: 0, to: 1 } } } : t));
-    expect(sameShape(boardShape(line({ source: 4, sink: 5, belt: 9 }, { tiles })), boardShape(BEFORE))).toBe(false);
+    expect(sameShape(shapeOf(line({ source: 4, sink: 5, belt: 9 }, { tiles })), shapeOf(BEFORE))).toBe(false);
   });
 
   it('reads the same shape for a belt carrying items as for an empty one', () => {
     const full = line({ source: 40, sink: 41, belt: 42 }, { items: 3, occupiedSlots: [0, 2, 4] });
-    expect(sameShape(boardShape(full), boardShape(BEFORE))).toBe(true);
+    expect(sameShape(shapeOf(full), shapeOf(BEFORE))).toBe(true);
+  });
+
+  it('reads a different shape for a restored Sink whose config differs from the captured one', () => {
+    const after = line({ source: 40, sink: 41, belt: 42 });
+    const http: AppliedConfig['config'] = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } };
+    expect(sameShape(shapeOf(after, answered(after, { 41: http })), shapeOf(BEFORE))).toBe(false);
+    // And the same config under new handles still matches.
+    expect(sameShape(shapeOf(after, answered(after)), shapeOf(BEFORE))).toBe(true);
+  });
+
+  it('is incomplete with a machine unanswered, and an incomplete shape never matches, not even itself', () => {
+    const missing = shapeOf(BEFORE, answered(BEFORE).slice(0, 1));
+    expect(missing.complete).toBe(false);
+    expect(sameShape(missing, missing)).toBe(false);
+    expect(sameShape(missing, shapeOf(BEFORE))).toBe(false);
+    expect(shapeOf(BEFORE).complete).toBe(true);
+  });
+
+  it('reads no answer from another generation, so an answer from before an Undo keyframe never counts', () => {
+    const stale = answered(BEFORE).map((a) => ({ ...a, generation: GEN - 1 }));
+    expect(shapeOf(BEFORE, stale).complete).toBe(false);
+  });
+
+  it('takes an answer of no config as an answer', () => {
+    const none = shapeOf(BEFORE, answered(BEFORE, { 5: null }));
+    expect(none.complete).toBe(true);
+    expect(sameShape(none, shapeOf(BEFORE))).toBe(false);
   });
 
   it('writes a tile kind the same whatever order its keys came in', () => {
@@ -92,9 +133,22 @@ describe('boardShape', () => {
   });
 });
 
+describe('withConfigs', () => {
+  it("fills a missing config from the answer about the handle the machine had, at the shape's generation", () => {
+    const partial = shapeOf(BEFORE, answered(BEFORE).slice(0, 1));
+    const handles = handlesByKey(BEFORE);
+    const filled = withConfigs(partial, handles, answered(BEFORE), GEN);
+    expect(filled.complete).toBe(true);
+    expect(sameShape(filled, shapeOf(BEFORE))).toBe(true);
+    // An answer from another generation, or about another handle, leaves it as it was.
+    expect(withConfigs(partial, handles, answered(BEFORE).map((a) => ({ ...a, generation: GEN + 1 })), GEN)).toBe(partial);
+    expect(withConfigs(partial, handles, [{ node: 77, generation: GEN, config: DEBUG }], GEN)).toBe(partial);
+  });
+});
+
 describe('beltTilesIn', () => {
   it("finds the belt docked to both machines by their keys, and nothing for a pair it doesn't join", () => {
-    const shape = boardShape(BEFORE);
+    const shape = shapeOf(BEFORE);
     expect(beltTilesIn(shape, '0@2,2', '7@8,2')?.map((t) => t.cell_x)).toEqual([3, 4, 5, 6, 7]);
     expect(beltTilesIn(shape, '0@2,2', '7@9,9')).toBeNull();
   });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BELT_ENDS, BINDING_NAMES_COMPLETE, evaluateCheck, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
 import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
-import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
+import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -47,6 +47,7 @@ function ctx(over: {
       editsInFlight: false,
       triggerPressed: null,
       appliedTrigger: null,
+      appliedConfigs: [],
       view: { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 0, right: 800, top: 0, bottom: 600 } },
       ...over.chrome,
     },
@@ -541,11 +542,26 @@ describe('restored', () => {
       },
     ],
   });
-  const CAPTURE = { since: 'delete-belt', shape: boardShape({ nodes: [], belts: [], ...line(4, 5, 9) } as BoardFacts) };
+  /** The host's answers for the Source and the Sink at these handles, asked at generation 1. */
+  const answers = (src: number, snk: number): AppliedConfig[] => [
+    { node: src, generation: 1, config: { kind: 'Source', trigger: { kind: 'Webhook' } } },
+    { node: snk, generation: 1, config: { kind: 'Sink', target: { kind: 'Debug' } } },
+  ];
+  const CAPTURE = {
+    since: 'delete-belt',
+    generation: 1,
+    handles: {},
+    shape: boardShape({ nodes: [], belts: [], generation: 1, ...line(4, 5, 9) }, answers(4, 5)),
+  };
   const check = { is: 'restored', since: 'delete-belt' } as const;
 
   it('is done when the captured shape comes back under new handles', () => {
-    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), capture: CAPTURE })).done).toBe(true);
+    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), chrome: { appliedConfigs: answers(40, 41) }, capture: CAPTURE })).done).toBe(true);
+  });
+
+  it('is not done while a restored machine has no config answer', () => {
+    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), capture: CAPTURE })).done).toBe(false);
+    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), chrome: { appliedConfigs: answers(40, 41).slice(0, 1) }, capture: CAPTURE })).done).toBe(false);
   });
 
   it("is not done while the belt's Head dock is missing", () => {

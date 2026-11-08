@@ -5,6 +5,7 @@
 // a command.
 
 import type { ShortcutId } from '../input/shortcuts';
+import type { MachineConfig } from '../protocol/decode';
 
 export type LessonId = 'your-first-line' | 'delete-and-undo';
 /**
@@ -63,10 +64,24 @@ export interface ChromeFacts {
   triggerPressed: 'Webhook' | 'Timer' | null;
   /** The host's last answer about a node's trigger. Only this says a trigger has been applied. */
   appliedTrigger: { node: number; kind: 'Webhook' | 'Timer' } | null;
+  /**
+   * The host's answers about the bound machines' applied configs, each tagged with the board generation
+   * its query was sent at. The layer hands over only answers about a bound handle at this frame's
+   * generation, and the reader checks the generation again, because an Undo keyframe re-mints handles.
+   */
+  appliedConfigs: readonly AppliedConfig[];
   view: {
     camera: { x: number; y: number; scale: number };
     freeArea: { left: number; right: number; top: number; bottom: number };
   };
+}
+
+/** One answer from the host's config query: about handle `node`, asked at board generation `generation`. */
+export interface AppliedConfig {
+  node: number;
+  generation: number;
+  /** Null when the host says the machine has no config. */
+  config: MachineConfig | null;
 }
 
 export type Check =

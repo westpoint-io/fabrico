@@ -1,6 +1,7 @@
 import { expect, test, type JSHandle, type Page } from '@playwright/test';
 import { addFrameBudget, addWaitBudget, frameBudgetMs, tickBudgetMs } from '../../e2e/support/frameSampler';
 import { CELL } from '../../shared/geometry';
+import { KIND_NAMES } from '../../src/chrome/kindNames';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
 import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
 import { NUB_RING_R, NUB_RING_STROKE, PORT_ROLE, doorstepCell } from '../../src/protocol/ports';
@@ -1067,6 +1068,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     const list = (b: Record<string, number>): string => Object.entries(b).map(([k, v]) => `${k}:${v}`).join(',');
     console.log(`MEASURE restored-handles ${lesson.id} before=${list(handlesBefore)} after=${list(after)}`);
   }
+  if (step.done.is === 'restored') await expectCaptureHoldsConfigs(page, label, step.done.since);
   if (cellClip !== null && beforePixels !== null) {
     const afterPixels = await captureWithGhostGone(page, cellClip);
     expect(
@@ -1104,6 +1106,20 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   }
   await expectRenderLoopAlive(page, `after ${label}`);
   console.log(`WALK ${lesson.id} step ${stepIndex + 1} ${step.id} passed`);
+}
+
+/**
+ * The restored check's capture holds an applied config for each machine, read through the tutorial's
+ * one host query, so bring-back compared configs and not only kinds, cells and ports. Read once the
+ * board is back, when its machines are the captured ones.
+ */
+async function expectCaptureHoldsConfigs(page: Page, label: string, since: string): Promise<void> {
+  const capture = (await readProbe(page)).capture;
+  const kinds = (await readScene(page)).nodes.map((n) => KIND_NAMES[n.kind] ?? `kind ${n.kind}`).sort();
+  expect(capture?.since, `${label}: the probe holds the capture the restored check compares with`).toBe(since);
+  const configs = [...(capture?.configKinds ?? [])].sort();
+  console.log(`MEASURE capture since=${capture?.since ?? '-'} machines=${capture?.machines ?? 0} configs=${configs.join(',')}`);
+  expect(configs, `${label}: the capture holds one applied config per machine, of that machine's kind`).toEqual(kinds);
 }
 
 /** What a delete step takes off the board: a machine by its `nodeKey`, or a belt by the handles of the two machines it joins. */

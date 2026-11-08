@@ -3,11 +3,13 @@
 // Undo re-mints every handle it puts back, and a keyframe can even hand an old handle to another
 // element, so two boards are compared by what a person could see of them: each machine's kind, cells
 // and ports, and each belt's tiles and what its ends dock to, named by the docked machine's `nodeKey`.
-// Item counts stay out, so a belt that lost its items still reads as the same belt. Pure, like the rest
-// of this folder.
+// Item counts stay out, so a belt that lost its items still reads as the same belt. Each machine's
+// applied config is in it too, from the host's answer about that machine's handle at the board's own
+// generation, and a shape missing any machine's answer is incomplete and matches nothing. Pure, like the
+// rest of this folder.
 
 import { nodeKey } from './check';
-import type { BoardFacts } from './types';
+import type { AppliedConfig, BoardFacts } from './types';
 
 export interface MachineShape {
   nodeKey: string;
@@ -15,8 +17,11 @@ export interface MachineShape {
   cells: ReadonlyArray<readonly [number, number]>;
   /** In the board's port order, which is the order a dock's `port` counts in. The side carries the turn. */
   ports: ReadonlyArray<{ role: number; cell_x: number; cell_y: number; side: number }>;
-  /** The machine's applied config. Plan 104-02 fills it through the tutorial's one host read; null until then. */
-  config: unknown;
+  /**
+   * The machine's applied config, as the host answered for its handle at the shape's generation. Null
+   * while no answer has come; `{ value: null }` is an answer that the machine has no config.
+   */
+  config: { value: AppliedConfig['config'] } | null;
 }
 
 export interface BeltShape {
@@ -29,6 +34,8 @@ export interface BeltShape {
 export interface BoardShape {
   machines: readonly MachineShape[];
   belts: readonly BeltShape[];
+  /** Does every machine hold its config answer? An incomplete shape never matches. */
+  complete: boolean;
 }
 
 /** JSON with every object's keys sorted, so the same value always writes the same string. */
@@ -47,8 +54,18 @@ function compareCells(a: readonly number[], b: readonly number[]): number {
   return (a[0] as number) - (b[0] as number) || (a[1] as number) - (b[1] as number);
 }
 
-/** The board's shape. It holds no handle: every reference to another element goes by that element's key. */
-export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts'>): BoardShape {
+/** The answer about `handle` asked at `generation`, or null with none. An answer from another generation is about another board. */
+function answerFor(answers: readonly AppliedConfig[], handle: number, generation: number): MachineShape['config'] {
+  const answer = answers.find((a) => a.node === handle && a.generation === generation);
+  return answer === undefined ? null : { value: answer.config };
+}
+
+/**
+ * The board's shape. It holds no handle: every reference to another element goes by that element's key.
+ * `answers` are the frame's config answers; only those about a machine's own handle at the board's
+ * generation are read.
+ */
+export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts' | 'generation'>, answers: readonly AppliedConfig[]): BoardShape {
   const nameOf = (handle: number): string => {
     const node = board.nodes.find((n) => n.id === handle);
     if (node !== undefined) return nodeKey(node);
@@ -63,7 +80,7 @@ export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts'>): BoardSha
       ports: [...n.ports]
         .sort((a, b) => a.index - b.index)
         .map((p) => ({ role: p.role, cell_x: p.cell_x, cell_y: p.cell_y, side: p.side })),
-      config: null,
+      config: answerFor(answers, n.id, board.generation),
     }))
     .sort((a, b) => (a.nodeKey < b.nodeKey ? -1 : a.nodeKey > b.nodeKey ? 1 : 0));
   const belts: BeltShape[] = board.belts
@@ -79,12 +96,40 @@ export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts'>): BoardSha
       if (ta === undefined || tb === undefined) return (ta === undefined ? 0 : 1) - (tb === undefined ? 0 : 1);
       return ta.cell_x - tb.cell_x || ta.cell_y - tb.cell_y;
     });
-  return { machines, belts };
+  return { machines, belts, complete: machines.every((m) => m.config !== null) };
 }
 
-/** Do two shapes match? One stable serialisation each, compared whole. */
+/**
+ * `shape` with each machine still missing its config filled from `answers`, by the handle that machine
+ * had when the shape was read, at that read's generation. The same object when nothing new arrived.
+ */
+export function withConfigs(
+  shape: BoardShape,
+  handles: Readonly<Record<string, number>>,
+  answers: readonly AppliedConfig[],
+  generation: number,
+): BoardShape {
+  if (shape.complete) return shape;
+  let changed = false;
+  const machines = shape.machines.map((m) => {
+    const handle = handles[m.nodeKey];
+    if (m.config !== null || handle === undefined) return m;
+    const config = answerFor(answers, handle, generation);
+    if (config === null) return m;
+    changed = true;
+    return { ...m, config };
+  });
+  return changed ? { ...shape, machines, complete: machines.every((m) => m.config !== null) } : shape;
+}
+
+/** Each machine's handle by its `nodeKey`, so a shape read now can take a config answer later. */
+export function handlesByKey(board: Pick<BoardFacts, 'nodes'>): Record<string, number> {
+  return Object.fromEntries(board.nodes.map((n) => [nodeKey(n), n.id]));
+}
+
+/** Do two shapes match? Both must be complete, and then one stable serialisation each is compared whole. */
 export function sameShape(a: BoardShape, b: BoardShape): boolean {
-  return stableJson(a) === stableJson(b);
+  return a.complete && b.complete && stableJson(a) === stableJson(b);
 }
 
 /**

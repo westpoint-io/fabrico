@@ -9,12 +9,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, ty
 import { MIN_ZOOM } from '../../render/camera';
 import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
+import { BELT_ENDS } from '../../tutorial/check';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
-import type { BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
+import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
 import { frameTarget, offScreen as rectOffScreen } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
@@ -22,7 +23,7 @@ import { moveCamera, readCamera } from './cameraRead';
 import { HintPointer, type HintTarget } from './HintPointer';
 import { LESSONS_PANEL_ID, LessonPanel, focusListClose, type ResetFooter } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
-import { readAppliedTrigger } from './triggerRead';
+import { readAppliedConfig } from './triggerRead';
 
 export interface HintRect {
   x: number;
@@ -53,6 +54,12 @@ export interface TutorialProbe {
   noteText: string;
   /** Is the stage's ring (for a drag, either ring) out of the free area? Never for a panel target. */
   offScreen: boolean;
+  /**
+   * The shape the restored check compares with, summed up with no handle in it: the step it was taken
+   * at, how many machines it holds, and each machine's config kind (`missing` while no answer has come,
+   * `none` for an answer of no config). Null with no capture held.
+   */
+  capture: { since: string; machines: number; configKinds: string[] } | null;
 }
 
 /** The facts the last frame used. */
@@ -150,6 +157,14 @@ function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRec
     noteKind: slot?.kind ?? '',
     noteText: slot === null || slot.hidden ? '' : phrasePlain(slot.tokens),
     offScreen: s.card === 'running' && offScreen,
+    capture:
+      s.capture === null
+        ? null
+        : {
+            since: s.capture.since,
+            machines: s.capture.shape.machines.length,
+            configKinds: s.capture.shape.machines.map((m) => (m.config === null ? 'missing' : (m.config.value?.kind ?? 'none'))),
+          },
   };
 }
 
@@ -295,8 +310,38 @@ export function handFocusBackFromList(lessonOnScreen: boolean): void {
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 }
 
-/** How often the layer asks the host for the bound Source's trigger: slower than a person presses Apply. */
+/** How often the layer asks the host for each bound machine's config: slower than a person presses Apply. */
 export const TRIGGER_POLL_MS = 400;
+
+/** The handles of the running lesson's bound machines, sorted and joined, so an effect can key on them. Belts are left out. */
+function boundMachineIds(s: TutorialState): string {
+  if (s.card !== 'running') return '';
+  const ids = Object.entries(s.bindings)
+    .filter(([name, bound]) => bound !== undefined && BELT_ENDS[name as BindingName] === undefined)
+    .map(([, bound]) => bound?.id as number);
+  return [...new Set(ids)].sort((a, b) => a - b).join(',');
+}
+
+/**
+ * The frame's config answers: only those about a machine still bound, asked at this frame's generation.
+ * An answer from before an Undo keyframe is about a handle that may now name another machine.
+ */
+function answersForFrame(answers: ReadonlyMap<number, AppliedConfig>, bound: string, generation: number): AppliedConfig[] {
+  if (bound === '') return [];
+  const ids = new Set(bound.split(',').map(Number));
+  return [...answers.values()].filter((a) => ids.has(a.node) && a.generation === generation);
+}
+
+/**
+ * The trigger step's answer, projected from the latest config answer about its binding's handle, with the
+ * meaning it always had: no answer is null, and an answer about another handle never shows here.
+ */
+function appliedTriggerOf(s: TutorialState, answers: ReadonlyMap<number, AppliedConfig>): ChromeFacts['appliedTrigger'] {
+  const watch = triggerWatch(s);
+  const node = watch === null ? undefined : s.bindings[watch]?.id;
+  const config = node === undefined ? undefined : answers.get(node)?.config;
+  return node !== undefined && config?.kind === 'Source' ? { node, kind: config.trigger.kind } : null;
+}
 
 /** The binding the lesson's trigger step asks about. Null when the lesson has no such step. */
 function triggerWatch(s: TutorialState): BindingName | null {
@@ -387,8 +432,9 @@ export function TutorialLayer({
   const [cardLeft, setCardLeft] = useState<number | null>(null);
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
-  // The host's last answer about the bound Source's trigger. The frame loop reads only this.
-  const appliedRef = useRef<ChromeFacts['appliedTrigger']>(null);
+  // The host's last config answer about each bound machine, by handle, tagged with the generation its
+  // query was sent at. The frame loop reads only this.
+  const answersRef = useRef<Map<number, AppliedConfig>>(new Map());
   // The frame loop below outlives any one render, so it reads the chrome's props through this.
   const chromeRef = useRef({ armed, selectedNode, selectedBelt, playing });
   chromeRef.current = { armed, selectedNode, selectedBelt, playing };
@@ -409,24 +455,33 @@ export function TutorialLayer({
   // Which footer button takes focus once the press that changed the footer has rendered.
   const footerFocusRef = useRef<'keep' | 'reset' | null>(null);
 
-  // THE TRIGGER READ, from the moment the Source is bound. A Timer applied before its step comes up
-  // has to be known when that step does, so the step finishes in the same pass and the note says so.
-  // It's async, so it runs on a timer and the frame loop reads the ref, because a query per frame is
-  // what the Route sweep in App.tsx warns against. It reads and enqueues nothing, so the simulation
-  // can't tell it ran.
-  const watch = triggerWatch(state);
-  const watchedNode = watch !== null && state.card === 'running' ? (state.bindings[watch]?.id ?? null) : null;
+  // THE CONFIG READ, for every bound machine, from the moment it is bound. A Timer applied before its
+  // step comes up has to be known when that step does, so the step finishes in the same pass and the
+  // note says so, and the restored check compares each machine's config. It's async, so it runs on a
+  // timer and the frame loop reads the ref, because a query per frame is what the Route sweep in App.tsx
+  // warns against. Each answer keeps the board generation read when its query went out. It reads and
+  // enqueues nothing, so the simulation can't tell it ran.
+  const boundIds = boundMachineIds(state);
   useEffect(() => {
-    if (watchedNode === null) return undefined;
+    const ids = boundIds === '' ? [] : boundIds.split(',').map(Number);
+    // An answer about a handle no longer bound is about nothing this lesson reads, and a new lesson
+    // starts with nothing bound, so the store empties then.
+    for (const node of [...answersRef.current.keys()]) if (!ids.includes(node)) answersRef.current.delete(node);
+    if (ids.length === 0) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const read = async (): Promise<void> => {
+    const ask = async (node: number): Promise<void> => {
+      const generation = handleRef.current?.sceneState.generation;
+      if (generation === undefined) return;
       try {
-        const applied = await readAppliedTrigger(watchedNode);
-        if (!disposed) appliedRef.current = applied;
+        const config = await readAppliedConfig(node);
+        if (!disposed) answersRef.current.set(node, { node, generation, config });
       } catch {
-        // A query that fails says nothing about the trigger, so the last answer stands.
+        // A query that fails says nothing about the config, so the last answer stands.
       }
+    };
+    const read = async (): Promise<void> => {
+      await Promise.all(ids.map(ask));
       if (!disposed) timer = setTimeout(() => void read(), TRIGGER_POLL_MS);
     };
     void read();
@@ -434,7 +489,7 @@ export function TutorialLayer({
       disposed = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [watchedNode]);
+  }, [boundIds, handleRef]);
 
   useLayoutEffect(() => {
     probeRef.current = () => probeOf(stateRef.current, factsRef.current, refusalRecordRef.current, offScreenRef.current);
@@ -492,7 +547,8 @@ export function TutorialLayer({
           ...chromeRef.current,
           editsInFlight: readEditsInFlightRef.current(),
           triggerPressed: readTriggerPressed(),
-          appliedTrigger: appliedRef.current,
+          appliedTrigger: appliedTriggerOf(stateRef.current, answersRef.current),
+          appliedConfigs: answersForFrame(answersRef.current, boundMachineIds(stateRef.current), board.generation),
           view: { camera, freeArea: readFreeArea() },
         };
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);
@@ -597,7 +653,7 @@ export function TutorialLayer({
         // Done sticks, and a lesson this one replaces stays In progress: one lesson runs at a time.
         progress.write(withLessonStarted(progress.read(), lessonId));
         dispatch({ type: 'newSent', lessonId, floorAtSend });
-        appliedRef.current = null;
+        answersRef.current.clear();
         setStage(null);
         onLessonsOpenChange(false);
       });
@@ -606,9 +662,9 @@ export function TutorialLayer({
   );
 
   const resume = useCallback((): void => {
-    // The last answer is from before the lesson was left, and the poll stopped there, so it can't say
-    // what the trigger is now. The re-check waits for a fresh one.
-    appliedRef.current = null;
+    // The last answers are from before the lesson was left, and the poll stopped there, so they can't say
+    // what the configs are now. The re-check waits for fresh ones.
+    answersRef.current.clear();
     dispatch({ type: 'resumed' });
     onLessonsOpenChange(false);
   }, [dispatch, onLessonsOpenChange]);
