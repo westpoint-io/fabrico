@@ -262,6 +262,12 @@ const FOOTPRINT: Readonly<Record<FloorSpot, readonly [number, number]>> = {
 };
 /** Lesson 4's line, across: the Source, three cells of belt, the Factory, three more, and the Sinks. */
 const LINE_CELLS = 11;
+/**
+ * How far down the free area lesson 4's line sits, the Source's row. Lower than lesson 1's 50%: the
+ * line is three rows tall, and once the inspector opens at step 2 an open Legend wraps narrower and its
+ * top rises, by 98 px at 1024x768, so a line at 50% could end under it.
+ */
+const LINE_ROW_DOWN = 0.4;
 /** From the Source to the Factory's left edge. */
 const FACTORY_OFFSET_CELLS = 4;
 /** From the Factory's output cell to the Sink in front of it, leaving three cells of belt. */
@@ -300,7 +306,7 @@ function sinkCellFor(port: BoardNode['ports'][number]): readonly [number, number
  * is worked out from what the user can see. Lesson 1's rule: the Source under the point 40% across and
  * 50% down the free area, the Sink on the Source's row, six cells east, or west when east is past the
  * free area's right edge. Lesson 4's line is 11 cells, so its Source is placed with the whole line
- * centred across the free area (one cell inside its left edge when 11 cells don't fit), the Factory's
+ * centred across the free area (one cell inside its left edge when 11 cells don't fit) and 40% down, the Factory's
  * top left 4 cells east of the Source and one row up, so its input is on the Source's row, and each Sink
  * 4 cells out from the Factory's output along the side that output faces, on its row. That's east at
  * turn 0, and the same rule turned for a turned Factory.
@@ -346,7 +352,7 @@ export function floorSpot(args: {
       const px = line <= width ? freeArea.left + (width - line) / 2 : freeArea.left + size;
       let x = Math.round((px - camera.x) / size);
       if (x * size + camera.x < freeArea.left) x += 1;
-      return free(x, midRow);
+      return free(x, Math.floor((freeArea.top + LINE_ROW_DOWN * (freeArea.bottom - freeArea.top) - camera.y) / size));
     }
     case 'factory':
       return source === null ? fortyPercent() : free(source[0] + FACTORY_OFFSET_CELLS, source[1] - 1);

@@ -1701,6 +1701,21 @@ describe('floorSpot for lesson 4', () => {
     expect(floorSpot({ spot: 'freeOutputSink', view: VIEW, board: b, bindings })).toEqual([12, 6]);
   });
 
+  it("with the Legend open the line's lower row stays above the Legend once the inspector lifts it", () => {
+    // 104-06, measured at 1024x768 with the Legend open: the free area is 116 to 426 px when the Source
+    // is placed, and 116 to 328 once the Source's inspector opens and the Legend wraps higher. The camera
+    // puts a row's top on the old 50% line (271 px), the worst grid snap for that rule.
+    const open: ChromeFacts['view'] = { camera: { x: 0, y: 15, scale: 1 }, freeArea: { left: 198, right: 610, top: 116, bottom: 426 } };
+    const src = floorSpot({ spot: 'centredSource', view: open, board: board() });
+    const sourceNode: BoardNode = { id: 1, kind: SOURCE, cells: [[src[0], src[1]]], ports: [] };
+    const bindings = { source: { nodeKey: nodeKey(sourceNode), id: 1 } };
+    const shrunk: ChromeFacts['view'] = { ...open, freeArea: { ...open.freeArea, bottom: 328 } };
+    const [, fy] = floorSpot({ spot: 'factory', view: shrunk, board: board({ nodes: [sourceNode] }), bindings });
+    // The Factory's three rows, and the second Sink on the last of them.
+    const bottom = (fy + 3) * CELL_PX + open.camera.y;
+    expect(bottom, `the Factory ends at ${bottom} px, above the Legend's 328`).toBeLessThanOrEqual(328);
+  });
+
   it('when 11 cells do not fit, the line starts one cell inside the free area', () => {
     const narrow: ChromeFacts['view'] = { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 200, right: 400, top: 116, bottom: 328 } };
     const [x] = floorSpot({ spot: 'centredSource', view: narrow, board: board() });
