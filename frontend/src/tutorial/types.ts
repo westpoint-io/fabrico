@@ -163,8 +163,8 @@ export type HintAnchor =
   /** A bound belt's middle tile, `tiles[floor(n / 2)]`: a press anywhere on a belt selects it. */
   | { on: 'belt'; of: BindingName }
   /**
-   * A bound machine's port: the first in its port order with this role. With `pick: 'free'`, the first
-   * with this role that no belt dock names, and nothing when every one has a belt.
+   * A bound machine's port: the first in its port order with this role. With `pick: 'free'` on an
+   * output, the first output no belt docks (`freeOutputs` in `check.ts`), and nothing when every one has a belt.
    */
   | { on: 'port'; of: BindingName; role: PortRoleName; pick?: 'free'; to?: { of: BindingName; role: PortRoleName } };
 

@@ -28,6 +28,7 @@ import { doorstepCell, dropHitRadiusWorld, nubAnchor } from '../../protocol/port
 import { FACTORY_EDITOR_LABELS } from '../FactoryConfigBody';
 import { ADD_OUTPUT_LABEL } from '../PortsSection';
 import type { SceneHandle } from '../../render/pixiApp';
+import { freeOutputs } from '../../tutorial/check';
 import type { BoundNode, TutorialState } from '../../tutorial/machine';
 import type { BindingName, HintAnchor, PanelTarget, PortRoleName } from '../../tutorial/types';
 import { readCamera } from './cameraRead';
@@ -217,9 +218,8 @@ function portBox(
   const node = boundNode(nodes, bindings[of]);
   const cam = readCamera();
   if (node === null || cam === null) return null;
-  const docked = (index: number): boolean =>
-    [...(belts?.values() ?? [])].some((belt) => belt.docks.some((d) => d.node === bindings[of]?.id && d.port === index));
-  const port = node.ports.find((p) => p.role === PORT_ROLE[role] && (pick !== 'free' || !docked(p.index)));
+  const port =
+    pick === 'free' && role === 'out' ? freeOutputs(node, belts?.values() ?? [])[0] : node.ports.find((p) => p.role === PORT_ROLE[role]);
   if (port === undefined) return null;
   if (role === 'out') return { ...doorstepSquareBox(port, cam), zIndex: BOARD_TARGET_Z };
   const disc = dropDiscBox(nubAnchor(port.cell_x, port.cell_y, port.side), cam);
@@ -256,11 +256,45 @@ function shownPart(control: HTMLElement): { left: number; top: number; right: nu
   return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
+/**
+ * The inspector's sticky Apply and Revert row, when `control` sits in the inspector's column above it.
+ * The column scrolls under that row, so the part of a control behind it is there in the layout and can't
+ * take a press.
+ */
+function stickyRowOver(control: HTMLElement): HTMLElement | null {
+  const row = control.closest(INSPECTOR)?.querySelector<HTMLElement>('[data-fab-action-row]') ?? null;
+  return row === null || row.contains(control) ? null : row;
+}
+
+/** The nearest ancestor that scrolls vertically, or null. */
+function scrollColumnOf(control: HTMLElement): HTMLElement | null {
+  for (let el = control.parentElement; el !== null; el = el.parentElement) {
+    const { overflowY } = getComputedStyle(el);
+    if (overflowY === 'auto' || overflowY === 'scroll') return el;
+  }
+  return null;
+}
+
+/**
+ * Bring a panel control into view when its stage begins: `block: 'nearest'`, then, if that left its
+ * lower edge behind the inspector's sticky row (where `nearest` puts a control below the fold), scroll
+ * the column on by the overlap and the ring's outset. This moves chrome only.
+ */
+function bringIntoView(control: HTMLElement): void {
+  control.scrollIntoView({ block: 'nearest' });
+  const row = stickyRowOver(control);
+  const column = scrollColumnOf(control);
+  if (row === null || column === null) return;
+  const covered = control.getBoundingClientRect().bottom - row.getBoundingClientRect().top;
+  if (covered > 0) column.scrollTop += covered + OUTSET_PX + BORDER_PX;
+}
+
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
 function ringBox(
   target: HintTarget,
   layer: HTMLElement,
-  stageBegan: boolean,
+  /** Has this stage's control been brought into view yet? Called once it resolves, and true from then on. */
+  scrollOnce: () => boolean,
   nodes: SceneNodes | undefined,
   belts: SceneBelts | undefined,
 ): RingBox | null {
@@ -269,11 +303,15 @@ function ringBox(
   if (hint.on === 'panel') {
     const control = panelControl(hint.target);
     if (control === null) return null;
-    // Once, when the stage begins: a palette row can sit below the fold of its scrolling column.
+    // Once per stage, on the first frame the control is there: a palette row can sit below the fold of
+    // its scrolling column, and an inspector control can mount a frame or more after its stage begins.
     // This moves chrome only, so the camera and the board stay as they were.
-    if (stageBegan) control.scrollIntoView({ block: 'nearest' });
-    const shown = shownPart(control);
-    if (shown === null) return null;
+    if (scrollOnce()) bringIntoView(control);
+    const part = shownPart(control);
+    // The part above the inspector's sticky row, which paints over the column it sits in.
+    const row = stickyRowOver(control);
+    const shown = part === null || row === null ? part : { ...part, bottom: Math.min(part.bottom, row.getBoundingClientRect().top) };
+    if (shown === null || shown.bottom <= shown.top) return null;
     const origin = layer.getBoundingClientRect();
     return {
       x: shown.left - origin.left - OUTSET_PX,
@@ -334,6 +372,8 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
   const paintElRef = useRef<HTMLDivElement | null>(null);
   const paintToElRef = useRef<HTMLDivElement | null>(null);
   const lastStageRef = useRef<string | null>(null);
+  /** Has the current stage's panel control been brought into view? */
+  const scrolledRef = useRef(false);
 
   useLayoutEffect(() => {
     const project = (): void => {
@@ -342,11 +382,17 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       const ringTo = ringToRef.current;
       if (layer === null || ring === null || ringTo === null) return;
       const target = targetRef.current;
-      const stageBegan = target !== null && target.stageKey !== lastStageRef.current;
+      // A stage that comes round again is brought into view again, so the scroll is forgotten on any change.
+      if ((target?.stageKey ?? null) !== lastStageRef.current) scrolledRef.current = false;
       lastStageRef.current = target?.stageKey ?? null;
+      const scrollOnce = (): boolean => {
+        if (scrolledRef.current) return false;
+        scrolledRef.current = true;
+        return true;
+      };
       const nodes = handleRef.current?.sceneState.nodes;
       const belts = handleRef.current?.sceneState.belts;
-      const box = target === null ? null : ringBox(target, layer, stageBegan, nodes, belts);
+      const box = target === null ? null : ringBox(target, layer, scrollOnce, nodes, belts);
       const hint = target?.hint;
       const to = hint?.on === 'port' ? hint.to : undefined;
       const toBox = target !== null && to !== undefined ? portBox(nodes, belts, target.bindings, to.of, to.role) : null;

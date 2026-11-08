@@ -13,6 +13,7 @@ import {
   boundBeltIds,
   boundBeltJoining,
   evaluateCheck,
+  freeOutputs,
   lineDoorstep,
   lineStuck,
   lowestSlotInto,
@@ -280,9 +281,7 @@ function keyCell(key: string | undefined): readonly [number, number] | null {
 function outputFor(spot: 'firstOutputSink' | 'freeOutputSink', factory: BoardNode, board: BoardFacts): BoardNode['ports'][number] | null {
   const outs = factory.ports.filter((p) => p.role === PORT_ROLE.OUT);
   if (spot === 'firstOutputSink') return outs[0] ?? null;
-  const docked = (p: BoardNode['ports'][number]): boolean =>
-    board.belts.some((b) => b.docks.some((d) => d.node === factory.id && d.port === p.index));
-  const free = outs.filter((p) => !docked(p));
+  const free = freeOutputs(factory, board.belts);
   const faced = (p: BoardNode['ports'][number]): boolean => {
     const [x, y] = sinkCellFor(p);
     return board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === y));

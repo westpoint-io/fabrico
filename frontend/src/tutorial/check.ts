@@ -245,6 +245,20 @@ export function lowestSlotInto(board: BoardFacts, node: number): number | null {
   return belt === undefined ? null : (belt.occupiedSlots[0] ?? Number.POSITIVE_INFINITY);
 }
 
+/**
+ * A machine's Out ports that no belt docks, in port order. A belt's Tail dock names the output by its
+ * place among the machine's Outs, not by the port's `index` (`dockPort` in `protocol/ports.ts`).
+ */
+export function freeOutputs<P extends { role: number }>(
+  node: { id: number; ports: readonly P[] },
+  belts: Iterable<{ docks: ReadonlyArray<{ end: string; node: number; port: number }> }>,
+): P[] {
+  const all = [...belts];
+  return node.ports
+    .filter((p) => p.role === PORT_ROLE.OUT)
+    .filter((_, ordinal) => !all.some((b) => b.docks.some((d) => d.end === 'Tail' && d.node === node.id && d.port === ordinal)));
+}
+
 /** How many ports with role Out the bound machine holds, found by its `nodeKey`. 0 when it isn't on the board. */
 export function outputsOf(board: Pick<BoardFacts, 'nodes'>, bound: BoundNode | undefined): number {
   const node = bound === undefined ? undefined : board.nodes.find((n) => nodeKey(n) === bound.nodeKey);
