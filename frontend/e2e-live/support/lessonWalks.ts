@@ -24,6 +24,17 @@ export interface LessonWalk {
    * the walk. `lessonCoverage.source.test.ts` compares it with the lesson data and the app's tables.
    */
   refusedCardNote: string;
+  /**
+   * Which of a key stage's own keys the hand presses, keyed `<stepId>/<stageId>`. A stage left out
+   * presses its shortcut's first key. `lessonCoverage.source.test.ts` fails an entry naming a stage the
+   * lesson lacks, a stage whose gesture isn't a key, or a key its shortcut doesn't list.
+   */
+  keyAt?: Readonly<Record<string, string>>;
+  /**
+   * Draw each `dragHint` belt the other way round: press inside the far ring (the In disc) at
+   * `dragFrom` and let go inside the near ring (the Out square) at `dragTo`.
+   */
+  reverseDrags?: boolean;
 }
 
 export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
@@ -37,9 +48,15 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
   'delete-and-undo': {
     pressOffset: { dx: -4, dy: 5 },
     floorOffset: { dx: -5, dy: 3 },
-    dragFrom: { dx: -2, dy: 3 },
-    dragTo: { dx: 3, dy: -2 },
+    // Reversed, as lesson-variants.walk.ts draws its working reversed belt: the press on the west half
+    // of the Sink's In disc, where a belt can start, and the release on the east half of the Out square.
+    dragFrom: { dx: -3, dy: 2 },
+    dragTo: { dx: 2, dy: -3 },
     refusedCardNote: "That cell holds the Source, so the Sink wasn't placed. Click the free cell in the ring.",
+    // The belt goes with Delete and the Sink with Backspace. The toolbar Undo and Ctrl+Z come from the
+    // two bring-back stages themselves.
+    keyAt: { 'delete-belt/press-delete': 'Delete', 'delete-sink/press-delete': 'Backspace' },
+    reverseDrags: true,
   },
 };
 

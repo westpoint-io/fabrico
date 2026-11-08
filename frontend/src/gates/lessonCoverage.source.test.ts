@@ -5,6 +5,8 @@
 // can't see a loop, so this compares ids. "No walk" means any of: a lesson in `LESSONS` with no entry
 // in the table, an entry with no lesson, a lesson file `lessons/index.ts` doesn't list, a stage whose
 // gesture the runner can't drive, or a refused gesture pointing at a step or stage that isn't there.
+// A walk entry's `keyAt` is held too: each entry must name a key stage the lesson has, and a key that
+// stage's own shortcut lists, or the walk would press something the card never asked for.
 //
 // It also scans all the `*.walk.ts` files and the runner they share for a test taken out of the run,
 // and fails when one of the files the walk is known to need has gone. Playwright exits 0 on a skipped
@@ -18,6 +20,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCE } from '../../e2e-live/support/lessonWalks.ts';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
+import { SHORTCUTS } from '../input/shortcuts.ts';
 import { LESSONS } from '../tutorial/lessons/index.ts';
 import { MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
@@ -91,6 +94,21 @@ function auditRefused(lesson: Lesson): string[] {
   return [`${lesson.id}: its refused gesture names the stage ${lesson.refused.atStage}, which step ${step.id} doesn't have`];
 }
 
+/** The walk entry's chosen keys, each against the stage it names and that stage's own shortcut. */
+function auditKeyAt(lesson: Lesson, walk: unknown): string[] {
+  const keyAt = (walk as { keyAt?: Readonly<Record<string, string>> } | undefined)?.keyAt ?? {};
+  return Object.entries(keyAt).flatMap(([entry, key]) => {
+    const [stepId, stageId] = entry.split('/');
+    const stage = lesson.steps.find((s) => s.id === stepId)?.stages.find((s) => s.id === stageId);
+    const label = `${lesson.id}: keyAt ${entry}`;
+    if (stage === undefined) return [`${label} names a stage this lesson doesn't have`];
+    if (stage.gesture.do !== 'key') return [`${label} names a stage whose gesture is ${stage.gesture.do}, not a key`];
+    const keys: readonly string[] = SHORTCUTS[stage.gesture.shortcut].keys;
+    if (!keys.includes(key)) return [`${label} chooses ${JSON.stringify(key)}, and the ${stage.gesture.shortcut} shortcut lists only ${keys.join(', ')}`];
+    return [];
+  });
+}
+
 /** One string per gap, each naming the lesson or file. Empty means every lesson gets a walk it can finish. */
 export function auditLessonCoverage(args: CoverageArgs): string[] {
   const findings: string[] = [];
@@ -103,6 +121,7 @@ export function auditLessonCoverage(args: CoverageArgs): string[] {
       }
     });
     findings.push(...auditRefused(lesson));
+    findings.push(...auditKeyAt(lesson, args.walks[lesson.id]));
   }
   for (const id of Object.keys(args.walks)) {
     if (!ids.has(id)) findings.push(`${id}: LESSON_WALKS has an entry for this id, and LESSONS holds no such lesson`);
@@ -292,6 +311,30 @@ describe('every lesson has a walk', () => {
     it('a drag into one ring that marks no port', () => {
       const lesson = withStage((s) => ({ ...s, gesture: { do: 'dragToHint' } }));
       expect(audit({ lessons: [lesson] })).toMatch(/stage board-paused: this stage names a drag into one ring and doesn't mark exactly one port/);
+    });
+
+    describe('a keyAt entry', () => {
+      const DU = 'delete-and-undo';
+      const withKeyAt = (keyAt: Record<string, string>): CoverageArgs['walks'] => ({
+        ...LESSON_WALKS,
+        [DU]: { ...LESSON_WALKS[DU], keyAt },
+      });
+
+      it('holds the real entry, which picks Delete and Backspace', () => {
+        expect(LESSON_WALKS[DU].keyAt).toEqual({ 'delete-belt/press-delete': 'Delete', 'delete-sink/press-delete': 'Backspace' });
+      });
+
+      it('naming a stage the lesson lacks', () => {
+        expect(audit({ walks: withKeyAt({ 'delete-belt/no-such-stage': 'Delete' }) })).toContain(`${DU}: keyAt delete-belt/no-such-stage names a stage this lesson doesn't have`);
+      });
+
+      it('naming a stage whose gesture is not a key', () => {
+        expect(audit({ walks: withKeyAt({ 'delete-belt/select-belt': 'Delete' }) })).toContain(`${DU}: keyAt delete-belt/select-belt names a stage whose gesture is pressHint, not a key`);
+      });
+
+      it("choosing a key the stage's shortcut doesn't list", () => {
+        expect(audit({ walks: withKeyAt({ 'delete-sink/press-delete': 'x' }) })).toContain(`${DU}: keyAt delete-sink/press-delete chooses "x", and the delete shortcut lists only Delete, Backspace`);
+      });
     });
 
     it('a refused step that does not exist', () => {

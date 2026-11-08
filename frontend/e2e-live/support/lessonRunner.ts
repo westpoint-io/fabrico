@@ -219,6 +219,11 @@ interface WalkState {
   ringsRead: Set<string>;
   /** The test pressed Undo along the way. Undo's keyframe drops the selection, so the inspector has closed. */
   undone: boolean;
+  /**
+   * The belt-tile read across a delete and its Undo: the cell of the bound belt's first tile, at the
+   * Source's output, and its captures A (before the delete) and B (after it). Null until A is taken.
+   */
+  beltTile: { cell: readonly [number, number]; a: Buffer; b: Buffer | null } | null;
 }
 
 /**
@@ -584,10 +589,17 @@ export async function dragAlongByHand(page: Page, points: ReadonlyArray<{ x: num
   await page.mouse.up();
 }
 
-/** Press a shortcut with the modifiers its table entry names. */
-export async function pressShortcut(page: Page, id: ShortcutId): Promise<void> {
+/**
+ * Press a shortcut with the modifiers its table entry names. `key` picks one of the entry's own keys,
+ * the first by default; a key the entry doesn't list is refused, naming `stage`.
+ */
+export async function pressShortcut(page: Page, id: ShortcutId, key?: string, stage: string = id): Promise<void> {
   const { keys, ctrl, shift } = SHORTCUTS[id];
-  await page.keyboard.press(`${ctrl === true ? 'Control+' : ''}${shift === true ? 'Shift+' : ''}${keys[0] as string}`);
+  const chosen = key ?? (keys[0] as string);
+  if (!(keys as readonly string[]).includes(chosen)) {
+    throw new Error(`${stage}: the walk chose the key ${JSON.stringify(chosen)}, and the ${id} shortcut lists only ${keys.map((k) => JSON.stringify(k)).join(', ')}`);
+  }
+  await page.keyboard.press(`${ctrl === true ? 'Control+' : ''}${shift === true ? 'Shift+' : ''}${chosen}`);
 }
 
 /** What `expectDotsRideBelt` read from the page's drawn frames. */
@@ -990,6 +1002,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
           // The pointer still sits on the palette row.
           beforePixels = await captureWithGhostGone(page, cellClip);
         }
+        // Capture A: the first press on a belt ring in a belt delete step, with no tool armed and nothing
+        // selected yet, so the tile holds the belt as drawn.
+        if (step.done.is === 'beltGone' && stage.hint?.on === 'belt' && state.beltTile === null) {
+          state.beltTile = await captureBeltTileA(page, lesson, stepIndex, step.done.of);
+        }
         const offset = fromOffset(stage.hint?.on === 'floor' ? walk.floorOffset : walk.pressOffset);
         if (stage.hint?.on === 'floor' || stage.hint?.on === 'machine' || stage.hint?.on === 'belt') {
           await expectOnTheBoard(page, label, 'the ring is', [pointInRect(rects.hint, offset)]);
@@ -1004,8 +1021,10 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       if (rects !== null) {
         if (rects.hintTo === null) throw new Error(`${label}: this stage names a drag and reports no release ring`);
         await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint, rects.hintTo]);
-        const start = pointInRect(rects.hint, fromOffset(walk.dragFrom));
-        const end = pointInRect(rects.hintTo, fromOffset(walk.dragTo));
+        // Reversed, the press lands in the far ring (the In disc) and the release in the near one.
+        const start = pointInRect(walk.reverseDrags === true ? rects.hintTo : rects.hint, fromOffset(walk.dragFrom));
+        const end = pointInRect(walk.reverseDrags === true ? rects.hint : rects.hintTo, fromOffset(walk.dragTo));
+        if (walk.reverseDrags === true) console.log(`REVERSED ${lesson.id} step ${stepIndex + 1}`);
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
         beltClip = await middleTileClip(page, label, stage);
         beltBefore = await captureWithGhostGone(page, beltClip.clip);
@@ -1031,7 +1050,9 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       }
     } else if (gesture.do === 'key') {
       if ((await probeAtStage(page, stepIndex, stage.id)) !== null) {
-        await pressShortcut(page, gesture.shortcut);
+        const key = walk.keyAt?.[`${step.id}/${stage.id}`];
+        if (key !== undefined) console.log(`KEY ${lesson.id} step ${stepIndex + 1} ${stage.id} ${key}`);
+        await pressShortcut(page, gesture.shortcut, key, label);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
     }
@@ -1068,7 +1089,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     const list = (b: Record<string, number>): string => Object.entries(b).map(([k, v]) => `${k}:${v}`).join(',');
     console.log(`MEASURE restored-handles ${lesson.id} before=${list(handlesBefore)} after=${list(after)}`);
   }
-  if (step.done.is === 'restored') await expectCaptureHoldsConfigs(page, label, step.done.since);
+  if (step.done.is === 'beltGone') await readBeltTileB(page, label, state);
+  if (step.done.is === 'restored') {
+    await expectCaptureHoldsConfigs(page, label, step.done.since);
+    if (lesson.steps.some((s) => s.done.is === 'beltGone')) await readBeltTileC(page, label, state);
+  }
   if (cellClip !== null && beforePixels !== null) {
     const afterPixels = await captureWithGhostGone(page, cellClip);
     expect(
@@ -1106,6 +1131,68 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   }
   await expectRenderLoopAlive(page, `after ${label}`);
   console.log(`WALK ${lesson.id} step ${stepIndex + 1} ${step.id} passed`);
+}
+
+/** The screen clip 2 px inside a cell, at the camera as it stands. */
+async function cellClipOf(page: Page, cell: readonly [number, number]): Promise<{ x: number; y: number; width: number; height: number }> {
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  // The same inset as the placed cell's read, which comes to 2 px inside the cell.
+  const inset = CELL_INTERIOR_INSET_PX - 4;
+  return { x: cell[0] * size + cam.x + inset, y: cell[1] * size + cam.y + inset, width: size - 2 * inset, height: size - 2 * inset };
+}
+
+/** Belt ink in a capture, and the floor that says a belt drew: belt ink at least the clip's width. */
+function beltInkOf(capture: Buffer): { ink: number; floor: number } {
+  const img = decodePngRows(capture, 0, Number.MAX_SAFE_INTEGER);
+  return { ink: railInk(img), floor: img.width };
+}
+
+/**
+ * Capture A of the belt-tile read: the bound belt's first tile, the one its Tail starts on at the
+ * Source's output. No ring of the lesson reaches that tile, so the read sees the board only.
+ */
+async function captureBeltTileA(page: Page, lesson: Lesson, stepIndex: number, name: string): Promise<NonNullable<WalkState['beltTile']>> {
+  const label = `${stepLabel(lesson, stepIndex)} capture A`;
+  const { bound } = await readProbe(page);
+  const belt = (await readScene(page)).belts.find((b) => b.id === bound[name]);
+  const first = belt?.tiles[0];
+  if (belt === undefined || first === undefined) throw new Error(`${label}: the bound ${name} isn't on the board with a tile to read`);
+  const ends = BELT_ENDS[name as keyof typeof BELT_ENDS];
+  const tail = belt.docks.find((d) => d.end === 'Tail')?.node;
+  expect(ends !== undefined && tail === bound[ends[0]], `${label}: the ${name}'s Tail, where its first tile is, docks the ${ends?.[0] ?? '?'}`).toBe(true);
+  const cell = [first.cell_x, first.cell_y] as const;
+  const a = await captureWithGhostGone(page, await cellClipOf(page, cell));
+  const { ink, floor } = beltInkOf(a);
+  expect(ink, `${label}: the ${name}'s first tile (${cell[0]},${cell[1]}) holds belt ink before the delete`).toBeGreaterThanOrEqual(floor);
+  return { cell, a, b: null };
+}
+
+/** Capture B, once the delete step has left, with nothing selected: no belt ink, and other bytes than A. */
+async function readBeltTileB(page: Page, label: string, state: WalkState): Promise<void> {
+  const tile = state.beltTile;
+  if (tile === null) throw new Error(`${label} capture B: capture A was never taken, so the delete has nothing to compare with`);
+  // A few drawn frames, so the renderer has drawn the board the model holds.
+  await page.waitForTimeout(addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), `${label}: the deleted belt drawn away`));
+  const b = await captureWithGhostGone(page, await cellClipOf(page, tile.cell));
+  const { ink, floor } = beltInkOf(b);
+  expect(ink, `${label} capture B: the tile (${tile.cell[0]},${tile.cell[1]}) holds no belt ink once the belt is deleted`).toBeLessThan(floor);
+  expect(b.equals(tile.a), `${label} capture B: the tile's bytes differ from capture A's`).toBe(false);
+  tile.b = b;
+}
+
+/** Capture C, once the restore step has finished: belt ink again, then the render loop alive. */
+async function readBeltTileC(page: Page, label: string, state: WalkState): Promise<void> {
+  const tile = state.beltTile;
+  if (tile === null || tile.b === null) throw new Error(`${label} capture C: captures A and B were never both taken`);
+  await page.waitForTimeout(addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), `${label}: the restored belt drawn back`));
+  const c = await captureWithGhostGone(page, await cellClipOf(page, tile.cell));
+  const a = beltInkOf(tile.a);
+  const b = beltInkOf(tile.b);
+  const read = beltInkOf(c);
+  console.log(`MEASURE belt-tile a=${a.ink} b=${b.ink} c=${read.ink} floor=${read.floor} c_equals_a=${c.equals(tile.a) ? 'yes' : 'no'}`);
+  expect(read.ink, `${label} capture C: the tile (${tile.cell[0]},${tile.cell[1]}) holds belt ink again once the belt is restored`).toBeGreaterThanOrEqual(read.floor);
+  await expectRenderLoopAlive(page, `${label} after capture C`);
 }
 
 /**
@@ -1173,19 +1260,7 @@ async function middleTileClip(
   const [ox, oy] = doorstepCell(out);
   const [ix, iy] = doorstepCell(into);
   const cell = [Math.floor((ox + ix) / 2), Math.floor((oy + iy) / 2)] as const;
-  const cam = await cameraOf(page);
-  const size = CELL * cam.scale;
-  // The same inset as the placed cell's read, which comes to 2 px inside the cell.
-  const inset = CELL_INTERIOR_INSET_PX - 4;
-  return {
-    cell,
-    clip: {
-      x: cell[0] * size + cam.x + inset,
-      y: cell[1] * size + cam.y + inset,
-      width: size - 2 * inset,
-      height: size - 2 * inset,
-    },
-  };
+  return { cell, clip: await cellClipOf(page, cell) };
 }
 
 async function walkSteps(page: Page, lesson: Lesson, state: WalkState, from: number, to: number): Promise<void> {
@@ -1230,7 +1305,15 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
   expect(first?.stepIndex, `${lesson.id}: the record starts on step 1`).toBe(0);
 
   const to = opts.until === undefined ? lesson.steps.length : indexOfStep(lesson, opts.until);
-  const state: WalkState = { actedOn: new Set(), walked: new Set(Array.from({ length: to }, (_, i) => i)), walk, refusalDone: false, ringsRead: new Set(), undone: false };
+  const state: WalkState = {
+    actedOn: new Set(),
+    walked: new Set(Array.from({ length: to }, (_, i) => i)),
+    walk,
+    refusalDone: false,
+    ringsRead: new Set(),
+    undone: false,
+    beltTile: null,
+  };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
   if (opts.until === undefined) await finishWalk(page, lesson, state);
