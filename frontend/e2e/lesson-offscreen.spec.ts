@@ -465,7 +465,7 @@ test.describe('show me', () => {
     expect(cam.scale, 'and not below the camera floor').toBeGreaterThanOrEqual(MIN_ZOOM);
   });
 
-  test('Show me is disabled with its title while a belt draw is held, and enabled after Escape', async ({ page }) => {
+  test('Show me is disabled with its title, and the line says to finish the belt, while a draw is held; both go back after Escape', async ({ page }) => {
     // One of three slow Show me tests. On a loaded CI runner each wheel notch cost about 0.66 s and
     // these tests zoomed one notch per round trip; the shared zoomInto now sends two wheel events per
     // zoom. test.slow() triples the 30 s budget and comes off once a CI mock shard runs all three under 15 s.
@@ -482,9 +482,16 @@ test.describe('show me', () => {
     await page.mouse.move(at.x + CELL, at.y, { steps: 3 });
     await expect(button, 'disabled while the draw is held').toBeDisabled();
     await expect(button).toHaveAttribute('title', 'Finish or cancel the belt first.');
+    // The line says why too, and stays Show me's description, so a screen reader hears it.
+    const line = page.locator('#fab-offscreen-line');
+    await expect(line, 'the line while the draw is held').toHaveText('Finish or cancel the belt first.');
+    await expect(button).toHaveAttribute('aria-describedby', 'fab-offscreen-line');
+    await expect(button, 'its description is the line').toHaveAccessibleDescription('Finish or cancel the belt first.');
     await page.keyboard.press('Escape');
     await expect(button, 'enabled once Escape ended the draw').toBeEnabled();
     await expect(button, 'with no title').not.toHaveAttribute('title', /./);
+    await expect(line, 'the line after the draw').toHaveText('The ring is out of view.');
+    await expect(button).toHaveAccessibleDescription('The ring is out of view.');
     await page.mouse.up();
   });
 

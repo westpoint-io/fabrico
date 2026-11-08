@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { noteTokens } from '../../tutorial/machine.ts';
 import { MAX_NOTE_CHARS } from '../../tutorial/phrase.ts';
-import { SHOW_ME_DRAWING_TITLE, StepCard, type StepCardView } from './StepCard.tsx';
+import { OFFSCREEN_LINE, SHOW_ME_DRAWING_TITLE, StepCard, type StepCardView } from './StepCard.tsx';
 
 // The vitest env is `node`, with no DOM, so the component is called directly and its element tree is
 // walked, as `WelcomeCard.test.tsx` does. `Words` is a component the tree holds unexpanded, so the walk
@@ -172,6 +172,20 @@ describe('StepCard', () => {
       expect(SHOW_ME_DRAWING_TITLE).toBe('Finish or cancel the belt first.');
     });
 
+    it('says to finish the belt in the line while a draw is held, and that the ring is out of view otherwise', () => {
+      const lineOf = (view: StepCardView): El | undefined => elements(rowOf(view)[0]!.props.children).find((el) => el.type === 'p');
+      const held = lineOf({ ...RUNNING, offScreen: true, drawing: true });
+      expect(textOf(held)).toBe('Finish or cancel the belt first.');
+      expect(held?.props.id, 'the line keeps its id').toBe('fab-offscreen-line');
+      const button = showMeOf(render({ ...RUNNING, offScreen: true, drawing: true }));
+      expect(button?.props['aria-describedby'], "the line is still Show me's description").toBe('fab-offscreen-line');
+      expect(button?.props.disabled).toBe(true);
+      expect(button?.props.title, 'the title is the same sentence').toBe(SHOW_ME_DRAWING_TITLE);
+      const free = lineOf({ ...RUNNING, offScreen: true, drawing: false });
+      expect(textOf(free)).toBe('The ring is out of view.');
+      expect(OFFSCREEN_LINE).toBe('The ring is out of view.');
+    });
+
     it('calls onShowMe when Show me is pressed', () => {
       let shown = 0;
       const els = elements(StepCard({ view: { ...RUNNING, offScreen: true }, ...NOOPS, onShowMe: () => (shown += 1) }));
@@ -328,6 +342,13 @@ describe('StepCard', () => {
     const text = textOf(StepCard({ view: { ...RUNNING, note }, ...NOOPS }));
     expect(text).toContain('The board was already running, so step 5 is done. Space pauses it.');
     expect(text.indexOf('already running')).toBeLessThan(text.indexOf('Step 1 of 6'));
+  });
+
+  it("sets Lesson done and Lesson paused at the Lessons heading's size and line height", () => {
+    for (const view of [FINISHED, { state: 'swapped' }] as StepCardView[]) {
+      const [heading] = render(view).filter((el) => el.type === 'h2');
+      expect(styleOf(heading!), view.state).toEqual({ margin: 0, fontSize: 'var(--fab-font-size-hero)', lineHeight: 1.2 });
+    }
   });
 
   describe('when the lesson is finished', () => {

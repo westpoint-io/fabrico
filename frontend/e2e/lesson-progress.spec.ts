@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
+import { LESSONS } from '../src/tutorial/lessons/index';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { buildPacket, waitForBoard, type Harness, type InjectBelt } from './support/wire';
 import {
@@ -297,5 +298,92 @@ test.describe('Progress after a close and reopen', () => {
     expect(await stored(third), 'the cleared key stays gone').toBeNull();
     await openLessons(third);
     await expectRow(third, 'Not started', [START]);
+  });
+});
+
+// The list holds every lesson in teaching order (UI-SPEC "Lessons panel with three rows"). The accent goes
+// on the first row that isn't Done, so a user who finished lesson 1 sees the blue Start on lesson 3.
+interface ListRow {
+  id: string;
+  title: string;
+  status: string;
+  buttons: (string | null)[];
+  accent: (string | null)[];
+}
+
+async function readRows(page: Page): Promise<ListRow[]> {
+  return page.locator(`${PANEL} [data-fab-lesson-row]`).evaluateAll((rows) =>
+    rows.map((row) => {
+      const words = row.querySelectorAll(':scope > div:first-child > div');
+      return {
+        id: row.getAttribute('data-fab-lesson-row') ?? '',
+        title: words[0]?.textContent ?? '',
+        status: words[1]?.textContent ?? '',
+        buttons: Array.from(row.querySelectorAll('button')).map((b) => b.getAttribute('aria-label')),
+        accent: Array.from(row.querySelectorAll('button.fab-cta')).map((b) => b.getAttribute('aria-label')),
+      };
+    }),
+  );
+}
+
+test.describe('Three lessons in the list', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  const TITLES = ['Your first line', 'Delete and Undo', 'A Factory with two outputs'];
+
+  test('the lessons ship in teaching order', () => {
+    expect(LESSONS.map((l) => l.title)).toEqual(TITLES);
+  });
+
+  test('with no saved progress all three read Not started with Start, and the accent is on the first', async ({ page }) => {
+    await boot(page);
+    expect(await stored(page), 'nothing saved').toBeNull();
+    await openLessons(page);
+    const rows = await readRows(page);
+    console.log(`MEASURE list-rows empty ${JSON.stringify(rows)}`);
+    expect(rows.map((r) => r.title), 'three rows in teaching order, titles read from the DOM').toEqual(TITLES);
+    expect(rows.map((r) => r.id)).toEqual(LESSONS.map((l) => l.id));
+    for (const row of rows) {
+      expect(row.status, row.title).toBe('Not started');
+      expect(row.buttons, row.title).toEqual([`Start ${row.title}`]);
+    }
+    expect(rows.flatMap((r) => r.accent), 'the accent on one button, the first row').toEqual(['Start Your first line']);
+  });
+
+  test('with lesson 1 Done, the accent is Start Delete and Undo and on no other button', async ({ page }) => {
+    await seed(page, DONE_VALUE);
+    await boot(page);
+    await openLessons(page);
+    const rows = await readRows(page);
+    console.log(`MEASURE list-rows lesson1-done ${JSON.stringify(rows)}`);
+    expect(rows.map((r) => r.title), 'three rows in teaching order, titles read from the DOM').toEqual(TITLES);
+    expect(rows.map((r) => r.status)).toEqual(['Done', 'Not started', 'Not started']);
+    expect(rows.map((r) => r.buttons)).toEqual([['Restart Your first line'], ['Start Delete and Undo'], ['Start A Factory with two outputs']]);
+    expect(rows.flatMap((r) => r.accent), 'the accent on the next lesson only').toEqual(['Start Delete and Undo']);
+    const named = page.locator(PANEL).getByRole('button', { name: 'Start Delete and Undo', exact: true });
+    await expect(named, 'the accessible name reaches the button').toHaveClass(/\bfab-cta\b/);
+    await expect(page.locator(`${PANEL} .fab-cta`)).toHaveCount(1);
+  });
+});
+
+// The finished card's heading reads at the Lessons heading's size and line height (UI-SPEC "Carried
+// fixes in StepCard.tsx"), not the browser's 18 px h2 at the panel's line height of 1.
+test.describe("The finished card's heading", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("Lesson done sets the Lessons heading's size and a line height of 1.2", async ({ page }) => {
+    const h = await bootConfigured(page);
+    await startLesson(page, h);
+    await toFinishedCard(page, h);
+    const metrics = (el: Element): { fontSize: number; lineHeight: number } => {
+      const style = getComputedStyle(el);
+      return { fontSize: parseFloat(style.fontSize), lineHeight: parseFloat(style.lineHeight) };
+    };
+    const done = await page.locator(CARD).getByRole('heading', { name: 'Lesson done' }).evaluate(metrics);
+    await page.locator(CARD).getByRole('button', { name: 'Back to lessons', exact: true }).click();
+    const lessons = await page.locator('#fab-lessons-heading').evaluate(metrics);
+    console.log(`MEASURE heading done=${JSON.stringify(done)} lessons=${JSON.stringify(lessons)}`);
+    expect(done.lineHeight, 'line height 1.2 times the font size').toBeCloseTo(done.fontSize * 1.2, 1);
+    expect(done, "the same as the Lessons heading's").toEqual(lessons);
   });
 });

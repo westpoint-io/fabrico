@@ -7,7 +7,7 @@ import {
   type Harness,
   type PacketOpts,
 } from './support/wire';
-import { CARD, boot, injectRefusal, readProbe, ringAt, startLesson } from './support/lessonMock';
+import { CARD, boot, buildBoard, injectRefusal, readProbe, ringAt, startFactoryLesson, startLesson, toTypeCode } from './support/lessonMock';
 
 // a11y.spec.ts (TEST-04, Phase 13-04) — an axe accessibility audit of the React
 // chrome ONLY.
@@ -86,6 +86,61 @@ test('the lesson card and the Lessons list pass axe with Show me, a refusal note
     console.log(`AXE ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`);
   }
   expect(results.violations.map((v) => v.id)).toEqual([]);
+});
+
+/** 103's scope: the step card and the Lessons list, canvas excluded. Logs what it covered and every violation. */
+async function axeLessonScope(page: Page, label: string): Promise<string[]> {
+  const results = await new AxeBuilder({ page })
+    .include('[data-fab-step-card]')
+    .include('#fab-lessons-panel')
+    .exclude('canvas')
+    .analyze();
+  const nodes = results.passes.reduce((n, rule) => n + rule.nodes.length, 0);
+  console.log(`AXE-SCOPE ${label} include=[data-fab-step-card],#fab-lessons-panel exclude=canvas rules-passed=${results.passes.length} nodes-passed=${nodes} violations=${results.violations.length}`);
+  for (const v of results.violations) {
+    console.log(`AXE ${label} ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`);
+  }
+  return results.violations.map((v) => v.id);
+}
+
+async function openLessonsList(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Help', exact: true }).click();
+  await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
+  await expect(page.locator('#fab-lessons-panel'), 'the Lessons list shows').toBeVisible();
+}
+
+// Lesson 4's code stage puts code fragments in the card (spans marked data-fab-code) with the Factory
+// panel open beside it. Both are asserted on screen first, so the scan can't pass over a card without them.
+// The Lessons list opens in the inspector's corner and would close the Factory panel, so this run leaves
+// it shut and the list half of the scope matches nothing; the Legend run below covers the list.
+test("the lesson card passes axe on lesson 4's code stage, with the Factory panel open", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const { h, host } = await startFactoryLesson(page);
+  await buildBoard(page, h, host);
+  await toTypeCode(page);
+  expect((await readProbe(page)).stageId, 'on the code stage').toBe('type-code');
+  const card = page.locator(CARD);
+  await expect(card.locator('[data-fab-code]').first(), 'a code fragment shows in the card').toBeVisible();
+  expect(await card.locator('[data-fab-code]').count(), 'the code stage names two fragments').toBeGreaterThanOrEqual(2);
+  await expect(page.locator('aside[aria-labelledby="fab-config-heading"]'), 'the Factory panel is open').toBeVisible();
+  expect(await axeLessonScope(page, 'lesson-4-type-code')).toEqual([]);
+});
+
+// The step card paints over an open Legend at the window's bottom (plan 104-06); axe reads the card there.
+test('the lesson card and the Lessons list pass axe with the Legend open under the card', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const h = await boot(page);
+  await page.getByRole('button', { name: 'Legend' }).click();
+  const legend = page.locator('#fab-legend-panel');
+  await expect(legend, 'the Legend is open').toBeVisible();
+  await startLesson(page, h);
+  await ringAt(page, 'source-tool');
+  await openLessonsList(page);
+  const [cardBox, legendBox] = await Promise.all([page.locator(CARD).boundingBox(), legend.boundingBox()]);
+  expect(cardBox, 'the card shows').not.toBeNull();
+  expect(legendBox, 'the Legend still shows').not.toBeNull();
+  expect(cardBox!.y + cardBox!.height, 'the card ends inside the Legend, so it sits over it').toBeGreaterThan(legendBox!.y);
+  expect(await axeLessonScope(page, 'legend-open')).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------

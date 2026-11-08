@@ -60,8 +60,10 @@ export interface StepCardProps {
   left?: number;
 }
 
-/** Show me's title while a belt draw is held. */
+/** Show me's title, and the off-screen line, while a belt draw is held. */
 export const SHOW_ME_DRAWING_TITLE = 'Finish or cancel the belt first.';
+/** The off-screen line while no draw is held. */
+export const OFFSCREEN_LINE = 'The ring is out of view.';
 
 const textStyle: CSSProperties = {
   margin: 0,
@@ -156,8 +158,9 @@ function OffScreenRow({ offScreen, drawing, onShowMe }: { offScreen: boolean; dr
         ...(offScreen ? {} : { visibility: 'hidden' }),
       }}
     >
+      {/* Show me's aria-describedby target, so a screen reader hears why the button is disabled while a draw is held. */}
       <p id="fab-offscreen-line" style={textStyle}>
-        The ring is out of view.
+        {drawing ? SHOW_ME_DRAWING_TITLE : OFFSCREEN_LINE}
       </p>
       <button
         type="button"
@@ -213,8 +216,8 @@ export function StepCard(props: StepCardProps): JSX.Element {
           {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
           {view.state === 'swapped' && (
             <>
-              {/* A heading, as Lesson done is, so a screen reader can jump to it. */}
-              <h2 className="fab-title" style={{ margin: 0 }}>
+              {/* A heading, as Lesson done is, so a screen reader can jump to it, at the Lessons heading's size and line height. */}
+              <h2 className="fab-title" style={{ margin: 0, fontSize: 'var(--fab-font-size-hero)', lineHeight: 1.2 }}>
                 Lesson paused
               </h2>
               <p style={textStyle}>The board changed, so this lesson stopped. Restart it, or leave it.</p>
@@ -238,7 +241,8 @@ export function StepCard(props: StepCardProps): JSX.Element {
           )}
           {view.state === 'finished' && (
             <>
-              <h2 className="fab-title" style={{ margin: 0 }}>
+              {/* The Lessons heading's size and line height (LessonPanel.tsx), not the browser's h2 and the panel's line height 1. */}
+              <h2 className="fab-title" style={{ margin: 0, fontSize: 'var(--fab-font-size-hero)', lineHeight: 1.2 }}>
                 Lesson done
               </h2>
               <Words tokens={view.text} />
