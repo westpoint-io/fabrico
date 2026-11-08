@@ -3,6 +3,7 @@ import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLay
 import { EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
 import { SHORTCUTS } from '../src/input/shortcuts';
 import { LESSONS } from '../src/tutorial/lessons/index';
+import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { noteTokens } from '../src/tutorial/machine';
 import { REAL_TABLES, phrasePlain } from '../src/tutorial/phrase';
@@ -712,7 +713,7 @@ test.describe('the machine and port rings, and the rest of the lesson', () => {
     await expect(card, 'the card goes').toHaveCount(0);
     await expect(page.locator('#fab-lessons-panel'), 'and the list opens').toBeVisible();
     // The row a real finish leaves, with the board still as the lesson left it.
-    await expectRow(page, 'Done', ['Restart Your first line'], []);
+    await expectRow(page, 'Done', ['Restart Your first line'], [NEXT_START]);
     expect(h.controls.filter((c) => c === 'new'), 'going back to the list sent no New').toEqual(['new']);
   });
 
@@ -748,6 +749,8 @@ const PANEL = '#fab-lessons-panel';
 const START = `Start ${YOUR_FIRST_LINE.title}`;
 const RESUME = `Resume ${YOUR_FIRST_LINE.title}`;
 const RESTART = `Restart ${YOUR_FIRST_LINE.title}`;
+/** With the first lesson Done, the accent moves to the next lesson's Start. */
+const NEXT_START = `Start ${DELETE_AND_UNDO.title}`;
 const GUARD_HEADING = 'Start a new board?';
 const STOPPED_TITLE = 'Unavailable: the simulation stopped';
 const SWAPPED_SENTENCE = 'The board changed, so this lesson stopped. Restart it, or leave it.';
@@ -857,7 +860,7 @@ test.describe('the lesson list', () => {
     }, YOUR_FIRST_LINE.id);
     const h = await boot(page);
     await openLessons(page);
-    await expectRow(page, 'Done', [RESTART], []);
+    await expectRow(page, 'Done', [RESTART], [NEXT_START]);
 
     // A finished lesson running again reads In progress on top of the stored Done.
     await page.getByRole('button', { name: RESTART, exact: true }).click();
@@ -872,7 +875,7 @@ test.describe('the lesson list', () => {
     await pressLeave(page);
     h.inject(swappedBoard(2, 6));
     await openLessons(page);
-    await expectRow(page, 'Done', [RESTART], []);
+    await expectRow(page, 'Done', [RESTART], [NEXT_START]);
   });
 
   test('a lesson can be left, resumed and restarted', async ({ page }) => {
@@ -967,10 +970,12 @@ test.describe('the lesson list', () => {
     await openLessons(page);
     await expectRow(page, 'In progress', [RESUME, RESTART], [RESUME]);
 
-    // One short-titled lesson ships, and this reads layout, so it gives the page's own row the longest
-    // title and copies it. The real stylesheet and font do the rest.
+    // The shipped titles are shorter, and this reads layout, so it gives the first lesson's row the
+    // longest title and makes the list five copies of it: the other rows go, because they don't offer
+    // Resume and Restart. The real stylesheet and font do the rest.
     const rows = await lessonRow(page).evaluate((row, title) => {
       (row.firstElementChild!.firstElementChild as HTMLElement).textContent = title;
+      for (const other of [...row.parentElement!.children]) if (other !== row) other.remove();
       for (let i = 0; i < 4; i++) row.parentElement!.append(row.cloneNode(true));
       return row.parentElement!.children.length;
     }, LONGEST_TITLE);
