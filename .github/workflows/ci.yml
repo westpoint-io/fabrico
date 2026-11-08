@@ -1275,12 +1275,33 @@ jobs:
   # ubuntu-only on purpose: chromium download + headless run is flaky across the
   # Windows/macOS matrix (RESEARCH Pitfall 4), and the cross-platform guarantees
   # live in the determinism job. One Linux chromium run is the right cost/coverage.
+  #
+  # FOUR SHARDS ON FOUR RUNNERS. On one runner the suite's 606 tests took 18 to 35 minutes
+  # on 2 workers. It now runs as `--shard=<i>/4`, one leg per runner, and each leg boots its
+  # own Vite through the config's webServer. The check names become
+  # `frontend e2e (Playwright + axe) (1)` to `(4)`.
+  #
+  # NO VERDICT JOB. This suite has no report checker and no test floor, so each leg's exit
+  # code is its verdict, as the single job's was. `fail-fast: false` keeps the other legs
+  # running after one goes red, and any red or cancelled leg turns the run red. GitHub runs
+  # every leg the matrix names, so a leg can't drop out unseen.
+  #
+  # NO RETRY. `playwright.config.ts` sets `retries: 0`, so a test that fails once fails its
+  # leg instead of passing as flaky, and `trace: 'retain-on-failure'` keeps the trace of
+  # that one attempt. A red leg uploads its traces as `mock-test-results-<i>`.
+  #
+  # The limit is per leg: the slowest single-runner run was 35 minutes, a quarter of it
+  # doubled is under 20, and setup comes on top.
   e2e:
     name: frontend e2e (Playwright + axe)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1301,11 +1322,20 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      # Boots `npm run dev` via playwright.config.ts webServer, then runs the
-      # command-emission + a11y specs.
+      # Boots `npm run dev` via playwright.config.ts webServer, then runs this leg's
+      # quarter of the command-emission + a11y specs.
       - name: Run e2e (Playwright + axe)
         working-directory: frontend
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+
+      # A failing leg's traces go nowhere otherwise, and a red that only CI shows needs them.
+      - name: Keep the traces of a red mock shard
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-test-results-${{ matrix.shard }}
+          path: frontend/test-results/
+          retention-days: 14
 
   # Live E2E gate (Phase 22, E2E-01..04): Playwright drives headless chromium
   # against the REAL dev_render_server binary (real Core -> RenderProducer ->

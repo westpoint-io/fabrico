@@ -16,7 +16,10 @@ export default defineConfig({
   fullyParallel: true,
   // CI must never green-light a stray `test.only`.
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // A test that needs a retry to pass is a red gate, as in the live and walk
+  // configs. The old CI retry let a test that failed once pass as flaky, and no
+  // gate read the flaky line, so retries is 0 on CI and locally.
+  retries: 0,
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:5173',
@@ -29,9 +32,9 @@ export default defineConfig({
     // blocking config and a reuse config disagree on the GL backend, a baseline
     // regenerated through one can fail under the other.
     launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader'] },
-    // A trace on the first retry is enough to debug a flake without paying the
-    // capture cost on every run.
-    trace: 'on-first-retry',
+    // With retries at 0 there is no retry to capture a trace on, so a failing
+    // test keeps its trace from its only attempt. CI uploads them from a red leg.
+    trace: 'retain-on-failure',
     // Run the mock chrome suite as a RETURNING user. Every fresh Playwright
     // context starts with empty localStorage, so the Phase-34 first-run
     // WelcomeCard (itself an `aside.fab-panel`) would render on every spec and
