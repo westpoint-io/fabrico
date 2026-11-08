@@ -7,7 +7,7 @@
 import type { ShortcutId } from '../input/shortcuts';
 import type { MachineConfig } from '../protocol/decode';
 
-export type LessonId = 'your-first-line' | 'delete-and-undo';
+export type LessonId = 'your-first-line' | 'delete-and-undo' | 'a-factory-with-two-outputs';
 /**
  * What a step can bind. `belt`, `beltIn`, `beltOut` and `beltOut2` are belts, each found by the two
  * machines `BELT_ENDS` in `check.ts` names for it; the rest are machines, each found by its `nodeKey`.
@@ -70,6 +70,10 @@ export interface ChromeFacts {
    * generation, and the reader checks the generation again, because an Undo keyframe re-mints handles.
    */
   appliedConfigs: readonly AppliedConfig[];
+  /** Does the inspector's heading show the not-applied marker? Read from the DOM: the panel holds typed, unapplied config. */
+  codeNotApplied: boolean;
+  /** The text in the Factory's code editor, its lines joined by newlines, or null with no Factory editor showing. */
+  codeText: string | null;
   view: {
     camera: { x: number; y: number; scale: number };
     freeArea: { left: number; right: number; top: number; bottom: number };
@@ -95,7 +99,11 @@ export type Check =
   /** No belt joins the two machines `BELT_ENDS` names for this binding, with the generation unchanged since the step began. */
   | { is: 'beltGone'; of: BindingName }
   /** The board's shape, with no handle in it, equals the shape captured when the step `since` began. */
-  | { is: 'restored'; since: string };
+  | { is: 'restored'; since: string }
+  /** The bound machine holds at least `outs` ports with role Out. */
+  | { is: 'portAdded'; of: BindingName; outs: number }
+  /** Each Sink's lowest occupied slot rose at least once since the step began, each read on its own. */
+  | { is: 'itemsArriveAtBoth'; at: readonly [BindingName, BindingName] };
 
 export type StageWhen =
   | { is: 'always' }
@@ -116,7 +124,14 @@ export type StageWhen =
    */
   | { is: 'gone'; of: BindingName }
   | { is: 'triggerNotPressed'; trigger: 'Timer' }
-  | { is: 'triggerNotApplied'; trigger: 'Timer' };
+  | { is: 'triggerNotApplied'; trigger: 'Timer' }
+  /**
+   * The bound Factory's code is as it was when the step began: the applied source isn't known yet, the
+   * editor isn't showing, or the editor holds that source with no not-applied marker.
+   */
+  | { is: 'codeUnchanged'; of: BindingName }
+  /** The inspector shows its not-applied marker. */
+  | { is: 'codeNotApplied' };
 
 /** A chrome control a ring can mark. Each resolves by the control's own name or state, so a renamed control fails the walk. */
 export type PanelTarget =
@@ -126,17 +141,32 @@ export type PanelTarget =
   | { kind: 'beltTool' }
   | { kind: 'segment'; group: 'Trigger'; label: 'Timer' }
   | { kind: 'applyButton' }
-  | { kind: 'undoButton' };
+  | { kind: 'undoButton' }
+  /** The inspector's add-output button, found by its label. */
+  | { kind: 'addOutputButton' }
+  /** The line of the Factory's code editor whose text holds `holds`, or the whole editor with no such line. */
+  | { kind: 'codeLine'; holds: string };
 
 export type PortRoleName = 'out' | 'in';
 
+/**
+ * Where a floor ring goes, worked out by `floorSpot`. `source` and `sink` are lesson 1's rule. The rest
+ * build lesson 4's line: a Source placed so the whole line is centred in the free area, a Factory beside
+ * it, and a Sink in front of each of the Factory's outputs.
+ */
+export type FloorSpot = 'source' | 'sink' | 'centredSource' | 'factory' | 'firstOutputSink' | 'freeOutputSink';
+
 export type HintAnchor =
   | { on: 'panel'; target: PanelTarget }
-  | { on: 'floor'; spot: 'source' | 'sink' }
+  | { on: 'floor'; spot: FloorSpot }
   | { on: 'machine'; of: BindingName }
   /** A bound belt's middle tile, `tiles[floor(n / 2)]`: a press anywhere on a belt selects it. */
   | { on: 'belt'; of: BindingName }
-  | { on: 'port'; of: BindingName; role: PortRoleName; to?: { of: BindingName; role: PortRoleName } };
+  /**
+   * A bound machine's port: the first in its port order with this role. With `pick: 'free'`, the first
+   * with this role that no belt dock names, and nothing when every one has a belt.
+   */
+  | { on: 'port'; of: BindingName; role: PortRoleName; pick?: 'free'; to?: { of: BindingName; role: PortRoleName } };
 
 export type Gesture =
   | { do: 'pressHint' }
@@ -145,10 +175,15 @@ export type Gesture =
   | { do: 'dragToHint' }
   | { do: 'key'; shortcut: ShortcutId }
   | { do: 'watch' }
+  /** Type `insert` into the code editor just after the text `after`, on the line the ring marks. */
+  | { do: 'typeCode'; after: string; insert: string }
   | { do: 'none' };
 
-/** Lesson words: plain text, a key named through `SHORTCUTS`, or a machine named through `KIND_NAMES`. */
-export type PhraseToken = string | { key: ShortcutId } | { kind: number };
+/**
+ * Lesson words: plain text, a key named through `SHORTCUTS`, a machine named through `KIND_NAMES`, or a
+ * fragment of code, shown as it is and never broken across lines.
+ */
+export type PhraseToken = string | { key: ShortcutId } | { kind: number } | { code: string };
 
 /** One thing a step asks for. A step's stages are read top to bottom, and the first that holds is shown. */
 export interface Stage {

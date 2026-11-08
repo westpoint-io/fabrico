@@ -29,7 +29,7 @@ const VIEW: ChromeFacts['view'] = {
 };
 
 function chrome(over: Partial<ChromeFacts> = {}): ChromeFacts {
-  return { armed: null, selectedNode: null, selectedBelt: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, appliedConfigs: [], view: VIEW, ...over };
+  return { armed: null, selectedNode: null, selectedBelt: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, appliedConfigs: [], codeNotApplied: false, codeText: null, view: VIEW, ...over };
 }
 
 function board(over: Partial<BoardFacts> = {}): BoardFacts {
@@ -264,7 +264,7 @@ describe('reduce: press-play and watch-items', () => {
     const s = frame(atStep(4), { nodes: BOTH, belts: [carrying], tick: 11 }, TIMER);
     expect(s.stepIndex).toBe(5);
     expect(s.card).toBe('running');
-    expect(s.baseline?.lowestSlot, 'the lowest slot is taken when the step begins').toBe(9);
+    expect(s.baseline?.lowestSlots, 'the lowest slot is taken when the step begins').toEqual({ sink: 9 });
   });
 
   it('the first delivery finishes the lesson', () => {
@@ -290,7 +290,7 @@ describe('reduce: press-play and watch-items', () => {
     s = frame(s, { nodes: BOTH, belts: [carrying([7])], tick: 12, generation: 2 }, TIMER);
     expect(s.card, 'the generation moved').toBe('running');
     expect(s.baseline?.generation).toBe(2);
-    expect(s.baseline?.lowestSlot, 'the read starts again from the new frame').toBe(7);
+    expect(s.baseline?.lowestSlots, 'the read starts again from the new frame').toEqual({ sink: 7 });
     s = frame(s, { nodes: BOTH, belts: [carrying([])], tick: 13, generation: 2 }, TIMER);
     expect(s.card, 'a real rise after it still counts').toBe('finished');
   });
@@ -298,7 +298,7 @@ describe('reduce: press-play and watch-items', () => {
   it('reduce returns the same object when nothing changed, so the layer can skip work', () => {
     const s = atStep(5);
     const again = frame(s, { nodes: BOTH, belts: [JOINED], tick: 12 }, TIMER);
-    expect(again.baseline?.lowestSlot).toBe(s.baseline?.lowestSlot);
+    expect(again.baseline?.lowestSlots).toEqual(s.baseline?.lowestSlots);
     expect(frame(again, { nodes: BOTH, belts: [JOINED], tick: 13 }, TIMER)).toBe(again);
   });
 });
@@ -1263,7 +1263,7 @@ describe('lesson 3: Delete and Undo', () => {
 
   it('has six steps in order, each opening with the paused stage, inside the card budgets', () => {
     const du = LESSONS.find((l) => l.id === DU);
-    expect(LESSONS.map((l) => l.id)).toEqual(['your-first-line', 'delete-and-undo']);
+    expect(LESSONS.map((l) => l.id)).toEqual(['your-first-line', 'delete-and-undo', 'a-factory-with-two-outputs']);
     expect(du?.title).toBe('Delete and Undo');
     expect(du?.steps.map((s) => s.id)).toEqual(['place-source', 'place-sink', 'draw-belt', 'delete-belt', 'delete-sink', 'bring-back']);
     for (const s of du?.steps ?? []) expect(s.stages[0]?.id, s.id).toBe('board-paused');
@@ -1411,12 +1411,13 @@ describe('lesson 1 on the shared stages', () => {
   });
 });
 
-describe('rowViews with two lessons', () => {
-  it('puts the accent on Start for Delete and Undo once lesson 1 is Done', () => {
+describe('rowViews with three lessons', () => {
+  it('puts the accent on Start for Delete and Undo once lesson 1 is Done, with the rows in teaching order', () => {
     const views = rowViews({ lessons: LESSONS, progress: withLessonDone(EMPTY_PROGRESS, 'your-first-line'), state: IDLE, swapFloor: FLOOR, simStopped: false });
-    expect(views.map((v) => [v.id, v.status, v.accent])).toEqual([
-      ['your-first-line', 'done', null],
-      ['delete-and-undo', 'notStarted', 'start'],
+    expect(views.map((v) => [v.id, v.title, v.status, v.accent])).toEqual([
+      ['your-first-line', 'Your first line', 'done', null],
+      ['delete-and-undo', 'Delete and Undo', 'notStarted', 'start'],
+      ['a-factory-with-two-outputs', 'A Factory with two outputs', 'notStarted', null],
     ]);
   });
 });

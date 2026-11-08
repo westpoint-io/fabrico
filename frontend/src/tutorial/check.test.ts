@@ -38,7 +38,7 @@ function ctx(over: {
 }): CheckContext {
   return {
     board: { tick: 10, generation: 1, swapFloor: 1, nodes: [], belts: [], ...over.board },
-    baseline: { knownKeys: [], tick: 10, playing: true, lowestSlot: null, generation: 1, ...over.baseline },
+    baseline: { knownKeys: [], tick: 10, playing: true, lowestSlots: {}, rose: [], generation: 1, factorySource: null, ...over.baseline },
     chrome: {
       armed: null,
       selectedNode: null,
@@ -48,6 +48,8 @@ function ctx(over: {
       triggerPressed: null,
       appliedTrigger: null,
       appliedConfigs: [],
+      codeNotApplied: false,
+      codeText: null,
       view: { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 0, right: 800, top: 0, bottom: 600 } },
       ...over.chrome,
     },
@@ -438,7 +440,7 @@ describe('tickRose', () => {
 describe('itemArrived', () => {
   const check = { is: 'itemArrived', at: 'sink' } as const;
   const withSlots = (slots: readonly number[], lowestSlot: number | null, id = 9): CheckContext =>
-    ctx({ board: { belts: [belt(id, slots, INTO_THE_SINK)] }, baseline: { lowestSlot } });
+    ctx({ board: { belts: [belt(id, slots, INTO_THE_SINK)] }, baseline: { lowestSlots: { sink: lowestSlot } } });
 
   it('a refused delivery: slot 0 held across frames is not done', () => {
     expect(evaluateCheck(check, withSlots([0, 4, 8], 0)).done).toBe(false);
@@ -465,7 +467,7 @@ describe('itemArrived', () => {
       { end: 'Tail', node: THE_SINK.id, port: 0 },
       { end: 'Head', node: 55, port: 0 },
     ];
-    const result = evaluateCheck(check, ctx({ board: { belts: [belt(3, [8], elsewhere)] }, baseline: { lowestSlot: 0 } }));
+    const result = evaluateCheck(check, ctx({ board: { belts: [belt(3, [8], elsewhere)] }, baseline: { lowestSlots: { sink: 0 } } }));
     expect(result.done).toBe(false);
   });
 
@@ -474,14 +476,14 @@ describe('itemArrived', () => {
       { end: 'Head', node: THE_SOURCE.id, port: 0 },
       { end: 'Tail', node: THE_SINK.id, port: 0 },
     ];
-    const result = evaluateCheck(check, ctx({ board: { belts: [belt(3, [8], backwards)] }, baseline: { lowestSlot: 0 } }));
+    const result = evaluateCheck(check, ctx({ board: { belts: [belt(3, [8], backwards)] }, baseline: { lowestSlots: { sink: 0 } } }));
     expect(result.done).toBe(false);
   });
 
   it('a generation change between two frames is not done, because a keyframe re-mints handles', () => {
     const result = evaluateCheck(
       check,
-      ctx({ board: { generation: 2, belts: [belt(9, [8], INTO_THE_SINK)] }, baseline: { generation: 1, lowestSlot: 0 } }),
+      ctx({ board: { generation: 2, belts: [belt(9, [8], INTO_THE_SINK)] }, baseline: { generation: 1, lowestSlots: { sink: 0 } } }),
     );
     expect(result.done).toBe(false);
   });

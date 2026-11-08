@@ -35,6 +35,12 @@ export interface LessonWalk {
    * `dragFrom` and let go inside the near ring (the Out square) at `dragTo`.
    */
   reverseDrags?: boolean;
+  /**
+   * Where the refused press lands, in screen pixels from the centre of the bound machine's whole
+   * footprint. Left out, the press uses `pressOffset`. A 3 by 3 machine needs a bigger offset than a
+   * 1 by 1 one for the press to land off its centre cell.
+   */
+  refusedOffset?: { dx: number; dy: number };
 }
 
 export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
@@ -58,10 +64,19 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
     keyAt: { 'delete-belt/press-delete': 'Delete', 'delete-sink/press-delete': 'Backspace' },
     reverseDrags: true,
   },
+  'a-factory-with-two-outputs': {
+    pressOffset: { dx: 3, dy: 4 },
+    floorOffset: { dx: -3, dy: -4 },
+    dragFrom: { dx: 4, dy: 1 },
+    dragTo: { dx: -1, dy: -3 },
+    refusedCardNote: "The Factory covers that cell, so the Sink wasn't placed. Click the free cell in the ring.",
+    // At zoom 1 the Factory is 96 px square, so this lands in its top right cell, not its centre.
+    refusedOffset: { dx: 20, dy: -18 },
+  },
 };
 
 /** The gestures `walkStep` in `lessonRunner.ts` knows how to make. */
-export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'dragToHint', 'key', 'watch', 'none'];
+export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'dragToHint', 'key', 'watch', 'none', 'typeCode'];
 
 /**
  * The app's sentence for a footprint collision, transcribed because `RefusalMessage.tsx` pulls in the

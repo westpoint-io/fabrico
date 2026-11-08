@@ -5,16 +5,21 @@
 // changed, so the React layer can skip an update on all but the frames that matter.
 
 import { CELL } from '../../shared/geometry';
+import { PORT_ROLE, unitDelta } from '../protocol/ports';
 import {
   BELT_ENDS,
   BINDING_NAMES,
   beltJoining,
+  boundBeltIds,
   boundBeltJoining,
   evaluateCheck,
   lineDoorstep,
   lineStuck,
   lowestSlotInto,
   nodeKey,
+  outputsOf,
+  slotRoseNow,
+  watchedNames,
   type ShapeCapture,
 } from './check';
 import type { Progress } from './progress';
@@ -22,8 +27,10 @@ import { beltTilesIn, boardShape, handlesByKey, withConfigs } from './shape';
 import type {
   BindingName,
   BoardFacts,
+  BoardNode,
   Check,
   ChromeFacts,
+  FloorSpot,
   Lesson,
   LessonId,
   PhraseToken,
@@ -55,12 +62,23 @@ export interface StepBaseline {
   /** Was the board playing when the step began? It decides whether the step-5 note applies. */
   playing: boolean;
   /**
-   * The last frame's lowest occupied slot on the belt into the watched Sink: updated each frame at the
-   * watch step, null with nothing to compare with yet. `Infinity` is an empty belt.
+   * The last frame's lowest occupied slot on the belt into each Sink the step's check watches, keyed by
+   * that Sink's binding: updated each frame at a watch step, null with nothing to compare with yet.
+   * `Infinity` is an empty belt. It holds exactly the watched names, and nothing at any other step.
    */
-  lowestSlot: number | null;
-  /** The generation `lowestSlot` was read at. A keyframe re-mints handles and would look like a false rise. */
+  lowestSlots: Readonly<Partial<Record<BindingName, number | null>>>;
+  /** The watched names whose slot has risen since the step began. A keyframe keeps these and forgets the slots. */
+  rose: readonly BindingName[];
+  /**
+   * The generation the step began at, and at a watch step the one `lowestSlots` was read at. A keyframe
+   * re-mints handles and would look like a false rise.
+   */
   generation: number;
+  /**
+   * At a step with a code stage, the bound Factory's applied source: the host's answer at this generation
+   * when the step began, or the first answer after, if none had come then. Null until it's known.
+   */
+  factorySource: string | null;
 }
 
 export type Card = 'none' | 'starting' | 'running' | 'swapped' | 'finished';
@@ -167,7 +185,7 @@ function boundGone(name: BindingName, board: BoardFacts, s: Pick<TutorialState, 
   return !board.belts.some((belt) => belt.tiles.some((t) => tiles.some((c) => c.cell_x === t.cell_x && c.cell_y === t.cell_y)));
 }
 
-function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<TutorialState, 'bindings' | 'capture'>): boolean {
+function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<TutorialState, 'bindings' | 'capture' | 'baseline'>): boolean {
   const { armed } = chrome;
   const { bindings } = s;
   switch (when.is) {
@@ -187,13 +205,13 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
       return armed?.kind !== 'belt';
     case 'lineStopsShort': {
       const from = bindings[when.from];
-      return armed?.kind === 'belt' && from !== undefined && lineDoorstep(board, from.id) !== null;
+      return armed?.kind === 'belt' && from !== undefined && lineDoorstep(board, from.id, boundBeltIds(bindings)) !== null;
     }
     case 'lineStuck': {
       const from = bindings[when.from];
       const to = bindings[when.to];
       if (armed?.kind !== 'belt' || from === undefined || to === undefined) return false;
-      return lineStuck(board, from.id, to.id, chrome.editsInFlight);
+      return lineStuck(board, from.id, to.id, chrome.editsInFlight, boundBeltIds(bindings));
     }
     case 'notSelected':
       if (BELT_ENDS[when.of] !== undefined) return chrome.selectedBelt === null || chrome.selectedBelt !== bindings[when.of]?.id;
@@ -205,6 +223,16 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
     case 'triggerNotApplied':
       // Only a Source has a trigger, and the lesson's one Source is the bound one.
       return !(chrome.appliedTrigger?.kind === when.trigger && chrome.appliedTrigger.node === bindings.source?.id);
+    case 'codeUnchanged': {
+      // Read off the editor and not the host's answer, which comes on a poll: after Apply the answer
+      // can lag the panel, and the stage would flick back to typing for that long. With no marker
+      // showing, the editor holds the applied source, so the two say the same thing.
+      const source = s.baseline?.factorySource ?? null;
+      if (source === null || chrome.codeText === null) return true;
+      return chrome.codeText === source && !chrome.codeNotApplied;
+    }
+    case 'codeNotApplied':
+      return chrome.codeNotApplied;
   }
 }
 
@@ -222,38 +250,123 @@ export function currentStage(
 
 /** Cells east or west of the Source that the Sink's spot sits, leaving room for a belt. */
 const SINK_OFFSET_CELLS = 6;
+/** The cells each spot's machine covers, across and down. A Factory is 3 by 3 when it's placed. */
+const FOOTPRINT: Readonly<Record<FloorSpot, readonly [number, number]>> = {
+  source: [1, 1],
+  sink: [1, 1],
+  centredSource: [1, 1],
+  factory: [3, 3],
+  firstOutputSink: [1, 1],
+  freeOutputSink: [1, 1],
+};
+/** Lesson 4's line, across: the Source, three cells of belt, the Factory, three more, and the Sinks. */
+const LINE_CELLS = 11;
+/** From the Source to the Factory's left edge. */
+const FACTORY_OFFSET_CELLS = 4;
+/** From the Factory's output cell to the Sink in front of it, leaving three cells of belt. */
+const OUTPUT_SINK_CELLS = 4;
+
+/** The cell in a `nodeKey`, or null for no key. */
+function keyCell(key: string | undefined): readonly [number, number] | null {
+  const m = /@(-?\d+),(-?\d+)$/.exec(key ?? '');
+  return m === null ? null : [Number(m[1]), Number(m[2])];
+}
+
+/**
+ * The Out port of `factory` a Sink spot faces. The first one in port order, or for `freeOutputSink` the
+ * first that no belt docks and no machine already sits in front of. Before any belt is drawn that's the
+ * one the first Sink didn't take. Null with no Out.
+ */
+function outputFor(spot: 'firstOutputSink' | 'freeOutputSink', factory: BoardNode, board: BoardFacts): BoardNode['ports'][number] | null {
+  const outs = factory.ports.filter((p) => p.role === PORT_ROLE.OUT);
+  if (spot === 'firstOutputSink') return outs[0] ?? null;
+  const docked = (p: BoardNode['ports'][number]): boolean =>
+    board.belts.some((b) => b.docks.some((d) => d.node === factory.id && d.port === p.index));
+  const free = outs.filter((p) => !docked(p));
+  const faced = (p: BoardNode['ports'][number]): boolean => {
+    const [x, y] = sinkCellFor(p);
+    return board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === y));
+  };
+  return free.find((p) => !faced(p)) ?? free[0] ?? outs[0] ?? null;
+}
+
+/** The cell `OUTPUT_SINK_CELLS` out from an output's own cell, along the side it faces. */
+function sinkCellFor(port: BoardNode['ports'][number]): readonly [number, number] {
+  const [dx, dy] = unitDelta(port.side);
+  return [port.cell_x + dx * OUTPUT_SINK_CELLS, port.cell_y + dy * OUTPUT_SINK_CELLS];
+}
 
 /**
  * Where a floor ring goes. New keeps the camera, so a fixed cell could be off screen and the spot
- * is worked out from what the user can see: the Source under the point 40% across and 50% down the
- * free area, the Sink on the Source's row, six cells east, or west when east is past the free area's
- * right edge. Either one moves down a row at a time past any machine or belt tile already there, so the
- * ring marks a cell the host will take and is never the Source's own.
+ * is worked out from what the user can see. Lesson 1's rule: the Source under the point 40% across and
+ * 50% down the free area, the Sink on the Source's row, six cells east, or west when east is past the
+ * free area's right edge. Lesson 4's line is 11 cells, so its Source is placed with the whole line
+ * centred across the free area (one cell inside its left edge when 11 cells don't fit), the Factory's
+ * top left 4 cells east of the Source and one row up, so its input is on the Source's row, and each Sink
+ * 4 cells out from the Factory's output along the side that output faces, on its row. That's east at
+ * turn 0, and the same rule turned for a turned Factory.
+ *
+ * Every spot moves down a row at a time past anything already there, with every cell of its machine's
+ * footprint tested, so the ring marks a place the host will take and is never another machine's.
  */
 export function floorSpot(args: {
-  spot: 'source' | 'sink';
+  spot: FloorSpot;
   view: ChromeFacts['view'];
   board: BoardFacts;
   sourceKey?: string;
+  bindings?: TutorialState['bindings'];
 }): readonly [number, number] {
   const { camera, freeArea } = args.view;
+  const { board } = args;
   const size = CELL * camera.scale;
+  const [w, h] = FOOTPRINT[args.spot];
+  const takenAt = (x: number, y: number): boolean =>
+    board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === y)) ||
+    board.belts.some((b) => b.tiles.some((t) => t.cell_x === x && t.cell_y === y));
+  const footprintTaken = (x: number, y: number): boolean => {
+    for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) if (takenAt(x + dx, y + dy)) return true;
+    return false;
+  };
   const free = (x: number, y: number): readonly [number, number] => {
-    const taken = (cy: number): boolean =>
-      args.board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === cy)) ||
-      args.board.belts.some((b) => b.tiles.some((t) => t.cell_x === x && t.cell_y === cy));
     let row = y;
-    while (taken(row)) row += 1;
+    while (footprintTaken(x, row)) row += 1;
     return [x, row];
   };
-  const source = /@(-?\d+),(-?\d+)$/.exec(args.sourceKey ?? '');
-  if (args.spot === 'source' || source === null) {
+  const midRow = Math.floor((freeArea.top + 0.5 * (freeArea.bottom - freeArea.top) - camera.y) / size);
+  const fortyPercent = (): readonly [number, number] => {
     const px = freeArea.left + 0.4 * (freeArea.right - freeArea.left);
-    const py = freeArea.top + 0.5 * (freeArea.bottom - freeArea.top);
-    return free(Math.floor((px - camera.x) / size), Math.floor((py - camera.y) / size));
+    return free(Math.floor((px - camera.x) / size), midRow);
+  };
+  const source = keyCell(args.sourceKey ?? args.bindings?.source?.nodeKey);
+  switch (args.spot) {
+    case 'source':
+      return fortyPercent();
+    case 'centredSource': {
+      const width = freeArea.right - freeArea.left;
+      const line = LINE_CELLS * size;
+      const px = line <= width ? freeArea.left + (width - line) / 2 : freeArea.left + size;
+      let x = Math.round((px - camera.x) / size);
+      if (x * size + camera.x < freeArea.left) x += 1;
+      return free(x, midRow);
+    }
+    case 'factory':
+      return source === null ? fortyPercent() : free(source[0] + FACTORY_OFFSET_CELLS, source[1] - 1);
+    case 'firstOutputSink':
+    case 'freeOutputSink': {
+      const key = args.bindings?.factory?.nodeKey;
+      const factory = key === undefined ? undefined : board.nodes.find((n) => nodeKey(n) === key);
+      const port = factory === undefined ? null : outputFor(args.spot, factory, board);
+      if (port !== null) {
+        const [x, y] = sinkCellFor(port);
+        return free(x, y);
+      }
+      break;
+    }
+    case 'sink':
+      break;
   }
-  const sx = Number(source[1]);
-  const sy = Number(source[2]);
+  if (source === null) return fortyPercent();
+  const [sx, sy] = source;
   const east = sx + SINK_OFFSET_CELLS;
   const eastEdge = (east + 1) * size + camera.x;
   return free(eastEdge > freeArea.right ? sx - SINK_OFFSET_CELLS : east, sy);
@@ -266,21 +379,37 @@ function withSpot(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
     return s.spot === null ? s : { ...s, spot: null };
   }
   if (s.spot?.stageId === stage.id) return s;
-  const sourceKey = s.bindings.source?.nodeKey;
-  const cell = floorSpot({
-    spot: stage.hint.spot,
-    view: chrome.view,
-    board,
-    ...(sourceKey === undefined ? {} : { sourceKey }),
-  });
+  const cell = floorSpot({ spot: stage.hint.spot, view: chrome.view, board, bindings: s.bindings });
   return { ...s, spot: { stageId: stage.id, cell } };
 }
 
-/** The value `lowestSlot` starts from when this step begins: only a step that watches a belt has one. */
-function lowestSlotFor(check: Check | undefined, board: BoardFacts, bindings: TutorialState['bindings']): number | null {
-  if (check?.is !== 'itemArrived') return null;
-  const bound = bindings[check.at];
-  return bound === undefined ? null : lowestSlotInto(board, bound.id);
+/** This frame's lowest slot into each Sink the check watches, keyed by its binding. Empty for a check that watches none. */
+function slotsFor(check: Check | undefined, board: BoardFacts, bindings: TutorialState['bindings']): StepBaseline['lowestSlots'] {
+  const slots: Partial<Record<BindingName, number | null>> = {};
+  for (const name of watchedNames(check)) {
+    const bound = bindings[name];
+    slots[name] = bound === undefined ? null : lowestSlotInto(board, bound.id);
+  }
+  return slots;
+}
+
+function sameSlots(a: StepBaseline['lowestSlots'], b: StepBaseline['lowestSlots']): boolean {
+  const names = Object.keys(a) as BindingName[];
+  return names.length === Object.keys(b).length && names.every((name) => Object.hasOwn(b, name) && a[name] === b[name]);
+}
+
+/** The Factory a step's code stage reads, or null for a step with no code stage. */
+function codeWatch(step: Step | undefined): BindingName | null {
+  for (const stage of step?.stages ?? []) if (stage.when.is === 'codeUnchanged') return stage.when.of;
+  return null;
+}
+
+/** The applied source of the Factory bound as `of`, from the host's answers at this generation, or null with none. */
+function appliedSourceOf(of: BindingName | null, board: BoardFacts, chrome: ChromeFacts, bindings: TutorialState['bindings']): string | null {
+  const bound = of === null ? undefined : bindings[of];
+  if (bound === undefined) return null;
+  const answer = chrome.appliedConfigs.find((a) => a.node === bound.id && a.generation === board.generation);
+  return answer?.config?.kind === 'Factory' ? answer.config.source : null;
 }
 
 function baselineFor(
@@ -294,8 +423,10 @@ function baselineFor(
     knownKeys,
     tick: board.tick,
     playing: chrome.playing,
-    lowestSlot: lowestSlotFor(step?.done, board, bindings),
+    lowestSlots: slotsFor(step?.done, board, bindings),
+    rose: [],
     generation: board.generation,
+    factorySource: appliedSourceOf(codeWatch(step), board, chrome, bindings),
   };
 }
 
@@ -405,8 +536,11 @@ function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: 
     }
     case 'tickRose':
     case 'itemArrived':
+    case 'itemsArriveAtBoth':
     case 'restored':
       return true;
+    case 'portAdded':
+      return outputsOf(board, s.bindings[check.of]) >= check.outs;
     // A delete step's result is its target staying gone.
     case 'nodeGone':
     case 'beltGone':
@@ -506,13 +640,31 @@ function rebound(s: TutorialState, board: BoardFacts): TutorialState {
   return bindings === s.bindings ? s : { ...s, bindings };
 }
 
-/** The watch step's read: forget the last slot across a keyframe, then take this frame's. */
-function withWatchRead(s: TutorialState, board: BoardFacts, lessons: readonly Lesson[]): TutorialState {
-  const check = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex]?.done;
-  if (s.card !== 'running' || s.baseline === null || check?.is !== 'itemArrived') return s;
-  const lowestSlot = lowestSlotFor(check, board, s.bindings);
-  if (lowestSlot === s.baseline.lowestSlot && board.generation === s.baseline.generation) return s;
-  return { ...s, baseline: { ...s.baseline, lowestSlot, generation: board.generation } };
+/**
+ * The step's own reads, after its check has run. At a watch step: latch each watched Sink whose slot rose
+ * this frame, then take this frame's slots. Across a keyframe the slots are forgotten and read again, with
+ * no rise counted, and the latches stand. At a code step: take the Factory's applied source from the first
+ * answer, if none had come when the step began.
+ */
+function withWatchRead(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
+  const step = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex];
+  if (s.card !== 'running' || s.baseline === null || step === undefined) return s;
+  const held = s.baseline;
+  let baseline = held;
+  const names = watchedNames(step.done);
+  if (names.length > 0) {
+    const sameGeneration = board.generation === held.generation;
+    const risen = sameGeneration ? names.filter((name) => !held.rose.includes(name) && slotRoseNow(board, held, s.bindings, name)) : [];
+    const lowestSlots = slotsFor(step.done, board, s.bindings);
+    if (risen.length > 0 || !sameGeneration || !sameSlots(lowestSlots, held.lowestSlots)) {
+      baseline = { ...baseline, lowestSlots, rose: [...held.rose, ...risen], generation: board.generation };
+    }
+  }
+  if (baseline.factorySource === null) {
+    const source = appliedSourceOf(codeWatch(step), board, chrome, s.bindings);
+    if (source !== null) baseline = { ...baseline, factorySource: source };
+  }
+  return baseline === held ? s : { ...s, baseline };
 }
 
 /** Is a re-check on the Timer step still waiting for the host's first answer about the bound Source? */
@@ -533,7 +685,7 @@ function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
   // pass. The user is on the step they were on, and there's nothing to tell them.
   if (checked !== found && next.card === 'running' && next.stepIndex >= found.stepIndex) next = { ...next, note: found.note };
   if (next.rechecking && !awaitsTriggerAnswer(next, chrome, lessons)) next = { ...next, rechecking: false };
-  return withSpot(withWatchRead(next, board, lessons), board, chrome, lessons);
+  return withSpot(withWatchRead(next, board, chrome, lessons), board, chrome, lessons);
 }
 
 export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Lesson[]): TutorialState {

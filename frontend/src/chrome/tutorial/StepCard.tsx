@@ -68,13 +68,18 @@ const textStyle: CSSProperties = {
   lineHeight: 1.4,
 };
 
-/** Key and machine names at weight 700. The words are React text children, never markup. */
+/** A key or machine name. */
+const strongStyle: CSSProperties = { fontWeight: 700 };
+/** A code fragment: the same weight, and never broken at its inner spaces. The card is already monospace. */
+const codeStyle: CSSProperties = { fontWeight: 700, whiteSpace: 'nowrap' };
+
+/** Key and machine names and code fragments at weight 700. The words are React text children, never markup. */
 function Words({ tokens, mark }: { tokens: readonly PhraseToken[]; mark?: string }): JSX.Element {
   return (
     <p style={textStyle} {...(mark === undefined ? {} : { [mark]: '' })}>
       {phrase(tokens).map((segment, i) =>
         segment.strong ? (
-          <span key={i} style={{ fontWeight: 700 }}>
+          <span key={i} style={segment.code === true ? codeStyle : strongStyle} {...(segment.code === true ? { 'data-fab-code': '' } : {})}>
             {segment.text}
           </span>
         ) : (

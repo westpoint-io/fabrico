@@ -19,12 +19,14 @@
 // A disc's moving element carries `data-fab-hit-r`, the hit radius in CSS px as painted this frame.
 
 import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObject } from 'react';
-import { CELL, nubAnchor } from '../../../shared/geometry';
+import { CELL } from '../../../shared/geometry';
 import { KIND_NAMES } from '../../../shared/kindNames';
 import type { PortView } from '../../protocol/decode';
 import { effectiveBox } from '../../protocol/footprint';
 import { machine_kind } from '../../protocol/kinds';
-import { doorstepCell, dropHitRadiusWorld } from '../../protocol/ports';
+import { doorstepCell, dropHitRadiusWorld, nubAnchor } from '../../protocol/ports';
+import { FACTORY_EDITOR_LABELS } from '../FactoryConfigBody';
+import { ADD_OUTPUT_LABEL } from '../PortsSection';
 import type { SceneHandle } from '../../render/pixiApp';
 import type { BoundNode, TutorialState } from '../../tutorial/machine';
 import type { BindingName, HintAnchor, PanelTarget, PortRoleName } from '../../tutorial/types';
@@ -109,6 +111,37 @@ function buttonReading(root: Element | null, word: string): HTMLElement | null {
   return [...root.querySelectorAll<HTMLElement>('button')].find((b) => b.textContent?.trim() === word) ?? null;
 }
 
+/** The open inspector, found by its heading. */
+const INSPECTOR = 'aside[aria-labelledby="fab-config-heading"]';
+
+/**
+ * The Factory's code editor in the open inspector: the box the label reading
+ * `FACTORY_EDITOR_LABELS.factory` names. Null with no Factory selected, or before its editor mounts.
+ */
+export function factoryEditor(): HTMLElement | null {
+  const label = [...document.querySelectorAll<HTMLLabelElement>(`${INSPECTOR} label`)].find(
+    (l) => l.textContent?.trim() === FACTORY_EDITOR_LABELS.factory,
+  );
+  return label === undefined || label.htmlFor === '' ? null : document.getElementById(label.htmlFor);
+}
+
+/**
+ * The text in the Factory's code editor, its lines joined by newlines, or null with no editor. It only
+ * reads. CodeMirror pads an empty line with a zero-width space, which isn't in the source, so it goes.
+ */
+export function readCodeText(): string | null {
+  const content = factoryEditor()?.querySelector('.cm-content');
+  if (content === null || content === undefined) return null;
+  return [...content.querySelectorAll('.cm-line')].map((line) => (line.textContent ?? '').replace(/\u200b/g, '')).join('\n');
+}
+
+/** The line of the Factory's editor holding `holds`, or the whole editor with no such line. */
+function codeLine(holds: string): HTMLElement | null {
+  const editor = factoryEditor();
+  if (editor === null) return null;
+  return [...editor.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent?.includes(holds) === true) ?? editor;
+}
+
 /** A panel target's control, by its name or its state, so a renamed control fails the walk. */
 function panelControl(target: PanelTarget): HTMLElement | null {
   switch (target.kind) {
@@ -123,9 +156,13 @@ function panelControl(target: PanelTarget): HTMLElement | null {
     case 'segment':
       return buttonReading(document.querySelector(`[role="group"][aria-label="${target.group}"]`), target.label);
     case 'applyButton':
-      return buttonReading(document.querySelector('aside[aria-labelledby="fab-config-heading"]'), 'Apply');
+      return buttonReading(document.querySelector(INSPECTOR), 'Apply');
     case 'undoButton':
       return document.querySelector<HTMLElement>('header button[aria-label="Undo"]');
+    case 'addOutputButton':
+      return buttonReading(document.querySelector(INSPECTOR), ADD_OUTPUT_LABEL);
+    case 'codeLine':
+      return codeLine(target.holds);
   }
 }
 
@@ -163,17 +200,26 @@ function boundNode(nodes: SceneNodes | undefined, bound: BoundNode | undefined) 
   return node;
 }
 
-/** A bound machine's port ring through the camera: a disc on an In port's dot, a square on an Out port's doorstep. */
+/**
+ * A bound machine's port ring through the camera: a disc on an In port's dot, a square on an Out port's
+ * doorstep. The port is the first with the role in the machine's port order, or with `pick: 'free'` the
+ * first that no belt dock names. Read each frame, so the ring follows the user if they took the other
+ * output first, and hides once every output has a belt.
+ */
 function portBox(
   nodes: SceneNodes | undefined,
+  belts: SceneBelts | undefined,
   bindings: TutorialState['bindings'],
   of: BindingName,
   role: PortRoleName,
+  pick?: 'free',
 ): RingBox | null {
   const node = boundNode(nodes, bindings[of]);
   const cam = readCamera();
   if (node === null || cam === null) return null;
-  const port = node.ports.find((p) => p.role === PORT_ROLE[role]);
+  const docked = (index: number): boolean =>
+    [...(belts?.values() ?? [])].some((belt) => belt.docks.some((d) => d.node === bindings[of]?.id && d.port === index));
+  const port = node.ports.find((p) => p.role === PORT_ROLE[role] && (pick !== 'free' || !docked(p.index)));
   if (port === undefined) return null;
   if (role === 'out') return { ...doorstepSquareBox(port, cam), zIndex: BOARD_TARGET_Z };
   const disc = dropDiscBox(nubAnchor(port.cell_x, port.cell_y, port.side), cam);
@@ -237,7 +283,7 @@ function ringBox(
       zIndex: PANEL_TARGET_Z,
     };
   }
-  if (hint.on === 'port') return portBox(nodes, target.bindings, hint.of, hint.role);
+  if (hint.on === 'port') return portBox(nodes, belts, target.bindings, hint.of, hint.role, hint.pick);
   const cam = readCamera();
   if (cam === null) return null;
   if (hint.on === 'belt') return beltBox(belts, target.bindings[hint.of], cam);
@@ -303,7 +349,7 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       const box = target === null ? null : ringBox(target, layer, stageBegan, nodes, belts);
       const hint = target?.hint;
       const to = hint?.on === 'port' ? hint.to : undefined;
-      const toBox = target !== null && to !== undefined ? portBox(nodes, target.bindings, to.of, to.role) : null;
+      const toBox = target !== null && to !== undefined ? portBox(nodes, belts, target.bindings, to.of, to.role) : null;
       if (target === null || box === null || (to !== undefined && toBox === null)) {
         ring.style.visibility = 'hidden';
         ringTo.style.visibility = 'hidden';

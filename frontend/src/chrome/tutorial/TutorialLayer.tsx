@@ -18,9 +18,10 @@ import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressS
 import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
 import { frameTarget, offScreen as rectOffScreen } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
+import { CONFIG_NOT_APPLIED_MARKER } from '../configCopy';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { moveCamera, readCamera } from './cameraRead';
-import { HintPointer, type HintTarget } from './HintPointer';
+import { HintPointer, readCodeText, type HintTarget } from './HintPointer';
 import { LESSONS_PANEL_ID, LessonPanel, focusListClose, type ResetFooter } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
 import { readAppliedConfig } from './triggerRead';
@@ -350,6 +351,11 @@ function triggerWatch(s: TutorialState): BindingName | null {
   return done?.is === 'triggerApplied' ? done.of : null;
 }
 
+/** Does the inspector's heading show its not-applied marker? Read from the DOM. */
+function readCodeNotApplied(): boolean {
+  return document.getElementById('fab-config-heading')?.textContent?.includes(CONFIG_NOT_APPLIED_MARKER) === true;
+}
+
 /** The pressed segment of the inspector's Trigger group: the unapplied buffer, read from the DOM. */
 function readTriggerPressed(): ChromeFacts['triggerPressed'] {
   const text = document.querySelector('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]')?.textContent?.trim();
@@ -549,6 +555,8 @@ export function TutorialLayer({
           triggerPressed: readTriggerPressed(),
           appliedTrigger: appliedTriggerOf(stateRef.current, answersRef.current),
           appliedConfigs: answersForFrame(answersRef.current, boundMachineIds(stateRef.current), board.generation),
+          codeNotApplied: readCodeNotApplied(),
+          codeText: readCodeText(),
           view: { camera, freeArea: readFreeArea() },
         };
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);

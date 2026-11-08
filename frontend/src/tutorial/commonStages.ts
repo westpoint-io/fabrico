@@ -4,7 +4,7 @@
 // that `lessons/index.ts` doesn't hold in `LESSONS`, and this file holds no lesson. Machine and key names
 // are tokens, never typed words, and `auditLessonWords` reads these stages through every lesson that uses them.
 
-import type { BindingName, Stage } from './types';
+import type { BindingName, PhraseToken, Stage } from './types';
 
 /** The `machine_kind` byte that `KIND_NAMES` calls Source. */
 export const SOURCE_KIND = 0;
@@ -43,18 +43,61 @@ export const TOOL_DOWN: Stage = {
   text: ['Press ', { key: 'escape' }, ' to put the tool down, or click it again in the palette.'],
 };
 
+/**
+ * The stages that set the bound Source's trigger to Timer, after the paused stage: put the tool down,
+ * select the Source, press Timer, press Apply. Four, because machine tools stay armed after a place, a
+ * press on the Source with a tool still armed sends another Place, and a trigger change does nothing
+ * until Apply.
+ */
+export const SET_TIMER_STAGES: readonly Stage[] = [
+  TOOL_DOWN,
+  {
+    id: 'select-source',
+    when: { is: 'notSelected', of: 'source' },
+    hint: { on: 'machine', of: 'source' },
+    gesture: { do: 'pressHint' },
+    text: ['A new ', { kind: SOURCE_KIND }, ' waits for a web request, so it makes nothing yet. Click it to select it.'],
+  },
+  {
+    id: 'press-timer',
+    when: { is: 'triggerNotPressed', trigger: 'Timer' },
+    hint: { on: 'panel', target: { kind: 'segment', group: 'Trigger', label: 'Timer' } },
+    gesture: { do: 'pressHint' },
+    text: ['Under Trigger, press Timer so it makes items on its own.'],
+  },
+  {
+    id: 'apply-timer',
+    when: { is: 'triggerNotApplied', trigger: 'Timer' },
+    hint: { on: 'panel', target: { kind: 'applyButton' } },
+    gesture: { do: 'pressHint' },
+    text: ['Press Apply to put the change on the board.'],
+  },
+];
+
 /** One end of a belt a lesson asks for: the machine's binding and its kind byte, which names it in the words. */
 export interface BeltEnd {
   bind: BindingName;
   kind: number;
 }
 
+/** What a lesson may change in `beltStages`. Each one left out keeps lesson 1's. */
+export interface BeltStageOptions {
+  /** `free` starts the drag from the first output no belt holds yet, for a machine with more than one. */
+  pick?: 'free';
+  /** The plain drag's words. */
+  draw?: readonly PhraseToken[];
+  /** The carry-on stage's words. */
+  carryOn?: readonly PhraseToken[];
+  /** Coaching lines for the plain drag, keyed by refusal tag. */
+  drawCoach?: Readonly<Record<string, readonly PhraseToken[]>>;
+}
+
 /**
  * The four stages that draw one belt from `from`'s output to `to`'s input: arm the Belt tool, undo a belt
  * that can't be carried on, carry a short line on, and the plain drag. Their ids, conditions, rings and
- * words are lesson 1's, with each machine named by its own end.
+ * words are lesson 1's, with each machine named by its own end, unless `options` says otherwise.
  */
-export function beltStages(from: BeltEnd, to: BeltEnd): readonly Stage[] {
+export function beltStages(from: BeltEnd, to: BeltEnd, options: BeltStageOptions = {}): readonly Stage[] {
   return [
     {
       id: 'belt-tool',
@@ -81,14 +124,15 @@ export function beltStages(from: BeltEnd, to: BeltEnd): readonly Stage[] {
       when: { is: 'lineStopsShort', from: from.bind },
       hint: { on: 'port', of: to.bind, role: 'in' },
       gesture: { do: 'dragToHint' },
-      text: ['That ', { kind: BELT_KIND }, ' stops before the ', { kind: to.kind }, '. Drag from the ring at its end to the ', { kind: to.kind }, "'s input dot."],
+      text: options.carryOn ?? ['That ', { kind: BELT_KIND }, ' stops before the ', { kind: to.kind }, '. Drag from the ring at its end to the ', { kind: to.kind }, "'s input dot."],
     },
     {
       id: 'belt-draw',
       when: { is: 'beltArmed' },
-      hint: { on: 'port', of: from.bind, role: 'out', to: { of: to.bind, role: 'in' } },
+      hint: { on: 'port', of: from.bind, role: 'out', ...(options.pick === undefined ? {} : { pick: options.pick }), to: { of: to.bind, role: 'in' } },
       gesture: { do: 'dragHint' },
-      text: ['Drag from the ', { kind: from.kind }, "'s output dot to the ", { kind: to.kind }, "'s input dot."],
+      text: options.draw ?? ['Drag from the ', { kind: from.kind }, "'s output dot to the ", { kind: to.kind }, "'s input dot."],
+      ...(options.drawCoach === undefined ? {} : { coach: options.drawCoach }),
     },
   ];
 }

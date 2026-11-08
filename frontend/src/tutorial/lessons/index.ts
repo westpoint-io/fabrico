@@ -6,6 +6,7 @@
 
 import type { Lesson } from '../types';
 import { DELETE_AND_UNDO } from './deleteAndUndo';
+import { TWO_OUTPUTS } from './twoOutputs';
 import { YOUR_FIRST_LINE } from './yourFirstLine';
 
-export const LESSONS: readonly Lesson[] = [YOUR_FIRST_LINE, DELETE_AND_UNDO];
+export const LESSONS: readonly Lesson[] = [YOUR_FIRST_LINE, DELETE_AND_UNDO, TWO_OUTPUTS];

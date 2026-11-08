@@ -20,6 +20,8 @@ export const REAL_TABLES: WordTables = { shortcuts: SHORTCUTS, kinds: KIND_NAMES
 export interface PhraseSegment {
   text: string;
   strong: boolean;
+  /** Set on a code fragment, which the card shows at weight 700 and never breaks across lines. */
+  code?: true;
 }
 
 /**
@@ -30,7 +32,7 @@ export interface PhraseSegment {
 export const MAX_INSTRUCTION_CHARS = 141;
 export const MAX_NOTE_CHARS = 94;
 
-function wordOf(token: Exclude<PhraseToken, string>, tables: WordTables): string {
+function wordOf(token: Exclude<PhraseToken, string | { code: string }>, tables: WordTables): string {
   if ('kind' in token) {
     if (!Object.hasOwn(tables.kinds, token.kind)) {
       throw new Error(`lesson text names kind ${token.kind}, and the kind table has no such entry`);
@@ -46,9 +48,11 @@ function wordOf(token: Exclude<PhraseToken, string>, tables: WordTables): string
 }
 
 export function phrase(tokens: readonly PhraseToken[], tables: WordTables = REAL_TABLES): PhraseSegment[] {
-  return tokens.map((token) =>
-    typeof token === 'string' ? { text: token, strong: false } : { text: wordOf(token, tables), strong: true },
-  );
+  return tokens.map((token) => {
+    if (typeof token === 'string') return { text: token, strong: false };
+    if ('code' in token) return { text: token.code, strong: true, code: true };
+    return { text: wordOf(token, tables), strong: true };
+  });
 }
 
 export function phrasePlain(tokens: readonly PhraseToken[], tables: WordTables = REAL_TABLES): string {
@@ -57,7 +61,7 @@ export function phrasePlain(tokens: readonly PhraseToken[], tables: WordTables =
     .join('');
 }
 
-/** Stands in for a table token in the audit: not a letter, a digit or a space. */
+/** Stands in for a table token or a code fragment in the audit: not a letter, a digit or a space. */
 const TOKEN_MARKER = '\u0001';
 const LETTER_OR_DIGIT = /[A-Za-z0-9]/;
 
@@ -88,7 +92,8 @@ export function auditLessonWords(lessons: readonly Lesson[], tables: WordTables 
   const patterns = words.map((word) => ({ word, pattern: labelPattern(word) }));
   const findings: string[] = [];
   const audit = (where: string, tokens: readonly PhraseToken[]): void => {
-    // One string, so a lone `.` token after a machine name reads as the end of its sentence.
+    // One string, so a lone `.` token after a machine name reads as the end of its sentence. A code
+    // fragment is the program's own text, so its words aren't lesson words and aren't audited.
     const joined = tokens.map((token) => (typeof token === 'string' ? token : TOKEN_MARKER)).join('');
     for (const { word, pattern } of patterns) {
       if (pattern.test(joined)) findings.push(`${where}: "${word}" is typed as text, so a rename can't reach it`);

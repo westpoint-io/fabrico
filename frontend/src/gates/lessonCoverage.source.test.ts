@@ -240,8 +240,8 @@ describe('every lesson has a walk', () => {
     expect(Object.keys(LESSON_WALKS).length).toBe(LESSONS.length);
   });
 
-  it('lets the runner drive the six gestures', () => {
-    expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint dragToHint key none pressHint watch');
+  it('lets the runner drive the seven gestures', () => {
+    expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint dragToHint key none pressHint typeCode watch');
   });
 
   it("holds the app's own sentence for the refusal the walk reads", () => {
@@ -283,7 +283,7 @@ describe('every lesson has a walk', () => {
     });
 
     it('a file under lessons/ that index.ts imports and leaves out of LESSONS', () => {
-      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, DELETE_AND_UNDO]', '[DELETE_AND_UNDO]');
+      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, DELETE_AND_UNDO, TWO_OUTPUTS]', '[DELETE_AND_UNDO, TWO_OUTPUTS]');
       expect(indexSource, 'the substitution landed').not.toBe(REAL.indexSource);
       expect(audit({ indexSource })).toMatch(/yourFirstLine\.ts: lessons\/index\.ts imports this file and leaves it out/);
     });

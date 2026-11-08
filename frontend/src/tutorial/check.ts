@@ -85,17 +85,38 @@ export function beltJoining(board: Pick<BoardFacts, 'belts'>, a: number, b: numb
   return undefined;
 }
 
+/** No belt to leave out. */
+const NO_BELTS: ReadonlySet<number> = new Set();
+
+/**
+ * The handles of the belts the lesson has bound. The line helpers leave these out, so a Factory's second
+ * line is read on its own: its first output's belt already ends in a Sink, and read as this line's last
+ * piece it would make the new line look stuck.
+ */
+export function boundBeltIds(bindings: TutorialState['bindings']): ReadonlySet<number> {
+  const ids = BINDING_NAMES.filter((name) => BELT_ENDS[name] !== undefined).flatMap((name) => {
+    const bound = bindings[name];
+    return bound === undefined ? [] : [bound.id];
+  });
+  return ids.length === 0 ? NO_BELTS : new Set(ids);
+}
+
+/** The board's belts without the ones in `skip`. */
+function without<B extends Pick<BoardFacts, 'belts'>>(board: B, skip: ReadonlySet<number>): B {
+  return skip.size === 0 ? board : { ...board, belts: board.belts.filter((belt) => !skip.has(belt.id)) };
+}
+
 /**
  * The cell a line leaving `a` carries on from: the one past the Head of its last piece, or null when
  * there's no such end. That's no belt leaving `a`, a line that ends in a machine, or a single tile (no
  * direction, so no Head a press can find). The app rings this cell while the Belt tool is armed, and a
- * press there joins the new piece on.
+ * press there joins the new piece on. Belts in `skip` aren't pieces of this line.
  *
  * It doesn't ask whether the cell is free, because a piece drawn into the Sink reaches the board before
  * its dock does, with this cell on the Sink. `lineStuck` tells that moment from a real block.
  */
-export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number): readonly [number, number] | null {
-  const belt = lastPiece(board, a);
+export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number, skip: ReadonlySet<number> = NO_BELTS): readonly [number, number] | null {
+  const belt = lastPiece(without(board, skip), a);
   if (belt === undefined || belt.docks.some((d) => d.end === 'Head')) return null;
   const port = beltEndPort(belt.tiles, 'Head');
   return port === null ? null : doorstepCell(port);
@@ -139,18 +160,27 @@ function onDoorstep(board: Pick<BoardFacts, 'nodes'>, node: number, role: number
  * dock there, a belt into `b` starting where its Tail would dock is about to join up, and a belt with no
  * docks is about to get them. Once it's false, no dock is coming and each of them is stuck.
  */
-export function lineStuck(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number, editsInFlight: boolean): boolean {
-  if (beltJoining(board, a, b) !== undefined) return false;
-  if (!editsInFlight && looseBeltInTheWay(board, a, b)) return true;
-  const door = lineDoorstep(board, a);
-  const into = board.belts.find((belt) => belt.docks.some((d) => d.end === 'Head' && d.node === b));
+export function lineStuck(
+  board: Pick<BoardFacts, 'belts' | 'nodes'>,
+  a: number,
+  b: number,
+  editsInFlight: boolean,
+  skip: ReadonlySet<number> = NO_BELTS,
+): boolean {
+  // The line's own belts, apart from any an earlier step bound. A cell taken by one of those is still
+  // taken, so `cellBlocked` reads the whole board.
+  const line = without(board, skip);
+  if (beltJoining(line, a, b) !== undefined) return false;
+  if (!editsInFlight && looseBeltInTheWay(line, a, b)) return true;
+  const door = lineDoorstep(line, a);
+  const into = line.belts.find((belt) => belt.docks.some((d) => d.end === 'Head' && d.node === b));
   if (into !== undefined) {
     const start = into.tiles[0];
     if (start === undefined || into.docks.some((d) => d.end === 'Tail') || !editsInFlight) return true;
     const atDoor = door !== null && door[0] === start.cell_x && door[1] === start.cell_y;
     return !atDoor && !onDoorstep(board, a, PORT_ROLE.OUT, start);
   }
-  const last = lastPiece(board, a);
+  const last = lastPiece(line, a);
   if (last === undefined) return false;
   if (last.docks.some((d) => d.end === 'Head')) return true;
   const end = last.tiles[last.tiles.length - 1];
@@ -180,9 +210,14 @@ function cellBlocked(board: Pick<BoardFacts, 'belts' | 'nodes'>, [x, y]: readonl
  * at a time, the docks first, so one press leaves the belt where it was with nothing holding it. A good
  * draw looks the same until its docks arrive, so `lineStuck` only reads this with no edit in flight.
  */
-export function looseBeltInTheWay(board: Pick<BoardFacts, 'belts' | 'nodes'>, a: number, b: number): boolean {
-  const door = lineDoorstep(board, a);
-  return board.belts.some(
+export function looseBeltInTheWay(
+  board: Pick<BoardFacts, 'belts' | 'nodes'>,
+  a: number,
+  b: number,
+  skip: ReadonlySet<number> = NO_BELTS,
+): boolean {
+  const door = lineDoorstep(board, a, skip);
+  return without(board, skip).belts.some(
     (belt) =>
       belt.docks.length === 0 &&
       belt.tiles.some(
@@ -208,6 +243,31 @@ export function beltKey(a: BoundNode, b: BoundNode): string {
 export function lowestSlotInto(board: BoardFacts, node: number): number | null {
   const belt = board.belts.find((b) => b.docks.some((d) => d.end === 'Head' && d.node === node));
   return belt === undefined ? null : (belt.occupiedSlots[0] ?? Number.POSITIVE_INFINITY);
+}
+
+/** How many ports with role Out the bound machine holds, found by its `nodeKey`. 0 when it isn't on the board. */
+export function outputsOf(board: Pick<BoardFacts, 'nodes'>, bound: BoundNode | undefined): number {
+  const node = bound === undefined ? undefined : board.nodes.find((n) => nodeKey(n) === bound.nodeKey);
+  return node === undefined ? 0 : node.ports.filter((p) => p.role === PORT_ROLE.OUT).length;
+}
+
+/** The Sinks a check watches, each with a lowest slot of its own. Empty for a check that watches none. */
+export function watchedNames(check: Check | undefined): readonly BindingName[] {
+  if (check?.is === 'itemArrived') return [check.at];
+  if (check?.is === 'itemsArriveAtBoth') return check.at;
+  return [];
+}
+
+/**
+ * Has the lowest slot into the machine bound as `name` risen on this frame, against the read the watch
+ * took last frame? Never across a keyframe, which re-mints handles and would look like a rise.
+ */
+export function slotRoseNow(board: BoardFacts, baseline: StepBaseline, bindings: TutorialState['bindings'], name: BindingName): boolean {
+  const bound = bindings[name];
+  const last = baseline.lowestSlots[name];
+  if (bound === undefined || last === undefined || last === null || board.generation !== baseline.generation) return false;
+  const low = lowestSlotInto(board, bound.id);
+  return low !== null && low > last;
 }
 
 /** The belt joining the two machines `BELT_ENDS` names for this binding, or undefined with no such belt or an end unbound. */
@@ -244,12 +304,14 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
     }
     case 'tickRose':
       return board.tick > baseline.tick ? DONE : NOT_DONE;
-    case 'itemArrived': {
-      const bound = bindings[check.at];
-      if (bound === undefined || baseline.lowestSlot === null || board.generation !== baseline.generation) return NOT_DONE;
-      const low = lowestSlotInto(board, bound.id);
-      return low !== null && low > baseline.lowestSlot ? DONE : NOT_DONE;
-    }
+    case 'itemArrived':
+      return slotRoseNow(board, baseline, bindings, check.at) ? DONE : NOT_DONE;
+    // Each Sink latches on its own, so the two rises can come on different frames. The code isn't read:
+    // any code that sends items down both belts counts.
+    case 'itemsArriveAtBoth':
+      return check.at.every((name) => baseline.rose.includes(name) || slotRoseNow(board, baseline, bindings, name)) ? DONE : NOT_DONE;
+    case 'portAdded':
+      return outputsOf(board, bindings[check.of]) >= check.outs ? DONE : NOT_DONE;
     // A Delete leaves the generation where it was and an Undo raises it, so only a Delete finishes these.
     case 'nodeGone': {
       const bound = bindings[check.of];

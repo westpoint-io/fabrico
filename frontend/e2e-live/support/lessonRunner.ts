@@ -6,9 +6,9 @@ import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/Tutorial
 import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
 import { NUB_RING_R, NUB_RING_STROKE, PORT_ROLE, doorstepCell } from '../../src/protocol/ports';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
-import { BELT_ENDS, beltJoining, lineDoorstep, nodeKey } from '../../src/tutorial/check';
+import { BELT_ENDS, beltJoining, lineDoorstep, nodeKey, watchedNames } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
-import type { Lesson, Stage, Step } from '../../src/tutorial/types';
+import type { BindingName, Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
 import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
 import {
@@ -615,29 +615,129 @@ interface DotSamples {
   lastModelTick: number;
 }
 
+/** One watched Sink and the belt docked at its Head, each with the name the lesson binds it by. */
+interface WatchedPair {
+  sinkName: string;
+  beltName: string;
+  sink: { id: number; cells: ReadonlyArray<readonly number[]> };
+  tiles: ReadonlyArray<readonly [number, number]>;
+  /** The belt's tile touching the Sink. */
+  lastTile: readonly [number, number];
+}
+
+/** The handles of the belts the probe holds bound, for the line helpers to leave out. */
+function boundBeltsOf(bound: Readonly<Record<string, number>>): ReadonlySet<number> {
+  return new Set(Object.entries(bound).flatMap(([name, id]) => (BELT_ENDS[name as BindingName] === undefined ? [] : [id])));
+}
+
 /**
- * The walk's read of what a person watches at the end of the lesson, off what's drawn. The model can
- * claim items forever while the item layer draws nothing, so this reads the layer, then the screen,
- * then the render loop. An item can be on the Sink's tile for a few frames only, so the first read
- * runs on animation frames in the page rather than from polls that could land between them.
+ * The row a capture across `columns` reads as empty: the first of the rows below and above the belts,
+ * nearest first, with no belt tile and no machine cell in those columns, read from the model.
  */
-export async function expectDotsRideBelt(page: Page, ctx: { label: string }): Promise<void> {
+function controlRow(
+  scene: { nodes: ReadonlyArray<{ cells: ReadonlyArray<readonly number[]> }>; belts: ReadonlyArray<{ tiles: ReadonlyArray<{ cell_x: number; cell_y: number }> }> },
+  rows: readonly number[],
+  columns: readonly [number, number],
+): number | null {
+  const [left, right] = columns;
+  const across = (x: number): boolean => x >= left && x <= right;
+  const empty = (y: number): boolean =>
+    !scene.nodes.some((n) => n.cells.some((c) => c[1] === y && across(c[0] as number))) &&
+    !scene.belts.some((b) => b.tiles.some((t) => t.cell_y === y && across(t.cell_x)));
+  const low = Math.min(...rows);
+  const high = Math.max(...rows);
+  for (let d = 1; d <= 3; d++) {
+    if (empty(high + d)) return high + d;
+    if (empty(low - d)) return low - d;
+  }
+  return null;
+}
+
+/** Dot ink pixels in a capture, and the device pixel ratio it was taken at. */
+async function dotInkIn(page: Page, clip: { x: number; y: number; width: number; height: number }): Promise<{ ink: number; dpr: number }> {
+  const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
+  let ink = 0;
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) if (isDotInk(img.data, (y * img.width + x) * 4)) ink += 1;
+  }
+  return { ink, dpr: img.width / clip.width };
+}
+
+/**
+ * The walk's read of what a person watches at the end of a lesson, off what's drawn: for each Sink the
+ * step's check watches, the dots on the belt docked at its Head, one pair after the other, each message
+ * naming that belt's binding. The model can claim items forever while the item layer draws nothing, so
+ * this reads the layer, then the screen, then the render loop. An item can be on the Sink's tile for a
+ * few frames only, so the layer read runs on animation frames in the page rather than from polls that
+ * could land between them.
+ */
+export async function expectDotsRideBelt(page: Page, ctx: { label: string; sinks: readonly string[] }): Promise<void> {
   const { label } = ctx;
   const probe = await readProbe(page);
   const scene = await readScene(page);
-  const belt = scene.belts.find((b) => b.id === probe.bound.belt);
-  const sink = scene.nodes.find((n) => n.id === probe.bound.sink);
-  if (belt === undefined || sink === undefined) {
-    throw new Error(`${label}: the lesson's bound belt and Sink aren't both on the board (bound: ${JSON.stringify(probe.bound)})`);
+  if (ctx.sinks.length === 0) throw new Error(`${label}: the step's check watches no Sink, so there are no dots to read`);
+  const pairs: WatchedPair[] = ctx.sinks.map((sinkName) => {
+    const sink = scene.nodes.find((n) => n.id === probe.bound[sinkName]);
+    const belt = sink === undefined ? undefined : scene.belts.find((b) => b.docks.some((d) => d.end === 'Head' && d.node === sink.id));
+    if (sink === undefined || belt === undefined) {
+      throw new Error(`${label}: the watched ${sinkName} and a belt into it aren't both on the board (bound: ${JSON.stringify(probe.bound)})`);
+    }
+    const beltName =
+      Object.entries(probe.bound).find(([name, id]) => id === belt.id && BELT_ENDS[name as BindingName] !== undefined)?.[0] ?? `belt ${belt.id}`;
+    const tiles = belt.tiles.map((t) => [t.cell_x, t.cell_y] as const);
+    const lastTile = tiles.find(([x, y]) => sink.cells.some((c) => Math.abs((c[0] as number) - x) + Math.abs((c[1] as number) - y) === 1));
+    if (lastTile === undefined) throw new Error(`${label}: no tile of the ${beltName} touches the ${sinkName} (tiles: ${JSON.stringify(tiles)})`);
+    return { sinkName, beltName, sink, tiles, lastTile };
+  });
+  for (const pair of pairs) {
+    const [sinkX, sinkY] = pair.sink.cells[0] as readonly [number, number];
+    await expectOnTheBoard(page, label, `the ${pair.sinkName} the user is told to watch is`, [await screenCellCentre(page, sinkX, sinkY)]);
   }
-  const [sinkX, sinkY] = sink.cells[0] as readonly [number, number];
-  await expectOnTheBoard(page, label, 'the Sink the user is told to watch is', [await screenCellCentre(page, sinkX, sinkY)]);
-  const tiles = belt.tiles.map((t) => [t.cell_x, t.cell_y] as const);
-  const lastTile = tiles.find(([x, y]) => sink.cells.some((c) => Math.abs((c[0] as number) - x) + Math.abs((c[1] as number) - y) === 1));
-  if (lastTile === undefined) {
-    throw new Error(`${label}: no tile of the belt touches the Sink (tiles: ${JSON.stringify(tiles)})`);
+  // Each belt on one row, and a control row with nothing on it across all of their columns, read from the
+  // model first. Ink there means the read is counting something that isn't a dot.
+  for (const pair of pairs) {
+    const rows = new Set(pair.tiles.map(([, y]) => y));
+    expect(rows.size, `${label}: the walk reads a belt on one row, and the ${pair.beltName} sits on ${rows.size}`).toBe(1);
+  }
+  const allXs = pairs.flatMap((p) => p.tiles.map(([x]) => x));
+  const columns = [Math.min(...allXs), Math.max(...allXs)] as const;
+  const control = controlRow(scene, pairs.map((p) => p.lastTile[1]), columns);
+  if (control === null) throw new Error(`${label}: no row near the watched belts is empty across columns ${columns[0]} to ${columns[1]}, so there is no control strip`);
+
+  for (const pair of pairs) {
+    const what = `${label} ${pair.beltName}`;
+    await expectDotsOnOneBelt(page, what, pair);
+    const cam = await cameraOf(page);
+    const size = CELL * cam.scale;
+    const xs = pair.tiles.map(([x]) => x);
+    const rowClip = (y: number) => ({
+      x: Math.min(...xs) * size + cam.x,
+      y: y * size + cam.y,
+      width: (Math.max(...xs) - Math.min(...xs) + 1) * size,
+      height: size,
+    });
+    const strip = { x: columns[0] * size + cam.x, y: control * size + cam.y, width: (columns[1] - columns[0] + 1) * size, height: size };
+    await expect
+      .poll(
+        async () => {
+          const below = await dotInkIn(page, strip);
+          expect(below.ink, `${what}: the control row ${control}, empty on the board, holds no dot ink`).toBe(0);
+          const row = await dotInkIn(page, rowClip(pair.lastTile[1]));
+          return row.ink >= DOT_INK_MIN * row.dpr * row.dpr ? 'ink' : `${row.ink} ink pixels on the ${pair.beltName}'s row`;
+        },
+        {
+          message: `${what}: a capture of the ${pair.beltName}'s row holds dot ink`,
+          timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), `the dots read on the ${pair.beltName}: ink in a capture`),
+        },
+      )
+      .toBe('ink');
   }
 
+  await expectRenderLoopAlive(page, `at ${label}`);
+}
+
+/** The item layer's dots on one belt: three drawn ticks, a move, and a dot on the tile touching its Sink. */
+async function expectDotsOnOneBelt(page: Page, what: string, pair: WatchedPair): Promise<void> {
   // The layer as plotted, on every drawn frame until a read below stops it.
   await page.evaluate(
     ([cell, cells, last]) => {
@@ -687,7 +787,7 @@ export async function expectDotsRideBelt(page: Page, ctx: { label: string }): Pr
       };
       requestAnimationFrame(sample);
     },
-    [CELL, tiles, lastTile] as const,
+    [CELL, pair.tiles, pair.lastTile] as const,
   );
   const readDots = (): Promise<DotSamples> =>
     page.evaluate(() => (window as unknown as { __lessonDots: DotSamples }).__lessonDots);
@@ -699,11 +799,11 @@ export async function expectDotsRideBelt(page: Page, ctx: { label: string }): Pr
         const riding = d.drawnTicks.length >= 3 && d.moves >= 1 && d.onLastTile;
         return riding
           ? 'riding'
-          : `drawn ticks ${d.drawnTicks.length}, moves ${d.moves}, dot on the Sink's tile ${d.onLastTile}, model tick ${d.firstModelTick} to ${d.lastModelTick}`;
+          : `drawn ticks ${d.drawnTicks.length}, moves ${d.moves}, dot on the ${pair.sinkName}'s tile ${d.onLastTile}, model tick ${d.firstModelTick} to ${d.lastModelTick}`;
       },
       {
-        message: `${label}: item dots ride the belt into the Sink, as the item layer plotted them`,
-        timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), 'the dots read: three drawn ticks and a dot on the last tile'),
+        message: `${what}: item dots ride the ${pair.beltName} into the ${pair.sinkName}, as the item layer plotted them`,
+        timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), `the dots read on the ${pair.beltName}: three drawn ticks and a dot on the last tile`),
       },
     )
     .toBe('riding');
@@ -712,47 +812,58 @@ export async function expectDotsRideBelt(page: Page, ctx: { label: string }): Pr
     const w = window as unknown as { __lessonDotsRun?: number };
     w.__lessonDotsRun = (w.__lessonDotsRun ?? 0) + 1;
   });
-  console.log(`MEASURE dots drawn-ticks=${dots.drawnTicks.length} positions=${dots.positions.length}`);
+  console.log(`MEASURE dots ${pair.beltName} drawn-ticks=${dots.drawnTicks.length} positions=${dots.positions.length}`);
+}
 
-  // The screen. The row below the belt holds no dot, so ink there means the read is counting something
-  // that isn't a dot, and a count on the belt's row would prove nothing.
-  const rows = new Set(tiles.map(([, y]) => y));
-  expect(rows.size, `${label}: the walk reads a belt on one row, and this one sits on ${rows.size}`).toBe(1);
-  const xs = tiles.map(([x]) => x);
-  const cam = await cameraOf(page);
-  const size = CELL * cam.scale;
-  const clip = {
-    x: Math.min(...xs) * size + cam.x,
-    y: (lastTile[1] as number) * size + cam.y,
-    width: (Math.max(...xs) - Math.min(...xs) + 1) * size,
-    height: 2 * size,
-  };
-  await expect
-    .poll(
-      async () => {
-        const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
-        const dpr = img.width / clip.width;
-        const split = Math.round(img.height / 2);
-        let onRow = 0;
-        let below = 0;
-        for (let y = 0; y < img.height; y++) {
-          for (let x = 0; x < img.width; x++) {
-            if (!isDotInk(img.data, (y * img.width + x) * 4)) continue;
-            if (y < split) onRow += 1;
-            else below += 1;
-          }
+/**
+ * Click just after `after` on the line the ring marks, and type `insert` there. The point comes from a
+ * DOM Range over the line's own text, so it's where a person reading the line would click, and it must
+ * sit inside the ring. The text goes in with `keyboard.insertText`, the paste-shaped insertion: typed
+ * Enter keys re-indent in CodeMirror (`defaultKeymap` binds Enter to `insertNewlineAndIndent`, see
+ * `typeFactorySource` in oracle.ts), so a typed line can't be relied on to land as written.
+ */
+async function walkTypeCode(page: Page, label: string, ring: HintRect, gesture: { after: string; insert: string }): Promise<void> {
+  const at = await page.evaluate(
+    ([r, after]) => {
+      const inRing = (el: Element): boolean => {
+        const b = el.getBoundingClientRect();
+        return b.left < r.x + r.width && b.right > r.x && b.top < r.y + r.height && b.bottom > r.y;
+      };
+      const line = [...document.querySelectorAll('.cm-line')].find((l) => (l.textContent ?? '').includes(after) && inRing(l));
+      if (line === undefined) return null;
+      const end = (line.textContent ?? '').indexOf(after) + after.length;
+      // The text node and offset of the last character of `after`.
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const length = node.textContent?.length ?? 0;
+        if (seen + length >= end) {
+          const range = document.createRange();
+          range.setStart(node, end - seen - 1);
+          range.setEnd(node, end - seen);
+          const box = range.getBoundingClientRect();
+          return { x: box.right, y: box.top + box.height / 2 };
         }
-        expect(below, `${label}: the row below the belt holds no dot ink`).toBe(0);
-        return onRow >= DOT_INK_MIN * dpr * dpr ? 'ink' : `${onRow} ink pixels on the belt's row`;
-      },
-      {
-        message: `${label}: a capture of the belt's row holds dot ink`,
-        timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), 'the dots read: ink in a capture'),
-      },
-    )
-    .toBe('ink');
-
-  await expectRenderLoopAlive(page, `at ${label}`);
+        seen += length;
+      }
+      return null;
+    },
+    [ring, gesture.after] as const,
+  );
+  if (at === null) throw new Error(`${label}: no line inside the ring holds ${JSON.stringify(gesture.after)}`);
+  // Two pixels past the character's right edge, which CodeMirror reads as the gap after it.
+  const point = { x: at.x + 2, y: at.y };
+  const inside = point.x >= ring.x && point.x <= ring.x + ring.width && point.y >= ring.y && point.y <= ring.y + ring.height;
+  expect(inside, `${label}: the point just after ${gesture.after} (${point.x},${point.y}) lies inside the ring (${ring.x},${ring.y} ${ring.width}x${ring.height})`).toBe(true);
+  await pressPointByHand(page, point);
+  await page.keyboard.insertText(gesture.insert);
+  const text = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.cm-line'))
+      .map((l) => (l.textContent ?? '').replace(/​/g, ''))
+      .join('\n'),
+  );
+  expect(text, `${label}: the editor holds the typed text right after ${gesture.after}`).toContain(`${gesture.after}${gesture.insert}`);
+  console.log(`TYPED ${label}: ${JSON.stringify(gesture.insert)} after ${JSON.stringify(gesture.after)}`);
 }
 
 /** The toolbar's tick counter, as a person reads it. */
@@ -862,17 +973,27 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   const lengthBefore = (await readRecord(page)).length;
   const before = await readScene(page);
   const boundId = probe.bound[press.of];
-  const anchor = before.nodes.find((n) => n.id === boundId)?.cells[0] as readonly [number, number] | undefined;
-  if (anchor === undefined) {
+  const cells = before.nodes.find((n) => n.id === boundId)?.cells;
+  if (cells === undefined || cells.length === 0) {
     throw new Error(`${label}: the bound ${press.of} (${String(boundId)}) isn't on the board`);
   }
-  const [cx, cy] = anchor;
-  const centre = await screenCellCentre(page, cx, cy);
-  const size = CELL * (await cameraOf(page)).scale;
-  const point = pointInRect(
-    { x: centre.x - size / 2, y: centre.y - size / 2, width: size, height: size, shape: 'square' },
-    fromOffset(state.walk.pressOffset),
-  );
+  // Anywhere in the machine's whole footprint, from its centre, so a 3 by 3 machine is pressed off its
+  // middle cell. On a 1 by 1 machine this is the cell itself, as it always was.
+  const xs = cells.map((c) => c[0] as number);
+  const ys = cells.map((c) => c[1] as number);
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const footprint: HintRect = {
+    x: Math.min(...xs) * size + cam.x,
+    y: Math.min(...ys) * size + cam.y,
+    width: (Math.max(...xs) - Math.min(...xs) + 1) * size,
+    height: (Math.max(...ys) - Math.min(...ys) + 1) * size,
+    shape: 'square',
+  };
+  const point = pointInRect(footprint, fromOffset(state.walk.refusedOffset ?? state.walk.pressOffset));
+  const cx = Math.floor((point.x - cam.x) / size);
+  const cy = Math.floor((point.y - cam.y) / size);
+  console.log(`REFUSAL-PRESS ${label}: cell (${cx},${cy}) of the ${press.of}'s ${footprint.width / size}x${footprint.height / size} footprint`);
   await expectOnTheBoard(page, label, 'the press is', [point]);
 
   expect(((await page.locator('#fab-refusal').textContent()) ?? '').trim(), `${label}: no refusal is showing before the press`).toBe('');
@@ -915,7 +1036,7 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   await page.waitForTimeout(addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES * 2), `${label}: the second-flash window`));
   const flashes = await rejectFlashCellsSeen(page);
   await stopRejectFlashLatch(page);
-  expect(flashes, `${label}: one flash, on the cell of the bound ${press.of}`).toEqual([{ cx, cy }]);
+  expect(flashes, `${label}: one flash, on the cell of the bound ${press.of} under the press`).toEqual([{ cx, cy }]);
 
   const after = await readProbe(page);
   expect(after.stepIndex, `${label}: the refusal moved the step on`).toBe(stepIndex);
@@ -964,7 +1085,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     // dots never read. The board keeps running after that delivery and the Timer keeps making items,
     // so the dots are still there to read, and a fast delivery can't skip the read.
     if (watchStage !== undefined && !dotsRead && (left || entry?.stageId === watchStage.id)) {
-      await expectDotsRideBelt(page, { label: stepLabel(lesson, stepIndex) });
+      await expectDotsRideBelt(page, { label: stepLabel(lesson, stepIndex), sinks: watchedNames(step.done) });
       dotsRead = true;
       actedOn.add(stageKey(stepIndex, watchStage.id));
       continue;
@@ -1026,7 +1147,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const end = pointInRect(walk.reverseDrags === true ? rects.hint : rects.hintTo, fromOffset(walk.dragTo));
         if (walk.reverseDrags === true) console.log(`REVERSED ${lesson.id} step ${stepIndex + 1}`);
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
-        beltClip = await middleTileClip(page, label, stage);
+        beltClip = await middleTileClip(page, label, stage, rects.hint);
         beltBefore = await captureWithGhostGone(page, beltClip.clip);
         await dragByHand(page, start, end);
         actedOn.add(stageKey(stepIndex, stage.id));
@@ -1038,7 +1159,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint]);
         const { bound } = await readProbe(page);
         const from = stage.when.is === 'lineStopsShort' ? bound[stage.when.from] : undefined;
-        const cell = from === undefined ? null : lineDoorstep(await readScene(page), from);
+        const cell = from === undefined ? null : lineDoorstep(await readScene(page), from, boundBeltsOf(bound));
         if (cell === null) throw new Error(`${label}: the board holds no line end to carry on from`);
         await expectBeltEndRingPainted(page, label, cell);
         const at = await screenCellCentre(page, cell[0], cell[1]);
@@ -1046,6 +1167,13 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const end = pointInRect(rects.hint, fromOffset(walk.dragTo));
         await expectOnTheBoard(page, label, 'both ends of the drag are', [start, end]);
         await dragByHand(page, start, end);
+        actedOn.add(stageKey(stepIndex, stage.id));
+      }
+    } else if (gesture.do === 'typeCode') {
+      const rects = await hintsForStage(page, lesson, stepIndex, stage);
+      if (rects !== null) {
+        await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint]);
+        await walkTypeCode(page, label, rects.hint, gesture);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
     } else if (gesture.do === 'key') {
@@ -1242,22 +1370,25 @@ async function expectTargetGone(page: Page, label: string, target: DeleteTarget)
 /**
  * The screen clip inside the cell half way between the drag's two doorsteps: the cell outside its out
  * port and the cell outside its in port. A belt drawn between them runs over this cell whichever
- * machines the stage names.
+ * machines the stage names. The out end is the cell under the press ring's centre, the Out square's own
+ * doorstep, so a drag from a machine's free output reads that output's row.
  */
 async function middleTileClip(
   page: Page,
   label: string,
   stage: Stage,
+  outRing: HintRect,
 ): Promise<{ cell: readonly [number, number]; clip: { x: number; y: number; width: number; height: number } }> {
   const hint = stage.hint;
   if (hint?.on !== 'port' || hint.to === undefined) throw new Error(`${label}: the drag stage names no pair of ports`);
   const { bound } = await readProbe(page);
   const nodes = (await readScene(page)).nodes;
-  const portOf = (of: string, role: number) => nodes.find((n) => n.id === bound[of])?.ports.find((p) => p.role === role);
-  const out = portOf(hint.of, PORT_ROLE.OUT);
-  const into = portOf(hint.to.of, PORT_ROLE.IN);
-  if (out === undefined || into === undefined) throw new Error(`${label}: the bound machines aren't both on the board with the ports the drag names`);
-  const [ox, oy] = doorstepCell(out);
+  const into = nodes.find((n) => n.id === bound[hint.to!.of])?.ports.find((p) => p.role === PORT_ROLE.IN);
+  if (into === undefined) throw new Error(`${label}: the bound ${hint.to.of} isn't on the board with the input the drag names`);
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const ox = Math.floor((outRing.x + outRing.width / 2 - cam.x) / size);
+  const oy = Math.floor((outRing.y + outRing.height / 2 - cam.y) / size);
   const [ix, iy] = doorstepCell(into);
   const cell = [Math.floor((ox + ix) / 2), Math.floor((oy + iy) / 2)] as const;
   return { cell, clip: await cellClipOf(page, cell) };
@@ -1292,6 +1423,7 @@ async function finishWalk(page: Page, lesson: Lesson, state: WalkState): Promise
  * before that step, so a test can do it by hand and carry on with `continueLesson`.
  */
 export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: string } = {}): Promise<void> {
+  const began = Date.now();
   const walk: LessonWalk | undefined = LESSON_WALKS[lesson.id];
   if (walk === undefined) throw new Error(`${lesson.id}: LESSON_WALKS has no entry for this lesson, so the walk has no offsets to press with`);
   await latchStepRecord(page);
@@ -1316,8 +1448,12 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
   };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
-  if (opts.until === undefined) await finishWalk(page, lesson, state);
-  else checkRecord(lesson, await readRecord(page), state);
+  if (opts.until === undefined) {
+    await finishWalk(page, lesson, state);
+    console.log(`MEASURE lesson-ms ${lesson.id}=${Date.now() - began}`);
+  } else {
+    checkRecord(lesson, await readRecord(page), state);
+  }
 }
 
 /**

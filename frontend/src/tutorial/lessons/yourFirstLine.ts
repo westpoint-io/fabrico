@@ -3,7 +3,7 @@
 // The walk test plays this same data, so a stage added here is walked without touching the test.
 // Machine and key names are tokens, never typed words, and `auditLessonWords` fails on a typed one.
 
-import { BELT_KIND, BOARD_PAUSED, PLACE_ON_THE_FLOOR, SINK_KIND, SOURCE_KIND, TOOL_DOWN, beltStages } from '../commonStages';
+import { BELT_KIND, BOARD_PAUSED, PLACE_ON_THE_FLOOR, SET_TIMER_STAGES, SINK_KIND, SOURCE_KIND, beltStages } from '../commonStages';
 import type { Lesson } from '../types';
 
 export const YOUR_FIRST_LINE: Lesson = {
@@ -61,33 +61,7 @@ export const YOUR_FIRST_LINE: Lesson = {
     },
     {
       id: 'set-timer',
-      // Four stages, because machine tools stay armed after a place, a press on the Source with a tool
-      // still armed sends another Place, and a trigger change does nothing until Apply.
-      stages: [
-        BOARD_PAUSED,
-        TOOL_DOWN,
-        {
-          id: 'select-source',
-          when: { is: 'notSelected', of: 'source' },
-          hint: { on: 'machine', of: 'source' },
-          gesture: { do: 'pressHint' },
-          text: ['A new ', { kind: SOURCE_KIND }, ' waits for a web request, so it makes nothing yet. Click it to select it.'],
-        },
-        {
-          id: 'press-timer',
-          when: { is: 'triggerNotPressed', trigger: 'Timer' },
-          hint: { on: 'panel', target: { kind: 'segment', group: 'Trigger', label: 'Timer' } },
-          gesture: { do: 'pressHint' },
-          text: ['Under Trigger, press Timer so it makes items on its own.'],
-        },
-        {
-          id: 'apply-timer',
-          when: { is: 'triggerNotApplied', trigger: 'Timer' },
-          hint: { on: 'panel', target: { kind: 'applyButton' } },
-          gesture: { do: 'pressHint' },
-          text: ['Press Apply to put the change on the board.'],
-        },
-      ],
+      stages: [BOARD_PAUSED, ...SET_TIMER_STAGES],
       done: { is: 'triggerApplied', of: 'source', trigger: 'Timer' },
     },
     {
