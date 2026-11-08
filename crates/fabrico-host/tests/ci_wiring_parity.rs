@@ -2095,6 +2095,126 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
     );
 }
 
+/// The mock e2e suite's Playwright config, the one `npm run test:e2e` runs in the `e2e` job.
+const MOCK_CONFIG: &str = include_str!("../../../frontend/playwright.config.ts");
+/// The warm-up the mock config runs before any test. Embedded so that moving or deleting it is a
+/// build failure here.
+const MOCK_WARMUP: &str = include_str!("../../../frontend/e2e/support/warmVite.ts");
+/// The config line that runs the warm-up, whole.
+const MOCK_GLOBAL_SETUP: &str = "globalSetup: './e2e/support/warmVite.ts',";
+/// What the warm-up waits for: the palette's Source button, the element the specs' own
+/// `waitForChrome` waits for, so the app has rendered and Vite has compiled it.
+const MOCK_WARMUP_WAIT: &str = "await page.getByRole('button', { name: /Source/ }).waitFor(";
+
+/// Everything wrong with how the mock suite's Playwright config is set up. Empty means right.
+fn mock_config_wrong(config: &str, warmup: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let code: Vec<&str> = config
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//"))
+        .collect();
+
+    // The warm-up runs before the first test. A second `globalSetup` key would override the first,
+    // so every line that sets one has to be this line, once.
+    let setups: Vec<&str> = code
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("globalSetup"))
+        .collect();
+    if setups != [MOCK_GLOBAL_SETUP] {
+        wrong.push(format!(
+            "frontend/playwright.config.ts sets globalSetup with {setups:?}, expected exactly \
+             [\"{MOCK_GLOBAL_SETUP}\"]. Without the warm-up the first test on each shard pays for \
+             Vite's compile inside its own budget, with no retry behind it."
+        ));
+    }
+    if !warmup.lines().any(|line| line.trim_start().starts_with(MOCK_WARMUP_WAIT)) {
+        wrong.push(format!(
+            "frontend/e2e/support/warmVite.ts has no line starting `{MOCK_WARMUP_WAIT}`, so the \
+             warm-up no longer waits for the app to render and Vite may still be compiling when \
+             the first test starts."
+        ));
+    }
+    wrong
+}
+
+/// The mock suite loads the app once before its first test.
+///
+/// # Why
+///
+/// The mock suite runs as 4 shards with no retry, and each shard boots its own Vite. The
+/// webServer probe is answered by index.html before Vite has compiled anything, so without a
+/// warm-up the first tests of each shard paid for the compile inside their own 30 s budget. On CI
+/// they ran 1.2 to 2.5 times slower than the same tests later in a run, and one timed out. The
+/// warm-up is one `globalSetup` line and one file, and either can go with every test still green.
+#[test]
+fn the_mock_suite_warms_vite_before_its_first_test() {
+    let wrong = mock_config_wrong(MOCK_CONFIG, MOCK_WARMUP);
+    assert!(
+        wrong.is_empty(),
+        "{} fact(s) about the mock suite's config are wrong:\n\n{}\n\n\
+         Update the CONFIG to match this test.",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+}
+
+/// `mock_config_wrong` can fail: each break below is planted in a copy of the real files, and the
+/// check has to name it.
+#[test]
+fn the_mock_config_check_names_each_way_of_dropping_the_warm_up() {
+    let setup_line = format!("  {MOCK_GLOBAL_SETUP}\n");
+    // (what, planted config, planted warm-up, what the check must name)
+    let plants: Vec<(&str, String, String, &str)> = vec![
+        (
+            "the globalSetup line deleted",
+            MOCK_CONFIG.replace(&setup_line, ""),
+            MOCK_WARMUP.to_string(),
+            "sets globalSetup with []",
+        ),
+        (
+            "the globalSetup line commented out",
+            MOCK_CONFIG.replace(&setup_line, &format!("  // {MOCK_GLOBAL_SETUP}\n")),
+            MOCK_WARMUP.to_string(),
+            "sets globalSetup with []",
+        ),
+        (
+            "a second globalSetup line that overrides the first",
+            MOCK_CONFIG.replace(
+                &setup_line,
+                &format!("{setup_line}  globalSetup: './e2e/support/other.ts',\n"),
+            ),
+            MOCK_WARMUP.to_string(),
+            "sets globalSetup with [",
+        ),
+        (
+            "the warm-up's wait for the app removed",
+            MOCK_CONFIG.to_string(),
+            MOCK_WARMUP.replace(MOCK_WARMUP_WAIT, "await page.waitForTimeout(0); ("),
+            "has no line starting",
+        ),
+    ];
+    assert_eq!(plants.len(), 4, "four ways of dropping the mock suite's warm-up");
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, config, warmup, must_name) in &plants {
+        assert!(
+            config != MOCK_CONFIG || warmup != MOCK_WARMUP,
+            "{what}: the plant landed"
+        );
+        let named = mock_config_wrong(config, warmup).join("\n");
+        if !named.contains(must_name) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the mock config went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
 /// The job that runs both certification suites.
 const DETERMINISM_JOB: &str = "determinism";
 /// The shipped-default certification suite, as the whole of its `run:` line.

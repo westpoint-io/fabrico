@@ -405,6 +405,9 @@ test.describe('show me', () => {
   });
 
   test('a port stage: Show me frames both belt-draw rings and sends nothing', async ({ page }) => {
+    // One of three slow Show me tests. On CI they took 15 to 22 s with the suite on one runner,
+    // and 27 s to over 30 s as the first tests of a 4-way shard. test.slow() triples the 30 s budget.
+    test.slow();
     const { h } = await toBeltDrawWithSinkOut(page);
     await expectFlag(page, true, "with the Sink's In disc out of view");
     const { scale } = await cameraOf(page);
@@ -413,6 +416,9 @@ test.describe('show me', () => {
   });
 
   test('at zoom 4 with both belt-draw rings out of view, Show me zooms out until both fit, not below the floor', async ({ page }) => {
+    // One of three slow Show me tests. On CI they took 15 to 22 s with the suite on one runner,
+    // and 27 s to over 30 s as the first tests of a 4-way shard. test.slow() triples the 30 s budget.
+    test.slow();
     const { h } = await toBeltDrawAtZoom1(page);
     await zoomInto(page, PAN_FROM, 3.6, 4);
     const zoomed = await cameraOf(page);
@@ -435,6 +441,9 @@ test.describe('show me', () => {
   });
 
   test('Show me is disabled with its title while a belt draw is held, and enabled after Escape', async ({ page }) => {
+    // One of three slow Show me tests. On CI they took 15 to 22 s with the suite on one runner,
+    // and 27 s to over 30 s as the first tests of a 4-way shard. test.slow() triples the 30 s budget.
+    test.slow();
     await toBeltDrawWithSinkOut(page);
     await expectFlag(page, true, "with the Sink's In disc out of view");
     const button = page.locator(SHOW_ME);

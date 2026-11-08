@@ -20,6 +20,10 @@ export default defineConfig({
   // configs. The old CI retry let a test that failed once pass as flaky, and no
   // gate read the flaky line, so retries is 0 on CI and locally.
   retries: 0,
+  // Load the app once before any test, so Vite has compiled it before the first test's budget
+  // starts. Each CI shard boots its own Vite, and without this the first test on every shard
+  // paid for the compile. See e2e/support/warmVite.ts.
+  globalSetup: './e2e/support/warmVite.ts',
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:5173',
