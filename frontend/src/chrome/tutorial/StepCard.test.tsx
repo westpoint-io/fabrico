@@ -217,6 +217,37 @@ describe('StepCard', () => {
     expect(styleOf(name!).whiteSpace, 'a machine name still wraps as before').toBeUndefined();
   });
 
+  // `e2e/lesson-lines.spec.ts` sets every lesson text into the running card's paragraph by hand, built
+  // segment by segment the way `Words` builds it. This case pins that markup, so the two can't drift
+  // and the spec keeps measuring the text the card really sets.
+  it("pins Words' markup segment by segment: plain text, a token span at 700, a code span at 700 that doesn't wrap", () => {
+    const view: StepCardView = { ...RUNNING, text: ['A ', { kind: 0 }, ' runs ', { code: 'ctx.emit(1, input);' }, ' now.'] };
+    const [paragraph] = render(view).filter((el) => el.props['data-fab-step-text'] !== undefined);
+    expect(paragraph?.type).toBe('p');
+    expect(styleOf(paragraph!), "the paragraph's own style, which the spec keeps by reusing the real paragraph").toEqual({
+      margin: 0,
+      fontFamily: 'var(--fab-font)',
+      fontSize: 'var(--fab-font-size-base)',
+      color: 'var(--fab-ink)',
+      lineHeight: 1.4,
+    });
+    const children = paragraph!.props.children as unknown[];
+    expect(children).toHaveLength(5);
+    expect(children[0], 'a plain segment is a bare text child').toBe('A ');
+    expect(children[2]).toBe(' runs ');
+    expect(children[4]).toBe(' now.');
+    const token = children[1] as El;
+    expect(token.type).toBe('span');
+    expect(token.props.style).toEqual({ fontWeight: 700 });
+    expect(token.props.children).toBe('Source');
+    expect(Object.keys(token.props).sort(), 'a token span carries nothing but its style and text').toEqual(['children', 'style']);
+    const code = children[3] as El;
+    expect(code.type).toBe('span');
+    expect(code.props.style).toEqual({ fontWeight: 700, whiteSpace: 'nowrap' });
+    expect(code.props.children).toBe('ctx.emit(1, input);');
+    expect(Object.keys(code.props).sort(), 'a code span carries its style, its mark and its text').toEqual(['children', 'data-fab-code', 'style']);
+  });
+
   it('shows a note above the step counter when there is one', () => {
     const text = textOf(StepCard({ view: { ...RUNNING, note: ['Step 1 was already done.'] }, ...NOOPS }));
     expect(text.indexOf('Step 1 was already done.')).toBeGreaterThanOrEqual(0);
