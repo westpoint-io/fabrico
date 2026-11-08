@@ -1558,10 +1558,16 @@ jobs:
   # checker's bite proof runs in the verdict job, before the merge. `ci_wiring_parity.rs` pins both
   # jobs.
   #
-  # THE LIMIT. In CI run 42083745921 the whole walk took 42 minutes, and lesson-variants.walk.ts
-  # alone 26.2 of them. Twice that, rounded up, is the 55 minute `globalTimeout` in the walk config,
-  # so an overrun writes a report before the runner is killed. This job's limit is those 55 plus
-  # 15 for the build.
+  # THE LIMIT. In CI run 42083745921, with 25 walk tests, the whole walk took 42 minutes, and
+  # lesson-variants.walk.ts alone 26.2 of them. Twice that, rounded up, is the 55 minute
+  # `globalTimeout` in the walk config, so an overrun writes a report before the runner is killed.
+  # This job's limit is those 55 plus 15 for the build. The walk now has 27 tests; the two new ones
+  # are in lessons.walk.ts, in the third leg. Run whole and unthrottled on one machine, the 27-test
+  # walk took 735 s, and its three legs 183, 354 and 197 s. The same machine ran
+  # lesson-variants.walk.ts in 383 s on the walk CI timed at 26.2 minutes, a ratio of 4.1, which
+  # puts the second leg at about 24.2 CI minutes and the third at about 13.5. Twice 24.2, rounded
+  # up, is 49, under 55, so both limits stay. A local estimate only ever raises these limits; a
+  # recorded CI run of the 27-test walk replaces these local numbers.
   e2e-walk:
     name: lesson walk (real headless host)
     needs: changes
