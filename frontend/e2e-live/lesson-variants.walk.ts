@@ -24,7 +24,7 @@ import {
   stepOnce,
   walkLesson,
 } from './support/lessonRunner';
-import { pauseAndSettle, resumeIfPaused, transport } from './support/beltBoard';
+import { resumeIfPaused, transport } from './support/beltBoard';
 import {
   cameraOf,
   expectRenderLoopAlive,
@@ -50,6 +50,11 @@ const TWO_RISES_TICKS = 4;
 const ARRIVAL_TICKS = 200;
 /** Drawn frames the page may take to see the echoed belt and send its Docks, as parity.walk.ts allows. */
 const DOCKS_SENT_FRAMES = 8;
+/**
+ * Sim ticks a paused host may run on before it stops: `MAX_SETTLE_TICKS` (512, `sim_loop.rs`), plus 64
+ * for the fold and the round trip, as `EDIT_VERDICT_TICKS` in oracle.ts allows.
+ */
+const HOST_SETTLE_TICKS = 512 + 64;
 
 test.afterEach(async ({ page }, testInfo) => {
   await restoreHostAfterFailedTest(page, testInfo);
@@ -417,6 +422,14 @@ async function expectPastTheBelt(page: Page, what: string): Promise<void> {
  * tests hold the board before the last draw. On a held board only Step moves the sim, and the Undo folds
  * before an item can reach the Sink. The undo card is still read after Play, on a running board.
  *
+ * A paused host doesn't stop at once. It keeps ticking with Timer fires held until no belt holds an
+ * item, and stops after `MAX_SETTLE_TICKS` (512) regardless. The first piece of the two-piece line ends
+ * short of the Sink, so once items are on it they never leave and the host runs all 512 ticks: about 18 s
+ * at the 28 ticks a second the budget helpers assume, longer than `pauseAndSettle`'s 10 s in
+ * beltBoard.ts. So these tests hold the board with `holdTheBoard`, which waits on the same still tick
+ * under a cap derived from that bound. No item reaches the Sink while the host drains, because the
+ * second piece isn't drawn until it has stopped.
+ *
  * The check that a good draw never shows the undo card can't fail while the board is held, because the
  * paused stage comes first in draw-belt's stage list. So it lives on the running-board draws in the
  * reversed-belt and two-piece tests, on the first piece of the two-piece Undo test, and in the
@@ -424,12 +437,38 @@ async function expectPastTheBelt(page: Page, what: string): Promise<void> {
  */
 
 /**
+ * Pause from the toolbar and wait until two reads 200 ms apart see the same tick, under the host's own
+ * settle bound. Answers the tick the host stopped on.
+ */
+async function holdTheBoard(page: Page, what: string): Promise<number> {
+  await transport(page).click();
+  await expect(transport(page), `${what}: the sim is paused (the toggle offers Play)`).toHaveAttribute('aria-label', 'Play');
+  let pausedAt = -1;
+  await expect
+    .poll(
+      async () => {
+        const t = (await readScene(page)).tick;
+        const settled = t === pausedAt;
+        pausedAt = t;
+        return settled;
+      },
+      {
+        message: `${what}: the host stopped ticking`,
+        intervals: [200],
+        timeout: addWaitBudget(tickBudgetMs(HOST_SETTLE_TICKS), `${what}: the paused host draining its belts`),
+      },
+    )
+    .toBe(true);
+  return pausedAt;
+}
+
+/**
  * Hold the board, make the last draw on it, and move the sim only by Step: one to mint the belt and one
  * to dock both ends. The lesson leaves draw-belt and is still running. Answers the tick the hold began on.
  */
 async function finishOnHeldBoard(page: Page, draw: () => Promise<void>, beltsAfter: number, what: string): Promise<number> {
   await expect(transport(page), `${what}: the board is playing before the hold`).toHaveAttribute('aria-label', 'Pause');
-  const pausedAt = await pauseAndSettle(page, `${what}: hold the board`);
+  const pausedAt = await holdTheBoard(page, `${what}: hold the board`);
   await reachStage(page, DRAW_BELT, 'board-paused');
   await expect(page.getByTitle(/^Draw belts/), `${what}: the Belt tool is still armed on the held board`).toHaveAttribute('aria-pressed', 'true');
 
