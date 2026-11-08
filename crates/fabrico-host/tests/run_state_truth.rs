@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fabrico_core::core::Core;
-use fabrico_core::event::{LogHeader, SCHEMA_VERSION};
+use fabrico_core::event::{EventPayload, LogHeader, SCHEMA_VERSION};
 use fabrico_core::persist::{RedbStore, StoreError};
 use fabrico_host::config::HostConfig;
 use fabrico_host::demo_scene::{DEMO_GENESIS_SEED, SceneId, boot_scene};
@@ -50,6 +50,16 @@ const BUSY_BUDGET: u64 = 600;
 const DRAIN_BUDGET: u64 = MAX_SETTLE_TICKS + 8;
 /// How many steps the FAIL-04 probe watches the tick after the save.
 const RUN_ON_STEPS: u64 = 30;
+/// How long a held board waits for the executor to answer an effect it took before the hold. A
+/// Debug sink answers in microseconds on an idle machine, but a loaded machine has taken 160 ms.
+const ANSWER_WAIT: Duration = Duration::from_secs(2);
+/// The longest gap between two Steps while a held board waits for an answer. The gaps start at
+/// 1 ms and double up to this, so the whole wait takes about 15 Steps, far fewer than the 600
+/// ticks a sink's effect has before it times out.
+const ANSWER_POLL_MAX: Duration = Duration::from_millis(250);
+/// How long the held-board fold test may spend waiting for answers, over all its rounds, before
+/// it fails. Both waits are counted as the time slept, since the workspace never reads the clock.
+const FOLD_DEADLINE: Duration = Duration::from_secs(60);
 
 /// The demo board on a real `SimLoop`, as `dev_render_server` boots it.
 struct Demo {
@@ -593,10 +603,59 @@ impl Demo {
         }
         panic!("PRECONDITION: a Step left belt items and no effect in flight within {BUSY_BUDGET} steps");
     }
+
+    /// How many executor results the board has folded: the `CommandResult` events in its log. A
+    /// timeout the board synthesizes for an effect is a different event, so it never counts here.
+    fn results_folded(&self) -> usize {
+        self.sim
+            .host()
+            .logged_events()
+            .expect("read the board's event log")
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::CommandResult(_)))
+            .count()
+    }
+
+    /// On a board a Step has just held, Step again at growing gaps until one of those Steps folds
+    /// an executor result, sleeping at most `ANSWER_WAIT` in all. Returns whether one did, and
+    /// how long it slept.
+    ///
+    /// Every Step here lands on a held board, and the executor takes no new effect from a held
+    /// board, so a result folded here answers an effect it took before the hold. Counting
+    /// `CommandResult` events rather than effects in flight means a Step that also sends a new
+    /// effect can't hide the fold, and an effect that runs out its deadline can't pass for one.
+    fn held_steps_fold_a_result(&mut self) -> (bool, Duration) {
+        let folded_before = self.results_folded();
+        let mut slept = Duration::ZERO;
+        let mut gap = Duration::from_millis(1);
+        while slept < ANSWER_WAIT {
+            std::thread::sleep(gap);
+            slept += gap;
+            self.send(ControlMsg::Step);
+            self.step();
+            assert!(self.sim.is_paused(), "PRECONDITION: a Step holds the board");
+            if self.results_folded() > folded_before {
+                return (true, slept);
+            }
+            gap = (gap * 2).min(ANSWER_POLL_MAX);
+        }
+        (false, slept)
+    }
 }
 
-/// A Step on a held board folds a result the executor has sent since the hold. The sleep gives the
-/// executor time to answer, and a slow answer or a newly dispatched effect just takes another round.
+/// A Step on a held board folds a result the executor has sent since the hold.
+///
+/// Each round holds the board with a Step. If an effect is in flight, the board waits for the
+/// executor's answer by stepping at growing gaps (`held_steps_fold_a_result`). An effect the
+/// executor took before the hold is answered in that wait. One it hadn't taken is parked until a
+/// Resume and never answers, so the round ends at `ANSWER_WAIT` and the next round tries again.
+///
+/// The board is deterministic, so whether a Step's tick sends an effect depends on where the tick
+/// falls in the demo's cycle. A round that waited moves the board on by its extra Steps. With a
+/// fixed round length, one extra Step was enough to put every Step of the 599 rounds after it on
+/// a tick that sends nothing, so a single late answer failed the test with nothing left to wait
+/// for. So each round runs 0 to 3 extra ticks after its Resume, and later Steps land on every part
+/// of the cycle.
 #[test]
 fn a_step_on_a_held_board_folds_an_answered_effect() {
     let mut d = demo();
@@ -604,24 +663,40 @@ fn a_step_on_a_held_board_folds_an_answered_effect() {
     for _ in 0..200 {
         d.step();
     }
+    let (mut rounds, mut waited, mut slept) = (0, 0, Duration::ZERO);
     let mut folded = false;
-    for _ in 0..BUSY_BUDGET {
+    for round in 0..BUSY_BUDGET {
+        if slept >= FOLD_DEADLINE {
+            break;
+        }
+        rounds += 1;
         d.send(ControlMsg::Step);
         d.step();
-        let before = d.in_flight().0;
-        if before > 0 {
-            std::thread::sleep(Duration::from_millis(20));
-            d.send(ControlMsg::Step);
-            d.step();
-            if d.in_flight().0 < before {
+        if d.in_flight().0 > 0 {
+            waited += 1;
+            let (answered, this_wait) = d.held_steps_fold_a_result();
+            slept += this_wait;
+            if answered {
                 folded = true;
                 break;
             }
         }
         d.send(ControlMsg::Resume);
         d.step();
+        for _ in 0..round % 4 {
+            d.step();
+        }
     }
-    assert!(folded, "A STEP ON A HELD BOARD FOLDS AN ANSWERED EFFECT");
+    eprintln!(
+        "P90-step-folds rounds={rounds} waited={waited} folded={folded} slept_ms={}",
+        slept.as_millis()
+    );
+    assert!(
+        folded,
+        "A STEP ON A HELD BOARD FOLDS AN ANSWERED EFFECT: in {rounds} rounds, {waited} of which held \
+         an effect in flight and waited up to {ANSWER_WAIT:?} for it, no Step on a held board folded \
+         an executor result"
+    );
 }
 
 /// Review fix pass 1, WR-A-02: a Save on a board the user stepped or paused, with items still
