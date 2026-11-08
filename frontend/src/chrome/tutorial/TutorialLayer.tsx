@@ -16,7 +16,7 @@ import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
-import { frameTarget, offScreen as rectOffScreen } from '../../tutorial/view';
+import { frameTarget, offScreenFlag } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CONFIG_NOT_APPLIED_MARKER } from '../configCopy';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
@@ -124,14 +124,21 @@ function boardRingRects(stage: Stage, key: string): DOMRect[] | null {
 }
 
 /**
- * This frame's off-screen flag. A panel target or no target is never out of view. A board ring not yet
- * placed for the shown stage keeps the last value, because its rect still belongs to the old stage.
+ * This frame's off-screen flag, by `offScreenFlag`'s rule. A panel target or no target is never out of
+ * view. A board ring still placed for the previous stage keeps the last value, because its rect belongs
+ * to that stage; one that tried the shown stage and found no box reads false.
  */
 function offScreenNow(stage: Stage | null, key: string | null, free: ChromeFacts['view']['freeArea'], last: boolean): boolean {
-  if (stage === null || key === null || stage.hint === null || stage.hint.on === 'panel') return false;
-  const rects = boardRingRects(stage, key);
-  if (rects === null) return last;
-  return rects.some((r) => rectOffScreen(r, free));
+  const onBoard = stage !== null && key !== null && stage.hint !== null && stage.hint.on !== 'panel';
+  const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
+  return offScreenFlag({
+    shownKey: onBoard ? key : null,
+    placedKey: ring?.getAttribute('data-fab-hint-stage') ?? null,
+    triedKey: ring?.getAttribute('data-fab-hint-tried') ?? null,
+    rects: onBoard ? boardRingRects(stage, key) : null,
+    free,
+    last,
+  });
 }
 
 function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRecord | null, offScreen: boolean): TutorialProbe {

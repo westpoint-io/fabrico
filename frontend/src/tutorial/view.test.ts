@@ -1,7 +1,8 @@
-// view.test.ts - the off-screen test and the Show me camera, as plain arithmetic (HINT-03).
+// view.test.ts - the off-screen test, the off-screen flag's rule and the Show me camera, as plain
+// arithmetic (HINT-03, 103 review IN-01).
 
 import { describe, expect, it } from 'vitest';
-import { frameTarget, offScreen } from './view.ts';
+import { frameTarget, offScreen, offScreenFlag } from './view.ts';
 
 const FREE = { left: 200, right: 800, top: 100, bottom: 500 };
 const MIN_ZOOM = 0.25;
@@ -30,6 +31,44 @@ describe('offScreen: no shared area with the free area', () => {
     expect(offScreen({ x: 800, y: 200, width: 72, height: 72 }, FREE)).toBe(true);
     expect(offScreen({ x: 300, y: 28, width: 72, height: 72 }, FREE)).toBe(true);
     expect(offScreen({ x: 300, y: 500, width: 72, height: 72 }, FREE)).toBe(true);
+  });
+});
+
+describe('offScreenFlag: one frame of the flag, from the ring\'s two stage keys', () => {
+  const SHOWN = '8:belt-draw';
+  const BEFORE = '8:belt-tool';
+  const IN_VIEW = { x: 300, y: 200, width: 72, height: 72 };
+  const OUT = { x: 900, y: 200, width: 72, height: 72 };
+  const flag = (over: Partial<Parameters<typeof offScreenFlag>[0]>): boolean =>
+    offScreenFlag({ shownKey: SHOWN, placedKey: SHOWN, triedKey: SHOWN, rects: [IN_VIEW], free: FREE, last: false, ...over });
+
+  it('is false with no shown stage, or a panel stage the caller passes as none, whatever the ring and the last frame say', () => {
+    expect(flag({ shownKey: null, rects: [OUT], last: true })).toBe(false);
+    expect(flag({ shownKey: null, placedKey: null, triedKey: null, rects: null, last: true })).toBe(false);
+  });
+
+  it('reads the rings placed for the shown stage, whatever the last frame said', () => {
+    expect(flag({ rects: [IN_VIEW], last: true })).toBe(false);
+    expect(flag({ rects: [OUT], last: false })).toBe(true);
+    // A drag: one ring out of view is enough for the row.
+    expect(flag({ rects: [IN_VIEW, OUT], last: false })).toBe(true);
+  });
+
+  it('is false once the ring has tried the shown stage and found no box, even after a frame that said true', () => {
+    expect(flag({ placedKey: null, triedKey: SHOWN, rects: null, last: true })).toBe(false);
+  });
+
+  it('keeps the last value while the ring still names the previous stage', () => {
+    for (const last of [true, false]) {
+      expect(flag({ placedKey: BEFORE, triedKey: BEFORE, rects: null, last })).toBe(last);
+      // Hidden for the previous stage, or never painted yet.
+      expect(flag({ placedKey: null, triedKey: BEFORE, rects: null, last })).toBe(last);
+      expect(flag({ placedKey: null, triedKey: null, rects: null, last })).toBe(last);
+    }
+  });
+
+  it('never reads a rect placed for an older stage, which belongs to that stage', () => {
+    for (const last of [true, false]) expect(flag({ placedKey: BEFORE, triedKey: BEFORE, rects: [last ? IN_VIEW : OUT], last })).toBe(last);
   });
 });
 

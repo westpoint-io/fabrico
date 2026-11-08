@@ -7,7 +7,13 @@
 // THE RING RECORDS WHICH STAGE IT WAS PLACED FOR, in `data-fab-hint-stage`. The layer's frame loop
 // paints the ring first and works out the lesson second, so a stage change reaches the ring a frame
 // after the lesson state has moved. Until then its rect belongs to the old stage. The attribute is
-// what lets a reader tell the two apart, and only this file writes it.
+// what lets a reader tell the two apart, and only this file writes it. It names a placed ring only, so
+// the probe never reports a hidden ring's rect.
+//
+// THE RING ALSO RECORDS WHICH STAGE IT LAST TRIED, in `data-fab-hint-tried`: written on every paint that
+// has a target, whether or not the target resolved to a box, and removed with no target. The layer reads
+// the two together. A ring that tried the shown stage and isn't placed for it has lost its target, so
+// the off-screen flag lets go (`offScreenFlag` in `tutorial/view.ts`, 103 review IN-01).
 //
 // A DRAG HAS TWO RINGS, and one paint call writes both with that attribute. If either target resolves
 // to nothing, both hide and the attribute goes, so a drag stage never shows half its rings.
@@ -392,6 +398,8 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       };
       const nodes = handleRef.current?.sceneState.nodes;
       const belts = handleRef.current?.sceneState.belts;
+      if (target === null) ring.removeAttribute('data-fab-hint-tried');
+      else ring.setAttribute('data-fab-hint-tried', target.stageKey);
       const box = target === null ? null : ringBox(target, layer, scrollOnce, nodes, belts);
       const hint = target?.hint;
       const to = hint?.on === 'port' ? hint.to : undefined;

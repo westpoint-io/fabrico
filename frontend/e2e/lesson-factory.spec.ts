@@ -708,6 +708,102 @@ test.describe('lesson 4 on the mock host', () => {
   });
 });
 
+/** One record a drawn frame: the model's tick, the probe's stage and flag, and whether Show me is offered. */
+interface FrameRead {
+  tick: number;
+  stage: string | null;
+  off: boolean;
+  showMe: boolean;
+}
+
+/** Start recording one `FrameRead` a drawn frame, on `window.__fabFrames`, until `stopFrames`. */
+async function recordFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __fabFrames?: FrameRead[];
+      __fabFramesOn?: boolean;
+      __fabrico: { scene(): { tick: number }; tutorial(): { stageId: string | null; offScreen: boolean } };
+    };
+    w.__fabFrames = [];
+    w.__fabFramesOn = true;
+    const read = (): void => {
+      if (w.__fabFramesOn !== true) return;
+      const probe = w.__fabrico.tutorial();
+      const button = [...document.querySelectorAll<HTMLElement>('[data-fab-offscreen-row] button')][0];
+      const shown = button !== undefined && getComputedStyle(button).visibility !== 'hidden';
+      w.__fabFrames!.push({ tick: w.__fabrico.scene().tick, stage: probe.stageId, off: probe.offScreen, showMe: shown });
+      requestAnimationFrame(read);
+    };
+    requestAnimationFrame(read);
+  });
+}
+
+async function stopFrames(page: Page): Promise<FrameRead[]> {
+  return page.evaluate(() => {
+    const w = window as unknown as { __fabFrames?: FrameRead[]; __fabFramesOn?: boolean };
+    w.__fabFramesOn = false;
+    return w.__fabFrames ?? [];
+  });
+}
+
+test.describe('lesson 4 when a ring loses its target (103 review IN-01)', () => {
+  test.use({ viewport: { width: 1280, height: 720 } });
+
+  let pageErrors: string[] = [];
+  test.beforeEach(({ page }) => {
+    pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+  });
+  test.afterEach(() => {
+    expect(pageErrors, 'the page threw no error while the lesson ran').toEqual([]);
+  });
+
+  // IN-01 names the trigger: a bound machine whose port the ring can't find. With the Belt tool armed,
+  // a belt from the Factory that ends on the floor moves the card to belt-carry-on, whose ring sits on the
+  // second Sink's In, so it doesn't keep the stage up (104-EVIDENCE.md, MEASURE floor-belt). The second
+  // Sink re-sent without its In keeps belt-draw on the card, and the drag's rings have nothing to mark.
+  test('with the drag rings out of view, a Sink whose In the ring can\'t find drops the off-screen row within two frames', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 2 });
+    await expectAt(page, STEP.beltOut2, STAGE.beltDraw, 'the second belt finished belt-out, and the Belt tool is still armed');
+    // Zoom in on the Source, which pushes the Factory's outputs and the second Sink past the free area.
+    const cam = await cameraOf(page);
+    const size = CELL * cam.scale;
+    await zoomInto(page, { x: (board.source.cell_x + 0.5) * size + cam.x, y: (board.source.cell_y + 0.5) * size + cam.y }, 3, 3.6);
+    await expect.poll(async () => (await readProbe(page)).offScreen, { message: 'zoomed in, the drag rings are out of view' }).toBe(true);
+    const row = page.locator(`${CARD} [data-fab-offscreen-row]`);
+    const showMe = page.getByRole('button', { name: 'Show me', exact: true });
+    await expect(row, 'the card says the ring is out of view').toBeVisible();
+    await expect(showMe, 'and offers Show me').toBeVisible();
+
+    await recordFrames(page);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as { __fabFrames: unknown[] }).__fabFrames.length)) > 0).toBe(true);
+    const tick = ++board.tick;
+    const lost = { ...board.sink2, ports: (board.sink2.ports ?? []).filter((p) => p.role !== 0) };
+    injectBoard(h, { nodes: [board.source, board.factory, board.sink, lost], belts: board.belts, tick });
+    await waitForBoard(page, { machines: 4, tick });
+    await twoFrames(page);
+    await twoFrames(page);
+    const frames = await stopFrames(page);
+    const before = frames.filter((f) => f.tick < tick);
+    expect(before.length > 0 && before.every((f) => f.off && f.showMe), `before the packet the flag and Show me were on (${JSON.stringify(before.slice(-2))})`).toBe(true);
+    const held = frames.findIndex((f) => f.tick === tick);
+    const letGo = frames.findIndex((f, i) => i >= held && !f.off);
+    expect(held, 'the recorder drew a frame with the packet in the model').toBeGreaterThanOrEqual(0);
+    expect(
+      letGo >= 0 && letGo - held <= 2,
+      `the flag reads false within two drawn frames of the packet (frames ${JSON.stringify(frames.slice(held, held + 4))})`,
+    ).toBe(true);
+    expect(frames.slice(held).every((f) => f.stage === STAGE.beltDraw), 'the card stays on the drag the whole time').toBe(true);
+
+    const probe = await readProbe(page);
+    expect(probe.hint, 'the drag ring has nothing to mark, so it hides').toBeNull();
+    expect(probe.offScreen, 'the flag stays false').toBe(false);
+    await expect(row, 'the off-screen row hides').toBeHidden();
+    await expect(showMe, "Show me isn't in the accessibility tree").toHaveCount(0);
+  });
+});
+
 test.describe('lesson 4 at 1024x768, where the Factory panel is taller than its column', () => {
   test.use({ viewport: { width: 1024, height: 768 } });
 
