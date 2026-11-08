@@ -21,6 +21,7 @@ import {
   handDragBetween,
   handPath,
   latchRejectFlashCells,
+  pollScene,
   readScene,
   rejectFlashCell,
   rejectFlashCellsSeen,
@@ -139,6 +140,25 @@ export async function latchStepRecord(page: Page): Promise<void> {
 
 export async function readRecord(page: Page): Promise<StepRecordEntry[]> {
   return page.evaluate(() => [...((window as unknown as { __lessonRecord?: StepRecordEntry[] }).__lessonRecord ?? [])]);
+}
+
+/** How many gestures the page has handed to the transport. */
+export async function inputsSent(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const hook = (window as unknown as { __fabrico?: { inputsSent?(): number } }).__fabrico;
+    if (typeof hook?.inputsSent !== 'function') throw new Error('window.__fabrico.inputsSent() not installed');
+    return hook.inputsSent();
+  });
+}
+
+/** Press Step once and require the tick to rise by exactly 1. Never pressed twice. */
+export async function stepOnce(page: Page, what: string): Promise<number> {
+  const before = (await readScene(page)).tick;
+  await page.getByRole('button', { name: 'Step', exact: true }).click();
+  await pollScene(page, (s) => s.tick, {
+    message: `${what}: one Step moved the paused board from tick ${before} to ${before + 1}`,
+  }).toBe(before + 1);
+  return before + 1;
 }
 
 function stepLabel(lesson: Lesson, stepIndex: number): string {

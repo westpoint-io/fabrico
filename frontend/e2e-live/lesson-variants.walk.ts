@@ -12,6 +12,7 @@ import {
   dragAlongByHand,
   dragByHand,
   hintsForStage,
+  inputsSent,
   openLessonsFromHelp,
   pointInRect,
   pressPointByHand,
@@ -20,11 +21,14 @@ import {
   readProbe,
   readRecord,
   startLesson,
+  stepOnce,
   walkLesson,
 } from './support/lessonRunner';
+import { pauseAndSettle, resumeIfPaused, transport } from './support/beltBoard';
 import {
   cameraOf,
   expectRenderLoopAlive,
+  pollScene,
   readScene,
   resetToDemo,
   restoreHostAfterFailedTest,
@@ -44,6 +48,8 @@ const STAGE_FRAMES = 20;
 const TWO_RISES_TICKS = 4;
 /** Sim ticks for the first item to reach the Sink on a redrawn line, as the runner allows on its watch stage. */
 const ARRIVAL_TICKS = 200;
+/** Drawn frames the page may take to see the echoed belt and send its Docks, as parity.walk.ts allows. */
+const DOCKS_SENT_FRAMES = 8;
 
 test.afterEach(async ({ page }, testInfo) => {
   await restoreHostAfterFailedTest(page, testInfo);
@@ -403,18 +409,83 @@ async function expectPastTheBelt(page: Page, what: string): Promise<void> {
     .toBeGreaterThan(DRAW_BELT);
 }
 
-/**
- * One press on a finished line. The lesson goes back to the belt step, and what the press left on the
- * board stays there until the next press, so this waits for the board to run on before reading the card.
+/*
+ * The three tests below press Undo on a finished line, and on a running board that press races the
+ * first item. A full first piece puts the front item one tile from the Sink, about 6 ticks, and a single
+ * belt puts it about 30 ticks away. A finished lesson keeps its card and ignores Undo, which is the
+ * product's rule (the Finish row in UI-SPEC), so the Undo has to land before any item arrives. So these
+ * tests hold the board before the last draw. On a held board only Step moves the sim, and the Undo folds
+ * before an item can reach the Sink. The undo card is still read after Play, on a running board.
+ *
+ * The check that a good draw never shows the undo card can't fail while the board is held, because the
+ * paused stage comes first in draw-belt's stage list. So it lives on the running-board draws in the
+ * reversed-belt and two-piece tests, on the first piece of the two-piece Undo test, and in the
+ * generated walk's record rule.
  */
-async function undoFinishedLine(page: Page, what: string): Promise<void> {
+
+/**
+ * Hold the board, make the last draw on it, and move the sim only by Step: one to mint the belt and one
+ * to dock both ends. The lesson leaves draw-belt and is still running. Answers the tick the hold began on.
+ */
+async function finishOnHeldBoard(page: Page, draw: () => Promise<void>, beltsAfter: number, what: string): Promise<number> {
+  await expect(transport(page), `${what}: the board is playing before the hold`).toHaveAttribute('aria-label', 'Pause');
+  const pausedAt = await pauseAndSettle(page, `${what}: hold the board`);
+  await reachStage(page, DRAW_BELT, 'board-paused');
+  await expect(page.getByTitle(/^Draw belts/), `${what}: the Belt tool is still armed on the held board`).toHaveAttribute('aria-pressed', 'true');
+
+  const sentBefore = await inputsSent(page);
+  await draw();
+  await expect
+    .poll(() => inputsSent(page), {
+      message: `${what}: the page sent the draw`,
+      timeout: addWaitBudget(frameBudgetMs(STAGE_FRAMES), `${what}: the draw leaving the page`),
+    })
+    .toBe(sentBefore + 1);
+  await stepOnce(page, `${what}: mint the belt`);
+  await pollScene(page, (s) => s.belts.length, { message: `${what}: the belt was echoed after its one Step` }).toBe(beltsAfter);
+  await expect
+    .poll(() => inputsSent(page), {
+      message: `${what}: the page sent both Docks once the belt was echoed`,
+      timeout: addWaitBudget(frameBudgetMs(DOCKS_SENT_FRAMES), `${what}: the Docks leaving the page`),
+    })
+    .toBe(sentBefore + 3);
+  await stepOnce(page, `${what}: dock both belt ends`);
+  await expectPastTheBelt(page, what);
+
+  const probe = await readProbe(page);
+  const scene = await readScene(page);
+  expect(probe.card, `${what}: the lesson is still running, so the Undo lands on a finished line and not a finished lesson`).toBe('running');
+  expect(scene.tick, `${what}: the held board moved only by its two Steps`).toBe(pausedAt + 2);
+  const intoSink = scene.belts.find((b) => b.docks.some((d) => d.end === 'Head' && d.node === probe.bound.sink));
+  const sinkSlot = intoSink?.occupiedSlots[0] ?? 'none';
+  console.log(`MEASURE held-line what=${what} paused=${pausedAt} tick=${scene.tick} step=${probe.stepId} card=${probe.card} sink_slot=${sinkSlot}`);
+  return pausedAt;
+}
+
+/**
+ * One press on a finished line, on the held board. The page sends the Undo, one Step folds it, and the
+ * lesson goes back to the belt step while it still reads running. Then Play, and the undo card is read on
+ * a running board, because what the press left stays there until the next press.
+ */
+async function undoOnHeldBoard(page: Page, pausedAt: number, what: string): Promise<void> {
+  const sent = await inputsSent(page);
   await pressShortcut(page, 'undo');
+  await expect
+    .poll(() => inputsSent(page), {
+      message: `${what}: the page sent the Undo`,
+      timeout: addWaitBudget(frameBudgetMs(STAGE_FRAMES), `${what}: the Undo leaving the page`),
+    })
+    .toBe(sent + 1);
+  await stepOnce(page, `${what}: fold the Undo`);
   await expect
     .poll(async () => (await readProbe(page)).stepIndex, {
       message: `${what}: Undo took the lesson back to draw-belt`,
       timeout: frameBudgetMs(STAGE_FRAMES),
     })
     .toBe(DRAW_BELT);
+  expect((await readProbe(page)).card, `${what}: the lesson is still running after the Undo`).toBe('running');
+  expect((await readScene(page)).tick, `${what}: the held board moved only by the Undo's Step`).toBe(pausedAt + 3);
+  await resumeIfPaused(page);
   await waitTwoTickRises(page);
   await expectUndoCard(page, what);
 }
@@ -444,11 +515,13 @@ async function expectLessonFinishes(page: Page, what: string): Promise<void> {
 test('one Undo on a finished belt asks for Undo until the belt has gone, and the plain drag then works', async ({ page }) => {
   const errors = watchPageErrors(page);
   const { rings, sourceId, sinkId } = await armedForTheBelt(page);
-  await dragByHand(page, pointInRect(rings.hint, { x: 3, y: -2 }), pointInRect(rings.hintTo, { x: -2, y: 3 }));
-  await expectPastTheBelt(page, 'the plain drag');
-  await expectNoUndoCardSeen(page, 'the plain drag');
-
-  await undoFinishedLine(page, 'after one press');
+  const pausedAt = await finishOnHeldBoard(
+    page,
+    () => dragByHand(page, pointInRect(rings.hint, { x: 3, y: -2 }), pointInRect(rings.hintTo, { x: -2, y: 3 })),
+    1,
+    'the plain drag',
+  );
+  await undoOnHeldBoard(page, pausedAt, 'after one press');
   const [left] = (await readScene(page)).belts;
   console.log(`MEASURE undone-once docks=${JSON.stringify(left?.docks)}`);
   expect(left?.docks.find((d) => d.end === 'Tail')?.node, 'the belt still leaves the Source').toBe(sourceId);
@@ -473,11 +546,9 @@ test('Undo on a finished line of two pieces asks for Undo until the second piece
     const doorAt = await screenCellCentre(page, door[0], door[1]);
     await dragByHand(page, { x: doorAt.x + 3, y: doorAt.y - 2 }, pointInRect(into.hint, { x: -2, y: 3 }));
   };
-  await carryOn();
-  await expectPastTheBelt(page, 'the second piece');
-  await expectNoUndoCardSeen(page, 'the second piece');
-
-  await undoFinishedLine(page, 'after one press on the line');
+  await expectNoUndoCardSeen(page, 'the first piece, drawn on the running board');
+  const pausedAt = await finishOnHeldBoard(page, carryOn, 2, 'the second piece');
+  await undoOnHeldBoard(page, pausedAt, 'after one press on the line');
   console.log(`MEASURE undone-line belts=${JSON.stringify((await readScene(page)).belts.map((b) => ({ tiles: b.tiles.length, docks: b.docks })))}`);
   expect((await readScene(page)).belts, 'both pieces are still on the board').toHaveLength(2);
 
@@ -493,11 +564,13 @@ test('Undo on a finished line of two pieces asks for Undo until the second piece
 test('one Undo on a belt drawn from the Sink asks for Undo until the belt has gone', async ({ page }) => {
   const errors = watchPageErrors(page);
   const { rings } = await armedForTheBelt(page);
-  await dragByHand(page, pointInRect(rings.hintTo, { x: -3, y: 2 }), pointInRect(rings.hint, { x: 2, y: -3 }));
-  await expectPastTheBelt(page, 'the reversed belt');
-  await expectNoUndoCardSeen(page, 'the reversed belt');
-
-  await undoFinishedLine(page, 'after one press on the reversed belt');
+  const pausedAt = await finishOnHeldBoard(
+    page,
+    () => dragByHand(page, pointInRect(rings.hintTo, { x: -3, y: 2 }), pointInRect(rings.hint, { x: 2, y: -3 })),
+    1,
+    'the reversed belt',
+  );
+  await undoOnHeldBoard(page, pausedAt, 'after one press on the reversed belt');
   console.log(`MEASURE undone-reversed docks=${JSON.stringify((await readScene(page)).belts[0]?.docks)}`);
 
   await undoTheBelt(page, 0, 'the reversed belt');

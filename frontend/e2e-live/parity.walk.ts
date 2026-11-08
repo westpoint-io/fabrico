@@ -7,7 +7,15 @@ import { machine_kind } from '../src/protocol/kinds';
 import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
 import { frameBudgetMs } from '../e2e/support/frameSampler';
 import { portOf, transport } from './support/beltBoard';
-import { latchStepRecord, openLessonsFromHelp, readProbe, readRecord, startLesson } from './support/lessonRunner';
+import {
+  inputsSent,
+  latchStepRecord,
+  openLessonsFromHelp,
+  readProbe,
+  readRecord,
+  startLesson,
+  stepOnce,
+} from './support/lessonRunner';
 import {
   CELL,
   cameraOf,
@@ -123,15 +131,6 @@ function readSavedBoard(path: string): Printed {
   return { tick: Number(tick![1]), hash: hash![1], edits };
 }
 
-/** How many gestures the page has handed to the transport. */
-async function inputsSent(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const hook = (window as unknown as { __fabrico?: { inputsSent?(): number } }).__fabrico;
-    if (typeof hook?.inputsSent !== 'function') throw new Error('window.__fabrico.inputsSent() not installed');
-    return hook.inputsSent();
-  });
-}
-
 /** How many controls the page has handed to the transport. */
 async function controlsSent(page: Page): Promise<number> {
   return page.evaluate(() => {
@@ -139,16 +138,6 @@ async function controlsSent(page: Page): Promise<number> {
     if (typeof hook?.controlsSent !== 'function') throw new Error('window.__fabrico.controlsSent() not installed');
     return hook.controlsSent();
   });
-}
-
-/** Press Step once and require the tick to rise by exactly 1. Never pressed twice. */
-async function stepOnce(page: Page, what: string): Promise<number> {
-  const before = (await readScene(page)).tick;
-  await page.getByRole('button', { name: 'Step', exact: true }).click();
-  await pollScene(page, (s) => s.tick, {
-    message: `${what}: one Step moved the paused board from tick ${before} to ${before + 1}`,
-  }).toBe(before + 1);
-  return before + 1;
 }
 
 /** Pause if the toolbar offers Pause, then wait for two equal tick reads 200 ms apart. */
