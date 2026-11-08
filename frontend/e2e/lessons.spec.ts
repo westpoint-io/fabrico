@@ -140,11 +140,12 @@ async function readCard(page: Page): Promise<{ top: number; bottom: number; heig
  * step line and 3 of instruction, then the off-screen row every running card reserves, 8 of gap and
  * 44 tall: 44 + 6 x 16.8 + 2 x 8 + 8 + 44 = 212.8 (the UI-SPEC rounds it to 214). Measured at
  * 1024x768 with the longest note and instruction it is 196.0, because that instruction takes 2 lines,
- * not 3. Swapped is its heading, 18 tall, then 8 and 2 lines of text: 44 + 18 + 8 + 2 x 16.8 = 103.6,
- * as measured. Finished is the heading, 2 lines of closing sentence and the buttons under them, as
- * measured at 163.6.
+ * not 3. Swapped is its heading, 18 px at line height 1.2 and so 21.6 tall (plan 104-07 gave it the
+ * Lessons heading's line height), then 8 and 2 lines of text: 44 + 21.6 + 8 + 2 x 16.8 = 107.2, as
+ * measured. Finished is the heading, 2 lines of closing sentence and the buttons under them, as
+ * measured at 167.2.
  */
-const CARD_MAX_HEIGHT = { starting: 88, running: 213, swapped: 104, finished: 164 } as const;
+const CARD_MAX_HEIGHT = { starting: 88, running: 213, swapped: 108, finished: 168 } as const;
 
 /** A sentence too long for the card makes it taller, up over the board, and only its box shows that. */
 async function expectCardFits(page: Page, state: keyof typeof CARD_MAX_HEIGHT): Promise<void> {
