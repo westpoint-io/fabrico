@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
+import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
+import { TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutputs';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { phrasePlain } from '../src/tutorial/phrase';
 import type { Lesson, Stage } from '../src/tutorial/types';
@@ -10,16 +12,27 @@ import {
   SINK_ID,
   SOURCE_ID,
   boot,
+  buildBoard,
+  buildLine,
   cellOfRing,
+  configByNode,
   configuredHost,
+  deleteBelt,
+  deleteSink,
+  expectCaptureComplete,
   injectRefusal,
   pressRing,
   readProbe,
   ringAt,
   sinkAt,
   sourceAt,
+  startFactoryLesson,
   startLesson,
+  toTypeCode,
+  typeAndApply,
+  undoBoth,
   zoomOut,
+  type Visit,
 } from './support/lessonMock';
 
 // lesson-clearance.spec.ts - the step card stays clear of the ring it points with (HINT-04, placement).
@@ -105,6 +118,8 @@ interface Read {
   inspector: Rect | null;
   /** The free area by `readFreeArea`'s rule, worked out again from the page. */
   free: Rect;
+  /** The Palette's right edge. */
+  paletteRight: number;
 }
 
 /** The probe and the card's, the open inspector's and the free area's rects, from one evaluate. A hidden inspector reads null. */
@@ -128,6 +143,7 @@ async function readAll(page: Page): Promise<Read> {
         card,
         inspector: rect(document.querySelector(sel)),
         free: { x: left, y: freeTop, width: right - left, height: bottom - freeTop },
+        paletteRight: left,
       };
     },
     [INSPECTOR, LEGEND, FREE_TOP] as const,
@@ -157,9 +173,16 @@ function markedBy(ring: HintRect): Rect {
   return { x: ring.x + OUTSET, y: ring.y + OUTSET, width: ring.width - 2 * OUTSET, height: ring.height - 2 * OUTSET };
 }
 
+/** Is the card's left edge 8 px right of the Palette, the third rule's place? */
+function besidePalette(read: Read): boolean {
+  return read.card !== null && Math.abs(read.card.x - (read.paletteRight + GAP)) <= TOLERANCE;
+}
+
 /**
  * What is wrong with a read, or 'clear': the card meets a ring, the control a panel ring marks or the
- * open inspector, or a board ring lies outside the free area while the probe reads it in view.
+ * open inspector, or a board ring lies outside the free area while the probe reads it in view. Beside
+ * the Palette the card may overlap the inspector's lower part (UI-SPEC "Card placement across" and
+ * Assumption 2), as long as it covers neither ring nor the control a ring marks.
  */
 function overlaps(read: Read, board: boolean): string {
   const { card, probe, inspector, free } = read;
@@ -168,7 +191,7 @@ function overlaps(read: Read, board: boolean): string {
   if (probe.hint !== null && meets(card, probe.hint)) hits.push(`ring ${fmt(probe.hint)}`);
   if (probe.hintTo !== null && meets(card, probe.hintTo)) hits.push(`second ring ${fmt(probe.hintTo)}`);
   if (!board && probe.hint !== null && meets(card, markedBy(probe.hint))) hits.push(`the control the ring marks ${fmt(markedBy(probe.hint))}`);
-  if (inspector !== null && meets(card, inspector)) hits.push(`inspector ${fmt(inspector)}`);
+  if (inspector !== null && meets(card, inspector) && !besidePalette(read)) hits.push(`inspector ${fmt(inspector)}`);
   if (hits.length > 0) return `card ${fmt(card)} meets ${hits.join(' and ')}`;
   if (board && !probe.offScreen) {
     for (const ring of [probe.hint, probe.hintTo]) {
@@ -229,8 +252,16 @@ async function measureAt(run: Run, stageId: string): Promise<void> {
   const read = last as unknown as Read;
   run.visited.add(`${read.probe.stepId}/${read.probe.stageId}`);
   console.log(
-    `MEASURE clearance lesson=${lesson.id} ${label} step=${read.probe.stepId} stage=${read.probe.stageId} lines=${lines} card=${fmt(read.card)} ring=${fmt(read.probe.hint)} to=${fmt(read.probe.hintTo)} inspector=${fmt(read.inspector)} free=${fmt(read.free)} off=${read.probe.offScreen}`,
+    `MEASURE clearance lesson=${lesson.id} ${label} step=${read.probe.stepId} stage=${read.probe.stageId} lines=${lines} place=${placeOf(read)} card=${fmt(read.card)} ring=${fmt(read.probe.hint)} to=${fmt(read.probe.hintTo)} inspector=${fmt(read.inspector)} free=${fmt(read.free)} off=${read.probe.offScreen}`,
   );
+}
+
+/** Which of the three rules across placed the card, read off its rect. */
+function placeOf(read: Read): string {
+  if (read.card === null) return 'none';
+  if (besidePalette(read)) return 'palette';
+  if (read.inspector !== null && Math.abs(read.card.x + read.card.width - (read.inspector.x - GAP)) <= TOLERANCE) return 'inspector';
+  return 'centred';
 }
 
 /** Focus back to the page after a toolbar press, so Escape reaches the board. */
@@ -367,6 +398,99 @@ for (const size of SIZES) {
     });
   }
 }
+
+/**
+ * The visit lessons 3 and 4 pass to the shared flows: on each step's first stop, pause and measure the
+ * step's board-paused stage, then measure the stage itself.
+ */
+function measuringVisit(run: Run): Visit {
+  const paused = new Set<string>();
+  return async (stageId) => {
+    const step = (await readProbe(run.page)).stepId ?? '';
+    if (!paused.has(step)) {
+      paused.add(step);
+      await measurePaused(run, stageId);
+    }
+    await measureAt(run, stageId);
+  };
+}
+
+for (const size of SIZES) {
+  for (const legend of LEGEND_STATES) {
+    const label = labelOf(size, legend);
+    test(`lesson 3: the tallest card clears every ring at every ringed stage of DELETE_AND_UNDO, at ${label}`, async ({ page }) => {
+      test.setTimeout(240_000);
+      await page.setViewportSize(size);
+      const host = configByNode();
+      const h = await boot(page, host.opts);
+      await startLesson(page, h, DELETE_AND_UNDO);
+      if (legend) await openLegend(page);
+      const run: Run = { page, h, lesson: DELETE_AND_UNDO, label, visited: new Set<string>() };
+      const visit = measuringVisit(run);
+
+      // Zoom 1, where the six-cell line fits the 412 px free area at 1024 wide.
+      const board = await buildLine(page, h, host, visit, [0.9, 1.1]);
+      await expectCaptureComplete(page);
+      await deleteBelt(page, h, board, visit);
+      await deleteSink(page, h, board, visit);
+      await undoBoth(page, h, host, board, visit);
+
+      expect([...run.visited].sort(), 'every ringed stage of lesson 3 was visited').toEqual([...ringedOf(DELETE_AND_UNDO)].sort());
+    });
+
+    test(`lesson 4: the tallest card clears every ring at every ringed stage of TWO_OUTPUTS, at ${label}`, async ({ page }) => {
+      test.setTimeout(300_000);
+      await page.setViewportSize(size);
+      const { h, host } = await startFactoryLesson(page, {}, legend ? () => openLegend(page) : undefined);
+      const run: Run = { page, h, lesson: TWO_OUTPUTS, label, visited: new Set<string>() };
+      const visit = measuringVisit(run);
+
+      await buildBoard(page, h, host, { visit });
+      await toTypeCode(page, visit);
+      await typeAndApply(page, h, visit);
+
+      expect([...run.visited].sort(), 'every ringed stage of lesson 4 was visited').toEqual([...ringedOf(TWO_OUTPUTS)].sort());
+    });
+  }
+}
+
+test('at 1024x768 with the Factory selected, the card moves 8 px right of the Palette when the inspector-side place would cover the Belt ring', async ({ page }) => {
+  // UI-SPEC names lesson 4's sink-tool for this case. Measured, the Sink row's ring sits at about 190 px,
+  // far above the card, and the rows the inspector-side card covers at 1024x768 are the Palette's lower
+  // ones: the Belt row, ringed at belt-tool with the Factory still selected from step 4.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const { h, host } = await startFactoryLesson(page);
+  await buildBoard(page, h, host, { beltsDrawn: 0 });
+  const ring = await ringAt(page, 'belt-tool');
+  await expect(page.locator(INSPECTOR), "the Factory's inspector is open").toBeVisible();
+  for (const note of [false, true]) {
+    if (note) {
+      injectRefusal(h, 'InvalidDock');
+      await expect.poll(async () => (await readProbe(page)).noteKind, { message: 'the refusal note shows' }).toBe('refusal');
+    }
+    const what = note ? 'with a refusal note' : 'with no note';
+    let last: Read | null = null;
+    await expect
+      .poll(
+        async () => {
+          last = await readAll(page);
+          if (last.card === null || last.inspector === null) return 'no card or no inspector';
+          if (meets(last.card, ring)) return `card ${fmt(last.card)} meets the Belt ring ${fmt(ring)}`;
+          if (!besidePalette(last)) return `card left ${last.card.x.toFixed(1)}, Palette right ${last.paletteRight.toFixed(1)}`;
+          return 'beside the Palette';
+        },
+        { message: `${what}: the card clears the Belt ring with its left edge 8 px right of the Palette` },
+      )
+      .toBe('beside the Palette');
+    const read = last as unknown as Read;
+    const card = read.card as Rect;
+    const inspector = read.inspector as Rect;
+    // The case means something only if the inspector-side place would cover the ring.
+    const besideInspector: Rect = { ...card, x: inspector.x - GAP - card.width };
+    expect(meets(besideInspector, ring), `${what}: the inspector-side place ${fmt(besideInspector)} would cover the Belt ring ${fmt(ring)}`).toBe(true);
+    console.log(`MEASURE clearance ring-aware ${what} card=${fmt(card)} ring=${fmt(ring)} inspector=${fmt(inspector)} palette-right=${read.paletteRight.toFixed(1)}`);
+  }
+});
 
 test('the open inspector moves the card left at its own width, and Help puts it back in the centre', async ({ page }) => {
   const { h } = await startAt(page, { width: 1024, height: 768 });

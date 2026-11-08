@@ -4,27 +4,32 @@ import { EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
 import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { noteTokens } from '../src/tutorial/machine';
 import { phrasePlain } from '../src/tutorial/phrase';
-import { CELL, CMD, buildPacket, gestureSubject, screenCellCentre, type Harness, type InjectBelt, type InjectNode } from './support/wire';
+import { CELL, buildPacket, screenCellCentre, type Harness } from './support/wire';
 import {
   CARD,
+  LINE_BELT_ID,
   OUTSET,
   SINK_DEBUG,
   SOURCE_TIMER,
   SOURCE_WEBHOOK,
-  beltBetween,
   boot,
-  cellOfRing,
+  buildLine,
+  centreOf,
   configByNode,
+  deleteBelt,
+  deletesSent,
+  expectAt,
+  expectCaptureComplete,
   pressRing,
   readProbe,
   reminted,
   ringAt,
-  sinkAt,
-  sourceAt,
+  selectedBelt,
+  selectedNode,
   startLesson,
-  zoomInto,
+  undosSent,
+  type LineBoard,
 } from './support/lessonMock';
-import { cameraOf } from './support/wire';
 
 // lesson-delete.spec.ts - lesson 3, Delete and Undo, on a mock host.
 //
@@ -84,106 +89,9 @@ const STAGE = {
   undoBelt: stageOf(STEP.bringBack, 'undo-belt'),
 };
 
-const BELT_ID = 4;
+const BELT_ID = LINE_BELT_ID;
+type Board = LineBoard;
 const FLOOR = 1;
-
-/** The board the case has injected so far, and the tick and generation of its last packet. */
-interface Board {
-  source: InjectNode;
-  sink: InjectNode;
-  belt: InjectBelt;
-  tick: number;
-  generation: number;
-}
-
-async function selectedBelt(page: Page): Promise<number | null> {
-  return page.evaluate(() => (window as unknown as { __fabrico: { selectedBelt(): number | null } }).__fabrico.selectedBelt());
-}
-
-async function selectedNode(page: Page): Promise<number | null> {
-  return page.evaluate(() => (window as unknown as { __fabrico: { selectedNode(): number | null } }).__fabrico.selectedNode());
-}
-
-/** Poll the probe until it names this step and stage. */
-async function expectAt(page: Page, stepId: string, stageId: string, message: string): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const probe = await readProbe(page);
-        return `${probe.stepId}/${probe.stageId}`;
-      },
-      { message },
-    )
-    .toBe(`${stepId}/${stageId}`);
-}
-
-/** The Delete frames the page has sent, each with the handle it names. */
-function deletesSent(h: Harness): number[] {
-  return h.sent.filter((frame) => frame[0] === CMD.Delete).map((frame) => gestureSubject(frame).node ?? -1);
-}
-
-function undosSent(h: Harness): number {
-  return h.sent.filter((frame) => frame[0] === CMD.Undo).length;
-}
-
-/** The centre of a ring's rect, where a press on it lands. */
-function centreOf(ring: HintRect): { x: number; y: number } {
-  return { x: ring.x + ring.width / 2, y: ring.y + ring.height / 2 };
-}
-
-/**
- * Steps 1 to 3 the way a user plays them: the Source and the Sink through their floor rings, then the
- * Belt row and a drag from the Out ring to the In ring. The host's answers are injected after each
- * gesture, and both machines' configs are in the host's table before they land. Returns at tool-down,
- * with the Belt tool still armed.
- */
-async function buildLine(page: Page, h: Harness, host: ReturnType<typeof configByNode>): Promise<Board> {
-  await ringAt(page, STAGE.sourceTool);
-  // New keeps the camera, and the mock's first board fits one machine at the closest zoom. At that zoom
-  // six cells east of the Source is past the free area, so the Sink's spot would land west, where no
-  // straight belt reaches it. A user building a line zooms out first, and so does this.
-  await zoomInto(page, { x: 640, y: 360 }, 1.4, 1.6);
-  await page.getByRole('button', { name: 'Place Source', exact: true }).click();
-  const sourceRing = await ringAt(page, STAGE.sourceFloor);
-  const source = sourceAt(cellOfRing(sourceRing, await cameraOf(page)));
-  host.set(source.id, SOURCE_WEBHOOK);
-  await pressRing(page, sourceRing);
-  await expect.poll(() => h.sent.some((frame) => frame[0] === CMD.Place), { message: 'the floor press sent a Place' }).toBe(true);
-  h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: FLOOR, nodes: [source] }));
-
-  await ringAt(page, STAGE.sinkTool);
-  await page.getByRole('button', { name: 'Place Sink', exact: true }).click();
-  const sinkRing = await ringAt(page, STAGE.sinkFloor);
-  const sink = sinkAt(cellOfRing(sinkRing, await cameraOf(page)));
-  host.set(sink.id, SINK_DEBUG);
-  await pressRing(page, sinkRing);
-  h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: FLOOR, nodes: [source, sink] }));
-
-  await pressRing(page, await ringAt(page, STAGE.beltTool));
-  const from = await ringAt(page, STAGE.beltDraw);
-  const to = (await readProbe(page)).hintTo;
-  if (to === null) throw new Error('belt-draw shows no release ring');
-  const start = centreOf(from);
-  const end = to.hitCentre ?? centreOf(to);
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  await page.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 5 });
-  await page.mouse.move(end.x, end.y, { steps: 5 });
-  await page.mouse.up();
-  await expect.poll(() => h.sent.some((frame) => frame[0] === CMD.DrawBelt), { message: 'the drag sent a draw' }).toBe(true);
-
-  const belt = beltBetween(BELT_ID, source, sink);
-  h.inject(buildPacket({ full: false, tick: 8, generation: 1, swapFloor: FLOOR, nodes: [source, sink], belts: [belt], canUndo: true }));
-  await expectAt(page, STEP.deleteBelt, STAGE.toolDown, 'the joined belt finished draw-belt, and the Belt tool is still armed');
-  return { source, sink, belt, tick: 8, generation: 1 };
-}
-
-/** Wait until the capture the restored check compares with holds both machines' configs. */
-async function expectCaptureComplete(page: Page): Promise<void> {
-  await expect
-    .poll(async () => (await readProbe(page)).capture, { message: 'the capture taken as delete-belt began holds both configs' })
-    .toEqual({ since: STEP.deleteBelt, machines: 2, configKinds: ['Source', 'Sink'] });
-}
 
 /** What a press at this point would land on, by the names a case reads. */
 async function hitAt(page: Page, at: { x: number; y: number }): Promise<{ tag: string; inLayer: boolean; bin: boolean }> {
@@ -212,18 +120,6 @@ async function toSelectBelt(page: Page, opts: Parameters<typeof boot>[1] = {}): 
   await page.keyboard.press('Escape');
   await ringAt(page, STAGE.selectBelt);
   return { h, host, board };
-}
-
-/** Select the belt through its ring and press Delete, then inject the host's diff without it. */
-async function deleteBelt(page: Page, h: Harness, board: Board): Promise<void> {
-  await pressRing(page, await ringAt(page, STAGE.selectBelt));
-  await expect.poll(() => selectedBelt(page), { message: 'the press on the belt ring selected the belt' }).toBe(BELT_ID);
-  await expectAt(page, STEP.deleteBelt, STAGE.pressDeleteBelt, 'a selected belt moves the card to the Delete key');
-  await page.keyboard.press('Delete');
-  await expect.poll(() => deletesSent(h), { message: "Delete sent the belt's delete" }).toContain(BELT_ID);
-  board.tick += 1;
-  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: FLOOR, removed: [BELT_ID], canUndo: true }));
-  await expectAt(page, STEP.deleteSink, STAGE.selectSink, 'the belt gone finished delete-belt');
 }
 
 test.describe('lesson 3 on the mock host', () => {

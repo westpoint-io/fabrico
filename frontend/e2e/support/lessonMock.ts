@@ -12,9 +12,11 @@ import type { MachineConfig } from '../../src/protocol/decode';
 import { doorstepCell } from '../../src/protocol/ports';
 import { GESTURE_REFUSAL_KIND } from '../../src/transport/transport';
 import { YOUR_FIRST_LINE } from '../../src/tutorial/lessons/yourFirstLine';
+import { TWO_OUTPUTS } from '../../src/tutorial/lessons/twoOutputs';
 import type { Lesson } from '../../src/tutorial/types';
 import {
   CELL,
+  CMD,
   QueryRefusal,
   buildPacket,
   cameraOf,
@@ -25,6 +27,7 @@ import {
   type Harness,
   type InjectBelt,
   type InjectNode,
+  type InjectPort,
 } from './wire';
 
 /** The ring's outset on each side of its target. */
@@ -486,4 +489,565 @@ export async function panBoard(page: Page): Promise<void> {
  */
 export function injectRefusal(h: Harness, tag: string): void {
   h.injectText(JSON.stringify({ kind: GESTURE_REFUSAL_KIND, tag }));
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Lessons 3 and 4, played through their rings. `lesson-delete.spec.ts`, `lesson-factory.spec.ts` and
+// `lesson-clearance.spec.ts` share these, so each lesson's mock flow exists once.
+//
+// A flow takes an optional `visit`. When a spec passes one, the flow calls it with the stage id each
+// time the card shows a stage the flow stops on, before the gesture there, and it also takes the side
+// trips that show the stages a plain run skips: a tool put down and picked up again, a short belt that
+// stops before its machine, a selection cleared. `visit` must leave the card on the stage it was given.
+// ---------------------------------------------------------------------------------------------------
+
+/** A spec's stop at a stage a flow reaches. */
+export type Visit = (stageId: string) => Promise<void>;
+
+/** Poll the probe until it names this step and stage. */
+export async function expectAt(page: Page, stepId: string, stageId: string, message: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const probe = await readProbe(page);
+        return `${probe.stepId}/${probe.stageId}`;
+      },
+      { message },
+    )
+    .toBe(`${stepId}/${stageId}`);
+}
+
+/** How many frames carrying `cmd` the page has sent. */
+export function sentCount(h: Harness, cmd: number): number {
+  return h.sent.filter((frame) => frame[0] === cmd).length;
+}
+
+/** The centre of a ring's rect, where a press on it lands. */
+export function centreOf(ring: HintRect): { x: number; y: number } {
+  return { x: ring.x + ring.width / 2, y: ring.y + ring.height / 2 };
+}
+
+/** Wait for the stage's ring, then hand it to the visit. */
+async function stopAt(page: Page, stageId: string, visit: Visit | undefined): Promise<void> {
+  if (visit === undefined) return;
+  await ringAt(page, stageId);
+  await visit(stageId);
+}
+
+/** Press a floor ring with the tool armed and wait for the Place it sends. */
+export async function placeThrough(page: Page, h: Harness, ring: HintRect): Promise<void> {
+  const before = sentCount(h, CMD.Place);
+  await pressRing(page, ring);
+  await expect.poll(() => sentCount(h, CMD.Place), { message: 'the floor press sent a Place' }).toBe(before + 1);
+}
+
+/** The drag from the belt-draw ring (or from `startAt`) to its release ring, and the DrawBelt it sends. */
+export async function dragThroughRings(page: Page, h: Harness, startAt?: { x: number; y: number }): Promise<void> {
+  const from = await ringAt(page, 'belt-draw');
+  const to = (await readProbe(page)).hintTo;
+  if (to === null) throw new Error('belt-draw shows no release ring');
+  const before = sentCount(h, CMD.DrawBelt);
+  const start = startAt ?? centreOf(from);
+  const end = to.hitCentre ?? centreOf(to);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 5 });
+  await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => sentCount(h, CMD.DrawBelt), { message: 'the drag between the rings sent a draw' }).toBe(before + 1);
+}
+
+/**
+ * Press the first stage's ring if the step opens on it, and wait for `nextStage`. Machine and Belt
+ * tools stay armed after use, and a selection stays while tools come and go, so a step can open on
+ * `nextStage`. With a visit, Escape then puts the tool down or clears the selection so the card shows
+ * `firstStage` too, and its ring is pressed to come back.
+ */
+export async function armThrough(page: Page, firstStage: string, nextStage: string, visit?: Visit): Promise<void> {
+  if (visit !== undefined && (await readProbe(page)).stageId !== firstStage) {
+    await ringAt(page, nextStage);
+    await visit(nextStage);
+    // A refusal band or a held key can take one Escape, so press until the card moves back.
+    for (let i = 0; i < 4 && (await readProbe(page)).stageId !== firstStage; i++) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(100);
+    }
+    await ringAt(page, firstStage);
+  }
+  if ((await readProbe(page)).stageId === firstStage) {
+    await stopAt(page, firstStage, visit);
+    await pressRing(page, await ringAt(page, firstStage));
+  }
+  await ringAt(page, nextStage);
+}
+
+/**
+ * With a visit, at a belt-draw stage: put down the first two tiles of the drag's belt, docked at its Out
+ * only, so the card shows the carry-on stage, visit it, then take the belt off again so the card is back
+ * on the plain drag. Two tiles, because a one-tile belt has no direction and reads as stuck. The stub's
+ * handle is one no lesson uses.
+ */
+async function visitCarryOn(
+  page: Page,
+  h: Harness,
+  board: { nodes: InjectNode[]; belts: InjectBelt[]; tick: number },
+  full: InjectBelt,
+  visit: Visit | undefined,
+): Promise<void> {
+  if (visit === undefined) return;
+  if (full.tiles.length < 3) throw new Error(`a carry-on stub needs a belt of three tiles or more, and this one has ${full.tiles.length}`);
+  const stub: InjectBelt = { id: CARRY_ON_STUB_ID, tiles: full.tiles.slice(0, 2), docks: (full.docks ?? []).filter((d) => d.end === 'Tail') };
+  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, nodes: board.nodes, belts: [...board.belts, stub] }));
+  await stopAt(page, 'belt-carry-on', visit);
+  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, removed: [CARRY_ON_STUB_ID] }));
+  await ringAt(page, 'belt-draw');
+}
+
+/** The handle of the short belt `visitCarryOn` puts down and takes off. */
+const CARRY_ON_STUB_ID = 90;
+
+// Lesson 3, Delete and Undo.
+
+/** Lesson 3's belt handle. */
+export const LINE_BELT_ID = 4;
+
+/** Lesson 3's board as the case has injected it so far, and the tick and generation of its last packet. */
+export interface LineBoard {
+  source: InjectNode;
+  sink: InjectNode;
+  belt: InjectBelt;
+  tick: number;
+  generation: number;
+}
+
+export async function selectedBelt(page: Page): Promise<number | null> {
+  return page.evaluate(() => (window as unknown as { __fabrico: { selectedBelt(): number | null } }).__fabrico.selectedBelt());
+}
+
+export async function selectedNode(page: Page): Promise<number | null> {
+  return page.evaluate(() => (window as unknown as { __fabrico: { selectedNode(): number | null } }).__fabrico.selectedNode());
+}
+
+/** The Delete frames the page has sent, each with the handle it names. */
+export function deletesSent(h: Harness): number[] {
+  return h.sent.filter((frame) => frame[0] === CMD.Delete).map((frame) => gestureSubject(frame).node ?? -1);
+}
+
+export function undosSent(h: Harness): number {
+  return h.sent.filter((frame) => frame[0] === CMD.Undo).length;
+}
+
+/**
+ * Lesson 3's steps 1 to 3 the way a user plays them: the Source and the Sink through their floor rings,
+ * then the Belt row and a drag from the Out ring to the In ring, at a zoom in `zoom`. The host's answers
+ * are injected after each gesture, and both machines' configs are in the host's table before they
+ * land. Returns at tool-down, with the Belt tool still armed.
+ */
+export async function buildLine(
+  page: Page,
+  h: Harness,
+  host: ReturnType<typeof configByNode>,
+  visit?: Visit,
+  zoom: readonly [number, number] = [1.4, 1.6],
+): Promise<LineBoard> {
+  await ringAt(page, 'source-tool');
+  // New keeps the camera, and the mock's first board fits one machine at the closest zoom. At that zoom
+  // six cells east of the Source is past the free area, so the Sink's spot would land west, where no
+  // straight belt reaches it. A user building a line zooms out first, and so does this. At 1024 wide
+  // the free area is 412 px, and the line needs a zoom of about 1 to fit it.
+  await zoomInto(page, { x: 640, y: 360 }, zoom[0], zoom[1]);
+  await stopAt(page, 'source-tool', visit);
+  await page.getByRole('button', { name: 'Place Source', exact: true }).click();
+  await stopAt(page, 'source-floor', visit);
+  const sourceRing = await ringAt(page, 'source-floor');
+  const source = sourceAt(cellOfRing(sourceRing, await cameraOf(page)));
+  host.set(source.id, SOURCE_WEBHOOK);
+  await placeThrough(page, h, sourceRing);
+  h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [source] }));
+
+  await stopAt(page, 'sink-tool', visit);
+  await ringAt(page, 'sink-tool');
+  await page.getByRole('button', { name: 'Place Sink', exact: true }).click();
+  await stopAt(page, 'sink-floor', visit);
+  const sinkRing = await ringAt(page, 'sink-floor');
+  const sink = sinkAt(cellOfRing(sinkRing, await cameraOf(page)));
+  host.set(sink.id, SINK_DEBUG);
+  await pressRing(page, sinkRing);
+  h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: [source, sink] }));
+
+  await stopAt(page, 'belt-tool', visit);
+  await pressRing(page, await ringAt(page, 'belt-tool'));
+  await stopAt(page, 'belt-draw', visit);
+  const belt = beltBetween(LINE_BELT_ID, source, sink);
+  const board = { nodes: [source, sink], belts: [] as InjectBelt[], tick: 7 };
+  await visitCarryOn(page, h, board, belt, visit);
+  await dragThroughRings(page, h);
+
+  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, nodes: [source, sink], belts: [belt], canUndo: true }));
+  await expectAt(page, 'delete-belt', 'tool-down', 'the joined belt finished draw-belt, and the Belt tool is still armed');
+  return { source, sink, belt, tick: board.tick, generation: 1 };
+}
+
+/** Wait until the capture lesson 3's restored check compares with holds both machines' configs. */
+export async function expectCaptureComplete(page: Page): Promise<void> {
+  await expect
+    .poll(async () => (await readProbe(page)).capture, { message: 'the capture taken as delete-belt began holds both configs' })
+    .toEqual({ since: 'delete-belt', machines: 2, configKinds: ['Source', 'Sink'] });
+}
+
+/**
+ * Lesson 3's step 4 from tool-down: the tool down, the belt selected through its ring and Delete, then
+ * the host's diff without it. Ends at delete-sink's select-sink.
+ */
+export async function deleteBelt(page: Page, h: Harness, board: LineBoard, visit?: Visit): Promise<void> {
+  if ((await readProbe(page)).stageId === 'tool-down') {
+    await stopAt(page, 'tool-down', visit);
+    await page.keyboard.press('Escape');
+  }
+  await stopAt(page, 'select-belt', visit);
+  await pressRing(page, await ringAt(page, 'select-belt'));
+  await expect.poll(() => selectedBelt(page), { message: 'the press on the belt ring selected the belt' }).toBe(LINE_BELT_ID);
+  await expectAt(page, 'delete-belt', 'press-delete', 'a selected belt moves the card to the Delete key');
+  await stopAt(page, 'press-delete', visit);
+  await page.keyboard.press('Delete');
+  await expect.poll(() => deletesSent(h), { message: "Delete sent the belt's delete" }).toContain(LINE_BELT_ID);
+  board.tick += 1;
+  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: 1, removed: [LINE_BELT_ID], canUndo: true }));
+  await expectAt(page, 'delete-sink', 'select-sink', 'the belt gone finished delete-belt');
+}
+
+/**
+ * Lesson 3's step 5 from select-sink: the Sink selected through its ring and Backspace, then the host's
+ * diff without it. With a visit it first arms the Sink tool so the card shows tool-down, and puts it
+ * down again. Ends at bring-back's undo-sink.
+ */
+export async function deleteSink(page: Page, h: Harness, board: LineBoard, visit?: Visit): Promise<void> {
+  if (visit !== undefined) {
+    await page.getByRole('button', { name: 'Place Sink', exact: true }).click();
+    await expectAt(page, 'delete-sink', 'tool-down', 'an armed tool moves the card to tool-down');
+    await stopAt(page, 'tool-down', visit);
+    await page.keyboard.press('Escape');
+  }
+  await stopAt(page, 'select-sink', visit);
+  await pressRing(page, await ringAt(page, 'select-sink'));
+  await expect.poll(() => selectedNode(page), { message: 'the press on the Sink ring selected the Sink' }).toBe(board.sink.id);
+  await expectAt(page, 'delete-sink', 'press-delete', 'a selected Sink moves the card to the Delete key');
+  await stopAt(page, 'press-delete', visit);
+  await page.keyboard.press('Backspace');
+  await expect.poll(() => deletesSent(h), { message: "Backspace sent the Sink's delete" }).toContain(board.sink.id);
+  board.tick += 1;
+  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: 1, removed: [board.sink.id], canUndo: true }));
+  await expectAt(page, 'bring-back', 'undo-sink', 'the Sink gone finished delete-sink');
+}
+
+/**
+ * Lesson 3's step 6 from undo-sink: the Undo button under its ring, then Ctrl+Z, each answered with a
+ * keyframe that re-mints every handle. Ends with the lesson finished.
+ */
+export async function undoBoth(page: Page, h: Harness, host: ReturnType<typeof configByNode>, board: LineBoard, visit?: Visit): Promise<void> {
+  await stopAt(page, 'undo-sink', visit);
+  const undos = undosSent(h);
+  await pressRing(page, await ringAt(page, 'undo-sink'));
+  await expect.poll(() => undosSent(h), { message: 'the Undo button sent an Undo' }).toBe(undos + 1);
+  const first = reminted({ nodes: [board.source, board.sink] }, 10);
+  host.set(first.nodes[0]!.id, SOURCE_WEBHOOK);
+  host.set(first.nodes[1]!.id, SINK_DEBUG);
+  h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 2, swapFloor: 1, nodes: first.nodes, canUndo: true, canRedo: true }));
+  await expectAt(page, 'bring-back', 'undo-belt', 'the Sink back moved the card to the belt');
+  await stopAt(page, 'undo-belt', visit);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => undosSent(h), { message: 'Ctrl+Z sent the second Undo' }).toBe(undos + 2);
+  const second = reminted({ nodes: [board.source, board.sink], belts: [board.belt] }, 20);
+  host.set(second.nodes[0]!.id, SOURCE_WEBHOOK);
+  host.set(second.nodes[1]!.id, SINK_DEBUG);
+  h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 3, swapFloor: 1, nodes: second.nodes, belts: second.belts, canUndo: true, canRedo: true }));
+  await expect.poll(async () => (await readProbe(page)).card, { message: 'the line back as it was finished the lesson' }).toBe('finished');
+}
+
+// Lesson 4, A Factory with two outputs.
+
+export const SINK2_ID = 5;
+export const BELT_IN_ID = 6;
+export const BELT_OUT_ID = 7;
+export const BELT_OUT2_ID = 8;
+/** The Sink fixture's In port index (`sinkAt`: the Fault is index 0). */
+export const SINK_IN = 1;
+/** The Factory fixture's port indices (`factoryAt`). */
+export const FACTORY_IN = 0;
+export const FACTORY_OUT = 1;
+export const FACTORY_OUT2 = 3;
+
+/** Lesson 4's board as the case has injected it so far, and the tick of its last packet. */
+export interface FactoryBoard {
+  source: InjectNode;
+  factory: InjectNode;
+  sink: InjectNode;
+  sink2: InjectNode;
+  belts: InjectBelt[];
+  tick: number;
+}
+
+type ConfigHost = ReturnType<typeof configByNode>;
+
+/** Inject the board as it stands, as a diff on generation 1. */
+export function injectBoard(h: Harness, board: { nodes: InjectNode[]; belts?: InjectBelt[]; tick: number }): void {
+  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: 1, nodes: board.nodes, belts: board.belts ?? [] }));
+}
+
+/** A port of a fixture machine, by index. */
+export function portOf(node: InjectNode, index: number): InjectPort {
+  const port = node.ports?.find((p) => p.index === index);
+  if (port === undefined) throw new Error(`machine ${node.id} has no port ${index}`);
+  return port;
+}
+
+/** Where a press on a port's doorstep cell lands, at its centre. */
+export async function doorstepCentre(page: Page, port: { cell_x: number; cell_y: number; side: number }): Promise<{ x: number; y: number }> {
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const [x, y] = doorstepCell(port);
+  return { x: x * size + cam.x + size / 2, y: y * size + cam.y + size / 2 };
+}
+
+/** Start lesson 4 and zoom to about 1, where the 11-cell line fits the free area. */
+export async function startFactoryLesson(
+  page: Page,
+  opts: Parameters<typeof boot>[1] = {},
+  beforeZoom?: () => Promise<void>,
+): Promise<{ h: Harness; host: ConfigHost }> {
+  const host = configByNode();
+  const h = await boot(page, { ...host.opts, ...opts });
+  await startLesson(page, h, TWO_OUTPUTS);
+  await ringAt(page, 'source-tool');
+  await beforeZoom?.();
+  // New keeps the camera, and the mock's first board fits one machine at the closest zoom, where the
+  // centred line can't fit and its later spots fall out of view. A user building a line zooms out.
+  await zoomInto(page, { x: 640, y: 360 }, 0.9, 1.1);
+  return { h, host };
+}
+
+/** Lesson 4's steps 1 and 2: the Source through its rings, and Timer set with the host answering it after Apply. */
+export async function sourceOnTimer(page: Page, h: Harness, host: ConfigHost, visit?: Visit): Promise<{ source: InjectNode; tick: number }> {
+  await stopAt(page, 'source-tool', visit);
+  await pressRing(page, await ringAt(page, 'source-tool'));
+  await stopAt(page, 'source-floor', visit);
+  const sourceRing = await ringAt(page, 'source-floor');
+  const source = sourceAt(cellOfRing(sourceRing, await cameraOf(page)));
+  host.set(source.id, SOURCE_WEBHOOK);
+  await placeThrough(page, h, sourceRing);
+  injectBoard(h, { nodes: [source], tick: 6 });
+
+  await ringAt(page, 'tool-down');
+  await stopAt(page, 'tool-down', visit);
+  await page.keyboard.press('Escape');
+  await stopAt(page, 'select-source', visit);
+  await pressRing(page, await ringAt(page, 'select-source'));
+  await stopAt(page, 'press-timer', visit);
+  await pressRing(page, await ringAt(page, 'press-timer'));
+  const configures = sentCount(h, CMD.Configure);
+  await stopAt(page, 'apply-timer', visit);
+  await pressRing(page, await ringAt(page, 'apply-timer'));
+  await expect.poll(() => sentCount(h, CMD.Configure), { message: 'Apply sent the Timer' }).toBe(configures + 1);
+  host.set(source.id, SOURCE_TIMER);
+  await expectAt(page, 'place-factory', 'factory-tool', 'the Timer answer finished set-timer');
+  return { source, tick: 6 };
+}
+
+/** Lesson 4's steps 3 and 4: the Factory through its rings, then + Add output, and the host's two-output Factory. */
+export async function factoryWithTwoOutputs(
+  page: Page,
+  h: Harness,
+  host: ConfigHost,
+  source: InjectNode,
+  tick: number,
+  atAddOutput?: () => Promise<void>,
+  visit?: Visit,
+): Promise<{ factory: InjectNode; tick: number }> {
+  await stopAt(page, 'factory-tool', visit);
+  await pressRing(page, await ringAt(page, 'factory-tool'));
+  await stopAt(page, 'factory-floor', visit);
+  const factoryRing = await ringAt(page, 'factory-floor');
+  const one = factoryAt(cellOfRing(factoryRing, await cameraOf(page)), 1);
+  host.set(one.id, factoryConfig());
+  await placeThrough(page, h, factoryRing);
+  injectBoard(h, { nodes: [source, one], tick: ++tick });
+
+  await expectAt(page, 'add-output', 'tool-down', 'the Factory appeared, and its tool is still armed');
+  await stopAt(page, 'tool-down', visit);
+  await page.keyboard.press('Escape');
+  await stopAt(page, 'select-factory', visit);
+  await pressRing(page, await ringAt(page, 'select-factory'));
+  await ringAt(page, 'press-add-output');
+  await atAddOutput?.();
+  await stopAt(page, 'press-add-output', visit);
+  await pressRing(page, await ringAt(page, 'press-add-output'));
+  await expect.poll(() => sentCount(h, CMD.AddPort), { message: '+ Add output under its ring sent the add' }).toBe(1);
+  const factory = factoryAt([one.cell_x, one.cell_y], 2);
+  injectBoard(h, { nodes: [source, factory], tick: ++tick });
+  await expectAt(page, 'place-sink', 'sink-tool', 'the Factory with two outputs finished add-output');
+  return { factory, tick };
+}
+
+/**
+ * Lesson 4's steps 5 and 6: both Sinks through their rings. With `firstOnRow` the first Sink goes on
+ * that row in the ring's column instead of in the ring, as a user who ignores the ring and puts it in
+ * front of the Factory's other output does; the card says any free spot works.
+ */
+export async function twoSinks(
+  page: Page,
+  h: Harness,
+  host: ConfigHost,
+  nodes: InjectNode[],
+  tick: number,
+  firstOnRow?: number,
+  visit?: Visit,
+): Promise<{ sink: InjectNode; sink2: InjectNode; tick: number }> {
+  await stopAt(page, 'sink-tool', visit);
+  await pressRing(page, await ringAt(page, 'sink-tool'));
+  await stopAt(page, 'sink-floor', visit);
+  const sinkRing = await ringAt(page, 'sink-floor');
+  const cam = await cameraOf(page);
+  const ringCell = cellOfRing(sinkRing, cam);
+  const cell: readonly [number, number] = firstOnRow === undefined ? ringCell : [ringCell[0], firstOnRow];
+  const sink = sinkAt(cell, SINK_ID);
+  host.set(sink.id, SINK_DEBUG);
+  if (firstOnRow === undefined) await placeThrough(page, h, sinkRing);
+  else {
+    const size = CELL * cam.scale;
+    const before = sentCount(h, CMD.Place);
+    await page.mouse.click(cell[0] * size + cam.x + size / 2, cell[1] * size + cam.y + size / 2);
+    await expect.poll(() => sentCount(h, CMD.Place), { message: 'the floor press off the ring sent a Place' }).toBe(before + 1);
+  }
+  injectBoard(h, { nodes: [...nodes, sink], tick: ++tick });
+
+  await expect.poll(async () => (await readProbe(page)).stepId, { message: 'the first Sink finished place-sink' }).toBe('place-second-sink');
+  await armThrough(page, 'second-sink-tool', 'second-sink-floor', visit);
+  await stopAt(page, 'second-sink-floor', visit);
+  const ring2 = await ringAt(page, 'second-sink-floor');
+  const sink2 = sinkAt(cellOfRing(ring2, await cameraOf(page)), SINK2_ID);
+  host.set(sink2.id, SINK_DEBUG);
+  await placeThrough(page, h, ring2);
+  injectBoard(h, { nodes: [...nodes, sink, sink2], tick: ++tick });
+  await expect.poll(async () => (await readProbe(page)).stepId, { message: 'the second Sink finished place-second-sink' }).toBe('belt-in');
+  return { sink, sink2, tick };
+}
+
+export interface FactoryBuildOptions {
+  /**
+   * Step 8 drawn from the Factory's second Out: the first Sink goes in front of that Out instead of in
+   * its ring, and the drag starts on that Out's doorstep instead of the ring. Step 9's free Out is then
+   * the first.
+   */
+  secondFirst?: boolean;
+  /** Stop after this many belts. */
+  beltsDrawn?: 0 | 1 | 2 | 3;
+  /** Called at press-add-output, before the press. */
+  atAddOutput?: () => Promise<void>;
+  visit?: Visit;
+}
+
+/**
+ * Lesson 4's steps 1 to 6, then the belts through their rings. Returns with the Belt tool still armed,
+ * on the step after the last belt drawn.
+ */
+export async function buildBoard(page: Page, h: Harness, host: ConfigHost, opts: FactoryBuildOptions = {}): Promise<FactoryBoard> {
+  const { visit } = opts;
+  const placed = await sourceOnTimer(page, h, host, visit);
+  const { factory, tick: t2 } = await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick, opts.atAddOutput, visit);
+  const secondRow = doorstepCell(portOf(factory, FACTORY_OUT2))[1];
+  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2, opts.secondFirst === true ? secondRow : undefined, visit);
+  const board: FactoryBoard = { source: placed.source, factory, sink, sink2, belts: [], tick: t3 };
+  const nodes = [board.source, factory, sink, sink2];
+  const outs = opts.secondFirst === true ? [FACTORY_OUT2, FACTORY_OUT] : [FACTORY_OUT, FACTORY_OUT2];
+  const plan: { step: string; belt: () => InjectBelt; from?: number }[] = [
+    { step: 'belt-in', belt: () => beltFromPort(BELT_IN_ID, board.source, 0, factory, FACTORY_IN) },
+    {
+      step: 'belt-out',
+      belt: () => beltFromPort(BELT_OUT_ID, factory, outs[0]!, sink, SINK_IN),
+      ...(opts.secondFirst === true ? { from: FACTORY_OUT2 } : {}),
+    },
+    { step: 'belt-out-2', belt: () => beltFromPort(BELT_OUT2_ID, factory, outs[1]!, sink2, SINK_IN) },
+  ];
+  for (const { step, belt, from } of plan.slice(0, opts.beltsDrawn ?? 3)) {
+    await expect.poll(async () => (await readProbe(page)).stepId, { message: `the lesson reached ${step}` }).toBe(step);
+    await armThrough(page, 'belt-tool', 'belt-draw', visit);
+    await stopAt(page, 'belt-draw', visit);
+    await visitCarryOn(page, h, { nodes, belts: board.belts, tick: board.tick }, belt(), visit);
+    if (visit !== undefined) board.tick += 2;
+    await dragThroughRings(page, h, from === undefined ? undefined : await doorstepCentre(page, portOf(factory, from)));
+    board.belts.push(belt());
+    injectBoard(h, { nodes, belts: board.belts, tick: ++board.tick });
+    await expect.poll(async () => (await readProbe(page)).stepId, { message: `the joined belt finished ${step}` }).not.toBe(step);
+  }
+  return board;
+}
+
+/**
+ * From a built board with the Belt tool armed to lesson 4's code-line stage. The Factory selected at
+ * step 4 stays selected while tools are armed, so the card goes straight to the code line unless
+ * something cleared the selection, and then it asks for the press. With a visit, Escape clears the
+ * selection so the card shows select-factory too.
+ */
+export async function toTypeCode(page: Page, visit?: Visit): Promise<HintRect> {
+  await expectAt(page, 'change-code', 'tool-down', 'the third belt finished belt-out-2, and the Belt tool is still armed');
+  await stopAt(page, 'tool-down', visit);
+  await page.keyboard.press('Escape');
+  await expect
+    .poll(async () => (await readProbe(page)).stageId, { message: 'with the tool down the card asks for the Factory or its code' })
+    .toMatch(/^(select-factory|type-code)$/);
+  await armThrough(page, 'select-factory', 'type-code', visit);
+  return ringAt(page, 'type-code');
+}
+
+/**
+ * The point just after `after` in the editor line that holds it: two px past the right edge of its
+ * last character, which CodeMirror reads as the gap after it. The walk finds it the same way.
+ */
+export async function pointAfter(page: Page, after: string): Promise<{ x: number; y: number }> {
+  const at = await page.evaluate((text) => {
+    const line = [...document.querySelectorAll('aside[aria-labelledby="fab-config-heading"] .cm-line')].find((l) => (l.textContent ?? '').includes(text));
+    if (line === undefined) return null;
+    const end = (line.textContent ?? '').indexOf(text) + text.length;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const length = node.textContent?.length ?? 0;
+      if (seen + length >= end) {
+        const range = document.createRange();
+        range.setStart(node, end - seen - 1);
+        range.setEnd(node, end - seen);
+        const box = range.getBoundingClientRect();
+        return { x: box.right + 2, y: box.top + box.height / 2 };
+      }
+      seen += length;
+    }
+    return null;
+  }, after);
+  if (at === null) throw new Error(`no editor line holds ${JSON.stringify(after)}`);
+  return at;
+}
+
+/** Click just after `after` and type `insert`, the way a user puts the caret there and types. */
+export async function typeAfter(page: Page, after: string, insert: string): Promise<void> {
+  const at = await pointAfter(page, after);
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.insertText(insert);
+}
+
+/**
+ * Lesson 4's step 10 from type-code: the lesson's own line typed after the first emit, Apply under its
+ * ring, and the host holding the code. Ends at the watch stage.
+ */
+export async function typeAndApply(page: Page, h: Harness, visit?: Visit): Promise<void> {
+  const gesture = TWO_OUTPUTS.steps.find((s) => s.id === 'change-code')?.stages.find((st) => st.id === 'type-code')?.gesture;
+  if (gesture?.do !== 'typeCode') throw new Error('lesson 4 type-code types no code');
+  await stopAt(page, 'type-code', visit);
+  await typeAfter(page, gesture.after, gesture.insert);
+  await expectAt(page, 'change-code', 'apply-code', 'the not-applied marker moved the card to Apply');
+  await stopAt(page, 'apply-code', visit);
+  const configures = sentCount(h, CMD.Configure);
+  await pressRing(page, await ringAt(page, 'apply-code'));
+  await expect.poll(() => sentCount(h, CMD.Configure), { message: 'Apply under its ring sent the code' }).toBe(configures + 1);
+  await expectAt(page, 'change-code', 'watch', 'Apply moved the card to the watch stage');
+  await stopAt(page, 'watch', visit);
 }

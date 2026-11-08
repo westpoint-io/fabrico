@@ -228,15 +228,37 @@ function readFreeArea(): ChromeFacts['view']['freeArea'] {
 
 /** The gap between the card's right edge and the open inspector's left edge. */
 const CARD_INSPECTOR_GAP_PX = 8;
+/** The gap between the Palette's right edge and the card's left edge, `--fab-space-sm`. */
+const CARD_PALETTE_GAP_PX = 8;
+
+/** The rings painted this frame: the main ring, and the drag's far ring when it shows. */
+function paintedRingRects(): DOMRect[] {
+  const rects: DOMRect[] = [];
+  for (const sel of ['[data-fab-hint]', '[data-fab-hint-to]']) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el === null || el.style.visibility === 'hidden') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) rects.push(r);
+  }
+  return rects;
+}
 
 /**
- * The card's left edge in its container's px while the open inspector meets the card's centred place,
- * or null for centred. The card keeps its width, so its right edge sits 8 px short of the inspector; at
- * 1024 wide that puts it over the palette's lower rows, which UI-SPEC "Card placement" accepts. The
- * inspector is found by its heading, because the camera cluster carries `[data-fab-corner-dock]` too.
- * Help hides the inspector with `display: none`, which reads as an empty rect, so the card is centred
- * again. Only x depends on this, and the centred place is worked out from the container and the card's
- * width, never the card's current x, so the shift can't feed back into itself.
+ * The card's left edge in its container's px, or null for centred. Three rules (UI-SPEC "Card
+ * placement across"):
+ *
+ * 1. Centred, while no open inspector meets the centred place.
+ * 2. Right edge 8 px short of an open inspector that meets the centred place. At 1024 wide that puts the
+ *    card over the Palette's lower rows.
+ * 3. If that place meets a ring painted this frame (either ring on a drag), left edge 8 px right of the
+ *    Palette instead, unless that place meets a ring too. The card may then overlap the inspector's
+ *    lower part, and its body passes the pointer through, so a control there still takes a press.
+ *
+ * The inspector is found by its heading, because the camera cluster carries `[data-fab-corner-dock]`
+ * too. Help hides the inspector with `display: none`, which reads as an empty rect, so the card is
+ * centred again. Only x depends on this, and every input is the container's, the inspector's, the
+ * Palette's or a ring's own rect, or the card's width and its top and bottom, none of which move with
+ * the card's x. So the choice can't feed back into itself.
  */
 function readCardLeft(): number | null {
   const card = document.querySelector<HTMLElement>('[data-fab-step-card]');
@@ -247,10 +269,18 @@ function readCardLeft(): number | null {
   const box = card.getBoundingClientRect();
   const parent = card.offsetParent;
   const host = parent === null ? { left: 0, width: window.innerWidth } : parent.getBoundingClientRect();
+  const across = (left: number) => (r: { left: number; right: number; top: number; bottom: number }): boolean =>
+    r.left < left + box.width && r.right > left && r.top < box.bottom && r.bottom > box.top;
   const centredLeft = host.left + (host.width - box.width) / 2;
-  const meets = ins.left < centredLeft + box.width && ins.right > centredLeft && ins.top < box.bottom && ins.bottom > box.top;
-  if (!meets) return null;
-  return ins.left - CARD_INSPECTOR_GAP_PX - box.width - host.left;
+  if (!across(centredLeft)(ins)) return null;
+  const besideInspector = ins.left - CARD_INSPECTOR_GAP_PX - box.width;
+  const rings = paintedRingRects();
+  const palette = document.querySelector<HTMLElement>('[data-fab-left-dock]');
+  if (palette !== null && rings.some(across(besideInspector))) {
+    const besidePalette = palette.getBoundingClientRect().right + CARD_PALETTE_GAP_PX;
+    if (!rings.some(across(besidePalette))) return besidePalette - host.left;
+  }
+  return besideInspector - host.left;
 }
 
 /**
