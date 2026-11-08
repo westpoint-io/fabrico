@@ -2491,8 +2491,11 @@ const CERT_ALL_RUN: &str = "run: cargo test --workspace --all-features --no-fail
 const CERT_CASES: &str = "PROPTEST_CASES: 1024";
 /// The shipped-default suite's condition: the `main` leg, which every operating system has.
 const CERT_DEFAULT_IF: &str = "if: matrix.leg == 'main'";
-/// The all-features suite's condition: its own leg on Windows, the `main` leg everywhere else.
-const CERT_ALL_IF: &str = "if: matrix.leg == 'all-features' || runner.os != 'Windows'";
+/// The all-features suite's condition: its own leg on Windows, the `main` leg everywhere else,
+/// and on the `main` leg even after the shipped-default suite failed. Without `!cancelled()` the
+/// implicit `success()` skips it there, so a red shipped-default suite hides an all-features break.
+const CERT_ALL_IF: &str =
+    "if: ${{ !cancelled() && (matrix.leg == 'all-features' || runner.os != 'Windows') }}";
 /// The determinism job's second matrix key.
 const DETERMINISM_LEGS: &str = "leg: [main, all-features]";
 /// The exclude entries that leave Ubuntu and macOS one leg each, as (os, leg).
@@ -2649,9 +2652,10 @@ fn certification_suites_wrong(yml: &str) -> Vec<String> {
 /// line would each lose a suite or most of its cases with every other test still green. On
 /// Linux and macOS the job has one leg, `main`, which runs both suites. On Windows the `main`
 /// leg runs the shipped-default suite and the `all-features` leg runs the other, in parallel,
-/// because back to back they made Windows the slowest leg of the workflow. This rule pins the
-/// two run lines, their case count, their conditions, the leg key, the two exclude entries
-/// and the cache step's `save-if`.
+/// because back to back they made Windows the slowest leg of the workflow. The all-features
+/// condition carries `!cancelled()`, so on the `main` leg it still runs after the shipped-default
+/// suite failed. This rule pins the two run lines, their case count, their conditions, the leg
+/// key, the two exclude entries and the cache step's `save-if`.
 #[test]
 fn both_certification_suites_run_on_every_operating_system() {
     let wrong = certification_suites_wrong(CI_YML);
@@ -2716,8 +2720,18 @@ fn the_certification_split_check_names_each_way_of_dropping_a_suite() {
             CI_YML.replace(&save_if, ""),
             format!("has no `{DETERMINISM_CACHE_SAVE_IF}` line"),
         ),
+        (
+            "the all-features suite skipped after a red shipped-default suite",
+            CI_YML.replace(
+                &format!("{ALL_STEP}        {CERT_ALL_IF}\n"),
+                &format!(
+                    "{ALL_STEP}        if: matrix.leg == 'all-features' || runner.os != 'Windows'\n"
+                ),
+            ),
+            format!("the step running `{CERT_ALL_RUN}` carries the condition(s)"),
+        ),
     ];
-    assert_eq!(plants.len(), 6, "six ways of dropping a certification suite in ci.yml");
+    assert_eq!(plants.len(), 7, "seven ways of dropping a certification suite in ci.yml");
 
     let mut missed: Vec<String> = Vec::new();
     for (what, yml, must_name) in &plants {

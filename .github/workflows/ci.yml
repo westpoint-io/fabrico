@@ -584,7 +584,7 @@ jobs:
     #
     # WHY WINDOWS ALONE SPLITS. Every operating system runs both certification suites
     # (shipped-default and all-features) exactly once. On Linux and macOS both run on the
-    # one `main` leg, one after the other. On Windows they took 16.3 plus 13.6 minutes in
+    # one `main` leg, one after the other, and the second runs even when the first went red. On Windows they took 16.3 plus 13.6 minutes in
     # one measured run and 23.6 plus 20.0 in another, back to back, which made Windows the
     # longest leg of the workflow. So Windows runs the shipped-default suite and every
     # other gate on its `main` leg, and the all-features suite alone on its `all-features`
@@ -993,7 +993,11 @@ jobs:
       # runs both steps below, the shipped-default one first. On Windows the `main` leg runs
       # the shipped-default step and the `all-features` leg runs the all-features step, in
       # parallel (WHY WINDOWS ALONE SPLITS, at the top of this job, has the measured
-      # minutes). `crates/fabrico-host/tests/ci_wiring_parity.rs` pins both run lines, their
+      # minutes). The all-features condition starts with `!cancelled()`, so on Linux and macOS
+      # it runs even after the shipped-default suite went red: without it, the implicit
+      # `success()` skipped it, and an all-features-only break stayed hidden until the
+      # shipped red was fixed. The job is red either way.
+      # `crates/fabrico-host/tests/ci_wiring_parity.rs` pins both run lines, their
       # PROPTEST_CASES, these two conditions and the matrix that makes the legs.
       - name: Certification suite - SHIPPED default features (PROPTEST_CASES=1024)
         if: matrix.leg == 'main'
@@ -1002,7 +1006,7 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
       - name: Certification suite - all features (PROPTEST_CASES=1024)
-        if: matrix.leg == 'all-features' || runner.os != 'Windows'
+        if: ${{ !cancelled() && (matrix.leg == 'all-features' || runner.os != 'Windows') }}
         env:
           PROPTEST_CASES: 1024
         run: cargo test --workspace --all-features --no-fail-fast
