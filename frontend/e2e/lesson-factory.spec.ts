@@ -1,12 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { HintRect } from '../src/chrome/tutorial/TutorialLayer';
-import { CONFIG_NOT_APPLIED_MARKER } from '../src/chrome/configCopy';
-import { TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutputs';
+import { CONFIG_NOT_APPLIED_MARKER, CONFIG_NOT_APPLIED_SUFFIX } from '../src/chrome/configCopy';
+import { FACTORY_EDITOR_LABELS } from '../src/chrome/FactoryConfigBody';
+import { ADD_OUTPUT_WORDS, TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutputs';
 import { phrasePlain } from '../src/tutorial/phrase';
-import { CMD, buildPacket, cameraOf, waitForBoard, type Harness, type InjectBelt, type InjectNode } from './support/wire';
+import { doorstepCell } from '../src/protocol/ports';
+import { CELL, CMD, buildPacket, cameraOf, waitForBoard, type Harness, type InjectBelt, type InjectNode, type InjectPort } from './support/wire';
 import {
   CARD,
   DEFAULT_FACTORY_SOURCE,
+  OUTSET,
   SINK_DEBUG,
   SINK_ID,
   SOURCE_TIMER,
@@ -111,6 +114,12 @@ for (const step of [STEP.beltOut, STEP.beltOut2]) {
 }
 
 const TYPED = typedAt(STEP.changeCode, STAGE.typeCode);
+/** The label that names the Factory's editor, the one the code-line ring finds it by. */
+const FACTORY_EDITOR_LABEL = FACTORY_EDITOR_LABELS.factory;
+/** The watch stage's second sentence, the one a user with code on one output reads. */
+const ONE_GETS_NONE = 'If one gets none, check the line you typed and press Apply again.';
+/** The apply stage's second sentence, beside the panel's error row. */
+const CHECK_THE_LINE = 'If the panel shows an error, check the line you typed.';
 
 const SINK2_ID = 5;
 const BELT_IN_ID = 6;
@@ -169,13 +178,13 @@ async function placeThrough(page: Page, h: Harness, ring: HintRect): Promise<voi
   await expect.poll(() => sentCount(h, CMD.Place), { message: 'the floor press sent a Place' }).toBe(before + 1);
 }
 
-/** The drag from the belt-draw ring to its release ring, and the DrawBelt it sends. */
-async function dragThroughRings(page: Page, h: Harness): Promise<void> {
+/** The drag from the belt-draw ring (or from `startAt`) to its release ring, and the DrawBelt it sends. */
+async function dragThroughRings(page: Page, h: Harness, startAt?: { x: number; y: number }): Promise<void> {
   const from = await ringAt(page, STAGE.beltDraw);
   const to = (await readProbe(page)).hintTo;
   if (to === null) throw new Error('belt-draw shows no release ring');
   const before = sentCount(h, CMD.DrawBelt);
-  const start = centreOf(from);
+  const start = startAt ?? centreOf(from);
   const end = to.hitCentre ?? centreOf(to);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
@@ -273,7 +282,14 @@ async function sourceOnTimer(page: Page, h: Harness, host: Host): Promise<{ sour
 }
 
 /** Steps 3 and 4: the Factory through its rings, then + Add output, and the host's two-output Factory. */
-async function factoryWithTwoOutputs(page: Page, h: Harness, host: Host, source: InjectNode, tick: number): Promise<{ factory: InjectNode; tick: number }> {
+async function factoryWithTwoOutputs(
+  page: Page,
+  h: Harness,
+  host: Host,
+  source: InjectNode,
+  tick: number,
+  atAddOutput?: () => Promise<void>,
+): Promise<{ factory: InjectNode; tick: number }> {
   await pressRing(page, await ringAt(page, STAGE.factoryTool));
   const factoryRing = await ringAt(page, STAGE.factoryFloor);
   const one = factoryAt(cellOfRing(factoryRing, await cameraOf(page)), 1);
@@ -284,8 +300,9 @@ async function factoryWithTwoOutputs(page: Page, h: Harness, host: Host, source:
   await expectAt(page, STEP.addOutput, STAGE.addToolDown, 'the Factory appeared, and its tool is still armed');
   await page.keyboard.press('Escape');
   await pressRing(page, await ringAt(page, STAGE.selectFactory));
-  const addRing = await ringAt(page, STAGE.pressAddOutput);
-  await pressRing(page, addRing);
+  await ringAt(page, STAGE.pressAddOutput);
+  await atAddOutput?.();
+  await pressRing(page, await ringAt(page, STAGE.pressAddOutput));
   await expect.poll(() => sentCount(h, CMD.AddPort), { message: '+ Add output under its ring sent the add' }).toBe(1);
   const factory = factoryAt([one.cell_x, one.cell_y], 2);
   injectBoard(h, { nodes: [source, factory], tick: ++tick });
@@ -293,13 +310,33 @@ async function factoryWithTwoOutputs(page: Page, h: Harness, host: Host, source:
   return { factory, tick };
 }
 
-/** Steps 5 and 6: both Sinks through their rings. */
-async function twoSinks(page: Page, h: Harness, host: Host, nodes: InjectNode[], tick: number): Promise<{ sink: InjectNode; sink2: InjectNode; tick: number }> {
+/**
+ * Steps 5 and 6: both Sinks through their rings. With `firstOnRow` the first Sink goes on that row in
+ * the ring's column instead of in the ring, as a user who ignores the ring and puts it in front of the
+ * Factory's other output does; the card says any free spot works.
+ */
+async function twoSinks(
+  page: Page,
+  h: Harness,
+  host: Host,
+  nodes: InjectNode[],
+  tick: number,
+  firstOnRow?: number,
+): Promise<{ sink: InjectNode; sink2: InjectNode; tick: number }> {
   await pressRing(page, await ringAt(page, STAGE.sinkTool));
   const sinkRing = await ringAt(page, STAGE.sinkFloor);
-  const sink = sinkAt(cellOfRing(sinkRing, await cameraOf(page)), SINK_ID);
+  const cam = await cameraOf(page);
+  const ringCell = cellOfRing(sinkRing, cam);
+  const cell: readonly [number, number] = firstOnRow === undefined ? ringCell : [ringCell[0], firstOnRow];
+  const sink = sinkAt(cell, SINK_ID);
   host.set(sink.id, SINK_DEBUG);
-  await placeThrough(page, h, sinkRing);
+  if (firstOnRow === undefined) await placeThrough(page, h, sinkRing);
+  else {
+    const size = CELL * cam.scale;
+    const before = sentCount(h, CMD.Place);
+    await page.mouse.click(cell[0] * size + cam.x + size / 2, cell[1] * size + cam.y + size / 2);
+    await expect.poll(() => sentCount(h, CMD.Place), { message: 'the floor press off the ring sent a Place' }).toBe(before + 1);
+  }
   injectBoard(h, { nodes: [...nodes, sink], tick: ++tick });
 
   await expect.poll(async () => (await readProbe(page)).stepId, { message: 'the first Sink finished place-sink' }).toBe(STEP.placeSecondSink);
@@ -313,27 +350,58 @@ async function twoSinks(page: Page, h: Harness, host: Host, nodes: InjectNode[],
   return { sink, sink2, tick };
 }
 
+/** Where a press on a port's doorstep cell lands, at its centre. */
+async function doorstepCentre(page: Page, port: { cell_x: number; cell_y: number; side: number }): Promise<{ x: number; y: number }> {
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const [x, y] = doorstepCell(port);
+  return { x: x * size + cam.x + size / 2, y: y * size + cam.y + size / 2 };
+}
+
+function portOf(node: InjectNode, index: number): InjectPort {
+  const port = node.ports?.find((p) => p.index === index);
+  if (port === undefined) throw new Error(`machine ${node.id} has no port ${index}`);
+  return port;
+}
+
+interface BuildOptions {
+  /**
+   * Step 8 drawn from the Factory's second Out: the first Sink goes in front of that Out instead of in
+   * its ring, and the drag starts on that Out's doorstep instead of the ring. Step 9's free Out is then
+   * the first.
+   */
+  secondFirst?: boolean;
+  /** Stop after this many belts. */
+  beltsDrawn?: 0 | 1 | 2 | 3;
+  /** Called at press-add-output, before the press. */
+  atAddOutput?: () => Promise<void>;
+}
+
 /**
- * Steps 1 to 6, then the belts through their rings. `secondFirst` draws step 8 from the second Out, so
- * step 9's free Out is the first. `beltsDrawn` stops after that many belts. Returns with the Belt tool
- * still armed.
+ * Steps 1 to 6, then the belts through their rings. Returns with the Belt tool still armed, on the step
+ * after the last belt drawn.
  */
-async function buildBoard(page: Page, h: Harness, host: Host, opts: { secondFirst?: boolean; beltsDrawn?: 0 | 1 | 2 | 3 } = {}): Promise<Board> {
+async function buildBoard(page: Page, h: Harness, host: Host, opts: BuildOptions = {}): Promise<Board> {
   const placed = await sourceOnTimer(page, h, host);
-  const { factory, tick: t2 } = await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick);
-  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2);
+  const { factory, tick: t2 } = await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick, opts.atAddOutput);
+  const secondRow = doorstepCell(portOf(factory, FACTORY_OUT2))[1];
+  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2, opts.secondFirst === true ? secondRow : undefined);
   const board: Board = { source: placed.source, factory, sink, sink2, belts: [], tick: t3 };
   const nodes = [board.source, factory, sink, sink2];
   const outs = opts.secondFirst === true ? [FACTORY_OUT2, FACTORY_OUT] : [FACTORY_OUT, FACTORY_OUT2];
-  const plan: { step: string; belt: () => InjectBelt }[] = [
+  const plan: { step: string; belt: () => InjectBelt; from?: number }[] = [
     { step: STEP.beltIn, belt: () => beltFromPort(BELT_IN_ID, board.source, 0, factory, FACTORY_IN) },
-    { step: STEP.beltOut, belt: () => beltFromPort(BELT_OUT_ID, factory, outs[0]!, outs[0] === FACTORY_OUT ? sink : sink2, SINK_IN) },
-    { step: STEP.beltOut2, belt: () => beltFromPort(BELT_OUT2_ID, factory, outs[1]!, outs[1] === FACTORY_OUT ? sink : sink2, SINK_IN) },
+    {
+      step: STEP.beltOut,
+      belt: () => beltFromPort(BELT_OUT_ID, factory, outs[0]!, sink, SINK_IN),
+      ...(opts.secondFirst === true ? { from: FACTORY_OUT2 } : {}),
+    },
+    { step: STEP.beltOut2, belt: () => beltFromPort(BELT_OUT2_ID, factory, outs[1]!, sink2, SINK_IN) },
   ];
-  for (const { step, belt } of plan.slice(0, opts.beltsDrawn ?? 3)) {
+  for (const { step, belt, from } of plan.slice(0, opts.beltsDrawn ?? 3)) {
     await expect.poll(async () => (await readProbe(page)).stepId, { message: `the lesson reached ${step}` }).toBe(step);
     await armThrough(page, STAGE.beltTool, STAGE.beltDraw);
-    await dragThroughRings(page, h);
+    await dragThroughRings(page, h, from === undefined ? undefined : await doorstepCentre(page, portOf(factory, from)));
     board.belts.push(belt());
     injectBoard(h, { nodes, belts: board.belts, tick: ++board.tick });
     await expect.poll(async () => (await readProbe(page)).stepId, { message: `the joined belt finished ${step}` }).not.toBe(step);
@@ -374,6 +442,94 @@ async function deliverInto(page: Page, h: Harness, board: Board, belts: readonly
     await waitForBoard(page, { machines: nodes.length, tick: board.tick });
     await twoFrames(page);
   }
+}
+
+/** The ring a doorstep square should draw: the cell plus the outset each side, through the camera. */
+async function doorstepRing(page: Page, port: InjectPort): Promise<{ x: number; y: number; width: number; height: number }> {
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const [x, y] = doorstepCell(port);
+  return { x: x * size + cam.x - OUTSET, y: y * size + cam.y - OUTSET, width: size + 2 * OUTSET, height: size + 2 * OUTSET };
+}
+
+/** The largest gap between two rects' edges, in px. */
+function rectError(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.x + a.width - b.x - b.width), Math.abs(a.y + a.height - b.y - b.height));
+}
+
+/** Does `inner` lie inside `outer`, to within a pixel? */
+function inside(inner: { x: number; y: number; width: number; height: number }, outer: { x: number; y: number; width: number; height: number }): boolean {
+  return inner.x >= outer.x - 1 && inner.y >= outer.y - 1 && inner.x + inner.width <= outer.x + outer.width + 1 && inner.y + inner.height <= outer.y + outer.height + 1;
+}
+
+/** The ring less its outset: the part of the control the ring goes around. */
+function marked(ring: HintRect): { x: number; y: number; width: number; height: number } {
+  return { x: ring.x + OUTSET, y: ring.y + OUTSET, width: ring.width - 2 * OUTSET, height: ring.height - 2 * OUTSET };
+}
+
+/** A panel control the code stages ring, found by its own name, never through the ring. */
+type PanelControl = 'add-output' | 'editor' | 'apply';
+
+/**
+ * A panel control's rect, and the part of the inspector's scrolling column the user sees: the column's
+ * client area, ending at the sticky Apply row's top for a control that scrolls under that row. Also the
+ * column's scroll and client heights, so a case can say the panel is taller than its column.
+ */
+async function panelView(page: Page, which: PanelControl, words: string) {
+  return page.evaluate(
+    ([kind, label]) => {
+      const aside = document.querySelector('aside[aria-labelledby="fab-config-heading"]');
+      if (aside === null) return null;
+      let control: HTMLElement | null = null;
+      if (kind === 'editor') {
+        const l = [...aside.querySelectorAll('label')].find((x) => x.textContent?.trim() === label);
+        control = l === undefined ? null : document.getElementById(l.htmlFor);
+      } else {
+        control = [...aside.querySelectorAll<HTMLElement>('button')].find((b) => b.textContent?.trim() === label) ?? null;
+      }
+      if (control === null) return null;
+      let column: HTMLElement | null = null;
+      for (let el = control.parentElement; el !== null; el = el.parentElement) {
+        const { overflowY } = getComputedStyle(el);
+        if (overflowY === 'auto' || overflowY === 'scroll') {
+          column = el;
+          break;
+        }
+      }
+      if (column === null) return null;
+      const row = aside.querySelector<HTMLElement>('[data-fab-action-row]');
+      const c = column.getBoundingClientRect();
+      const top = c.top + column.clientTop;
+      let bottom = top + column.clientHeight;
+      if (row !== null && !row.contains(control)) bottom = Math.min(bottom, row.getBoundingClientRect().top);
+      const r = control.getBoundingClientRect();
+      return {
+        control: { x: r.x, y: r.y, width: r.width, height: r.height },
+        shown: { x: c.left + column.clientLeft, y: top, width: column.clientWidth, height: bottom - top },
+        scrollHeight: column.scrollHeight,
+        clientHeight: column.clientHeight,
+      };
+    },
+    [which, words] as const,
+  );
+}
+
+/** What a press at this point would land on. */
+async function hitAt(page: Page, at: { x: number; y: number }): Promise<{ tag: string; inLayer: boolean; inEditor: boolean; button: string | null }> {
+  return page.evaluate(
+    ([x, y, editorLabel]) => {
+      const el = document.elementFromPoint(x, y);
+      const label = [...document.querySelectorAll('aside[aria-labelledby="fab-config-heading"] label')].find((l) => l.textContent?.trim() === editorLabel) as HTMLLabelElement | undefined;
+      const editor = label === undefined ? null : document.getElementById(label.htmlFor);
+      return {
+        tag: el?.tagName ?? 'none',
+        inLayer: el?.closest('[data-fab-hint-layer]') != null,
+        inEditor: el !== null && editor !== null && editor.contains(el),
+        button: el?.closest('button')?.textContent?.trim() ?? null,
+      };
+    },
+    [at.x, at.y, FACTORY_EDITOR_LABEL] as const,
+  );
 }
 
 test.describe('lesson 4 on the mock host', () => {
@@ -434,5 +590,164 @@ test.describe('lesson 4 on the mock host', () => {
       { tag: 'SPAN', text: 'ctx.emit(1, input)', wrap: 'nowrap' },
     ]);
     await expect(page.locator('[data-fab-hint]'), 'no ring on a finished lesson').toBeHidden();
+  });
+
+  test('with a belt on the first output, the drag for the second Sink starts on the second output', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 2 });
+    await expectAt(page, STEP.beltOut2, STAGE.beltDraw, 'the second belt finished belt-out, and the Belt tool is still armed');
+    const ring = await ringAt(page, STAGE.beltDraw);
+    const want = await doorstepRing(page, portOf(board.factory, FACTORY_OUT2));
+    expect(
+      rectError(ring, want),
+      `the ring marks the second output's doorstep, the one with no belt (ring ${JSON.stringify(ring)}, doorstep ${JSON.stringify(want)})`,
+    ).toBeLessThanOrEqual(1);
+    await expect(page.locator(CARD)).toContainText(wordsOf(STEP.beltOut2, STAGE.beltDraw));
+  });
+
+  test('with step 8 drawn from the second output, the drag for the second Sink starts on the first', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 2, secondFirst: true });
+    await expectAt(page, STEP.beltOut2, STAGE.beltDraw, 'the second belt finished belt-out, and the Belt tool is still armed');
+    const ring = await ringAt(page, STAGE.beltDraw);
+    const want = await doorstepRing(page, portOf(board.factory, FACTORY_OUT));
+    expect(
+      rectError(ring, want),
+      `the ring moved to the first output's doorstep, the one the user left free (ring ${JSON.stringify(ring)}, doorstep ${JSON.stringify(want)})`,
+    ).toBeLessThanOrEqual(1);
+  });
+
+  test('the code-line ring sits on the line with the first emit, inside the editor, and a click there reaches the editor', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    await buildBoard(page, h, host);
+    const ring = await toTypeCode(page);
+    const view = await panelView(page, 'editor', FACTORY_EDITOR_LABEL);
+    if (view === null) throw new Error('the Factory editor is not in the inspector');
+    expect(inside(marked(ring), view.control), `the ring goes around a part of the editor (ring ${JSON.stringify(ring)}, editor ${JSON.stringify(view.control)})`).toBe(true);
+    const line = await page.evaluate((text) => {
+      const l = [...document.querySelectorAll('aside[aria-labelledby="fab-config-heading"] .cm-line')].find((x) => (x.textContent ?? '').includes(text));
+      const r = l?.getBoundingClientRect();
+      return r === undefined ? null : { x: r.x, y: r.y, width: r.width, height: r.height };
+    }, TYPED.after);
+    if (line === null) throw new Error(`no editor line holds ${TYPED.after}`);
+    expect(
+      Math.abs(marked(ring).y - line.y) <= 1 && Math.abs(marked(ring).height - line.height) <= 1,
+      `the ring is one line tall, on the line holding ${TYPED.after} (ring ${JSON.stringify(ring)}, line ${JSON.stringify(line)})`,
+    ).toBe(true);
+    const at = await pointAfter(page, TYPED.after);
+    const hit = await hitAt(page, at);
+    expect(hit.inLayer, 'just after the emit, the ring layer takes no click').toBe(false);
+    expect(hit.inEditor, `just after the emit, a click lands in the editor (it read ${hit.tag})`).toBe(true);
+  });
+
+  test('the + Add output ring is the button plus 4 px a side, and a press at its centre reaches the button', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    let checked = false;
+    await buildBoard(page, h, host, {
+      beltsDrawn: 0,
+      atAddOutput: async () => {
+        const ring = await ringAt(page, STAGE.pressAddOutput);
+        const view = await panelView(page, 'add-output', ADD_OUTPUT_WORDS);
+        if (view === null) throw new Error(`no ${ADD_OUTPUT_WORDS} button in the inspector`);
+        const want = { x: view.control.x - OUTSET, y: view.control.y - OUTSET, width: view.control.width + 2 * OUTSET, height: view.control.height + 2 * OUTSET };
+        expect(rectError(ring, want), `the ring goes round the whole ${ADD_OUTPUT_WORDS} button (ring ${JSON.stringify(ring)}, button ${JSON.stringify(view.control)})`).toBeLessThanOrEqual(1);
+        const hit = await hitAt(page, centreOf(ring));
+        expect(hit.inLayer, 'at the ring centre, the ring layer takes no press').toBe(false);
+        expect(hit.button, `at the ring centre, a press lands on ${ADD_OUTPUT_WORDS} (it read ${hit.tag})`).toBe(ADD_OUTPUT_WORDS);
+        checked = true;
+      },
+    });
+    expect(checked, 'the case read the ring at press-add-output').toBe(true);
+  });
+
+  test('code with a syntax error keeps the card on Apply, beside the panel\'s own error row', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host);
+    await toTypeCode(page);
+    // A stray ( in the emit the user types, so the host's pre-check refuses the code.
+    await typeAfter(page, TYPED.after, ' ctx.emit((1, input);');
+    await expectAt(page, STEP.changeCode, STAGE.applyCode, 'the typed code moved the card to Apply');
+    const configures = sentCount(h, CMD.Configure);
+    await pressRing(page, await ringAt(page, STAGE.applyCode));
+    const error = page.locator('aside[aria-labelledby="fab-config-heading"]').getByRole('alert');
+    await expect(error, 'the panel shows its own error row for code that does not parse').toBeVisible();
+    await expect(error, 'and the row says the code was not applied').toContainText(CONFIG_NOT_APPLIED_SUFFIX);
+    await expect(marker(page), 'the panel still says the code is not applied').toBeVisible();
+    // The stream re-sends the last packet, so a stage change a few frames late would show by now.
+    await page.waitForTimeout(300);
+    expect(sentCount(h, CMD.Configure), 'nothing was sent to the board').toBe(configures);
+    expect(host.get(board.factory.id), 'the host still holds the default handler').toEqual(factoryConfig());
+    const probe = await readProbe(page);
+    expect(`${probe.stepId}/${probe.stageId}`, 'the card stays on Apply').toBe(`${STEP.changeCode}/${STAGE.applyCode}`);
+    const text = page.locator(`${CARD} [data-fab-step-text]`);
+    await expect(text, 'the card says to check the line you typed').toContainText(CHECK_THE_LINE);
+    await expect(text).toHaveText(wordsOf(STEP.changeCode, STAGE.applyCode));
+  });
+
+  test('code that applies and still emits on one output leaves the card on watch, saying what to check', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host);
+    await toTypeCode(page);
+    // A comment where the second emit should go: the code parses, applies, and still emits on output 0 only.
+    await typeAfter(page, TYPED.after, ' /* one output */');
+    await expectAt(page, STEP.changeCode, STAGE.applyCode, 'the typed comment moved the card to Apply');
+    await pressRing(page, await ringAt(page, STAGE.applyCode));
+    await expect(marker(page), 'the marker clears once the host holds the code').toHaveCount(0);
+    await expectAt(page, STEP.changeCode, STAGE.watch, 'clean code moves the card to watch, whatever it emits');
+    const text = page.locator(`${CARD} [data-fab-step-text]`);
+    await expect(text, 'the watch card says to check the line if a Sink gets nothing').toContainText(ONE_GETS_NONE);
+    await expect(text).toHaveText(wordsOf(STEP.changeCode, STAGE.watch));
+
+    // Only the first output's belt carries items.
+    await deliverInto(page, h, board, [BELT_OUT_ID]);
+    await page.waitForTimeout(300);
+    const probe = await readProbe(page);
+    expect(probe.card, 'items into one Sink alone never finish the lesson').toBe('running');
+    expect(`${probe.stepId}/${probe.stageId}`, 'the card stays on watch').toBe(`${STEP.changeCode}/${STAGE.watch}`);
+    await expect(page.locator(CARD).getByRole('heading', { name: 'Lesson done' })).toHaveCount(0);
+  });
+});
+
+test.describe('lesson 4 at 1024x768, where the Factory panel is taller than its column', () => {
+  test.use({ viewport: { width: 1024, height: 768 } });
+
+  let pageErrors: string[] = [];
+  test.beforeEach(({ page }) => {
+    pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+  });
+  test.afterEach(() => {
+    expect(pageErrors, 'the page threw no error while the lesson ran').toEqual([]);
+  });
+
+  /** The stage's ring goes round a part of its control that the column shows, above the sticky row. */
+  async function expectRingShown(page: Page, stage: string, which: PanelControl, words: string): Promise<{ scrollHeight: number; clientHeight: number }> {
+    const ring = await ringAt(page, stage);
+    const view = await panelView(page, which, words);
+    if (view === null) throw new Error(`${stage}: no ${which} in the inspector`);
+    expect(
+      inside(marked(ring), view.shown),
+      `${stage}: the ring goes round a part of the ${which} the panel shows, after the stage's scroll (ring ${JSON.stringify(ring)}, shown column ${JSON.stringify(view.shown)}, control ${JSON.stringify(view.control)})`,
+    ).toBe(true);
+    expect(marked(ring).height, `${stage}: the ring marks more than a sliver of the ${which}`).toBeGreaterThanOrEqual(Math.min(view.control.height, 16));
+    return { scrollHeight: view.scrollHeight, clientHeight: view.clientHeight };
+  }
+
+  test('+ Add output, the code line and Apply are each scrolled into the panel\'s shown part as their stage begins', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    let add: { scrollHeight: number; clientHeight: number } | null = null;
+    await buildBoard(page, h, host, {
+      atAddOutput: async () => {
+        add = await expectRingShown(page, STAGE.pressAddOutput, 'add-output', ADD_OUTPUT_WORDS);
+      },
+    });
+    expect(add, 'the case read the ring at press-add-output').not.toBeNull();
+    expect(add!.scrollHeight, 'the Factory panel is taller than its column at 1024x768').toBeGreaterThan(add!.clientHeight);
+
+    await toTypeCode(page);
+    await expectRingShown(page, STAGE.typeCode, 'editor', FACTORY_EDITOR_LABEL);
+    await typeAfter(page, TYPED.after, TYPED.insert);
+    await expectAt(page, STEP.changeCode, STAGE.applyCode, 'the typed emit moved the card to Apply');
+    await expectRingShown(page, STAGE.applyCode, 'apply', 'Apply');
   });
 });
