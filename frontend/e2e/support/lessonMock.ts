@@ -240,6 +240,46 @@ export async function zoomOut(page: Page): Promise<void> {
   await expect.poll(async () => (await cameraOf(page)).scale, { message: 'the wheel changed the zoom' }).not.toBe(before.scale);
 }
 
+/** One wheel notch the camera reads as a mouse wheel. Not exported: zoomInto measures what it does. */
+const WHEEL_NOTCH = 60;
+/** The most wheel events zoomInto sends before it gives up. */
+const MAX_WHEEL_EVENTS = 8;
+
+/**
+ * Wheel at `at` until the camera's scale reads in `[lo, hi]`, and return that scale.
+ *
+ * On a loaded CI runner one wheel round trip cost about 0.66 s, and zooming one notch at a time
+ * took about 30 of them. So this sends one notch, reads the camera's zoom per wheel pixel from the
+ * scale before and after, and covers the rest in one wheel event aimed at the geometric middle of the
+ * range. Zooming about a fixed cursor point composes, so the camera ends where the notches would
+ * have taken it, apart from float rounding. Each event polls the camera before the next is sent.
+ *
+ * The camera reads an event as a mouse wheel only when it is whole, vertical and at least 50, so the
+ * sized event is rounded and never smaller than one notch. Each range must be wider than one notch,
+ * a factor of e^0.09, so a notch can't jump over it. The page must run at device scale 1: Chromium
+ * divides the wheel delta by the scale, and a fractional delta reads as a trackpad pan.
+ */
+export async function zoomInto(page: Page, at: { x: number; y: number }, lo: number, hi: number): Promise<number> {
+  await page.mouse.move(at.x, at.y);
+  const first = (await cameraOf(page)).scale;
+  if (first >= lo && first <= hi) return first;
+  await page.mouse.wheel(0, first > hi ? WHEEL_NOTCH : -WHEEL_NOTCH);
+  await expect.poll(async () => (await cameraOf(page)).scale, { message: 'the wheel notch moved the zoom' }).not.toBe(first);
+  let scale = (await cameraOf(page)).scale;
+  const rate = Math.abs(Math.log(scale / first)) / WHEEL_NOTCH;
+  const target = Math.sqrt(lo * hi);
+  for (let sent = 1; ; sent++) {
+    if (scale >= lo && scale <= hi) return scale;
+    if (sent >= MAX_WHEEL_EVENTS) throw new Error(`the zoom never reached [${lo}, ${hi}] after ${sent} wheel events`);
+    const raw = Math.round(Math.log(scale / target) / rate);
+    const dy = Math.abs(raw) < WHEEL_NOTCH ? Math.sign(raw || scale - target) * WHEEL_NOTCH : raw;
+    const before = scale;
+    await page.mouse.wheel(0, dy);
+    await expect.poll(async () => (await cameraOf(page)).scale, { message: 'the sized wheel event moved the zoom' }).not.toBe(before);
+    scale = (await cameraOf(page)).scale;
+  }
+}
+
 export async function panBoard(page: Page): Promise<void> {
   const before = await cameraOf(page);
   await page.mouse.move(640, 300);

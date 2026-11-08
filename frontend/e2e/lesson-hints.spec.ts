@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
 import { nubAnchor } from '../shared/geometry';
 import { doorstepCell, dropHitRadiusWorld } from '../src/protocol/ports';
-import { CELL, buildPacket, cameraOf, type InjectBelt, type InjectNode } from './support/wire';
-import { OUTSET, SOURCE_ID, boot, configuredHost, placeBoth, readProbe, ringAt, startLesson, toBeltDraw } from './support/lessonMock';
+import { CELL, buildPacket, type InjectBelt, type InjectNode } from './support/wire';
+import { OUTSET, SOURCE_ID, boot, configuredHost, placeBoth, readProbe, ringAt, startLesson, toBeltDraw, zoomInto } from './support/lessonMock';
 
 // lesson-hints.spec.ts - a port ring is the size of the spot the gesture accepts, by port role (HINT-02).
 //
@@ -14,8 +14,6 @@ import { OUTSET, SOURCE_ID, boot, configuredHost, placeBoth, readProbe, ringAt, 
 
 const TOLERANCE = 1;
 const BELT_ID = 4;
-/** One wheel notch the camera reads as a mouse wheel: whole, vertical and at least 50. Each moves the scale by e^0.09. */
-const WHEEL_NOTCH = 60;
 
 type Port = { cell_x: number; cell_y: number; side: number };
 
@@ -60,18 +58,6 @@ function discError(r: HintRect | null, port: Port, cam: { x: number; y: number; 
     Math.abs(r.hitCentre.x - cx),
     Math.abs(r.hitCentre.y - cy),
   );
-}
-
-/** Wheel at `at` one notch at a time until the camera's scale reads in `[lo, hi]`. A notch is narrower than the range, so it can't jump over it. */
-async function zoomInto(page: Page, at: { x: number; y: number }, lo: number, hi: number): Promise<number> {
-  await page.mouse.move(at.x, at.y);
-  for (let notch = 0; notch < 40; notch++) {
-    const { scale } = await cameraOf(page);
-    if (scale >= lo && scale <= hi) return scale;
-    await page.mouse.wheel(0, scale > hi ? WHEEL_NOTCH : -WHEEL_NOTCH);
-    await expect.poll(async () => (await cameraOf(page)).scale, { message: 'the wheel notch moved the zoom' }).not.toBe(scale);
-  }
-  throw new Error(`the zoom never reached [${lo}, ${hi}]`);
 }
 
 /** The belt-draw rings, polled until both sit on their ports: a square on the Source's doorstep and a disc on the Sink's In. */

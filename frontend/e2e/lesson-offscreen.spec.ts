@@ -16,6 +16,7 @@ import {
   sourceAt,
   startLesson,
   toBeltDraw,
+  zoomInto,
   type Box,
 } from './support/lessonMock';
 
@@ -33,8 +34,6 @@ import {
 
 const TOLERANCE = 1;
 const ROW = `${CARD} [data-fab-offscreen-row]`;
-/** One wheel notch the camera reads as a mouse wheel. Each moves the scale by e^0.09. */
-const WHEEL_NOTCH = 60;
 /** A point on the board inside the free area at 1280x800, where a middle-drag starts. */
 const PAN_FROM = { x: 520, y: 320 };
 
@@ -85,18 +84,6 @@ async function panBy(page: Page, dx: number, dy: number): Promise<void> {
       return Math.max(Math.abs(cam.x - before.x - dx), Math.abs(cam.y - before.y - dy));
     }, { message: `the middle-drag panned the board by (${dx}, ${dy})` })
     .toBeLessThanOrEqual(TOLERANCE);
-}
-
-/** Wheel at `at` one notch at a time until the camera's scale reads in `[lo, hi]`. */
-async function zoomInto(page: Page, at: { x: number; y: number }, lo: number, hi: number): Promise<number> {
-  await page.mouse.move(at.x, at.y);
-  for (let notch = 0; notch < 60; notch++) {
-    const { scale } = await cameraOf(page);
-    if (scale >= lo && scale <= hi) return scale;
-    await page.mouse.wheel(0, scale > hi ? WHEEL_NOTCH : -WHEEL_NOTCH);
-    await expect.poll(async () => (await cameraOf(page)).scale, { message: 'the wheel notch moved the zoom' }).not.toBe(scale);
-  }
-  throw new Error(`the zoom never reached [${lo}, ${hi}]`);
 }
 
 /** The flag's three readers agree on `on`: the probe, the card's attribute and the row's visibility. */
@@ -405,8 +392,9 @@ test.describe('show me', () => {
   });
 
   test('a port stage: Show me frames both belt-draw rings and sends nothing', async ({ page }) => {
-    // One of three slow Show me tests. On CI they took 15 to 22 s with the suite on one runner,
-    // and 27 s to over 30 s as the first tests of a 4-way shard. test.slow() triples the 30 s budget.
+    // One of three slow Show me tests. On a loaded CI runner each wheel notch cost about 0.66 s and
+    // these tests zoomed one notch per round trip; the shared zoomInto now sends two wheel events per
+    // zoom. test.slow() triples the 30 s budget and comes off once a CI mock shard runs all three under 15 s.
     test.slow();
     const { h } = await toBeltDrawWithSinkOut(page);
     await expectFlag(page, true, "with the Sink's In disc out of view");
@@ -416,8 +404,9 @@ test.describe('show me', () => {
   });
 
   test('at zoom 4 with both belt-draw rings out of view, Show me zooms out until both fit, not below the floor', async ({ page }) => {
-    // One of three slow Show me tests. On CI they took 15 to 22 s with the suite on one runner,
-    // and 27 s to over 30 s as the first tests of a 4-way shard. test.slow() triples the 30 s budget.
+    // One of three slow Show me tests. On a loaded CI runner each wheel notch cost about 0.66 s and
+    // these tests zoomed one notch per round trip; the shared zoomInto now sends two wheel events per
+    // zoom. test.slow() triples the 30 s budget and comes off once a CI mock shard runs all three under 15 s.
     test.slow();
     const { h } = await toBeltDrawAtZoom1(page);
     await zoomInto(page, PAN_FROM, 3.6, 4);
@@ -441,8 +430,9 @@ test.describe('show me', () => {
   });
 
   test('Show me is disabled with its title while a belt draw is held, and enabled after Escape', async ({ page }) => {
-    // One of three slow Show me tests. On CI they took 15 to 22 s with the suite on one runner,
-    // and 27 s to over 30 s as the first tests of a 4-way shard. test.slow() triples the 30 s budget.
+    // One of three slow Show me tests. On a loaded CI runner each wheel notch cost about 0.66 s and
+    // these tests zoomed one notch per round trip; the shared zoomInto now sends two wheel events per
+    // zoom. test.slow() triples the 30 s budget and comes off once a CI mock shard runs all three under 15 s.
     test.slow();
     await toBeltDrawWithSinkOut(page);
     await expectFlag(page, true, "with the Sink's In disc out of view");
