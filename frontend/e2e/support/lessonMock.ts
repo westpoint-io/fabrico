@@ -8,8 +8,11 @@
 
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
+import type { MachineConfig } from '../../src/protocol/decode';
+import { doorstepCell } from '../../src/protocol/ports';
 import { GESTURE_REFUSAL_KIND } from '../../src/transport/transport';
 import { YOUR_FIRST_LINE } from '../../src/tutorial/lessons/yourFirstLine';
+import type { Lesson } from '../../src/tutorial/types';
 import {
   CELL,
   buildPacket,
@@ -18,6 +21,7 @@ import {
   waitForBoard,
   waitForChrome,
   type Harness,
+  type InjectBelt,
   type InjectNode,
 } from './wire';
 
@@ -119,11 +123,14 @@ export async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>
   return h;
 }
 
-/** Help, Lessons, Start, then the Starting card, then the empty board the host answers New with. */
-export async function startLesson(page: Page, h: Harness): Promise<void> {
+/**
+ * Help, Lessons, Start, then the Starting card, then the empty board the host answers New with. The
+ * lesson defaults to the first, so lesson 1's specs call it as they always did.
+ */
+export async function startLesson(page: Page, h: Harness, lesson: Lesson = YOUR_FIRST_LINE): Promise<void> {
   await page.getByRole('button', { name: 'Help', exact: true }).click();
   await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
-  await page.getByRole('button', { name: `Start ${YOUR_FIRST_LINE.title}`, exact: true }).click();
+  await page.getByRole('button', { name: `Start ${lesson.title}`, exact: true }).click();
   await expect.poll(() => h.controls, { message: 'Start sent New' }).toContain('new');
 
   const card = page.locator(CARD);
@@ -136,7 +143,8 @@ export async function startLesson(page: Page, h: Harness): Promise<void> {
 
   h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1 }));
   await expect.poll(async () => (await readProbe(page)).card, { message: 'the new board started step 1' }).toBe('running');
-  await expect(card).toContainText(`Step 1 of ${STEP_COUNT}`);
+  expect((await readProbe(page)).lessonId, 'the lesson the row named is the one running').toBe(lesson.id);
+  await expect(card).toContainText(`Step 1 of ${lesson.steps.length}`);
 }
 
 /** Arm the Source and read the floor ring, with the cell it marks. */
@@ -173,6 +181,40 @@ export function configuredHost(): { opts: Parameters<typeof mockRenderSocket>[1]
   };
 }
 
+/** The configs a lesson's machines start on: a Source on Webhook and a Sink on Debug. */
+export const SOURCE_WEBHOOK: MachineConfig = { kind: 'Source', trigger: { kind: 'Webhook' } };
+export const SOURCE_TIMER: MachineConfig = { kind: 'Source', trigger: { kind: 'Timer', interval_ticks: 60 } };
+export const SINK_DEBUG: MachineConfig = { kind: 'Sink', target: { kind: 'Debug' } };
+
+/**
+ * A host whose `machine_config` answer comes from a table the case sets by handle, the way the real
+ * host answers about the machine it's asked about. Undo re-mints handles, so a case sets the new ones
+ * when it injects the keyframe. A handle the table doesn't hold is answered with no config, never left
+ * unanswered: the layer asks every bound machine at once and waits for all the answers.
+ */
+export function configByNode(): {
+  opts: Parameters<typeof mockRenderSocket>[1];
+  set(node: number, config: MachineConfig | null): void;
+  answers(node: number): number;
+} {
+  const table = new Map<number, MachineConfig | null>();
+  const counts = new Map<number, number>();
+  return {
+    opts: {
+      answerQuery: (verb, args) => {
+        if (verb !== 'machine_config') return undefined;
+        const node = Number(args.node);
+        counts.set(node, (counts.get(node) ?? 0) + 1);
+        return table.get(node) ?? null;
+      },
+    },
+    set: (node, config) => {
+      table.set(node, config);
+    },
+    answers: (node) => counts.get(node) ?? 0,
+  };
+}
+
 export function sourceAt(cell: readonly [number, number]): InjectNode {
   return { id: SOURCE_ID, kind: 0, cell_x: cell[0], cell_y: cell[1], ports: [{ index: 0, cell_x: cell[0], cell_y: cell[1], side: 1, role: 1 }] };
 }
@@ -194,6 +236,44 @@ export function sinkAt(cell: readonly [number, number]): InjectNode {
 export function cellOfRing(ring: HintRect, cam: { x: number; y: number; scale: number }): readonly [number, number] {
   const size = CELL * cam.scale;
   return [Math.round((ring.x + OUTSET - cam.x) / size), Math.round((ring.y + OUTSET - cam.y) / size)];
+}
+
+/**
+ * The belt a straight draw from `from`'s Out port to `to`'s In port leaves, docked at both ends: its
+ * tiles run from the Out doorstep to the In doorstep, Tail first, along the one row the two share.
+ */
+export function beltBetween(id: number, from: InjectNode, to: InjectNode, itemSlots: number[] = []): InjectBelt {
+  const out = from.ports?.find((p) => p.role === 1);
+  const into = to.ports?.find((p) => p.role === 0);
+  if (out === undefined || into === undefined) throw new Error('beltBetween needs an Out port on the first machine and an In port on the second');
+  const [ax, ay] = doorstepCell(out);
+  const [bx, by] = doorstepCell(into);
+  if (ay !== by) throw new Error(`beltBetween draws along one row, and the doorsteps sit on rows ${ay} and ${by}`);
+  const step = bx >= ax ? 1 : -1;
+  const tiles: [number, number][] = [];
+  for (let x = ax; x !== bx + step; x += step) tiles.push([x, ay]);
+  const crossed = [from, to].find((n) => tiles.some(([x, y]) => x === n.cell_x && y === n.cell_y));
+  if (crossed !== undefined) throw new Error(`beltBetween's row runs through the machine at (${crossed.cell_x},${crossed.cell_y}); place the second machine past the first's Out side`);
+  return {
+    id,
+    tiles,
+    itemSlots,
+    docks: [
+      { end: 'Tail', node: from.id, port: out.index },
+      { end: 'Head', node: to.id, port: into.index },
+    ],
+  };
+}
+
+/**
+ * The same board under new handles, as an Undo keyframe sends it: every machine and belt gets its old
+ * handle plus `shift`, and each dock follows the machine it names. Cells, ports and tiles stay put.
+ */
+export function reminted(board: { nodes: InjectNode[]; belts?: InjectBelt[] }, shift: number): { nodes: InjectNode[]; belts: InjectBelt[] } {
+  return {
+    nodes: board.nodes.map((n) => ({ ...n, id: n.id + shift })),
+    belts: (board.belts ?? []).map((b) => ({ ...b, id: b.id + shift, docks: (b.docks ?? []).map((d) => ({ ...d, node: d.node + shift })) })),
+  };
 }
 
 /** Steps 1 and 2 through the floor rings, with the host's answers injected. The Sink's tool stays armed. */
