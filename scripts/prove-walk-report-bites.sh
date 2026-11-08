@@ -57,7 +57,7 @@
 
 set -euo pipefail
 
-FLOOR=26
+FLOOR=27
 
 # Sourced first: the helper records where this script lives. Its Shape A with no probes: every report
 # is written under `mktemp -d`, and the helper compares this checkout's tracked tree before and after.
