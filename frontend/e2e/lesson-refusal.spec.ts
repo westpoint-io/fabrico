@@ -63,6 +63,33 @@ async function readNote(page: Page): Promise<{ kind: string | null; text: string
   }, NOTE);
 }
 
+/**
+ * Keep every sentence the band shows from now on, in order, in the page.
+ *
+ * The band clears `REFUSAL_HOLD_MS` after the refusal, and a client refusal comes at the press. A
+ * press here is a down, 14 moves and an up, and on CI run 42470679383 those took 4.4 s, so the band
+ * had already cleared when the case first read it after the release. Read this way, the case sees
+ * the sentence the band showed however long the press took, and the page's own clock is left alone.
+ * `#fab-refusal` is always mounted, so the observer stays on the band for the whole case.
+ */
+async function recordBand(page: Page): Promise<void> {
+  await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) throw new Error(`${sel} is not mounted`);
+    const w = window as unknown as { __bandSentences: string[] };
+    w.__bandSentences = [];
+    new MutationObserver(() => {
+      const text = el.textContent?.trim() ?? '';
+      if (text !== '' && w.__bandSentences.at(-1) !== text) w.__bandSentences.push(text);
+    }).observe(el, { characterData: true, childList: true, subtree: true });
+  }, BAND);
+}
+
+/** The first sentence the band showed since `recordBand`, or '' if it has shown none. */
+async function firstBandSentence(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as { __bandSentences: string[] }).__bandSentences[0] ?? '');
+}
+
 /** Steps 1 and 2 up to the Sink's floor ring, with the Source on the board and the Sink tool armed. */
 async function toSinkFloor(page: Page, h: Harness): Promise<InjectNode> {
   const { cell } = await armSourceForFloor(page);
@@ -115,6 +142,8 @@ test.describe('the step card says why a gesture was refused', () => {
     await page.getByTitle(/^Draw wires/).click();
     await ringAt(page, 'tool-down');
     const sent = h.sent.length;
+    await expect(page.locator(BAND), 'the band is empty before the press').toHaveText('');
+    await recordBand(page);
 
     // The Source's Out takes belts, not wires, so a Wire press on it forms no command and the client
     // refuses it as BeltOnlyPort (the press `e2e/belt-port-refusal.spec.ts` makes on a Router's Out).
@@ -126,8 +155,8 @@ test.describe('the step card says why a gesture was refused', () => {
     await page.mouse.move(start.x + 60, start.y + 20, { steps: 8 });
     await page.mouse.up();
 
-    await expect(page.locator(BAND), 'the client sentence reached the band').not.toHaveText('');
-    const band = (await page.locator(BAND).textContent())?.trim() ?? '';
+    await expect.poll(() => firstBandSentence(page), { message: 'the client sentence reached the band' }).not.toBe('');
+    const band = await firstBandSentence(page);
     await expect.poll(() => readNote(page), { message: "the card shows the client's sentence" }).toEqual({ kind: 'refusal', text: band });
     expect(h.sent.length, 'the press sent no gesture, so the sentence is the client\'s').toBe(sent);
     expect((await readProbe(page)).stageId, 'the step stayed where it was').toBe('tool-down');
