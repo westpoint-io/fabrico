@@ -1885,6 +1885,35 @@ describe('floorSpot for lesson 4', () => {
     expect(floorSpot({ spot: 'freeOutputSink', view: VIEW, board: b, bindings })).toEqual([12, 6]);
   });
 
+  // Review WR-03. With no belt drawn yet, step 8's ring marks the first output, so the second Sink's ring
+  // must face the other one wherever the first Sink went; between the first output and a first Sink placed
+  // off its ring, it would sit in that belt's path.
+  describe('with no belt drawn, the second Sink faces the output the first Sink\'s belt won\'t use', () => {
+    const second = (firstSink: BoardNode): readonly [number, number] =>
+      floorSpot({
+        spot: 'freeOutputSink',
+        view: VIEW,
+        board: board({ nodes: [L4_SOURCE, TWO_OUTS, firstSink] }),
+        bindings: { factory: { nodeKey: nodeKey(TWO_OUTS), id: TWO_OUTS.id }, sink: { nodeKey: nodeKey(firstSink), id: firstSink.id } },
+      });
+
+    it("the first Sink one cell east of its ring, on the first output's row: the second output, not the ring between", () => {
+      expect(second(sinkAt(32, 13, 5))).toEqual([12, 6]);
+    });
+
+    it("the first Sink two rows below the second output's ring cell: the second output", () => {
+      expect(second(sinkAt(32, 12, 8))).toEqual([12, 6]);
+    });
+
+    it('the first Sink exactly in front of the second output: the first output', () => {
+      expect(second(sinkAt(32, 12, 6))).toEqual([12, 5]);
+    });
+
+    it('the first Sink in its ring in front of the first output: the second output', () => {
+      expect(second(L4_SINK)).toEqual([12, 6]);
+    });
+  });
+
   it("with the Legend open the line's lower row stays above the Legend once the inspector lifts it", () => {
     // 104-06, measured at 1024x768 with the Legend open: the free area is 116 to 426 px when the Source
     // is placed, and 116 to 328 once the Source's inspector opens and the Legend wraps higher. The camera

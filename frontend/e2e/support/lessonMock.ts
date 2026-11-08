@@ -922,7 +922,8 @@ export async function factoryWithTwoOutputs(
 /**
  * Lesson 4's steps 5 and 6: both Sinks through their rings. With `firstOnRow` the first Sink goes on
  * that row in the ring's column instead of in the ring, as a user who ignores the ring and puts it in
- * front of the Factory's other output does; the card says any free spot works.
+ * front of the Factory's other output does; the card says any free spot works. With `firstEast` it goes
+ * that many columns east of the ring's cell, on its row or on `firstOnRow`.
  */
 export async function twoSinks(
   page: Page,
@@ -932,6 +933,7 @@ export async function twoSinks(
   tick: number,
   firstOnRow?: number,
   visit?: Visit,
+  firstEast = 0,
 ): Promise<{ sink: InjectNode; sink2: InjectNode; tick: number }> {
   await stopAt(page, 'sink-tool', visit);
   await pressRing(page, await ringAt(page, 'sink-tool'));
@@ -939,10 +941,11 @@ export async function twoSinks(
   const sinkRing = await ringAt(page, 'sink-floor');
   const cam = await cameraOf(page);
   const ringCell = cellOfRing(sinkRing, cam);
-  const cell: readonly [number, number] = firstOnRow === undefined ? ringCell : [ringCell[0], firstOnRow];
+  const offRing = firstOnRow !== undefined || firstEast !== 0;
+  const cell: readonly [number, number] = [ringCell[0] + firstEast, firstOnRow ?? ringCell[1]];
   const sink = sinkAt(cell, SINK_ID);
   host.set(sink.id, SINK_DEBUG);
-  if (firstOnRow === undefined) await placeThrough(page, h, sinkRing);
+  if (!offRing) await placeThrough(page, h, sinkRing);
   else {
     const size = CELL * cam.scale;
     const before = sentCount(h, CMD.Place);
@@ -970,6 +973,8 @@ export interface FactoryBuildOptions {
    * the first.
    */
   secondFirst?: boolean;
+  /** The first Sink this many columns east of its ring's cell, off its ring (review WR-03). */
+  firstEast?: number;
   /** Stop after this many belts. */
   beltsDrawn?: 0 | 1 | 2 | 3;
   /** Called at press-add-output, before the press. */
@@ -986,7 +991,7 @@ export async function buildBoard(page: Page, h: Harness, host: ConfigHost, opts:
   const placed = await sourceOnTimer(page, h, host, visit);
   const { factory, tick: t2 } = await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick, opts.atAddOutput, visit);
   const secondRow = doorstepCell(portOf(factory, FACTORY_OUT2))[1];
-  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2, opts.secondFirst === true ? secondRow : undefined, visit);
+  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2, opts.secondFirst === true ? secondRow : undefined, visit, opts.firstEast);
   const board: FactoryBoard = { source: placed.source, factory, sink, sink2, belts: [], tick: t3 };
   const nodes = [board.source, factory, sink, sink2];
   const outs = opts.secondFirst === true ? [FACTORY_OUT2, FACTORY_OUT] : [FACTORY_OUT, FACTORY_OUT2];

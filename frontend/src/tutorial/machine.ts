@@ -274,19 +274,31 @@ function keyCell(key: string | undefined): readonly [number, number] | null {
 }
 
 /**
- * The Out port of `factory` a Sink spot faces. The first one in port order, or for `freeOutputSink` the
- * first that no belt docks and no machine already sits in front of. Before any belt is drawn that's the
- * one the first Sink didn't take. Null with no Out.
+ * The Out port of `factory` a Sink spot faces. `firstOutputSink` faces the first Out in port order.
+ * `freeOutputSink`, once a belt docks on some Out, faces the first Out no belt docks and no machine sits
+ * in front of. With no belt drawn yet, step 8's ring marks the first Out, so it faces an Out the first
+ * Sink's belt won't use: the first in port order other than the one the bound first Sink sits in front
+ * of, or the last Out when that Sink sits in front of neither, so the ring never lands between the first
+ * Out and a first Sink placed off its ring (review WR-03). Null with no Out.
  */
-function outputFor(spot: 'firstOutputSink' | 'freeOutputSink', factory: BoardNode, board: BoardFacts): BoardNode['ports'][number] | null {
+function outputFor(
+  spot: 'firstOutputSink' | 'freeOutputSink',
+  factory: BoardNode,
+  board: BoardFacts,
+  firstSink: BoardNode | undefined,
+): BoardNode['ports'][number] | null {
   const outs = factory.ports.filter((p) => p.role === PORT_ROLE.OUT);
   if (spot === 'firstOutputSink') return outs[0] ?? null;
-  const free = freeOutputs(factory, board.belts);
-  const faced = (p: BoardNode['ports'][number]): boolean => {
+  const inFront = (n: BoardNode, p: BoardNode['ports'][number]): boolean => {
     const [x, y] = sinkCellFor(p);
-    return board.nodes.some((n) => n.cells.some((c) => c[0] === x && c[1] === y));
+    return n.cells.some((c) => c[0] === x && c[1] === y);
   };
-  return free.find((p) => !faced(p)) ?? free[0] ?? outs[0] ?? null;
+  const free = freeOutputs(factory, board.belts);
+  if (free.length === outs.length && firstSink !== undefined) {
+    const taken = outs.find((p) => inFront(firstSink, p));
+    return taken === undefined ? (outs[outs.length - 1] ?? null) : (outs.find((p) => p !== taken) ?? null);
+  }
+  return free.find((p) => !board.nodes.some((n) => inFront(n, p))) ?? free[0] ?? outs[0] ?? null;
 }
 
 /** The cell `OUTPUT_SINK_CELLS` out from an output's own cell, along the side it faces. */
@@ -354,7 +366,9 @@ export function floorSpot(args: {
     case 'freeOutputSink': {
       const key = args.bindings?.factory?.nodeKey;
       const factory = key === undefined ? undefined : board.nodes.find((n) => nodeKey(n) === key);
-      const port = factory === undefined ? null : outputFor(args.spot, factory, board);
+      const sinkKey = args.bindings?.sink?.nodeKey;
+      const firstSink = sinkKey === undefined ? undefined : board.nodes.find((n) => nodeKey(n) === sinkKey);
+      const port = factory === undefined ? null : outputFor(args.spot, factory, board, firstSink);
       if (port !== null) {
         const [x, y] = sinkCellFor(port);
         return free(x, y);

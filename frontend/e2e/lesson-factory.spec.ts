@@ -339,6 +339,20 @@ test.describe('lesson 4 on the mock host', () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  test("with the first Sink one cell east of its ring, the second Sink's ring faces the second output, off the first output's path (WR-03)", async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 0, firstEast: 1 });
+    const firstOut = doorstepCell(portOf(board.factory, FACTORY_OUT));
+    const secondOut = doorstepCell(portOf(board.factory, FACTORY_OUT2));
+    const first: readonly [number, number] = [board.sink.cell_x, board.sink.cell_y];
+    // The first ring sits four out from the first output; the first Sink went one cell past it.
+    const ringOffset = first[0] - 1 - firstOut[0];
+    expect(first[1], "the first Sink is on the first output's row").toBe(firstOut[1]);
+    const second: readonly [number, number] = [board.sink2.cell_x, board.sink2.cell_y];
+    expect(second, "the second Sink's ring marks the cell four out from the second output").toEqual([secondOut[0] + ringOffset, secondOut[1]]);
+    expect(second[1], "and not the first output's row, between that output and the first Sink").not.toBe(firstOut[1]);
+  });
+
   test('the code-line ring sits on the line with the first emit, inside the editor, and a click there reaches the editor', async ({ page }) => {
     const { h, host } = await startFactoryLesson(page);
     await buildBoard(page, h, host);
