@@ -1081,7 +1081,11 @@ test.describe('the lesson list', () => {
     const refusal = page.locator('#fab-refusal .fab-panel');
     const list = page.locator(PANEL);
     const refuseAPlace = async (): Promise<void> => {
-      const at = await screenCellCentre(page, OLD_MACHINE.cell_x, OLD_MACHINE.cell_y);
+      // The mock refuses any place here, so the press only has to reach the floor. One cell south of the
+      // old machine, because with three lessons the open list reaches down over that machine at 1024x768.
+      const at = await screenCellCentre(page, OLD_MACHINE.cell_x, OLD_MACHINE.cell_y + 1);
+      const under = await page.evaluate((p) => document.elementFromPoint(p.x, p.y)?.tagName ?? null, at);
+      expect(under, 'the refused press lands on the floor, clear of the list').toBe('CANVAS');
       await page.mouse.click(at.x, at.y);
       await expect(page.locator('#fab-refusal')).toHaveText('That space is taken. Clear it or try elsewhere.');
     };
