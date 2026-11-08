@@ -616,9 +616,14 @@ export interface LineBoard {
   source: InjectNode;
   sink: InjectNode;
   belt: InjectBelt;
+  /** A second Source the lesson never bound, on every packet from the Source's placement on, or null. */
+  extra: InjectNode | null;
   tick: number;
   generation: number;
 }
+
+/** The handle of the unbound second Source `buildLine` can put down. Higher than the Source's, so the lesson binds the Source. */
+export const EXTRA_SOURCE_ID = 11;
 
 export async function selectedBelt(page: Page): Promise<number | null> {
   return page.evaluate(() => (window as unknown as { __fabrico: { selectedBelt(): number | null } }).__fabrico.selectedBelt());
@@ -642,6 +647,10 @@ export function undosSent(h: Harness): number {
  * then the Belt row and a drag from the Out ring to the In ring, at a zoom in `zoom`. The host's answers
  * are injected after each gesture, and both machines' configs are in the host's table before they
  * land. Returns at tool-down, with the Belt tool still armed.
+ *
+ * With `extraSource`, the Source's packet also holds a second Source three cells below it, as a second
+ * click on the floor with the Source tool still armed leaves one. The lesson binds the lower handle, and
+ * the second Source stays on every packet after that, with Webhook in the host's table.
  */
 export async function buildLine(
   page: Page,
@@ -649,6 +658,7 @@ export async function buildLine(
   host: ReturnType<typeof configByNode>,
   visit?: Visit,
   zoom: readonly [number, number] = [1.4, 1.6],
+  opts: { extraSource?: boolean } = {},
 ): Promise<LineBoard> {
   await ringAt(page, 'source-tool');
   // New keeps the camera, and the mock's first board fits one machine at the closest zoom. At that zoom
@@ -662,8 +672,11 @@ export async function buildLine(
   const sourceRing = await ringAt(page, 'source-floor');
   const source = sourceAt(cellOfRing(sourceRing, await cameraOf(page)));
   host.set(source.id, SOURCE_WEBHOOK);
+  const extra = opts.extraSource === true ? { ...sourceAt([source.cell_x, source.cell_y + 3]), id: EXTRA_SOURCE_ID } : null;
+  if (extra !== null) host.set(extra.id, SOURCE_WEBHOOK);
+  const machines = (...more: InjectNode[]): InjectNode[] => [...more, ...(extra === null ? [] : [extra])];
   await placeThrough(page, h, sourceRing);
-  h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: [source] }));
+  h.inject(buildPacket({ full: false, tick: 6, generation: 1, swapFloor: 1, nodes: machines(source) }));
 
   await stopAt(page, 'sink-tool', visit);
   await ringAt(page, 'sink-tool');
@@ -673,19 +686,19 @@ export async function buildLine(
   const sink = sinkAt(cellOfRing(sinkRing, await cameraOf(page)));
   host.set(sink.id, SINK_DEBUG);
   await pressRing(page, sinkRing);
-  h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: [source, sink] }));
+  h.inject(buildPacket({ full: false, tick: 7, generation: 1, swapFloor: 1, nodes: machines(source, sink) }));
 
   await stopAt(page, 'belt-tool', visit);
   await pressRing(page, await ringAt(page, 'belt-tool'));
   await stopAt(page, 'belt-draw', visit);
   const belt = beltBetween(LINE_BELT_ID, source, sink);
-  const board = { nodes: [source, sink], belts: [] as InjectBelt[], tick: 7 };
+  const board = { nodes: machines(source, sink), belts: [] as InjectBelt[], tick: 7 };
   await visitCarryOn(page, h, board, belt, visit);
   await dragThroughRings(page, h);
 
-  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, nodes: [source, sink], belts: [belt], canUndo: true }));
+  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, nodes: machines(source, sink), belts: [belt], canUndo: true }));
   await expectAt(page, 'delete-belt', 'tool-down', 'the joined belt finished draw-belt, and the Belt tool is still armed');
-  return { source, sink, belt, tick: board.tick, generation: 1 };
+  return { source, sink, belt, extra, tick: board.tick, generation: 1 };
 }
 
 /** Wait until the capture lesson 3's restored check compares with holds both machines' configs. */
@@ -742,24 +755,24 @@ export async function deleteSink(page: Page, h: Harness, board: LineBoard, visit
 
 /**
  * Lesson 3's step 6 from undo-sink: the Undo button under its ring, then Ctrl+Z, each answered with a
- * keyframe that re-mints every handle. Ends with the lesson finished.
+ * keyframe that re-mints every handle, the unbound second Source's too when the board has one. Ends
+ * with the lesson finished.
  */
 export async function undoBoth(page: Page, h: Harness, host: ReturnType<typeof configByNode>, board: LineBoard, visit?: Visit): Promise<void> {
   await stopAt(page, 'undo-sink', visit);
   const undos = undosSent(h);
   await pressRing(page, await ringAt(page, 'undo-sink'));
   await expect.poll(() => undosSent(h), { message: 'the Undo button sent an Undo' }).toBe(undos + 1);
-  const first = reminted({ nodes: [board.source, board.sink] }, 10);
-  host.set(first.nodes[0]!.id, SOURCE_WEBHOOK);
-  host.set(first.nodes[1]!.id, SINK_DEBUG);
+  const machines = [board.source, board.sink, ...(board.extra === null ? [] : [board.extra])];
+  const first = reminted({ nodes: machines }, 10);
+  for (const n of first.nodes) host.set(n.id, n.kind === board.sink.kind ? SINK_DEBUG : SOURCE_WEBHOOK);
   h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 2, swapFloor: 1, nodes: first.nodes, canUndo: true, canRedo: true }));
   await expectAt(page, 'bring-back', 'undo-belt', 'the Sink back moved the card to the belt');
   await stopAt(page, 'undo-belt', visit);
   await page.keyboard.press('Control+z');
   await expect.poll(() => undosSent(h), { message: 'Ctrl+Z sent the second Undo' }).toBe(undos + 2);
-  const second = reminted({ nodes: [board.source, board.sink], belts: [board.belt] }, 20);
-  host.set(second.nodes[0]!.id, SOURCE_WEBHOOK);
-  host.set(second.nodes[1]!.id, SINK_DEBUG);
+  const second = reminted({ nodes: machines, belts: [board.belt] }, 20);
+  for (const n of second.nodes) host.set(n.id, n.kind === board.sink.kind ? SINK_DEBUG : SOURCE_WEBHOOK);
   h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 3, swapFloor: 1, nodes: second.nodes, belts: second.belts, canUndo: true, canRedo: true }));
   await expect.poll(async () => (await readProbe(page)).card, { message: 'the line back as it was finished the lesson' }).toBe('finished');
 }

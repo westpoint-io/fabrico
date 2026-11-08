@@ -17,6 +17,7 @@ import {
   centreOf,
   configByNode,
   deleteBelt,
+  deleteSink,
   deletesSent,
   expectAt,
   expectCaptureComplete,
@@ -27,6 +28,7 @@ import {
   selectedBelt,
   selectedNode,
   startLesson,
+  undoBoth,
   undosSent,
   type LineBoard,
 } from './support/lessonMock';
@@ -198,6 +200,33 @@ test.describe('lesson 3 on the mock host', () => {
     await expect(card).not.toContainText(/Step \d/);
     await expect(page.locator('[data-fab-hint]'), 'no ring on a finished lesson').toBeHidden();
   });
+  test('a second Source from a repeat floor click stays on the board, and both Undos still finish the lesson', async ({ page }) => {
+    // The Source tool stays armed after a place, so a second click on the floor puts down a second
+    // Source. The lesson binds the first, and the second rides along through both deletes and both
+    // Undo keyframes, re-minted with the rest each time.
+    const host = configByNode();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h, LESSON);
+    const board = await buildLine(page, h, host, undefined, undefined, { extraSource: true });
+    expect(board.extra, 'the board holds a Source the lesson never bound').not.toBeNull();
+    expect((await readProbe(page)).bound.source, 'the lesson bound the first Source').toBe(board.source.id);
+    await page.keyboard.press('Escape');
+    await deleteBelt(page, h, board);
+    await deleteSink(page, h, board);
+    await undoBoth(page, h, host, board);
+    const card = page.locator(CARD);
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
+    await expect(card).not.toContainText(wordsOf(STEP.bringBack, 'too-far'));
+    // The capture lists machines by key, which sorts as text, so the kinds are compared sorted.
+    const capture = (await readProbe(page)).capture;
+    expect(capture?.machines, 'the capture holds all three machines').toBe(3);
+    expect([...(capture?.configKinds ?? [])].sort(), "the capture reads the bound machines' configs and leaves the second Source's unread").toEqual([
+      'Sink',
+      'Source',
+      'unread',
+    ]);
+  });
+
   test('an Undo of the draw at select-belt is not a delete: the lesson goes back to step 3 and says so', async ({ page }) => {
     const { h, host, board } = await toSelectBelt(page);
     // Undo takes a draw back one command at a time, the docks first: the keyframe holds the belt with

@@ -3,10 +3,12 @@
 // Undo re-mints every handle it puts back, and a keyframe can even hand an old handle to another
 // element, so two boards are compared by what a person could see of them: each machine's kind, cells
 // and ports, and each belt's tiles and what its ends dock to, named by the docked machine's `nodeKey`.
-// Item counts stay out, so a belt that lost its items still reads as the same belt. Each machine's
-// applied config is in it too, from the host's answer about that machine's handle at the board's own
-// generation, and a shape missing any machine's answer is incomplete and matches nothing. Pure, like the
-// rest of this folder.
+// Item counts stay out, so a belt that lost its items still reads as the same belt. The applied config
+// of each machine the lesson bound is in it too, from the host's answer about that machine's handle at
+// the board's own generation, and a shape missing any such answer is incomplete and matches nothing.
+// The layer's poll only asks about bound machines, so any other machine, such as a second Source from a
+// repeat floor click, carries the marker 'unread' in place of a config and compares by kind, cells and
+// ports alone. Pure, like the rest of this folder.
 
 import { nodeKey } from './check';
 import type { AppliedConfig, BoardFacts } from './types';
@@ -19,9 +21,11 @@ export interface MachineShape {
   ports: ReadonlyArray<{ role: number; cell_x: number; cell_y: number; side: number }>;
   /**
    * The machine's applied config, as the host answered for its handle at the shape's generation. Null
-   * while no answer has come; `{ value: null }` is an answer that the machine has no config.
+   * while no answer has come; `{ value: null }` is an answer that the machine has no config. Only a
+   * machine the lesson bound carries a config, because only those are polled; any other machine holds
+   * 'unread', which is the same on both sides of a comparison and never waits for an answer.
    */
-  config: { value: AppliedConfig['config'] } | null;
+  config: { value: AppliedConfig['config'] } | null | 'unread';
 }
 
 export interface BeltShape {
@@ -34,7 +38,7 @@ export interface BeltShape {
 export interface BoardShape {
   machines: readonly MachineShape[];
   belts: readonly BeltShape[];
-  /** Does every machine hold its config answer? An incomplete shape never matches. */
+  /** Does every machine whose config is read hold its answer? An incomplete shape never matches. */
   complete: boolean;
 }
 
@@ -63,9 +67,14 @@ function answerFor(answers: readonly AppliedConfig[], handle: number, generation
 /**
  * The board's shape. It holds no handle: every reference to another element goes by that element's key.
  * `answers` are the frame's config answers; only those about a machine's own handle at the board's
- * generation are read.
+ * generation are read. `read` holds the `nodeKey`s whose config the lesson reads, the bound machines
+ * (`boundMachineKeys`); every other machine gets 'unread'.
  */
-export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts' | 'generation'>, answers: readonly AppliedConfig[]): BoardShape {
+export function boardShape(
+  board: Pick<BoardFacts, 'nodes' | 'belts' | 'generation'>,
+  answers: readonly AppliedConfig[],
+  read: ReadonlySet<string>,
+): BoardShape {
   const nameOf = (handle: number): string => {
     const node = board.nodes.find((n) => n.id === handle);
     if (node !== undefined) return nodeKey(node);
@@ -80,7 +89,7 @@ export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts' | 'generati
       ports: [...n.ports]
         .sort((a, b) => a.index - b.index)
         .map((p) => ({ role: p.role, cell_x: p.cell_x, cell_y: p.cell_y, side: p.side })),
-      config: answerFor(answers, n.id, board.generation),
+      config: read.has(nodeKey(n)) ? answerFor(answers, n.id, board.generation) : ('unread' as const),
     }))
     .sort((a, b) => (a.nodeKey < b.nodeKey ? -1 : a.nodeKey > b.nodeKey ? 1 : 0));
   const belts: BeltShape[] = board.belts
@@ -101,7 +110,8 @@ export function boardShape(board: Pick<BoardFacts, 'nodes' | 'belts' | 'generati
 
 /**
  * `shape` with each machine still missing its config filled from `answers`, by the handle that machine
- * had when the shape was read, at that read's generation. The same object when nothing new arrived.
+ * had when the shape was read, at that read's generation. An unread machine is left as it is. The same
+ * object when nothing new arrived.
  */
 export function withConfigs(
   shape: BoardShape,

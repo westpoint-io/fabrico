@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { nodeKey } from './check.ts';
 import { beltTilesIn, boardShape, handlesByKey, sameShape, stableJson, withConfigs } from './shape.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode } from './types.ts';
 
@@ -52,9 +53,16 @@ function answered(b: Pick<BoardFacts, 'nodes'>, over: Partial<Record<number, App
   return b.nodes.map((n) => ({ node: n.id, generation: GEN, config: n.id in over ? (over[n.id] ?? null) : n.kind === SOURCE ? WEBHOOK : DEBUG }));
 }
 
-/** The shape of `b` at generation `GEN`, every machine answered unless `answers` says otherwise. */
-function shapeOf(b: Pick<BoardFacts, 'nodes' | 'belts'>, answers: readonly AppliedConfig[] = answered(b)) {
-  return boardShape({ ...b, generation: GEN }, answers);
+/**
+ * The shape of `b` at generation `GEN`, every machine answered unless `answers` says otherwise. Every
+ * machine's config is read unless `read` names fewer, so these cases mean what they did before the read set.
+ */
+function shapeOf(
+  b: Pick<BoardFacts, 'nodes' | 'belts'>,
+  answers: readonly AppliedConfig[] = answered(b),
+  read: ReadonlySet<string> = new Set(b.nodes.map(nodeKey)),
+) {
+  return boardShape({ ...b, generation: GEN }, answers, read);
 }
 
 describe('boardShape', () => {
@@ -126,6 +134,33 @@ describe('boardShape', () => {
     const none = shapeOf(BEFORE, answered(BEFORE, { 5: null }));
     expect(none.complete).toBe(true);
     expect(sameShape(none, shapeOf(BEFORE))).toBe(false);
+  });
+
+  describe('with a machine the lesson never bound', () => {
+    /** BEFORE plus a second Source at (2, 5), as a repeat floor click leaves one. */
+    const withExtra = (ids: { source: number; sink: number; belt: number; extra: number }) => {
+      const b = line(ids);
+      return { nodes: [...b.nodes, { ...source(ids.extra), cells: [[2, 5]] as [number, number][] }], belts: b.belts };
+    };
+    const bound = new Set(['0@2,2', '7@8,2']);
+    const before = withExtra({ source: 4, sink: 5, belt: 9, extra: 6 });
+    const after = withExtra({ source: 40, sink: 41, belt: 42, extra: 43 });
+
+    it("matches when the two differ only in that machine's config", () => {
+      const timer: AppliedConfig['config'] = { kind: 'Source', trigger: { kind: 'Timer', interval_ticks: 30 } };
+      expect(sameShape(shapeOf(after, answered(after, { 43: timer }), bound), shapeOf(before, answered(before), bound))).toBe(true);
+    });
+
+    it("doesn't match when a bound machine's config differs", () => {
+      const http: AppliedConfig['config'] = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } };
+      expect(sameShape(shapeOf(after, answered(after, { 41: http }), bound), shapeOf(before, answered(before), bound))).toBe(false);
+    });
+
+    it('is complete with no answer about it, and marks it unread', () => {
+      const shape = shapeOf(before, answered(before).filter((a) => a.node !== 6), bound);
+      expect(shape.complete).toBe(true);
+      expect(shape.machines.find((m) => m.nodeKey === '0@2,5')?.config).toBe('unread');
+    });
   });
 
   it('writes a tile kind the same whatever order its keys came in', () => {

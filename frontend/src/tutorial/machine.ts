@@ -12,6 +12,7 @@ import {
   beltJoining,
   boundBeltIds,
   boundBeltJoining,
+  boundMachineKeys,
   evaluateCheck,
   freeOutputs,
   lineDoorstep,
@@ -440,17 +441,29 @@ function isDeleteCheck(check: Check | undefined): check is Extract<Check, { is: 
   return check?.is === 'nodeGone' || check?.is === 'beltGone';
 }
 
-/** The board's shape as it stands, captured for the step `since`. */
-function captureOf(since: string, board: BoardFacts, chrome: ChromeFacts): ShapeCapture {
-  return { since, generation: board.generation, handles: handlesByKey(board), shape: boardShape(board, chrome.appliedConfigs) };
+/** The board's shape as it stands, captured for the step `since`, reading the configs of the machines `bindings` holds. */
+function captureOf(since: string, board: BoardFacts, chrome: ChromeFacts, bindings: TutorialState['bindings']): ShapeCapture {
+  return {
+    since,
+    generation: board.generation,
+    handles: handlesByKey(board),
+    shape: boardShape(board, chrome.appliedConfigs, boundMachineKeys(bindings)),
+  };
 }
 
 /** The capture to hold once step `stepIndex` begins: a fresh one if a later `restored` check names it, else the one held. */
-function captureAt(lesson: Lesson, stepIndex: number, board: BoardFacts, chrome: ChromeFacts, held: ShapeCapture | null): ShapeCapture | null {
+function captureAt(
+  lesson: Lesson,
+  stepIndex: number,
+  board: BoardFacts,
+  chrome: ChromeFacts,
+  bindings: TutorialState['bindings'],
+  held: ShapeCapture | null,
+): ShapeCapture | null {
   const id = lesson.steps[stepIndex]?.id;
   if (id === undefined) return held;
   const named = lesson.steps.some((step) => step.done.is === 'restored' && step.done.since === id);
-  return named ? captureOf(id, board, chrome) : held;
+  return named ? captureOf(id, board, chrome, bindings) : held;
 }
 
 /**
@@ -462,7 +475,7 @@ function captureAt(lesson: Lesson, stepIndex: number, board: BoardFacts, chrome:
 function withCaptureFilled(s: TutorialState, board: BoardFacts, chrome: ChromeFacts): TutorialState {
   const held = s.capture;
   if (held === null || held.shape.complete) return s;
-  if (board.generation !== held.generation) return { ...s, capture: captureOf(held.since, board, chrome) };
+  if (board.generation !== held.generation) return { ...s, capture: captureOf(held.since, board, chrome, s.bindings) };
   const shape = withConfigs(held.shape, held.handles, chrome.appliedConfigs, held.generation);
   return shape === held.shape ? s : { ...s, capture: { ...held, shape } };
 }
@@ -504,7 +517,7 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
       stepIndex,
       bindings,
       baseline: baselineFor(isLast ? undefined : lesson.steps[stepIndex], knownKeys, board, chrome, bindings),
-      capture: isLast ? next.capture : captureAt(lesson, stepIndex, board, chrome, next.capture),
+      capture: isLast ? next.capture : captureAt(lesson, stepIndex, board, chrome, bindings, next.capture),
       deliberate: withDeliberate(next.deliberate, step.done, board),
     };
   }
@@ -615,7 +628,7 @@ function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings),
     spot: null,
     note: { kind: 'wentBack', a: gone + 1, b: gone + 1 },
-    capture: captureAt(lesson, gone, board, chrome, s.capture),
+    capture: captureAt(lesson, gone, board, chrome, bindings, s.capture),
     deliberate: null,
   };
 }
@@ -724,7 +737,7 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
       stepIndex: 0,
       floor: e.board.swapFloor,
       baseline: baselineFor(lesson?.steps[0], [], e.board, e.chrome, s.bindings),
-      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, e.chrome, null),
+      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, e.chrome, s.bindings, null),
     };
     return runFrame(running, e.board, e.chrome, lessons);
   }

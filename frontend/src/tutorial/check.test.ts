@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
+import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
 import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
@@ -553,7 +553,7 @@ describe('restored', () => {
     since: 'delete-belt',
     generation: 1,
     handles: {},
-    shape: boardShape({ nodes: [], belts: [], generation: 1, ...line(4, 5, 9) }, answers(4, 5)),
+    shape: boardShape({ nodes: [], belts: [], generation: 1, ...line(4, 5, 9) }, answers(4, 5), boundMachineKeys(BINDINGS)),
   };
   const check = { is: 'restored', since: 'delete-belt' } as const;
 

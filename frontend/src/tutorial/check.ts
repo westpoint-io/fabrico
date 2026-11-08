@@ -37,6 +37,26 @@ type UnlistedBinding = Exclude<BindingName, (typeof BINDING_NAMES)[number]>;
 export const BINDING_NAMES_COMPLETE: [UnlistedBinding] extends [never] ? true : false = true;
 
 /**
+ * The handles of the bound machines, sorted with no repeats. Belts are left out. This is the set the
+ * layer's config poll asks the host about, so it's also the only set a frame can hold answers for.
+ */
+export function boundMachineHandles(bindings: TutorialState['bindings']): number[] {
+  const ids = BINDING_NAMES.filter((name) => BELT_ENDS[name] === undefined)
+    .map((name) => bindings[name]?.id)
+    .filter((id): id is number => id !== undefined);
+  return [...new Set(ids)].sort((a, b) => a - b);
+}
+
+/** The `nodeKey`s of the bound machines: the machines whose config the restored check reads. */
+export function boundMachineKeys(bindings: TutorialState['bindings']): ReadonlySet<string> {
+  return new Set(
+    BINDING_NAMES.filter((name) => BELT_ENDS[name] === undefined)
+      .map((name) => bindings[name]?.nodeKey)
+      .filter((key): key is string => key !== undefined),
+  );
+}
+
+/**
  * The board's shape captured when the step `since` began, for the restored check. A machine whose config
  * answer hadn't come yet takes it later from the answer about its handle then, at `generation`, so
  * `handles` keeps those handles by `nodeKey`. It never goes into the shape.
@@ -339,6 +359,8 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       return boundBeltJoining(board, bindings, check.of) === undefined ? DONE : NOT_DONE;
     }
     case 'restored':
-      return capture !== null && capture.since === check.since && sameShape(boardShape(board, chrome.appliedConfigs), capture.shape) ? DONE : NOT_DONE;
+      return capture !== null && capture.since === check.since && sameShape(boardShape(board, chrome.appliedConfigs, boundMachineKeys(bindings)), capture.shape)
+        ? DONE
+        : NOT_DONE;
   }
 }

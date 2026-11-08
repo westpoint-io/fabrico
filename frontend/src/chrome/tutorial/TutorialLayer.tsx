@@ -9,7 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, ty
 import { MIN_ZOOM } from '../../render/camera';
 import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
-import { BELT_ENDS } from '../../tutorial/check';
+import { boundMachineHandles } from '../../tutorial/check';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
@@ -58,7 +58,7 @@ export interface TutorialProbe {
   /**
    * The shape the restored check compares with, summed up with no handle in it: the step it was taken
    * at, how many machines it holds, and each machine's config kind (`missing` while no answer has come,
-   * `none` for an answer of no config). Null with no capture held.
+   * `none` for an answer of no config, `unread` for a machine the lesson never bound). Null with no capture held.
    */
   capture: { since: string; machines: number; configKinds: string[] } | null;
 }
@@ -177,7 +177,9 @@ function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRec
         : {
             since: s.capture.since,
             machines: s.capture.shape.machines.length,
-            configKinds: s.capture.shape.machines.map((m) => (m.config === null ? 'missing' : (m.config.value?.kind ?? 'none'))),
+            configKinds: s.capture.shape.machines.map((m) =>
+              m.config === null ? 'missing' : m.config === 'unread' ? 'unread' : (m.config.value?.kind ?? 'none'),
+            ),
           },
   };
 }
@@ -366,11 +368,7 @@ export const TRIGGER_POLL_MS = 400;
 
 /** The handles of the running lesson's bound machines, sorted and joined, so an effect can key on them. Belts are left out. */
 function boundMachineIds(s: TutorialState): string {
-  if (s.card !== 'running') return '';
-  const ids = Object.entries(s.bindings)
-    .filter(([name, bound]) => bound !== undefined && BELT_ENDS[name as BindingName] === undefined)
-    .map(([, bound]) => bound?.id as number);
-  return [...new Set(ids)].sort((a, b) => a - b).join(',');
+  return s.card === 'running' ? boundMachineHandles(s.bindings).join(',') : '';
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCheck, nodeKey } from './check.ts';
+import { boundMachineHandles, evaluateCheck, nodeKey } from './check.ts';
 import { LESSONS } from './lessons/index.ts';
 import { TWO_OUTPUTS } from './lessons/twoOutputs.ts';
 import { YOUR_FIRST_LINE } from './lessons/yourFirstLine.ts';
@@ -1184,12 +1184,25 @@ describe('lesson 3: Delete and Undo', () => {
   const step = (s: TutorialState): string | undefined => LESSONS.find((l) => l.id === DU)?.steps[s.stepIndex]?.id;
   const WEBHOOK = { kind: 'Source', trigger: { kind: 'Webhook' } } as const;
   const DEBUG = { kind: 'Sink', target: { kind: 'Debug' } } as const;
-  /** The host's answer for every machine on the board, at the board's generation, as the layer's poll hands them over. */
-  const answersFor = (b: Partial<BoardFacts>): AppliedConfig[] =>
+  /** The host's answer about each machine on the board, at the board's generation. Only for a case that sets its own answers. */
+  const answersAbout = (b: Partial<BoardFacts>): AppliedConfig[] =>
     (b.nodes ?? []).map((n) => ({ node: n.id, generation: b.generation ?? 1, config: n.kind === SOURCE ? WEBHOOK : DEBUG }));
-  /** A frame of lesson 3 with every machine's config answered, unless the chrome says otherwise. */
+  /**
+   * The answers a frame carries, filtered the way the layer filters them: only about the handles in
+   * `boundMachineHandles` of the state before the frame, the set the poll asks about, and only where
+   * that handle names a machine on this frame's board, at this board's generation. So a keyframe frame
+   * carries no answer about the handles it re-mints, and the next frame does, as the real poll restarts
+   * once React re-renders with the rebound handles.
+   */
+  const answersFor = (s: TutorialState, b: Partial<BoardFacts>): AppliedConfig[] => {
+    const polled = new Set(boundMachineHandles(s.bindings));
+    return answersAbout(b).filter((a) => polled.has(a.node));
+  };
+  /** A frame of lesson 3 with the answers the layer would hand over, unless the chrome says otherwise. */
   const frame = (s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts> = {}): TutorialState =>
-    reduce(s, { type: 'frame', board: board(b), chrome: chrome({ appliedConfigs: answersFor(b), ...c }) }, LESSONS);
+    reduce(s, { type: 'frame', board: board(b), chrome: chrome({ appliedConfigs: answersFor(s, b), ...c }) }, LESSONS);
+  /** Two frames of the same board: the keyframe frame, and the one after it that carries the answers. */
+  const twice = (s: TutorialState, b: Partial<BoardFacts>): TutorialState => frame(frame(s, b), b);
 
   function startedDU(): TutorialState {
     const sent = reduce(IDLE, { type: 'newSent', lessonId: DU, floorAtSend: FLOOR }, LESSONS);
@@ -1215,7 +1228,7 @@ describe('lesson 3: Delete and Undo', () => {
     const sinkBack = frame(atDU(5), { nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], belts: [], generation: 2 });
     expect(sinkBack.card).toBe('running');
     expect(currentStage(sinkBack, board({ nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], generation: 2 }), chrome(), LESSONS)?.id).toBe('undo-belt');
-    const done = frame(sinkBack, { ...reminted(60), generation: 3 });
+    const done = twice(sinkBack, { ...reminted(60), generation: 3 });
     expect(done.card).toBe('finished');
   });
 
@@ -1255,7 +1268,7 @@ describe('lesson 3: Delete and Undo', () => {
     expect(s.bindings.belt).toBeDefined();
     // place-sink and draw-belt still stand on the next frame too, with both targets gone.
     expect(step(frame(s, { nodes: [SRC], belts: [] }))).toBe('bring-back');
-    expect(frame(s, { ...reminted(70), generation: 2 }).card).toBe('finished');
+    expect(twice(s, { ...reminted(70), generation: 2 }).card).toBe('finished');
   });
 
   it('a Sink deleted at draw-belt still sends the lesson back to place-sink', () => {
@@ -1295,10 +1308,11 @@ describe('lesson 3: Delete and Undo', () => {
     const waiting = frame(atDU(5), back, { appliedConfigs: [] });
     expect(waiting.card).toBe('running');
     expect(step(waiting)).toBe('bring-back');
-    // Answers about the new handles, but asked before the keyframe: they don't count.
-    expect(frame(waiting, back, { appliedConfigs: answersFor({ ...back, generation: 1 }) }).card).toBe('running');
+    // Answers about the new handles, but asked before the keyframe: they don't count. The layer drops
+    // these itself, so the case passes them by hand to show the reader checks the generation too.
+    expect(frame(waiting, back, { appliedConfigs: answersAbout({ ...back, generation: 1 }) }).card).toBe('running');
     // Only the Source answered at the new generation: still waiting.
-    expect(frame(waiting, back, { appliedConfigs: answersFor(back).slice(0, 1) }).card).toBe('running');
+    expect(frame(waiting, back, { appliedConfigs: answersAbout(back).slice(0, 1) }).card).toBe('running');
     // Both answered at the new generation: done.
     expect(frame(waiting, back).card).toBe('finished');
   });
@@ -1306,7 +1320,9 @@ describe('lesson 3: Delete and Undo', () => {
   it('bring-back stays open when a restored Sink has another config', () => {
     const back = { ...reminted(80), generation: 3 };
     const http = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } } as const;
-    const other = answersFor(back).map((a) => (a.node === 81 ? { ...a, config: http } : a));
+    // The keyframe frame carries no answer about the new handles in the app; the case hands them over
+    // at once, because it reads the comparison and not the timing.
+    const other = answersAbout(back).map((a) => (a.node === 81 ? { ...a, config: http } : a));
     expect(frame(atDU(5), back, { appliedConfigs: other }).card).toBe('running');
   });
 
@@ -1324,7 +1340,38 @@ describe('lesson 3: Delete and Undo', () => {
     expect(s.capture?.shape.belts.length).toBe(1);
     s = frame(s, { nodes: [SRC], belts: [] });
     expect(step(s)).toBe('bring-back');
-    expect(frame(s, { ...reminted(90), generation: 2 }).card).toBe('finished');
+    expect(twice(s, { ...reminted(90), generation: 2 }).card).toBe('finished');
+  });
+
+  it("a second Source from a repeat floor click doesn't stop bring-back", () => {
+    // The Source tool stays armed after a place, so a second floor click puts down a second Source.
+    // The lesson binds the lower handle, and the config poll never asks about the other one.
+    const EXTRA: BoardNode = { ...node(6, SOURCE, 2, 5), ports: [{ index: 0, cell_x: 2, cell_y: 5, side: 1, role: 1 }] };
+    let s = startedDU();
+    s = frame(s, { nodes: [SRC, EXTRA] });
+    expect(s.bindings.source?.id, 'the lesson binds the lower handle').toBe(SRC.id);
+    s = frame(s, { nodes: [SRC, EXTRA, SNK] });
+    s = frame(s, { nodes: [SRC, EXTRA, SNK], belts: [BELT] });
+    expect(step(s)).toBe('delete-belt');
+    s = frame(s, { nodes: [SRC, EXTRA, SNK], belts: [] });
+    s = frame(s, { nodes: [SRC, EXTRA], belts: [] });
+    expect(step(s)).toBe('bring-back');
+    // The first Undo: every handle re-minted, the second Source's too.
+    const sinkBack = { nodes: [{ ...SRC, id: 40 }, { ...EXTRA, id: 41 }, { ...SNK, id: 42 }], belts: [], generation: 2 };
+    expect(sinkBack.nodes.length, 'three machines at the first Undo').toBe(3);
+    s = twice(s, sinkBack);
+    expect(s.card).toBe('running');
+    // The second Undo: the belt back joined at both ends, every handle new again.
+    const back = { nodes: [{ ...SRC, id: 50 }, { ...EXTRA, id: 51 }, { ...SNK, id: 52 }], belts: [beltBetween(53, 50, 52)], generation: 3 };
+    expect(back.nodes.length, 'three machines at the second Undo').toBe(3);
+    s = frame(s, back);
+    const stages: (string | undefined)[] = [];
+    for (let i = 0; i < 2 && s.card === 'running'; i++) {
+      s = frame(s, back);
+      stages.push(currentStage(s, board(back), chrome({ appliedConfigs: answersFor(s, back) }), LESSONS)?.id);
+    }
+    expect(s.card, `finished within two frames of the board being back; it read stages ${JSON.stringify(stages)}`).toBe('finished');
+    expect(stages, 'no frame after the second keyframe shows the too-far stage').not.toContain('too-far');
   });
 
 });
