@@ -262,3 +262,32 @@ describe('the step text budget, counted on the resolved plain string', () => {
     }
   });
 });
+
+describe('a code fragment in lesson words', () => {
+  it('resolves to its own text, flagged as code and set at the emphasis weight', () => {
+    expect(phrase(['Type ', { code: 'ctx.emit(1, input);' }, ' to use it.'])).toEqual([
+      { text: 'Type ', strong: false },
+      { text: 'ctx.emit(1, input);', strong: true, code: true },
+      { text: ' to use it.', strong: false },
+    ]);
+    expect(phrasePlain(['Type ', { code: 'ctx.emit(1, input);' }, '.'])).toBe('Type ctx.emit(1, input);.');
+  });
+
+  it("isn't audited, because it's the program's text and not lesson words", () => {
+    // `Space` and `Esc` are table words; inside a code fragment they must not be findings.
+    const lesson: Lesson = {
+      ...YOUR_FIRST_LINE,
+      steps: [{ ...YOUR_FIRST_LINE.steps[0]!, stages: [{ ...stageOf('place-source', 'source-tool'), text: ['Type ', { code: 'Source Sink Space Esc' }, '.'] }] }],
+      closing: [{ code: 'Factory' }],
+    };
+    expect(auditLessonWords([lesson])).toEqual([]);
+  });
+
+  it('a table word typed outside the fragment is still a finding', () => {
+    const lesson: Lesson = {
+      ...YOUR_FIRST_LINE,
+      steps: [{ ...YOUR_FIRST_LINE.steps[0]!, stages: [{ ...stageOf('place-source', 'source-tool'), text: ['Place a Source and type ', { code: 'x' }, '.'] }] }],
+    };
+    expect(auditLessonWords([lesson]).join('\n')).toContain('"Source" is typed as text');
+  });
+});

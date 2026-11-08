@@ -207,6 +207,17 @@ describe('StepCard', () => {
     expect(bold.map((el) => textOf(el))).toEqual(['Step 1 of 6', 'Source']);
   });
 
+  it('sets a code fragment as React text in a span at weight 700 that does not wrap', () => {
+    const view: StepCardView = { ...RUNNING, text: ['Click just after ', { code: 'ctx.emit(0, input);' }, ' and type.'] };
+    const spans = render(view).filter((el) => el.type === 'span' && textOf(el) === 'ctx.emit(0, input);');
+    expect(spans).toHaveLength(1);
+    expect(styleOf(spans[0]!)).toMatchObject({ fontWeight: 700, whiteSpace: 'nowrap' });
+    expect(spans[0]!.props.children, 'the fragment is a text child, never markup').toBe('ctx.emit(0, input);');
+    expect(Object.keys(spans[0]!.props).sort(), 'no prop but its text, its style and its mark').toEqual(['children', 'data-fab-code', 'style']);
+    const name = render(RUNNING).find((el) => el.type === 'span' && textOf(el) === 'Source');
+    expect(styleOf(name!).whiteSpace, 'a machine name still wraps as before').toBeUndefined();
+  });
+
   it('shows a note above the step counter when there is one', () => {
     const text = textOf(StepCard({ view: { ...RUNNING, note: ['Step 1 was already done.'] }, ...NOOPS }));
     expect(text.indexOf('Step 1 was already done.')).toBeGreaterThanOrEqual(0);

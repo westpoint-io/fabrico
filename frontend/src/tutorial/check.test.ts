@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BELT_ENDS, BINDING_NAMES_COMPLETE, evaluateCheck, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
+import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
 import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
@@ -574,5 +574,126 @@ describe('restored', () => {
   it('is not done with no capture, or a capture from another step', () => {
     expect(evaluateCheck(check, ctx({ board: line(40, 41, 42) })).done).toBe(false);
     expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), capture: { ...CAPTURE, since: 'draw-belt' } })).done).toBe(false);
+  });
+});
+
+// Lesson 4's Factory: 3 by 3 at (6,4), its In on the west of the middle row, its first Out on the east
+// of the middle row and its Fault on the south. After + Add output, a second Out sits east of the bottom
+// row, so the ports read [In, Out, Fault, Out] and the box doesn't grow.
+const FACTORY = 2;
+const cells3x3 = (x: number, y: number): number[][] => [0, 1, 2].flatMap((dy) => [0, 1, 2].map((dx) => [x + dx, y + dy]));
+const ONE_OUT: BoardNode = {
+  id: 6,
+  kind: FACTORY,
+  cells: cells3x3(6, 4),
+  ports: [
+    { index: 0, cell_x: 6, cell_y: 5, side: 3, role: 0 },
+    { index: 1, cell_x: 8, cell_y: 5, side: 1, role: 1 },
+    { index: 2, cell_x: 7, cell_y: 6, side: 2, role: 2 },
+  ],
+};
+const TWO_OUTS: BoardNode = { ...ONE_OUT, ports: [...ONE_OUT.ports, { index: 3, cell_x: 8, cell_y: 6, side: 1, role: 1 }] };
+const FACTORY_BOUND: TutorialState['bindings'] = { factory: { nodeKey: nodeKey(ONE_OUT), id: ONE_OUT.id } };
+
+describe('portAdded', () => {
+  const check = { is: 'portAdded', of: 'factory', outs: 2 } as const;
+
+  it('a Factory holding [In, Out, Fault, Out] is done', () => {
+    expect(evaluateCheck(check, ctx({ board: { nodes: [TWO_OUTS] }, bindings: FACTORY_BOUND }))).toEqual({ done: true, bound: null });
+  });
+
+  it('a fresh Factory holding [In, Out, Fault] is not done', () => {
+    expect(evaluateCheck(check, ctx({ board: { nodes: [ONE_OUT] }, bindings: FACTORY_BOUND })).done).toBe(false);
+  });
+
+  it('a Factory that moved to another cell is not done, because it is found by its key', () => {
+    const moved: BoardNode = { ...TWO_OUTS, cells: cells3x3(6, 3) };
+    expect(evaluateCheck(check, ctx({ board: { nodes: [moved] }, bindings: FACTORY_BOUND })).done).toBe(false);
+  });
+});
+
+describe('itemsArriveAtBoth', () => {
+  const check = { is: 'itemsArriveAtBoth', at: ['sink', 'sink2'] } as const;
+  const SINK_TWO = node(15, SINK, 12, 6);
+  const bindings: TutorialState['bindings'] = {
+    sink: { nodeKey: nodeKey(THE_SINK), id: THE_SINK.id },
+    sink2: { nodeKey: nodeKey(SINK_TWO), id: SINK_TWO.id },
+  };
+  const into = (id: number, sink: number, slots: readonly number[]): BoardBelt =>
+    belt(id, slots, [
+      { end: 'Tail', node: ONE_OUT.id, port: 0 },
+      { end: 'Head', node: sink, port: 1 },
+    ]);
+  const at = (first: readonly number[], second: readonly number[], baseline: Partial<StepBaseline>): CheckContext =>
+    ctx({ board: { belts: [into(20, THE_SINK.id, first), into(21, SINK_TWO.id, second)] }, baseline, bindings });
+
+  it('a rise into one Sink alone is not done', () => {
+    expect(evaluateCheck(check, at([4], [3], { lowestSlots: { sink: 0, sink2: 3 } })).done).toBe(false);
+  });
+
+  it('a rise into the second Sink, with the first latched on an earlier frame, is done', () => {
+    expect(evaluateCheck(check, at([0], [4], { lowestSlots: { sink: 0, sink2: 0 }, rose: ['sink'] }))).toEqual({ done: true, bound: null });
+  });
+
+  it('both rising on the same frame is done', () => {
+    expect(evaluateCheck(check, at([4], [4], { lowestSlots: { sink: 0, sink2: 0 } })).done).toBe(true);
+  });
+
+  it('a keyframe is no rise, though a latch already taken stands', () => {
+    const across = ctx({
+      board: { generation: 2, belts: [into(20, THE_SINK.id, [0]), into(21, SINK_TWO.id, [9])] },
+      baseline: { generation: 1, lowestSlots: { sink: 0, sink2: 0 }, rose: ['sink'] },
+      bindings,
+    });
+    expect(evaluateCheck(check, across).done).toBe(false);
+  });
+});
+
+describe('freeOutputs', () => {
+  // A Tail dock names an output by its place among the Outs: 0 is the first Out, 1 the second.
+  const outOf = (ordinal: number): BoardBelt => belt(30 + ordinal, [], [{ end: 'Tail', node: TWO_OUTS.id, port: ordinal }]);
+
+  it('with a belt on the first Out, the free pick is the second', () => {
+    expect(freeOutputs(TWO_OUTS, [outOf(0)]).map((p) => p.index)).toEqual([3]);
+  });
+
+  it('with a belt on the second Out, the free pick is the first', () => {
+    expect(freeOutputs(TWO_OUTS, [outOf(1)]).map((p) => p.index)).toEqual([1]);
+  });
+
+  it('with both Outs docked, there is none', () => {
+    expect(freeOutputs(TWO_OUTS, [outOf(0), outOf(1)])).toEqual([]);
+  });
+
+  it("a belt docked at another machine's first output doesn't take this one's", () => {
+    const elsewhere = belt(40, [], [{ end: 'Tail', node: 99, port: 0 }]);
+    expect(freeOutputs(TWO_OUTS, [elsewhere]).map((p) => p.index)).toEqual([1, 3]);
+  });
+});
+
+describe('the line helpers leave bound belts out', () => {
+  const SINK_ONE = { ...node(14, SINK, 12, 5), ports: [{ index: 1, cell_x: 12, cell_y: 5, side: 3, role: 0 }] };
+  const SINK_TWO = { ...node(15, SINK, 12, 6), ports: [{ index: 1, cell_x: 12, cell_y: 6, side: 3, role: 0 }] };
+  const BELT_OUT: BoardBelt = {
+    ...belt(20, [], [
+      { end: 'Tail', node: TWO_OUTS.id, port: 0 },
+      { end: 'Head', node: SINK_ONE.id, port: 1 },
+    ]),
+    tiles: [9, 10, 11].map((x) => ({ cell_x: x, cell_y: 5 })),
+  };
+  const b = { nodes: [TWO_OUTS, SINK_ONE, SINK_TWO], belts: [BELT_OUT] };
+
+  it("read with the first output's belt, the free output's line is stuck, which is why it is left out", () => {
+    expect(lineStuck(b, TWO_OUTS.id, SINK_TWO.id, false)).toBe(true);
+  });
+
+  it('with that belt bound, the free output has no line yet: not stuck, and no end to carry on from', () => {
+    const skip = boundBeltIds({ beltOut: { nodeKey: 'belt:x', id: BELT_OUT.id } });
+    expect(lineStuck(b, TWO_OUTS.id, SINK_TWO.id, false, skip)).toBe(false);
+    expect(lineDoorstep(b, TWO_OUTS.id, skip)).toBeNull();
+  });
+
+  it('only belt bindings count as bound belts', () => {
+    expect([...boundBeltIds({ source: { nodeKey: '0@0,0', id: 1 }, beltIn: { nodeKey: 'belt:a', id: 7 }, beltOut2: { nodeKey: 'belt:b', id: 8 } })].sort()).toEqual([7, 8]);
   });
 });

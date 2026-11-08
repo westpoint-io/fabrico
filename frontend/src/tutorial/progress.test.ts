@@ -37,6 +37,13 @@ function fakeStorage(initial: Record<string, string> = {}): {
 const noRemove = (): void => {};
 
 describe('parseProgress', () => {
+  it('reads a version 1 value holding only your-first-line the same once three lessons are known', () => {
+    const blob = stored({ version: 1, lessons: { [LESSON]: 'done' } });
+    const three = ['your-first-line', 'delete-and-undo', 'a-factory-with-two-outputs'] as const;
+    expect(parseProgress(blob, three)).toEqual(parseProgress(blob, KNOWN));
+    expect(parseProgress(blob, three).lessons).toEqual({ [LESSON]: 'done' });
+  });
+
   it('reads a good value', () => {
     expect(parseProgress(stored({ version: 1, lessons: { [LESSON]: 'done' } }), KNOWN)).toEqual({
       version: 1,

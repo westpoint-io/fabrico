@@ -68,6 +68,9 @@ const NO_WRITE_NAMES: ReadonlyArray<readonly [string, RegExp]> = [
   ['sendBeacon', /\bsendBeacon\b/],
   ['EventSource', /\bEventSource\b/],
   ['commitConfig', /\bcommitConfig\b/],
+  // The Factory's code editor: the tutorial reads its text and never writes it. The user types.
+  ['EditorView', /\bEditorView\b/],
+  ['insertText', /\binsertText\b/],
   ['.click(', /\.click\s*(?:\?\.)?\(/],
   ['.dispatchEvent(', /\.dispatchEvent\s*(?:\?\.)?\(/],
   ['invoke', /\binvoke\b/],
@@ -304,6 +307,8 @@ describe('the tutorial stays a reader of the app', () => {
         ["navigator.sendBeacon('/x', body);", 'sendBeacon'],
         ["new EventSource('/x');", 'EventSource'],
         ['commitConfig(1, c, deps);', 'commitConfig'],
+        ['EditorView.findFromDOM(el)?.dispatch({ changes });', 'EditorView'],
+        ["document.execCommand('insertText', false, line);", 'insertText'],
         ["document.querySelector('button').click();", '.click('],
         ['button?.click?.();', '.click('],
         ['button.dispatchEvent(new MouseEvent("click"));', '.dispatchEvent('],

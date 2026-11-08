@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { evaluateCheck, nodeKey } from './check.ts';
 import { LESSONS } from './lessons/index.ts';
+import { TWO_OUTPUTS } from './lessons/twoOutputs.ts';
 import { YOUR_FIRST_LINE } from './lessons/yourFirstLine.ts';
 import {
   IDLE,
@@ -1419,5 +1421,290 @@ describe('rowViews with three lessons', () => {
       ['delete-and-undo', 'Delete and Undo', 'notStarted', 'start'],
       ['a-factory-with-two-outputs', 'A Factory with two outputs', 'notStarted', null],
     ]);
+  });
+});
+
+// LESSON 4. A Source at (2,5), the Factory 3 by 3 at (6,4) with its In on the Source's row, the first Sink
+// at (12,5) on the first Out's row and the second at (12,6) on the second Out's row. Ports as the host
+// sends them: [In, Out, Fault] fresh, [In, Out, Fault, Out] after + Add output. A Tail dock names an
+// output by its place among the Outs.
+const L4 = 'a-factory-with-two-outputs';
+const FACTORY = 2;
+const DEFAULT_CODE = 'export default function (input, ctx) { ctx.emit(0, input); }';
+const TWO_EMITS = 'export default function (input, ctx) { ctx.emit(0, input); ctx.emit(1, input); }';
+const square = (x: number, y: number): number[][] => [0, 1, 2].flatMap((dy) => [0, 1, 2].map((dx) => [x + dx, y + dy]));
+const L4_SOURCE: BoardNode = { id: 30, kind: SOURCE, cells: [[2, 5]], ports: [{ index: 0, cell_x: 2, cell_y: 5, side: 1, role: 1 }] };
+const ONE_OUT: BoardNode = {
+  id: 31,
+  kind: FACTORY,
+  cells: square(6, 4),
+  ports: [
+    { index: 0, cell_x: 6, cell_y: 5, side: 3, role: 0 },
+    { index: 1, cell_x: 8, cell_y: 5, side: 1, role: 1 },
+    { index: 2, cell_x: 7, cell_y: 6, side: 2, role: 2 },
+  ],
+};
+const TWO_OUTS: BoardNode = { ...ONE_OUT, ports: [...ONE_OUT.ports, { index: 3, cell_x: 8, cell_y: 6, side: 1, role: 1 }] };
+const sinkAt = (id: number, x: number, y: number): BoardNode => ({
+  id,
+  kind: SINK,
+  cells: [[x, y]],
+  ports: [
+    { index: 0, cell_x: x, cell_y: y, side: 2, role: 2 },
+    { index: 1, cell_x: x, cell_y: y, side: 3, role: 0 },
+  ],
+});
+const L4_SINK = sinkAt(32, 12, 5);
+const L4_SINK2 = sinkAt(33, 12, 6);
+const tilesAlong = (from: number, to: number, y: number): BoardBelt['tiles'] => Array.from({ length: to - from + 1 }, (_, i) => ({ cell_x: from + i, cell_y: y }));
+const beltOf = (id: number, tail: [number, number], head: [number, number], tiles: BoardBelt['tiles'], slots: number[] = []): BoardBelt => ({
+  id,
+  items: slots.length,
+  occupiedSlots: slots,
+  tiles,
+  docks: [
+    { end: 'Tail', node: tail[0], port: tail[1] },
+    { end: 'Head', node: head[0], port: head[1] },
+  ],
+});
+const BELT_IN = beltOf(40, [L4_SOURCE.id, 0], [ONE_OUT.id, 0], tilesAlong(3, 5, 5));
+const beltOut = (slots: number[] = []): BoardBelt => beltOf(41, [ONE_OUT.id, 0], [L4_SINK.id, 1], tilesAlong(9, 11, 5), slots);
+const beltOut2 = (slots: number[] = []): BoardBelt => beltOf(42, [ONE_OUT.id, 1], [L4_SINK2.id, 1], tilesAlong(9, 11, 6), slots);
+const L4_TIMER = { appliedTrigger: { node: L4_SOURCE.id, kind: 'Timer' as const } };
+const factoryAnswer = (source: string, generation = 1): AppliedConfig => ({ node: ONE_OUT.id, generation, config: { kind: 'Factory', source } });
+
+function l4Frame(s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts> = {}): TutorialState {
+  return frame(s, b, { ...L4_TIMER, ...c });
+}
+
+/** Lesson 4 brought to the step with this index, one step a frame. The board at each step is `l4Board(index)`. */
+function l4Board(index: number, out: number[] = [], out2: number[] = []): Partial<BoardFacts> {
+  const nodes = [L4_SOURCE, ...(index >= 3 ? [index >= 4 ? TWO_OUTS : ONE_OUT] : []), ...(index >= 5 ? [L4_SINK] : []), ...(index >= 6 ? [L4_SINK2] : [])];
+  const belts = [...(index >= 7 ? [BELT_IN] : []), ...(index >= 8 ? [beltOut(out)] : []), ...(index >= 9 ? [beltOut2(out2)] : [])];
+  return { nodes, belts };
+}
+
+function atL4(index: number, c: Partial<ChromeFacts> = {}): TutorialState {
+  const sent = reduce(IDLE, { type: 'newSent', lessonId: L4, floorAtSend: FLOOR }, LESSONS);
+  let s = frame(sent, {});
+  for (let i = 1; i <= index; i++) s = l4Frame(s, l4Board(i), c);
+  return s;
+}
+
+describe('lesson 4: A Factory with two outputs', () => {
+  it('has ten steps in order, each opening with the paused stage, inside the card budgets', () => {
+    expect(TWO_OUTPUTS.title).toBe('A Factory with two outputs');
+    expect(TWO_OUTPUTS.steps.map((s) => s.id)).toEqual([
+      'place-source',
+      'set-timer',
+      'place-factory',
+      'add-output',
+      'place-sink',
+      'place-second-sink',
+      'belt-in',
+      'belt-out',
+      'belt-out-2',
+      'change-code',
+    ]);
+    for (const s of TWO_OUTPUTS.steps) expect(s.stages[0]?.id, s.id).toBe('board-paused');
+    expect(auditLessonWords([TWO_OUTPUTS])).toEqual([]);
+    for (const s of TWO_OUTPUTS.steps) {
+      for (const stage of s.stages) {
+        const text = phrasePlain(stage.text);
+        expect(text.length, `${s.id} ${stage.id}: ${text}`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        for (const line of Object.values(stage.coach ?? {})) {
+          expect(phrasePlain(line).length, `${s.id} ${stage.id} coach`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        }
+      }
+    }
+    expect(phrasePlain(TWO_OUTPUTS.closing)).toBe(
+      "A Factory's code decides which output each item leaves by: ctx.emit(0, input) for the first, ctx.emit(1, input) for the second.",
+    );
+  });
+
+  it('walks to the watch step one step a frame, with + Add output before any Sink or belt', () => {
+    const s = atL4(9);
+    expect(s.card).toBe('running');
+    expect(s.stepIndex).toBe(9);
+    expect(s.bindings.factory?.nodeKey).toBe('2@6,4');
+    expect(s.bindings.beltOut2?.id).toBe(42);
+    expect(TWO_OUTPUTS.steps.findIndex((st) => st.id === 'add-output')).toBeLessThan(TWO_OUTPUTS.steps.findIndex((st) => st.id === 'place-sink'));
+  });
+
+  it('a turned Factory whose + Add output moves its corner goes back to place-factory and finishes it again in the same frame, with no note', () => {
+    const s = atL4(3);
+    expect(s.stepIndex, 'on add-output').toBe(3);
+    // Turned once, the grown box keeps its far edge, so its top left moves up a row and the key changes.
+    const grown: BoardNode = { ...TWO_OUTS, cells: square(6, 3) };
+    const next = l4Frame(s, { nodes: [L4_SOURCE, grown] });
+    expect(next.stepIndex, 'on place-sink').toBe(4);
+    expect(next.note).toBeNull();
+    expect(next.bindings.factory?.nodeKey).toBe('2@6,3');
+  });
+
+  describe('the watch read', () => {
+    const watching = (): TutorialState => {
+      const s = atL4(8);
+      return l4Frame(s, l4Board(9, [3], [3]));
+    };
+
+    it('a rise into the first Sink and a later rise into the second finishes on the second', () => {
+      let s = watching();
+      expect(s.stepIndex).toBe(9);
+      s = l4Frame(s, l4Board(9, [], [2]));
+      expect(s.card, 'one rise, into the first Sink').toBe('running');
+      expect(s.baseline?.rose).toEqual(['sink']);
+      s = l4Frame(s, l4Board(9, [1], [2]));
+      expect(s.card, 'the first falls again, and its latch stands').toBe('running');
+      s = l4Frame(s, l4Board(9, [1], []));
+      expect(s.card, 'the rise into the second Sink').toBe('finished');
+    });
+
+    it('rises into one Sink alone never finish', () => {
+      let s = watching();
+      for (let i = 0; i < 10; i++) s = l4Frame(s, l4Board(9, i % 2 === 0 ? [] : [0], [3]));
+      expect(s.card).toBe('running');
+      expect(s.baseline?.rose).toEqual(['sink']);
+    });
+
+    it('a keyframe between two frames is no rise, and keeps a latch already taken', () => {
+      let s = watching();
+      s = l4Frame(s, l4Board(9, [], [2]));
+      expect(s.baseline?.rose).toEqual(['sink']);
+      s = l4Frame(s, { ...l4Board(9, [0], [9]), generation: 2 });
+      expect(s.card, 'the second Sink only looks like it rose').toBe('running');
+      expect(s.baseline?.rose, 'the first latch stands across the keyframe').toEqual(['sink']);
+      expect(s.baseline?.lowestSlots).toEqual({ sink: 0, sink2: 9 });
+      s = l4Frame(s, { ...l4Board(9, [0], []), generation: 2 });
+      expect(s.card).toBe('finished');
+    });
+  });
+
+  it("step 9's stage, with beltOut bound and the Belt tool armed, is the plain drag and not the undo", () => {
+    const s = atL4(8);
+    expect(s.stepIndex).toBe(8);
+    expect(s.bindings.beltOut?.id).toBe(41);
+    const stage = currentStage(s, board(l4Board(8)), chrome({ ...L4_TIMER, armed: { kind: 'belt' } }), LESSONS);
+    expect(stage?.id).toBe('belt-draw');
+  });
+
+  describe('the code stages', () => {
+    const SELECTED = { selectedNode: ONE_OUT.id };
+    const atCode = (answers: AppliedConfig[]): TutorialState => {
+      const s = atL4(8);
+      return l4Frame(s, l4Board(9), { appliedConfigs: answers });
+    };
+    const stageAt = (s: TutorialState, c: Partial<ChromeFacts>): string | undefined =>
+      currentStage(s, board(l4Board(9)), chrome({ ...L4_TIMER, ...SELECTED, ...c }), LESSONS)?.id;
+
+    it('the source applied when the step began is held', () => {
+      expect(atCode([factoryAnswer(DEFAULT_CODE)]).baseline?.factorySource).toBe(DEFAULT_CODE);
+    });
+
+    it('unchanged with no marker shows type-code; the marker shows apply-code; changed text with no marker shows watch', () => {
+      const s = atCode([factoryAnswer(DEFAULT_CODE)]);
+      expect(stageAt(s, { codeText: DEFAULT_CODE, codeNotApplied: false })).toBe('type-code');
+      expect(stageAt(s, { codeText: TWO_EMITS, codeNotApplied: true })).toBe('apply-code');
+      expect(stageAt(s, { codeText: DEFAULT_CODE, codeNotApplied: true }), 'typed and typed back, still marked').toBe('apply-code');
+      expect(stageAt(s, { codeText: TWO_EMITS, codeNotApplied: false })).toBe('watch');
+    });
+
+    it('an unknown source shows type-code, and the first answer is taken once it comes', () => {
+      const s = atCode([]);
+      expect(s.baseline?.factorySource).toBeNull();
+      expect(stageAt(s, { codeText: TWO_EMITS, codeNotApplied: false })).toBe('type-code');
+      const answered = l4Frame(s, l4Board(9), { appliedConfigs: [factoryAnswer(DEFAULT_CODE)] });
+      expect(answered.baseline?.factorySource).toBe(DEFAULT_CODE);
+      const later = l4Frame(answered, l4Board(9), { appliedConfigs: [factoryAnswer(TWO_EMITS)] });
+      expect(later.baseline?.factorySource, 'the latch keeps the first answer').toBe(DEFAULT_CODE);
+    });
+
+    it('with no Factory editor showing, the stage is still type-code', () => {
+      expect(stageAt(atCode([factoryAnswer(DEFAULT_CODE)]), { codeText: null })).toBe('type-code');
+    });
+  });
+});
+
+describe('one watch read for one Sink and for two', () => {
+  it('lowestSlots holds exactly the watched names, in lesson 1 and in lesson 4', () => {
+    const one = atStep(5);
+    expect(one.stepIndex).toBe(5);
+    expect(Object.keys(one.baseline?.lowestSlots ?? {}).sort()).toEqual(['sink']);
+    const two = atL4(9);
+    expect(Object.keys(two.baseline?.lowestSlots ?? {}).sort()).toEqual(['sink', 'sink2']);
+    expect(atL4(8).baseline?.lowestSlots, 'a step that watches nothing holds no slot').toEqual({});
+  });
+
+  it("lesson 1's itemArrived reads the slot through the map, and nothing else", () => {
+    const one = atStep(5);
+    const b = board({ nodes: BOTH, belts: [{ ...JOINED, occupiedSlots: [4], items: 1 }] });
+    const check = { is: 'itemArrived', at: 'sink' } as const;
+    const base = one.baseline!;
+    const ctx = (lowestSlots: Record<string, number | null>) => ({ board: b, chrome: chrome(), bindings: one.bindings, capture: null, baseline: { ...base, lowestSlots } });
+    expect(evaluateCheck(check, ctx({ sink: 0 })).done, 'a rise against the map').toBe(true);
+    expect(evaluateCheck(check, ctx({})).done, 'no slot in the map').toBe(false);
+    expect(evaluateCheck(check, ctx({ sink2: 0 })).done, "another Sink's slot").toBe(false);
+  });
+});
+
+describe('floorSpot for lesson 4', () => {
+  // UI-SPEC "Floor spots": the free area at 1024x768 with a Factory selected, at zoom 1 and camera 0.
+  const VIEW_1024: ChromeFacts['view'] = { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 198, right: 610, top: 116, bottom: 328 } };
+  const CELL_PX = 32;
+
+  it('a Factory spot past a machine moves down until all nine cells are free', () => {
+    const blocker = node(50, SINK, 7, 6);
+    const spot = floorSpot({ spot: 'factory', view: VIEW, board: board({ nodes: [L4_SOURCE, blocker] }), sourceKey: nodeKey(L4_SOURCE) });
+    expect(spot).toEqual([6, 7]);
+    const covered = square(spot[0], spot[1]);
+    expect(covered.some(([x, y]) => x === 7 && y === 6)).toBe(false);
+    expect(floorSpot({ spot: 'factory', view: VIEW, board: board({ nodes: [L4_SOURCE] }), sourceKey: nodeKey(L4_SOURCE) }), 'nothing in the way').toEqual([6, 4]);
+  });
+
+  it('at 1024x768 the line is centred: the Source near 228 px and the Sinks ending near 580 px, inside 198 to 610', () => {
+    const src = floorSpot({ spot: 'centredSource', view: VIEW_1024, board: board() });
+    const sourceLeft = src[0] * CELL_PX;
+    // The ideal edges are 228 and 580; the cells snap to the grid, here 224 and 576.
+    expect(Math.abs(sourceLeft - 228)).toBeLessThan(CELL_PX / 2);
+    const sourceNode: BoardNode = { id: 1, kind: SOURCE, cells: [[src[0], src[1]]], ports: [] };
+    const bindings = { source: { nodeKey: nodeKey(sourceNode), id: 1 } };
+    const f = floorSpot({ spot: 'factory', view: VIEW_1024, board: board({ nodes: [sourceNode] }), bindings });
+    expect(f).toEqual([src[0] + 4, src[1] - 1]);
+    const [fx, fy] = f;
+    const factory: BoardNode = {
+      id: 2,
+      kind: FACTORY,
+      cells: square(fx, fy),
+      ports: [
+        { index: 0, cell_x: fx, cell_y: fy + 1, side: 3, role: 0 },
+        { index: 1, cell_x: fx + 2, cell_y: fy + 1, side: 1, role: 1 },
+        { index: 2, cell_x: fx + 1, cell_y: fy + 2, side: 2, role: 2 },
+        { index: 3, cell_x: fx + 2, cell_y: fy + 2, side: 1, role: 1 },
+      ],
+    };
+    const withFactory = { ...bindings, factory: { nodeKey: nodeKey(factory), id: 2 } };
+    const first = floorSpot({ spot: 'firstOutputSink', view: VIEW_1024, board: board({ nodes: [sourceNode, factory] }), bindings: withFactory });
+    expect(first, "the first Sink, on the first output's row").toEqual([fx + 6, fy + 1]);
+    const sink: BoardNode = { id: 3, kind: SINK, cells: [[first[0], first[1]]], ports: [] };
+    const second = floorSpot({ spot: 'freeOutputSink', view: VIEW_1024, board: board({ nodes: [sourceNode, factory, sink] }), bindings: withFactory });
+    expect(second, "the second Sink, on the second output's row").toEqual([fx + 6, fy + 2]);
+    const sinksRight = (first[0] + 1) * CELL_PX;
+    expect(Math.abs(sinksRight - 580)).toBeLessThan(CELL_PX / 2);
+    expect(sourceLeft).toBeGreaterThanOrEqual(VIEW_1024.freeArea.left);
+    expect(sinksRight).toBeLessThanOrEqual(VIEW_1024.freeArea.right);
+    expect(sinksRight - sourceLeft, 'eleven cells').toBe(11 * CELL_PX);
+  });
+
+  it('with a belt on the first output, the second Sink faces the other one, wherever the first Sink went', () => {
+    const b = board({ nodes: [L4_SOURCE, TWO_OUTS], belts: [beltOf(41, [ONE_OUT.id, 0], [99, 1], tilesAlong(9, 9, 5))] });
+    const bindings = { factory: { nodeKey: nodeKey(TWO_OUTS), id: TWO_OUTS.id } };
+    expect(floorSpot({ spot: 'freeOutputSink', view: VIEW, board: b, bindings })).toEqual([12, 6]);
+  });
+
+  it('when 11 cells do not fit, the line starts one cell inside the free area', () => {
+    const narrow: ChromeFacts['view'] = { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 200, right: 400, top: 116, bottom: 328 } };
+    const [x] = floorSpot({ spot: 'centredSource', view: narrow, board: board() });
+    expect(x * CELL_PX).toBeGreaterThanOrEqual(200 + CELL_PX - CELL_PX / 2);
+    expect(x * CELL_PX).toBeLessThanOrEqual(200 + CELL_PX + CELL_PX / 2);
   });
 });

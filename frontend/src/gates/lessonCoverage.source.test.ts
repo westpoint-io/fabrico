@@ -19,9 +19,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCE } from '../../e2e-live/support/lessonWalks.ts';
+import { ADD_OUTPUT_LABEL } from '../chrome/PortsSection.tsx';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
 import { SHORTCUTS } from '../input/shortcuts.ts';
 import { LESSONS } from '../tutorial/lessons/index.ts';
+import { ADD_OUTPUT_WORDS } from '../tutorial/lessons/twoOutputs.ts';
 import { MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
 import { stripComments } from './walkSpecSource';
@@ -83,6 +85,10 @@ function auditStage(stepLabel: string, stage: Stage, drivable: readonly string[]
   }
   if (stage.gesture.do === 'dragToHint' && (stage.hint?.on !== 'port' || stage.hint.to !== undefined)) {
     out.push(`${label}: this stage names a drag into one ring and doesn't mark exactly one port`);
+  }
+  // The walk types where the ring marks, so a typing stage has to mark the code line.
+  if (stage.gesture.do === 'typeCode' && (stage.hint?.on !== 'panel' || stage.hint.target.kind !== 'codeLine')) {
+    out.push(`${label}: this stage types code and doesn't mark a code line`);
   }
   return out;
 }
@@ -248,6 +254,13 @@ describe('every lesson has a walk', () => {
     expect(REFUSED_SENTENCE).toBe(REFUSAL_COPY.FootprintCollision);
   });
 
+  it("holds lesson 4's typed + Add output to the button's own label", () => {
+    expect(ADD_OUTPUT_WORDS).toBe(ADD_OUTPUT_LABEL);
+    const step = LESSONS.flatMap((l) => l.steps).find((s) => s.id === 'add-output');
+    const words = step?.stages.flatMap((stage) => stage.text.filter((t): t is string => typeof t === 'string')).join('') ?? '';
+    expect(words, 'the add-output stage says the label it marks').toContain(ADD_OUTPUT_LABEL);
+  });
+
   it('finds nothing in the real tree', () => {
     expect(auditLessonCoverage(REAL)).toEqual([]);
   });
@@ -306,6 +319,16 @@ describe('every lesson has a walk', () => {
     it('a drag into one ring that marks a pair of ports', () => {
       const lesson = withStage((s) => ({ ...s, gesture: { do: 'dragToHint' }, hint: { on: 'port', of: 'source', role: 'out', to: { of: 'sink', role: 'in' } } }));
       expect(audit({ lessons: [lesson] })).toMatch(/stage board-paused: this stage names a drag into one ring and doesn't mark exactly one port/);
+    });
+
+    it('a typeCode stage that marks no code line', () => {
+      const typing = { do: 'typeCode', after: 'a', insert: 'b' } as const;
+      const onApply = withStage((s) => ({ ...s, gesture: typing, hint: { on: 'panel', target: { kind: 'applyButton' } } }));
+      expect(audit({ lessons: [onApply] })).toMatch(/stage board-paused: this stage types code and doesn't mark a code line/);
+      const onTheFloor = withStage((s) => ({ ...s, gesture: typing, hint: { on: 'machine', of: 'source' } }));
+      expect(audit({ lessons: [onTheFloor] })).toMatch(/this stage types code and doesn't mark a code line/);
+      const onTheLine = withStage((s) => ({ ...s, gesture: typing, hint: { on: 'panel', target: { kind: 'codeLine', holds: 'a' } } }));
+      expect(audit({ lessons: [onTheLine] }), 'marking the code line is clean').not.toMatch(/types code/);
     });
 
     it('a drag into one ring that marks no port', () => {
