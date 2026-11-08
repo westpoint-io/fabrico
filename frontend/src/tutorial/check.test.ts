@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCheck, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
+import { BELT_ENDS, BINDING_NAMES_COMPLETE, evaluateCheck, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
+import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
 
@@ -486,5 +487,74 @@ describe('itemArrived', () => {
 
   it('no earlier value to compare with is not done', () => {
     expect(evaluateCheck(check, withSlots([8], null)).done).toBe(false);
+  });
+});
+
+describe('nodeGone and beltGone', () => {
+  const BELT_BINDING = { ...BINDINGS, belt: { nodeKey: 'belt:0@2,2+7@8,2', id: 9 } };
+
+  it('nodeGone is done on a diff frame that drops the bound Sink, with the generation unchanged', () => {
+    const check = { is: 'nodeGone', of: 'sink' } as const;
+    expect(evaluateCheck(check, ctx({ board: { nodes: [THE_SOURCE, THE_SINK] } })).done).toBe(false);
+    expect(evaluateCheck(check, ctx({ board: { nodes: [THE_SOURCE] } }))).toEqual({ done: true, bound: null });
+  });
+
+  it('nodeGone is not done on a keyframe that drops it with the generation raised, because that was an Undo', () => {
+    const check = { is: 'nodeGone', of: 'sink' } as const;
+    expect(evaluateCheck(check, ctx({ board: { generation: 2, nodes: [THE_SOURCE] }, baseline: { generation: 1 } })).done).toBe(false);
+  });
+
+  it('nodeGone is not done for a binding the lesson never made', () => {
+    expect(evaluateCheck({ is: 'nodeGone', of: 'factory' }, ctx({ board: { nodes: [THE_SOURCE] } })).done).toBe(false);
+  });
+
+  it('beltGone is done on a diff frame with no belt joining the two machines', () => {
+    const check = { is: 'beltGone', of: 'belt' } as const;
+    const joined = { nodes: [THE_SOURCE, THE_SINK], belts: [belt(9, [], INTO_THE_SINK)] };
+    expect(evaluateCheck(check, ctx({ board: joined, bindings: BELT_BINDING })).done).toBe(false);
+    expect(evaluateCheck(check, ctx({ board: { nodes: [THE_SOURCE, THE_SINK] }, bindings: BELT_BINDING })).done).toBe(true);
+  });
+
+  it('beltGone is not done on a keyframe with the generation raised', () => {
+    const check = { is: 'beltGone', of: 'belt' } as const;
+    expect(evaluateCheck(check, ctx({ board: { generation: 3, nodes: [THE_SOURCE, THE_SINK] }, bindings: BELT_BINDING })).done).toBe(false);
+  });
+
+  it('names a belt by its two machines in BELT_ENDS, with every binding name listed', () => {
+    expect(BELT_ENDS).toEqual({ belt: ['source', 'sink'], beltIn: ['source', 'factory'], beltOut: ['factory', 'sink'], beltOut2: ['factory', 'sink2'] });
+    expect(BINDING_NAMES_COMPLETE).toBe(true);
+  });
+});
+
+describe('restored', () => {
+  const tiles = [3, 4, 5, 6, 7].map((x) => ({ cell_x: x, cell_y: 2, kind: { Straight: { axis: 0 } } }));
+  const line = (src: number, snk: number, id: number, docks?: BoardBelt['docks']): Partial<BoardFacts> => ({
+    nodes: [{ ...THE_SOURCE, id: src }, { ...THE_SINK, id: snk }],
+    belts: [
+      {
+        ...belt(id, [], [
+          { end: 'Tail', node: src, port: 0 },
+          { end: 'Head', node: snk, port: 0 },
+        ]),
+        tiles,
+        ...(docks === undefined ? {} : { docks }),
+      },
+    ],
+  });
+  const CAPTURE = { since: 'delete-belt', shape: boardShape({ nodes: [], belts: [], ...line(4, 5, 9) } as BoardFacts) };
+  const check = { is: 'restored', since: 'delete-belt' } as const;
+
+  it('is done when the captured shape comes back under new handles', () => {
+    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), capture: CAPTURE })).done).toBe(true);
+  });
+
+  it("is not done while the belt's Head dock is missing", () => {
+    const board = line(40, 41, 42, [{ end: 'Tail', node: 40, port: 0 }]);
+    expect(evaluateCheck(check, ctx({ board, capture: CAPTURE })).done).toBe(false);
+  });
+
+  it('is not done with no capture, or a capture from another step', () => {
+    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42) })).done).toBe(false);
+    expect(evaluateCheck(check, ctx({ board: line(40, 41, 42), capture: { ...CAPTURE, since: 'draw-belt' } })).done).toBe(false);
   });
 });

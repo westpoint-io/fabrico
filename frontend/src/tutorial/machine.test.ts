@@ -12,7 +12,7 @@ import {
   type RowView,
   type TutorialState,
 } from './machine.ts';
-import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, auditLessonWords, phrasePlain } from './phrase.ts';
+import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 
@@ -1150,5 +1150,227 @@ describe('rowViews', () => {
     expect(views[0]?.actions, 'the first has no run to resume').toEqual(['restart']);
     expect(views[1]?.status).toBe('inProgress');
     expect(views[1]?.actions).toEqual(['restart']);
+  });
+});
+
+describe('lesson 3: Delete and Undo', () => {
+  const DU = 'delete-and-undo';
+  const SRC: BoardNode = THE_SOURCE;
+  const SNK: BoardNode = THE_SINK;
+  const tile = (x: number, kind: unknown) => ({ cell_x: x, cell_y: 2, kind });
+  const STRAIGHT = { Straight: { axis: 0 } };
+  /** The Source's output at (3, 2) to the Sink's input at (7, 2), Tail first. */
+  const beltBetween = (id: number, from: number, to: number, docked = true): BoardBelt => ({
+    id,
+    items: 0,
+    occupiedSlots: [],
+    tiles: [tile(3, STRAIGHT), tile(4, STRAIGHT), tile(5, STRAIGHT), tile(6, STRAIGHT), tile(7, STRAIGHT)],
+    docks: docked
+      ? [
+          { end: 'Tail', node: from, port: 0 },
+          { end: 'Head', node: to, port: 1 },
+        ]
+      : [],
+  });
+  const BELT = beltBetween(9, SRC.id, SNK.id);
+  /** The same machines and belt as an Undo keyframe puts them back: every handle new. */
+  const reminted = (base: number): Partial<BoardFacts> => {
+    const source = { ...SRC, id: base };
+    const sink = { ...SNK, id: base + 1 };
+    return { nodes: [source, sink], belts: [beltBetween(base + 2, source.id, sink.id)] };
+  };
+  const step = (s: TutorialState): string | undefined => LESSONS.find((l) => l.id === DU)?.steps[s.stepIndex]?.id;
+
+  function startedDU(): TutorialState {
+    const sent = reduce(IDLE, { type: 'newSent', lessonId: DU, floorAtSend: FLOOR }, LESSONS);
+    return frame(sent, {});
+  }
+
+  /** Lesson 3 brought to the step with this index, one step a frame, on generation 1. */
+  function atDU(index: number): TutorialState {
+    let s = startedDU();
+    if (index >= 1) s = frame(s, { nodes: [SRC] });
+    if (index >= 2) s = frame(s, { nodes: [SRC, SNK] });
+    if (index >= 3) s = frame(s, { nodes: [SRC, SNK], belts: [BELT] });
+    if (index >= 4) s = frame(s, { nodes: [SRC, SNK], belts: [] });
+    if (index >= 5) s = frame(s, { nodes: [SRC], belts: [] });
+    return s;
+  }
+
+  it('walks the six steps with two deletes and two Undo keyframes', () => {
+    expect(step(atDU(3))).toBe('delete-belt');
+    expect(atDU(3).capture?.since).toBe('delete-belt');
+    expect(step(atDU(4))).toBe('delete-sink');
+    expect(step(atDU(5))).toBe('bring-back');
+    const sinkBack = frame(atDU(5), { nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], belts: [], generation: 2 });
+    expect(sinkBack.card).toBe('running');
+    expect(currentStage(sinkBack, board({ nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], generation: 2 }), chrome(), LESSONS)?.id).toBe('undo-belt');
+    const done = frame(sinkBack, { ...reminted(60), generation: 3 });
+    expect(done.card).toBe('finished');
+  });
+
+  it('a Delete on the delete-belt step moves on', () => {
+    const s = frame(atDU(3), { nodes: [SRC, SNK], belts: [] });
+    expect(step(s)).toBe('delete-sink');
+    expect(s.note).toBeNull();
+    // And the frame after it, with the belt still gone, leaves the lesson where it is.
+    expect(step(frame(s, { nodes: [SRC, SNK], belts: [] }))).toBe('delete-sink');
+  });
+
+  it('an Undo of the original draw on the delete-belt step sends the lesson back to draw-belt', () => {
+    const s = frame(atDU(3), { nodes: [{ ...SRC, id: 30 }, { ...SNK, id: 31 }], belts: [beltBetween(32, 30, 31, false)], generation: 2 });
+    expect(step(s)).toBe('draw-belt');
+    expect(s.note).toEqual({ kind: 'wentBack', a: 3, b: 3 });
+  });
+
+  it('an Undo on the delete-sink step that brings the belt back sends the lesson back to delete-belt', () => {
+    const s = frame(atDU(4), { ...reminted(30), generation: 2 });
+    expect(step(s)).toBe('delete-belt');
+    expect(s.note).toEqual({ kind: 'wentBack', a: 4, b: 4 });
+    expect(s.bindings.belt?.id).toBe(32);
+  });
+
+  it('the restore step, bring-back, never goes back, whatever the board does', () => {
+    const s = atDU(5);
+    for (const b of [{ nodes: [], belts: [] }, { nodes: [SRC, SNK], belts: [beltBetween(9, SRC.id, SNK.id, false)], generation: 4 }, { nodes: [SRC] }]) {
+      expect(step(frame(s, b))).toBe('bring-back');
+    }
+  });
+
+  it('a Sink deleted at delete-belt finishes delete-belt and delete-sink in one pass, and one Undo finishes the lesson', () => {
+    const s = frame(atDU(3), { nodes: [SRC], belts: [] });
+    expect(step(s)).toBe('bring-back');
+    expect(s.note).toEqual({ kind: 'skippedOne', a: 5, b: 5 });
+    expect(s.bindings.sink).toBeDefined();
+    expect(s.bindings.belt).toBeDefined();
+    // place-sink and draw-belt still stand on the next frame too, with both targets gone.
+    expect(step(frame(s, { nodes: [SRC], belts: [] }))).toBe('bring-back');
+    expect(frame(s, { ...reminted(70), generation: 2 }).card).toBe('finished');
+  });
+
+  it('a Sink deleted at draw-belt still sends the lesson back to place-sink', () => {
+    const s = frame(atDU(2), { nodes: [SRC] });
+    expect(step(s)).toBe('place-sink');
+  });
+
+  it('has six steps in order, each opening with the paused stage, inside the card budgets', () => {
+    const du = LESSONS.find((l) => l.id === DU);
+    expect(LESSONS.map((l) => l.id)).toEqual(['your-first-line', 'delete-and-undo']);
+    expect(du?.title).toBe('Delete and Undo');
+    expect(du?.steps.map((s) => s.id)).toEqual(['place-source', 'place-sink', 'draw-belt', 'delete-belt', 'delete-sink', 'bring-back']);
+    for (const s of du?.steps ?? []) expect(s.stages[0]?.id, s.id).toBe('board-paused');
+    expect(auditLessonWords(du === undefined ? [] : [du])).toEqual([]);
+    for (const s of du?.steps ?? []) {
+      for (const stage of s.stages) {
+        const text = phrasePlain(stage.text);
+        expect(text.length, `${s.id} ${stage.id}: ${text}`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        for (const line of Object.values(stage.coach ?? {})) {
+          expect(phrasePlain(line).length, `${s.id} ${stage.id} coach`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        }
+      }
+    }
+    expect(phrasePlain(du?.closing ?? [])).toBe('Delete or Backspace takes a machine or a Belt off the board, and Ctrl+Z puts it back the way it was.');
+  });
+
+  it('reads the belt as selected through selectedBelt', () => {
+    const s = atDU(3);
+    const b = board({ nodes: [SRC, SNK], belts: [BELT] });
+    expect(currentStage(s, b, chrome(), LESSONS)?.id).toBe('select-belt');
+    expect(currentStage(s, b, chrome({ selectedBelt: BELT.id }), LESSONS)?.id).toBe('press-delete');
+    expect(currentStage(s, b, chrome({ selectedNode: BELT.id }), LESSONS)?.id).toBe('select-belt');
+  });
+});
+
+describe('rebound: every binding follows a re-mint', () => {
+  const FACTORY = 2;
+  /** A hand-made lesson that binds a Factory, a second Sink and the belt between them, then waits. */
+  const HAND_MADE: Lesson = {
+    id: 'delete-and-undo',
+    title: 'hand-made',
+    steps: [
+      { id: 'factory', stages: [], done: { is: 'nodeAppeared', kind: FACTORY, bind: 'factory' } },
+      { id: 'sink2', stages: [], done: { is: 'nodeAppeared', kind: SINK, bind: 'sink2' } },
+      { id: 'out2', stages: [], done: { is: 'beltJoins', a: 'factory', b: 'sink2', bind: 'beltOut2' } },
+      { id: 'wait', stages: [], done: { is: 'itemArrived', at: 'sink2' } },
+    ],
+    closing: [],
+    refused: { atStep: 'sink2', atStage: 'none', press: { on: 'machine', of: 'factory' }, tag: 'FootprintCollision' },
+  };
+  const factory = (id: number): BoardNode => ({ id, kind: FACTORY, cells: [[2, 2], [3, 2], [4, 2], [2, 3], [3, 3], [4, 3], [2, 4], [3, 4], [4, 4]], ports: [] });
+  const out2 = (id: number, from: number, to: number): BoardBelt => ({
+    id,
+    items: 0,
+    occupiedSlots: [],
+    tiles: [],
+    docks: [
+      { end: 'Tail', node: from, port: 3 },
+      { end: 'Head', node: to, port: 1 },
+    ],
+  });
+  const run = (s: TutorialState, b: Partial<BoardFacts>): TutorialState => reduce(s, { type: 'frame', board: board(b), chrome: chrome() }, [HAND_MADE]);
+
+  it('finds a beltOut2 binding again after a keyframe re-mints the Factory, the second Sink and the belt', () => {
+    let s = reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, [HAND_MADE]);
+    s = run(s, {});
+    s = run(s, { nodes: [factory(10)] });
+    s = run(s, { nodes: [factory(10), node(11, SINK, 9, 3)] });
+    s = run(s, { nodes: [factory(10), node(11, SINK, 9, 3)], belts: [out2(12, 10, 11)] });
+    expect(s.stepIndex).toBe(3);
+    expect(s.bindings.beltOut2?.id).toBe(12);
+    const next = run(s, { nodes: [factory(20), node(21, SINK, 9, 3)], belts: [out2(22, 20, 21)], generation: 2 });
+    expect(next.stepIndex).toBe(3);
+    expect(next.bindings.factory?.id).toBe(20);
+    expect(next.bindings.sink2?.id).toBe(21);
+    expect(next.bindings.beltOut2?.id).toBe(22);
+  });
+});
+
+describe('lesson 1 on the shared stages', () => {
+  /** Copied from the lesson at 09c740c, before its stages moved to commonStages.ts, resolved through the real tables. */
+  const PAUSED = 'The board is paused, so your edits wait. Press Play in the toolbar, or press Space.';
+  const FLOOR_TEXT = 'Click the floor to place it. The ring marks a free spot, but any free spot works.';
+  const BEFORE: ReadonlyArray<readonly [string, ReadonlyArray<readonly [string, string]>]> = [
+    ['place-source', [['board-paused', PAUSED], ['source-tool', 'A Source makes items. Click Source in the palette.'], ['source-floor', FLOOR_TEXT]]],
+    ['place-sink', [['board-paused', PAUSED], ['sink-tool', 'A Sink takes items in at the end of a line. Click Sink in the palette.'], ['sink-floor', FLOOR_TEXT]]],
+    [
+      'set-timer',
+      [
+        ['board-paused', PAUSED],
+        ['tool-down', 'Press Esc to put the tool down, or click it again in the palette.'],
+        ['select-source', 'A new Source waits for a web request, so it makes nothing yet. Click it to select it.'],
+        ['press-timer', 'Under Trigger, press Timer so it makes items on its own.'],
+        ['apply-timer', 'Press Apply to put the change on the board.'],
+      ],
+    ],
+    [
+      'draw-belt',
+      [
+        ['board-paused', PAUSED],
+        ['belt-tool', 'A Belt carries items between machines. Click Belt in the palette.'],
+        ['belt-undo', "That Belt can't be carried on. Press Ctrl+Z until it's gone, then draw it again."],
+        ['belt-carry-on', "That Belt stops before the Sink. Drag from the ring at its end to the Sink's input dot."],
+        ['belt-draw', "Drag from the Source's output dot to the Sink's input dot."],
+      ],
+    ],
+    ['press-play', [['board-paused', 'Press Play in the toolbar, or press Space.'], ['board-running', 'The board is running.']]],
+    ['watch-items', [['board-paused', PAUSED], ['watch', 'Watch the dots ride the Belt into the Sink.']]],
+  ];
+
+  it('reads as it did: the same stage ids per step and the same words', () => {
+    const now = YOUR_FIRST_LINE.steps.map((s) => [s.id, s.stages.map((g) => [g.id, phrasePlain(g.text, REAL_TABLES)])]);
+    expect(now).toEqual(BEFORE);
+    expect(phrasePlain(YOUR_FIRST_LINE.closing, REAL_TABLES)).toBe(
+      'A Source makes items, a Belt carries them and a Sink takes them in. The board is yours, so keep building.',
+    );
+  });
+});
+
+describe('rowViews with two lessons', () => {
+  it('puts the accent on Start for Delete and Undo once lesson 1 is Done', () => {
+    const views = rowViews({ lessons: LESSONS, progress: withLessonDone(EMPTY_PROGRESS, 'your-first-line'), state: IDLE, swapFloor: FLOOR, simStopped: false });
+    expect(views.map((v) => [v.id, v.status, v.accent])).toEqual([
+      ['your-first-line', 'done', null],
+      ['delete-and-undo', 'notStarted', 'start'],
+    ]);
   });
 });

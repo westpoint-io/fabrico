@@ -57,7 +57,7 @@
 
 set -euo pipefail
 
-FLOOR=25
+FLOOR=26
 
 # Sourced first: the helper records where this script lives. Its Shape A with no probes: every report
 # is written under `mktemp -d`, and the helper compares this checkout's tracked tree before and after.
@@ -174,7 +174,7 @@ run_case() {
 
 echo "prove-walk-report-bites: checker under test: $CHECKER"
 
-run_case "K1 $FLOOR tests, all passed" 0 "total=$FLOOR passed=$FLOOR failed=0" "$BASE"
+run_case "K1 $FLOOR tests, all passed" 0 "total=$FLOOR passed=$FLOOR failed=0 skipped=0 did_not_run=0 flaky=0 verdict=OK" "$BASE"
 with_more "$BASE" "$TMP/k2.json" 1
 run_case "K2 $((FLOOR + 1)) tests, all passed" 0 "total=$((FLOOR + 1))" "$TMP/k2.json"
 
