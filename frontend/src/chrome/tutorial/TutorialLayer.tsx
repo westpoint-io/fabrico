@@ -315,6 +315,8 @@ export interface TutorialLayerProps {
   handleRef: RefObject<SceneHandle | null>;
   armed: ArmedTool | null;
   selectedNode: number | null;
+  /** The selected belt's handle, App's own state apart from `selectedNode`. A belt's select stage reads it. */
+  selectedBelt: number | null;
   playing: boolean;
   lessonsOpen: boolean;
   onLessonsOpenChange: (open: boolean) => void;
@@ -348,6 +350,7 @@ export function TutorialLayer({
   handleRef,
   armed,
   selectedNode,
+  selectedBelt,
   playing,
   lessonsOpen,
   onLessonsOpenChange,
@@ -387,8 +390,8 @@ export function TutorialLayer({
   // The host's last answer about the bound Source's trigger. The frame loop reads only this.
   const appliedRef = useRef<ChromeFacts['appliedTrigger']>(null);
   // The frame loop below outlives any one render, so it reads the chrome's props through this.
-  const chromeRef = useRef({ armed, selectedNode, playing });
-  chromeRef.current = { armed, selectedNode, playing };
+  const chromeRef = useRef({ armed, selectedNode, selectedBelt, playing });
+  chromeRef.current = { armed, selectedNode, selectedBelt, playing };
   const readEditsInFlightRef = useRef(readEditsInFlight);
   readEditsInFlightRef.current = readEditsInFlight;
   const readBeltDrawInFlightRef = useRef(readBeltDrawInFlight);

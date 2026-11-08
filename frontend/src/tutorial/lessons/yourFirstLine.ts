@@ -3,28 +3,8 @@
 // The walk test plays this same data, so a stage added here is walked without touching the test.
 // Machine and key names are tokens, never typed words, and `auditLessonWords` fails on a typed one.
 
-import type { Lesson, Stage } from '../types';
-
-/** The `machine_kind` byte that `KIND_NAMES` calls Source. */
-const SOURCE_KIND = 0;
-/** The `machine_kind` byte that `KIND_NAMES` calls Sink. */
-const SINK_KIND = 7;
-/** The `machine_kind` byte that `KIND_NAMES` calls Belt. */
-const BELT_KIND = 1;
-
-/**
- * First in steps 1 to 4 and 6: a paused board holds an edit in the host's queue and moves no item, so
- * the step can't finish until it runs, and the user has to be told why nothing happened.
- */
-const BOARD_PAUSED: Stage = {
-  id: 'board-paused',
-  when: { is: 'paused' },
-  hint: { on: 'panel', target: { kind: 'playButton' } },
-  gesture: { do: 'pressHint' },
-  text: ['The board is paused, so your edits wait. Press Play in the toolbar, or press ', { key: 'playPause' }, '.'],
-};
-
-const PLACE_ON_THE_FLOOR = 'Click the floor to place it. The ring marks a free spot, but any free spot works.';
+import { BELT_KIND, BOARD_PAUSED, PLACE_ON_THE_FLOOR, SINK_KIND, SOURCE_KIND, TOOL_DOWN, beltStages } from '../commonStages';
+import type { Lesson } from '../types';
 
 export const YOUR_FIRST_LINE: Lesson = {
   id: 'your-first-line',
@@ -85,13 +65,7 @@ export const YOUR_FIRST_LINE: Lesson = {
       // still armed sends another Place, and a trigger change does nothing until Apply.
       stages: [
         BOARD_PAUSED,
-        {
-          id: 'tool-down',
-          when: { is: 'anyToolArmed' },
-          hint: { on: 'panel', target: { kind: 'armedTool' } },
-          gesture: { do: 'key', shortcut: 'escape' },
-          text: ['Press ', { key: 'escape' }, ' to put the tool down, or click it again in the palette.'],
-        },
+        TOOL_DOWN,
         {
           id: 'select-source',
           when: { is: 'notSelected', of: 'source' },
@@ -120,40 +94,7 @@ export const YOUR_FIRST_LINE: Lesson = {
       id: 'draw-belt',
       stages: [
         BOARD_PAUSED,
-        {
-          id: 'belt-tool',
-          when: { is: 'beltNotArmed' },
-          hint: { on: 'panel', target: { kind: 'beltTool' } },
-          gesture: { do: 'pressHint' },
-          text: ['A ', { kind: BELT_KIND }, ' carries items between machines. Click ', { kind: BELT_KIND }, ' in the palette.'],
-        },
-        // Ahead of both drags, because each of them starts or ends on something this belt holds, and a
-        // press can't carry it on. The user presses the key, and this stage sends nothing itself. It takes
-        // more than one press, because Undo takes the belt's docks back before the belt.
-        {
-          id: 'belt-undo',
-          when: { is: 'lineStuck', from: 'source', to: 'sink' },
-          hint: null,
-          gesture: { do: 'key', shortcut: 'undo' },
-          text: ['That ', { kind: BELT_KIND }, " can't be carried on. Press ", { key: 'undo' }, " until it's gone, then draw it again."],
-        },
-        // Ahead of the plain drag, because that drag starts on an output this belt already holds and the
-        // host refuses it. The app rings the belt's free end while the tool is armed, so this ring only
-        // marks where the drag finishes.
-        {
-          id: 'belt-carry-on',
-          when: { is: 'lineStopsShort', from: 'source' },
-          hint: { on: 'port', of: 'sink', role: 'in' },
-          gesture: { do: 'dragToHint' },
-          text: ['That ', { kind: BELT_KIND }, ' stops before the ', { kind: SINK_KIND }, '. Drag from the ring at its end to the ', { kind: SINK_KIND }, "'s input dot."],
-        },
-        {
-          id: 'belt-draw',
-          when: { is: 'beltArmed' },
-          hint: { on: 'port', of: 'source', role: 'out', to: { of: 'sink', role: 'in' } },
-          gesture: { do: 'dragHint' },
-          text: ['Drag from the ', { kind: SOURCE_KIND }, "'s output dot to the ", { kind: SINK_KIND }, "'s input dot."],
-        },
+        ...beltStages({ bind: 'source', kind: SOURCE_KIND }, { bind: 'sink', kind: SINK_KIND }),
       ],
       done: { is: 'beltJoins', a: 'source', b: 'sink', bind: 'belt' },
     },

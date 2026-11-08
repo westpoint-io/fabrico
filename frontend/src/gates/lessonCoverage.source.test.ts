@@ -264,7 +264,7 @@ describe('every lesson has a walk', () => {
     });
 
     it('a file under lessons/ that index.ts imports and leaves out of LESSONS', () => {
-      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE]', '[]');
+      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, DELETE_AND_UNDO]', '[DELETE_AND_UNDO]');
       expect(indexSource, 'the substitution landed').not.toBe(REAL.indexSource);
       expect(audit({ indexSource })).toMatch(/yourFirstLine\.ts: lessons\/index\.ts imports this file and leaves it out/);
     });

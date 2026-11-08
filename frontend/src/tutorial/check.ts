@@ -6,6 +6,7 @@
 
 import { PORT_ROLE, beltEndPort, doorstepCell } from '../protocol/ports';
 import type { BoundNode, StepBaseline, TutorialState } from './machine';
+import { boardShape, sameShape, type BoardShape } from './shape';
 import type { BindingName, BoardBelt, BoardFacts, BoardNode, Check, ChromeFacts } from './types';
 
 /**
@@ -18,11 +19,36 @@ export function nodeKey(node: Pick<BoardNode, 'kind' | 'cells'>): string {
   return `${node.kind}@${x},${y}`;
 }
 
+/**
+ * The belt bindings, each with the two machines it joins, from the output end to the input end. A belt
+ * holds no cell the lesson keeps, so it's found again by these two after Undo re-mints every handle.
+ */
+export const BELT_ENDS: Readonly<Partial<Record<BindingName, readonly [BindingName, BindingName]>>> = {
+  belt: ['source', 'sink'],
+  beltIn: ['source', 'factory'],
+  beltOut: ['factory', 'sink'],
+  beltOut2: ['factory', 'sink2'],
+};
+
+/** Every binding name, so a loop over the bindings can't leave a new one out: the type below fails to compile if it does. */
+export const BINDING_NAMES = ['source', 'sink', 'belt', 'factory', 'sink2', 'beltIn', 'beltOut', 'beltOut2'] as const satisfies readonly BindingName[];
+type UnlistedBinding = Exclude<BindingName, (typeof BINDING_NAMES)[number]>;
+/** True only while `BINDING_NAMES` lists every member of `BindingName`. */
+export const BINDING_NAMES_COMPLETE: [UnlistedBinding] extends [never] ? true : false = true;
+
+/** The board's shape captured when the step `since` began, for the restored check. */
+export interface ShapeCapture {
+  since: string;
+  shape: BoardShape;
+}
+
 export interface CheckContext {
   board: BoardFacts;
   baseline: StepBaseline;
   chrome: ChromeFacts;
   bindings: TutorialState['bindings'];
+  /** The capture the lesson holds, or null with none taken yet. */
+  capture: ShapeCapture | null;
 }
 
 export type CheckResult = { done: false } | { done: true; bound: { name: BindingName; node: BoundNode } | null };
@@ -178,8 +204,16 @@ export function lowestSlotInto(board: BoardFacts, node: number): number | null {
   return belt === undefined ? null : (belt.occupiedSlots[0] ?? Number.POSITIVE_INFINITY);
 }
 
+/** The belt joining the two machines `BELT_ENDS` names for this binding, or undefined with no such belt or an end unbound. */
+export function boundBeltJoining(board: Pick<BoardFacts, 'belts'>, bindings: TutorialState['bindings'], name: BindingName): BoardBelt | undefined {
+  const ends = BELT_ENDS[name];
+  const a = ends === undefined ? undefined : bindings[ends[0]];
+  const b = ends === undefined ? undefined : bindings[ends[1]];
+  return a === undefined || b === undefined ? undefined : beltJoining(board, a.id, b.id);
+}
+
 export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
-  const { board, baseline, chrome, bindings } = ctx;
+  const { board, baseline, chrome, bindings, capture } = ctx;
   switch (check.is) {
     case 'nodeAppeared': {
       const candidates = board.nodes
@@ -210,5 +244,19 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       const low = lowestSlotInto(board, bound.id);
       return low !== null && low > baseline.lowestSlot ? DONE : NOT_DONE;
     }
+    // A Delete leaves the generation where it was and an Undo raises it, so only a Delete finishes these.
+    case 'nodeGone': {
+      const bound = bindings[check.of];
+      if (bound === undefined || board.generation !== baseline.generation) return NOT_DONE;
+      return board.nodes.some((n) => nodeKey(n) === bound.nodeKey) ? NOT_DONE : DONE;
+    }
+    case 'beltGone': {
+      const ends = BELT_ENDS[check.of];
+      if (bindings[check.of] === undefined || ends === undefined || bindings[ends[0]] === undefined || bindings[ends[1]] === undefined) return NOT_DONE;
+      if (board.generation !== baseline.generation) return NOT_DONE;
+      return boundBeltJoining(board, bindings, check.of) === undefined ? DONE : NOT_DONE;
+    }
+    case 'restored':
+      return capture !== null && capture.since === check.since && sameShape(boardShape(board), capture.shape) ? DONE : NOT_DONE;
   }
 }

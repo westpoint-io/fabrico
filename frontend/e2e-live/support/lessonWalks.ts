@@ -34,6 +34,13 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
     dragTo: { dx: -2, dy: 3 },
     refusedCardNote: "That cell is taken, so the Sink wasn't placed. Click a free cell, like the one in the ring.",
   },
+  'delete-and-undo': {
+    pressOffset: { dx: -4, dy: 5 },
+    floorOffset: { dx: -5, dy: 3 },
+    dragFrom: { dx: -2, dy: 3 },
+    dragTo: { dx: 3, dy: -2 },
+    refusedCardNote: "That cell holds the Source, so the Sink wasn't placed. Click the free cell in the ring.",
+  },
 };
 
 /** The gestures `walkStep` in `lessonRunner.ts` knows how to make. */

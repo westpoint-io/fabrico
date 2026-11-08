@@ -124,10 +124,33 @@ function panelControl(target: PanelTarget): HTMLElement | null {
       return buttonReading(document.querySelector(`[role="group"][aria-label="${target.group}"]`), target.label);
     case 'applyButton':
       return buttonReading(document.querySelector('aside[aria-labelledby="fab-config-heading"]'), 'Apply');
+    case 'undoButton':
+      return document.querySelector<HTMLElement>('header button[aria-label="Undo"]');
   }
 }
 
 type SceneNodes = NonNullable<SceneHandle['sceneState']>['nodes'];
+type SceneBelts = NonNullable<SceneHandle['sceneState']>['belts'];
+
+/**
+ * A bound belt's ring: its middle tile, `tiles[floor(n / 2)]` in the scene's Tail-first order, one cell
+ * plus the outset each side. A press on any tile selects a belt, and one tile is the spot the press needs.
+ * Null when the belt isn't on the board, so the ring hides with it.
+ */
+function beltBox(belts: SceneBelts | undefined, bound: BoundNode | undefined, cam: Cam): RingBox | null {
+  if (belts === undefined || bound === undefined) return null;
+  const tiles = belts.get(bound.id)?.tiles;
+  const tile = tiles === undefined ? undefined : tiles[Math.floor(tiles.length / 2)];
+  if (tile === undefined) return null;
+  const size = CELL * cam.scale;
+  return {
+    x: tile.cell_x * size + cam.x - OUTSET_PX,
+    y: tile.cell_y * size + cam.y - OUTSET_PX,
+    width: size + 2 * OUTSET_PX,
+    height: size + 2 * OUTSET_PX,
+    zIndex: BOARD_TARGET_Z,
+  };
+}
 
 /**
  * The bound machine as it stands now, or null. A keyframe can hand a handle to another kind or to
@@ -188,7 +211,13 @@ function shownPart(control: HTMLElement): { left: number; top: number; right: nu
 }
 
 /** The ring's box in the layer's own coordinates, or null when the target resolves to nothing. */
-function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean, nodes: SceneNodes | undefined): RingBox | null {
+function ringBox(
+  target: HintTarget,
+  layer: HTMLElement,
+  stageBegan: boolean,
+  nodes: SceneNodes | undefined,
+  belts: SceneBelts | undefined,
+): RingBox | null {
   const hint = target.hint;
   if (hint === null) return null;
   if (hint.on === 'panel') {
@@ -211,6 +240,7 @@ function ringBox(target: HintTarget, layer: HTMLElement, stageBegan: boolean, no
   if (hint.on === 'port') return portBox(nodes, target.bindings, hint.of, hint.role);
   const cam = readCamera();
   if (cam === null) return null;
+  if (hint.on === 'belt') return beltBox(belts, target.bindings[hint.of], cam);
   const size = CELL * cam.scale;
   if (hint.on === 'machine') {
     const node = boundNode(nodes, target.bindings[hint.of]);
@@ -269,7 +299,8 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       const stageBegan = target !== null && target.stageKey !== lastStageRef.current;
       lastStageRef.current = target?.stageKey ?? null;
       const nodes = handleRef.current?.sceneState.nodes;
-      const box = target === null ? null : ringBox(target, layer, stageBegan, nodes);
+      const belts = handleRef.current?.sceneState.belts;
+      const box = target === null ? null : ringBox(target, layer, stageBegan, nodes, belts);
       const hint = target?.hint;
       const to = hint?.on === 'port' ? hint.to : undefined;
       const toBox = target !== null && to !== undefined ? portBox(nodes, target.bindings, to.of, to.role) : null;

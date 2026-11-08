@@ -6,8 +6,12 @@
 
 import type { ShortcutId } from '../input/shortcuts';
 
-export type LessonId = 'your-first-line';
-export type BindingName = 'source' | 'sink' | 'belt';
+export type LessonId = 'your-first-line' | 'delete-and-undo';
+/**
+ * What a step can bind. `belt`, `beltIn`, `beltOut` and `beltOut2` are belts, each found by the two
+ * machines `BELT_ENDS` in `check.ts` names for it; the rest are machines, each found by its `nodeKey`.
+ */
+export type BindingName = 'source' | 'sink' | 'belt' | 'factory' | 'sink2' | 'beltIn' | 'beltOut' | 'beltOut2';
 
 export interface BoardNode {
   id: number;
@@ -20,8 +24,11 @@ export interface BoardBelt {
   id: number;
   items: number;
   occupiedSlots: readonly number[];
-  /** The cells the belt runs over. The host refuses a Place on any of them. */
-  tiles: ReadonlyArray<{ cell_x: number; cell_y: number }>;
+  /**
+   * The cells the belt runs over, Tail first. The host refuses a Place on any of them. `kind` is the
+   * tile's shape as `FabricoScene` carries it, read only by the restored check's shape.
+   */
+  tiles: ReadonlyArray<{ cell_x: number; cell_y: number; kind?: unknown }>;
   docks: ReadonlyArray<{ end: string; node: number; port: number }>;
 }
 
@@ -44,6 +51,8 @@ export type ArmedFact =
 export interface ChromeFacts {
   armed: ArmedFact;
   selectedNode: number | null;
+  /** The selected belt's handle. App keeps it apart from `selectedNode`, which gates a machine's delete controls. */
+  selectedBelt: number | null;
   playing: boolean;
   /**
    * Has the app sent a draw or a dock the board doesn't show yet, or does it still owe one? A good draw's
@@ -65,7 +74,13 @@ export type Check =
   | { is: 'triggerApplied'; of: BindingName; trigger: 'Timer' }
   | { is: 'beltJoins'; a: BindingName; b: BindingName; bind: BindingName }
   | { is: 'tickRose' }
-  | { is: 'itemArrived'; at: BindingName };
+  | { is: 'itemArrived'; at: BindingName }
+  /** The bound machine left the board while the generation stayed where it was when the step began: a Delete, not an Undo. */
+  | { is: 'nodeGone'; of: BindingName }
+  /** No belt joins the two machines `BELT_ENDS` names for this binding, with the generation unchanged since the step began. */
+  | { is: 'beltGone'; of: BindingName }
+  /** The board's shape, with no handle in it, equals the shape captured when the step `since` began. */
+  | { is: 'restored'; since: string };
 
 export type StageWhen =
   | { is: 'always' }
@@ -80,6 +95,11 @@ export type StageWhen =
   /** The Belt tool is armed, and a belt on the way from one machine to the other can only be undone, until it's gone. */
   | { is: 'lineStuck'; from: BindingName; to: BindingName }
   | { is: 'notSelected'; of: BindingName }
+  /**
+   * The bound thing is off the board. A machine: no node holds its `nodeKey`. A belt: no belt tile sits
+   * on any tile it had in the restored check's capture, or with no capture, no belt joins its two machines.
+   */
+  | { is: 'gone'; of: BindingName }
   | { is: 'triggerNotPressed'; trigger: 'Timer' }
   | { is: 'triggerNotApplied'; trigger: 'Timer' };
 
@@ -90,7 +110,8 @@ export type PanelTarget =
   | { kind: 'armedTool' }
   | { kind: 'beltTool' }
   | { kind: 'segment'; group: 'Trigger'; label: 'Timer' }
-  | { kind: 'applyButton' };
+  | { kind: 'applyButton' }
+  | { kind: 'undoButton' };
 
 export type PortRoleName = 'out' | 'in';
 
@@ -98,6 +119,8 @@ export type HintAnchor =
   | { on: 'panel'; target: PanelTarget }
   | { on: 'floor'; spot: 'source' | 'sink' }
   | { on: 'machine'; of: BindingName }
+  /** A bound belt's middle tile, `tiles[floor(n / 2)]`: a press anywhere on a belt selects it. */
+  | { on: 'belt'; of: BindingName }
   | { on: 'port'; of: BindingName; role: PortRoleName; to?: { of: BindingName; role: PortRoleName } };
 
 export type Gesture =

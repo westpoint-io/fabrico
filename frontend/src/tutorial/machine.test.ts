@@ -29,7 +29,7 @@ const VIEW: ChromeFacts['view'] = {
 };
 
 function chrome(over: Partial<ChromeFacts> = {}): ChromeFacts {
-  return { armed: null, selectedNode: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, view: VIEW, ...over };
+  return { armed: null, selectedNode: null, selectedBelt: null, playing: true, editsInFlight: false, triggerPressed: null, appliedTrigger: null, view: VIEW, ...over };
 }
 
 function board(over: Partial<BoardFacts> = {}): BoardFacts {

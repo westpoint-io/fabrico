@@ -5,6 +5,7 @@
 // in `LESSON_WALKS`, in `e2e-live/support/lessonWalks.ts`, or `lessonCoverage.source.test.ts` fails.
 
 import type { Lesson } from '../types';
+import { DELETE_AND_UNDO } from './deleteAndUndo';
 import { YOUR_FIRST_LINE } from './yourFirstLine';
 
-export const LESSONS: readonly Lesson[] = [YOUR_FIRST_LINE];
+export const LESSONS: readonly Lesson[] = [YOUR_FIRST_LINE, DELETE_AND_UNDO];

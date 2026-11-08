@@ -4914,6 +4914,7 @@ export function App() {
             handleRef={handleRef}
             armed={armed}
             selectedNode={selectedNode}
+            selectedBelt={selectedBelt}
             playing={playing}
             lessonsOpen={lessonsOpen}
             onLessonsOpenChange={(open) => setTopRightPanel(open ? 'lessons' : null)}

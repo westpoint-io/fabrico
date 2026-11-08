@@ -3,9 +3,9 @@ import { addFrameBudget, addWaitBudget, frameBudgetMs, tickBudgetMs } from '../.
 import { CELL } from '../../shared/geometry';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
 import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
-import { NUB_RING_R, NUB_RING_STROKE } from '../../src/protocol/ports';
+import { NUB_RING_R, NUB_RING_STROKE, PORT_ROLE, doorstepCell } from '../../src/protocol/ports';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
-import { lineDoorstep } from '../../src/tutorial/check';
+import { BELT_ENDS, beltJoining, lineDoorstep, nodeKey } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
@@ -924,6 +924,9 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   let beltClip: { cell: readonly [number, number]; clip: { x: number; y: number; width: number; height: number } } | null = null;
   let beltBefore: Buffer | null = null;
 
+  // What a delete step is to take off the board, named so a re-minted handle can't stand in for it.
+  const goneTarget = step.done.is === 'nodeGone' || step.done.is === 'beltGone' ? await deleteTargetOf(page, lesson, stepIndex, step) : null;
+
   const watchStage = step.stages.find((s) => s.gesture.do === 'watch');
   let dotsRead = false;
   const rounds = step.stages.length + 2;
@@ -983,7 +986,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
           beforePixels = await captureWithGhostGone(page, cellClip);
         }
         const offset = fromOffset(stage.hint?.on === 'floor' ? walk.floorOffset : walk.pressOffset);
-        if (stage.hint?.on === 'floor' || stage.hint?.on === 'machine') {
+        if (stage.hint?.on === 'floor' || stage.hint?.on === 'machine' || stage.hint?.on === 'belt') {
           await expectOnTheBoard(page, label, 'the ring is', [pointInRect(rects.hint, offset)]);
         }
         if (await pressHintRect(page, lesson, stepIndex, stage, rects.hint, offset)) {
@@ -999,7 +1002,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const start = pointInRect(rects.hint, fromOffset(walk.dragFrom));
         const end = pointInRect(rects.hintTo, fromOffset(walk.dragTo));
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
-        beltClip = await middleTileClip(page, label);
+        beltClip = await middleTileClip(page, label, stage);
         beltBefore = await captureWithGhostGone(page, beltClip.clip);
         await dragByHand(page, start, end);
         actedOn.add(stageKey(stepIndex, stage.id));
@@ -1054,6 +1057,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     const node = (await readScene(page)).nodes.find((n) => n.id === id);
     expect(node?.kind, `${label}: the bound ${step.done.bind} is on the board with the right kind`).toBe(step.done.kind);
   }
+  if (goneTarget !== null) await expectTargetGone(page, label, goneTarget);
   if (cellClip !== null && beforePixels !== null) {
     const afterPixels = await captureWithGhostGone(page, cellClip);
     expect(
@@ -1093,17 +1097,57 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   console.log(`WALK ${lesson.id} step ${stepIndex + 1} ${step.id} passed`);
 }
 
-/** The screen clip inside the cell half way between the bound machines, where the belt will run. */
+/** What a delete step takes off the board: a machine by its `nodeKey`, or a belt by the handles of the two machines it joins. */
+type DeleteTarget = { kind: 'node'; name: string; key: string } | { kind: 'belt'; name: string; a: number; b: number };
+
+/** Read the delete step's target off the board as the step begins, while it's still there. */
+async function deleteTargetOf(page: Page, lesson: Lesson, stepIndex: number, step: Step): Promise<DeleteTarget> {
+  const check = step.done;
+  if (check.is !== 'nodeGone' && check.is !== 'beltGone') throw new Error(`${stepLabel(lesson, stepIndex)}: not a delete step`);
+  const { bound } = await readProbe(page);
+  const ends = BELT_ENDS[check.of];
+  if (check.is === 'beltGone') {
+    const a = ends === undefined ? undefined : bound[ends[0]];
+    const b = ends === undefined ? undefined : bound[ends[1]];
+    if (a === undefined || b === undefined) throw new Error(`${stepLabel(lesson, stepIndex)}: the ${check.of}'s two machines aren't both bound`);
+    return { kind: 'belt', name: check.of, a, b };
+  }
+  const node = (await readScene(page)).nodes.find((n) => n.id === bound[check.of]);
+  if (node === undefined) throw new Error(`${stepLabel(lesson, stepIndex)}: the bound ${check.of} isn't on the board as the step begins`);
+  return { kind: 'node', name: check.of, key: nodeKey(node) };
+}
+
+/** The model holds no trace of what the delete step took off: no machine with its key, or no belt joining its two machines. */
+async function expectTargetGone(page: Page, label: string, target: DeleteTarget): Promise<void> {
+  const scene = await readScene(page);
+  if (target.kind === 'node') {
+    expect(scene.nodes.filter((n) => nodeKey(n) === target.key).map((n) => n.id), `${label}: the ${target.name} (${target.key}) is off the board`).toEqual([]);
+  } else {
+    expect(beltJoining(scene, target.a, target.b)?.id, `${label}: no belt joins the two machines the ${target.name} joined`).toBeUndefined();
+  }
+}
+
+/**
+ * The screen clip inside the cell half way between the drag's two doorsteps: the cell outside its out
+ * port and the cell outside its in port. A belt drawn between them runs over this cell whichever
+ * machines the stage names.
+ */
 async function middleTileClip(
   page: Page,
   label: string,
+  stage: Stage,
 ): Promise<{ cell: readonly [number, number]; clip: { x: number; y: number; width: number; height: number } }> {
+  const hint = stage.hint;
+  if (hint?.on !== 'port' || hint.to === undefined) throw new Error(`${label}: the drag stage names no pair of ports`);
   const { bound } = await readProbe(page);
   const nodes = (await readScene(page)).nodes;
-  const source = nodes.find((n) => n.id === bound.source)?.cells[0];
-  const sink = nodes.find((n) => n.id === bound.sink)?.cells[0];
-  if (source === undefined || sink === undefined) throw new Error(`${label}: the bound machines aren't both on the board`);
-  const cell = [Math.floor(((source[0] as number) + (sink[0] as number)) / 2), source[1] as number] as const;
+  const portOf = (of: string, role: number) => nodes.find((n) => n.id === bound[of])?.ports.find((p) => p.role === role);
+  const out = portOf(hint.of, PORT_ROLE.OUT);
+  const into = portOf(hint.to.of, PORT_ROLE.IN);
+  if (out === undefined || into === undefined) throw new Error(`${label}: the bound machines aren't both on the board with the ports the drag names`);
+  const [ox, oy] = doorstepCell(out);
+  const [ix, iy] = doorstepCell(into);
+  const cell = [Math.floor((ox + ix) / 2), Math.floor((oy + iy) / 2)] as const;
   const cam = await cameraOf(page);
   const size = CELL * cam.scale;
   // The same inset as the placed cell's read, which comes to 2 px inside the cell.

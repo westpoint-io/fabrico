@@ -5,8 +5,20 @@
 // changed, so the React layer can skip an update on all but the frames that matter.
 
 import { CELL } from '../../shared/geometry';
-import { beltJoining, evaluateCheck, lineDoorstep, lineStuck, lowestSlotInto, nodeKey } from './check';
+import {
+  BELT_ENDS,
+  BINDING_NAMES,
+  beltJoining,
+  boundBeltJoining,
+  evaluateCheck,
+  lineDoorstep,
+  lineStuck,
+  lowestSlotInto,
+  nodeKey,
+  type ShapeCapture,
+} from './check';
 import type { Progress } from './progress';
+import { beltTilesIn, boardShape } from './shape';
 import type {
   BindingName,
   BoardFacts,
@@ -82,6 +94,17 @@ export interface TutorialState {
   /** The floor spot of the stage showing now, fixed in world cells when that stage begins, so it follows pan and zoom. */
   spot: { stageId: string; cell: readonly [number, number] } | null;
   note: LessonNote | null;
+  /**
+   * The board's shape, taken from the frame a step begins on whenever a later step's `restored` check
+   * names that step, including when the lesson comes back to it. Null until such a step begins.
+   */
+  capture: ShapeCapture | null;
+  /**
+   * The bindings a Delete took off the board on purpose: each `nodeGone` or `beltGone` step a pass finishes
+   * adds its binding, at that frame's generation. While the generation stays there, the earlier steps
+   * that bound them still stand. Any generation change, which only an Undo or a board swap makes, ends it.
+   */
+  deliberate: { generation: number; names: readonly BindingName[] } | null;
 }
 
 export const IDLE: TutorialState = {
@@ -95,6 +118,8 @@ export const IDLE: TutorialState = {
   baseline: null,
   spot: null,
   note: null,
+  capture: null,
+  deliberate: null,
 };
 
 export type TutorialEvent =
@@ -115,7 +140,7 @@ export function stageKey(stepIndex: number, stageId: string): string {
  * and the ring show nothing of it.
  */
 export function viewKey(s: TutorialState): string {
-  const bound = (['source', 'sink', 'belt'] as const).map((name) => s.bindings[name]?.id ?? '-').join(',');
+  const bound = BINDING_NAMES.map((name) => s.bindings[name]?.id ?? '-').join(',');
   const note = s.note === null ? '-' : `${s.note.kind}:${s.note.a}:${s.note.b}`;
   const spot = s.spot === null ? '-' : `${s.spot.stageId}:${s.spot.cell[0]},${s.spot.cell[1]}`;
   return [s.card, s.lessonId ?? '-', s.stepIndex, bound, note, spot].join('|');
@@ -129,8 +154,22 @@ export function noteTokens(note: LessonNote): readonly PhraseToken[] {
   return [`The board was already running, so step ${note.a} is done. `, { key: 'playPause' }, ' pauses it.'];
 }
 
-function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, bindings: TutorialState['bindings']): boolean {
+/** Is the bound thing off the board? A belt with a capture is gone once no belt tile sits on a tile it had then. */
+function boundGone(name: BindingName, board: BoardFacts, s: Pick<TutorialState, 'bindings' | 'capture'>): boolean {
+  const bound = s.bindings[name];
+  if (bound === undefined) return false;
+  const ends = BELT_ENDS[name];
+  if (ends === undefined) return !board.nodes.some((n) => nodeKey(n) === bound.nodeKey);
+  const a = s.bindings[ends[0]];
+  const b = s.bindings[ends[1]];
+  const tiles = s.capture === null || a === undefined || b === undefined ? null : beltTilesIn(s.capture.shape, a.nodeKey, b.nodeKey);
+  if (tiles === null) return boundBeltJoining(board, s.bindings, name) === undefined;
+  return !board.belts.some((belt) => belt.tiles.some((t) => tiles.some((c) => c.cell_x === t.cell_x && c.cell_y === t.cell_y)));
+}
+
+function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<TutorialState, 'bindings' | 'capture'>): boolean {
   const { armed } = chrome;
+  const { bindings } = s;
   switch (when.is) {
     case 'always':
       return true;
@@ -157,7 +196,10 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, bindings
       return lineStuck(board, from.id, to.id, chrome.editsInFlight);
     }
     case 'notSelected':
+      if (BELT_ENDS[when.of] !== undefined) return chrome.selectedBelt === null || chrome.selectedBelt !== bindings[when.of]?.id;
       return chrome.selectedNode === null || chrome.selectedNode !== bindings[when.of]?.id;
+    case 'gone':
+      return boundGone(when.of, board, s);
     case 'triggerNotPressed':
       return chrome.triggerPressed !== when.trigger;
     case 'triggerNotApplied':
@@ -175,7 +217,7 @@ export function currentStage(
 ): Stage | null {
   if (s.card !== 'running') return null;
   const step = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex];
-  return step?.stages.find((stage) => holds(stage.when, board, chrome, s.bindings)) ?? null;
+  return step?.stages.find((stage) => holds(stage.when, board, chrome, s)) ?? null;
 }
 
 /** Cells east or west of the Source that the Sink's spot sits, leaving room for a belt. */
@@ -257,6 +299,26 @@ function baselineFor(
   };
 }
 
+/** Is this a step that asks the user to delete something? */
+function isDeleteCheck(check: Check | undefined): check is Extract<Check, { is: 'nodeGone' | 'beltGone' }> {
+  return check?.is === 'nodeGone' || check?.is === 'beltGone';
+}
+
+/** The capture to hold once step `stepIndex` begins: a fresh one if a later `restored` check names it, else the one held. */
+function captureAt(lesson: Lesson, stepIndex: number, board: BoardFacts, held: ShapeCapture | null): ShapeCapture | null {
+  const id = lesson.steps[stepIndex]?.id;
+  if (id === undefined) return held;
+  const named = lesson.steps.some((step) => step.done.is === 'restored' && step.done.since === id);
+  return named ? { since: id, shape: boardShape(board) } : held;
+}
+
+/** `deliberate` once a step with this check has finished on this frame. Only a delete step adds to it. */
+function withDeliberate(held: TutorialState['deliberate'], check: Check, board: BoardFacts): TutorialState['deliberate'] {
+  if (!isDeleteCheck(check)) return held;
+  const names = held !== null && held.generation === board.generation ? held.names : [];
+  return { generation: board.generation, names: [...names, check.of] };
+}
+
 /**
  * Finish every step that is true now. A step already true when it comes up is done in the same pass,
  * and the note says so. The first step finished in a pass is the one the user was on; any after it
@@ -273,7 +335,7 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
   while (next.card === 'running' && next.baseline !== null) {
     const step = lesson.steps[next.stepIndex];
     if (step === undefined) break;
-    const result = evaluateCheck(step.done, { board, baseline: next.baseline, chrome, bindings: next.bindings });
+    const result = evaluateCheck(step.done, { board, baseline: next.baseline, chrome, bindings: next.bindings, capture: next.capture });
     if (!result.done) break;
     finished += 1;
     endedOnRunningBoard = step.done.is === 'tickRose' && next.baseline.playing;
@@ -287,6 +349,8 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
       stepIndex,
       bindings,
       baseline: baselineFor(isLast ? undefined : lesson.steps[stepIndex], knownKeys, board, chrome, bindings),
+      capture: isLast ? next.capture : captureAt(lesson, stepIndex, board, next.capture),
+      deliberate: withDeliberate(next.deliberate, step.done, board),
     };
   }
   if (finished === 0) return next;
@@ -322,7 +386,12 @@ function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: 
     }
     case 'tickRose':
     case 'itemArrived':
+    case 'restored':
       return true;
+    // A delete step's result is its target staying gone.
+    case 'nodeGone':
+    case 'beltGone':
+      return boundGone(check.of, board, s);
   }
 }
 
@@ -332,14 +401,44 @@ function bindingOf(check: Check): BindingName | null {
 }
 
 /**
+ * The bindings a Delete has taken off the board on purpose, as far as this frame can tell: the ones
+ * `deliberate` holds at this generation, and, while the current step is a delete step and the generation
+ * is the one it began at, the target of it and of each delete step straight after it that is gone now.
+ * The second part is what lets a Delete finish its step at all, because going back is worked out before
+ * the steps are checked, and it covers a Sink deleted at the belt's step, which takes its belt with it.
+ */
+function deliberatelyGone(s: TutorialState, steps: readonly Step[], board: BoardFacts): Set<BindingName> {
+  const names = new Set<BindingName>(s.deliberate !== null && s.deliberate.generation === board.generation ? s.deliberate.names : []);
+  if (s.baseline === null || board.generation !== s.baseline.generation) return names;
+  for (const step of steps.slice(s.stepIndex)) {
+    if (!isDeleteCheck(step.done)) break;
+    if (boundGone(step.done.of, board, s)) names.add(step.done.of);
+  }
+  return names;
+}
+
+/**
  * If Undo, Delete or a config change took away an earlier step's result, go back to the earliest such
  * step. The bindings from it on are cleared and their keys forgotten, so a machine that's still there
  * counts again when its step comes back round.
+ *
+ * A DELIBERATE DELETE ISN'T A STEP UNDONE. While a delete step's target is gone with the generation
+ * unchanged, the earlier step that bound it still stands (`deliberatelyGone`). A delete step itself stands
+ * while its target stays gone, so an Undo that brings the target back sends the lesson back to it. Once a
+ * `restored` step is current, nothing goes back: that step is where the user brings things back, and the
+ * board passes through every earlier shape on the way.
  */
 function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
-  const steps = lessons.find((l) => l.id === s.lessonId)?.steps;
-  if (steps === undefined || s.baseline === null) return s;
-  const gone = steps.slice(0, s.stepIndex).findIndex((step) => !stillStands(step.done, s, board, chrome));
+  const lesson = lessons.find((l) => l.id === s.lessonId);
+  const steps = lesson?.steps;
+  if (lesson === undefined || steps === undefined || s.baseline === null) return s;
+  if (steps[s.stepIndex]?.done.is === 'restored') return s;
+  const kept = deliberatelyGone(s, steps, board);
+  const gone = steps.slice(0, s.stepIndex).findIndex((step) => {
+    const name = bindingOf(step.done);
+    if (name !== null && kept.has(name)) return false;
+    return !stillStands(step.done, s, board, chrome);
+  });
   if (gone < 0) return s;
   const bindings = { ...s.bindings };
   const forgotten = new Set<string>();
@@ -358,22 +457,32 @@ function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings),
     spot: null,
     note: { kind: 'wentBack', a: gone + 1, b: gone + 1 },
+    capture: captureAt(lesson, gone, board, s.capture),
+    deliberate: null,
   };
 }
 
-/** Find each bound thing again by its key, so a handle re-minted by Undo keeps its binding. */
+/**
+ * Find each bound thing again, so a handle re-minted by Undo keeps its binding: every machine by its
+ * `nodeKey`, then every belt by the two machines `BELT_ENDS` names for it, once both ends are found.
+ */
 function rebound(s: TutorialState, board: BoardFacts): TutorialState {
   let bindings = s.bindings;
-  for (const name of ['source', 'sink'] as const) {
+  for (const name of BINDING_NAMES) {
     const bound = bindings[name];
-    if (bound === undefined) continue;
+    if (bound === undefined || BELT_ENDS[name] !== undefined) continue;
     const found = board.nodes.find((n) => nodeKey(n) === bound.nodeKey);
     if (found !== undefined && found.id !== bound.id) bindings = { ...bindings, [name]: { ...bound, id: found.id } };
   }
-  const { belt, source, sink } = bindings;
-  if (belt !== undefined && source !== undefined && sink !== undefined) {
-    const found = beltJoining(board, source.id, sink.id);
-    if (found !== undefined && found.id !== belt.id) bindings = { ...bindings, belt: { ...belt, id: found.id } };
+  for (const name of BINDING_NAMES) {
+    const ends = BELT_ENDS[name];
+    const bound = bindings[name];
+    if (ends === undefined || bound === undefined) continue;
+    const a = bindings[ends[0]];
+    const b = bindings[ends[1]];
+    if (a === undefined || b === undefined) continue;
+    const found = beltJoining(board, a.id, b.id);
+    if (found !== undefined && found.id !== bound.id) bindings = { ...bindings, [name]: { ...bound, id: found.id } };
   }
   return bindings === s.bindings ? s : { ...s, bindings };
 }
@@ -396,7 +505,9 @@ function awaitsTriggerAnswer(s: TutorialState, chrome: ChromeFacts, lessons: rea
 
 /** One frame of a running lesson. The check reads last frame's slot, and only then is it replaced. */
 function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
-  const found = rebound(s, board);
+  // An Undo or a board swap raises the generation, and either one ends what a Delete took on purpose.
+  const settled = s.deliberate !== null && s.deliberate.generation !== board.generation ? { ...s, deliberate: null } : s;
+  const found = rebound(settled, board);
   const checked = withGoingBack(found, board, chrome, lessons);
   let next = advance(checked, board, chrome, lessons);
   // A machine moved to another cell has a new key, so its step goes back and finishes again in this one
@@ -430,12 +541,14 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
     // can't finish a step. So does a board with anything on it: New's board is always empty, and a
     // higher floor with machines is a Load sent before this New, whose keyframe landed first.
     if (e.board.swapFloor <= s.floor || e.board.nodes.length > 0 || e.board.belts.length > 0) return s;
+    const lesson = lessons.find((l) => l.id === s.lessonId);
     const running: TutorialState = {
       ...s,
       card: 'running',
       stepIndex: 0,
       floor: e.board.swapFloor,
-      baseline: baselineFor(lessons.find((l) => l.id === s.lessonId)?.steps[0], [], e.board, e.chrome, s.bindings),
+      baseline: baselineFor(lesson?.steps[0], [], e.board, e.chrome, s.bindings),
+      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, null),
     };
     return runFrame(running, e.board, e.chrome, lessons);
   }

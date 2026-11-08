@@ -33,6 +33,7 @@ function ctx(over: {
   baseline?: Partial<StepBaseline>;
   chrome?: Partial<ChromeFacts>;
   bindings?: TutorialState['bindings'];
+  capture?: CheckContext['capture'];
 }): CheckContext {
   return {
     board: { tick: 10, generation: 1, swapFloor: 1, nodes: [], belts: [], ...over.board },
@@ -40,6 +41,7 @@ function ctx(over: {
     chrome: {
       armed: null,
       selectedNode: null,
+      selectedBelt: null,
       playing: true,
       editsInFlight: false,
       triggerPressed: null,
@@ -48,6 +50,7 @@ function ctx(over: {
       ...over.chrome,
     },
     bindings: over.bindings ?? BINDINGS,
+    capture: over.capture ?? null,
   };
 }
 
