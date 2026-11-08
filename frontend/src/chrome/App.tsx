@@ -2688,6 +2688,15 @@ export function App() {
   // on an already-dismissed board stays a true no-op.
   const welcomeSeenRef = useRef(welcomeSeen);
   welcomeSeenRef.current = welcomeSeen;
+  // A lesson started from ? closes the welcome card the way the card's own Start a lesson does: the
+  // card covers lesson 4's floor rings, and its job ends once a lesson runs.
+  const onLessonActiveChange = useCallback(
+    (active: boolean): void => {
+      setLessonActive(active);
+      if (active && !welcomeSeenRef.current) dismissWelcome();
+    },
+    [dismissWelcome],
+  );
 
   // -------------------------------------------------------------------------
   // ERR-01: the host refusal display path. ONE handler, both transports.
@@ -4922,7 +4931,7 @@ export function App() {
             probeRef={tutorialProbeRef}
             refusalRef={tutorialRefusalRef}
             escapeRef={tutorialEscapeRef}
-            onActiveChange={setLessonActive}
+            onActiveChange={onLessonActiveChange}
             boardLive={simFatalReason === null && status.kind !== 'disconnected'}
             simStopped={simFatalReason !== null}
             readEditsInFlight={readEditsInFlight}

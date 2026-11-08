@@ -114,10 +114,14 @@ export function stopStream(page: Page): void {
   streamStops.get(page)?.();
 }
 
-/** Boot on the mock host with one machine on the board. */
-export async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>[1] = {}): Promise<Harness> {
-  await page.addInitScript(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
-  const h = await mockRenderSocket(page, opts);
+/**
+ * Boot on the mock host with one machine on the board. `firstLaunch` skips the seen-flag init script,
+ * so the welcome card shows; the case must also clear the config's stored flag with `test.use`.
+ */
+export async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>[1] & { firstLaunch?: boolean } = {}): Promise<Harness> {
+  const { firstLaunch = false, ...socket } = opts;
+  if (!firstLaunch) await page.addInitScript(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
+  const h = await mockRenderSocket(page, socket);
   await page.goto('/');
   await waitForChrome(page);
   await h.connected;

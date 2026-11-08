@@ -3,6 +3,7 @@ import type { HintRect } from '../src/chrome/tutorial/TutorialLayer';
 import { CONFIG_NOT_APPLIED_MARKER, CONFIG_NOT_APPLIED_SUFFIX } from '../src/chrome/configCopy';
 import { FACTORY_EDITOR_LABELS } from '../src/chrome/FactoryConfigBody';
 import { ADD_OUTPUT_WORDS, TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutputs';
+import { LESSONS } from '../src/tutorial/lessons';
 import { phrasePlain } from '../src/tutorial/phrase';
 import { doorstepCell } from '../src/protocol/ports';
 import { CELL, CMD, buildPacket, cameraOf, waitForBoard, type Harness, type InjectPort } from './support/wire';
@@ -16,10 +17,12 @@ import {
   OUTSET,
   SINK_DEBUG,
   SOURCE_TIMER,
+  boot,
   buildBoard,
   centreOf,
   expectAt,
   factoryConfig,
+  factoryWithTwoOutputs,
   injectBoard,
   pointAfter,
   portOf,
@@ -28,7 +31,9 @@ import {
   reminted,
   ringAt,
   sentCount,
+  sourceOnTimer,
   startFactoryLesson,
+  startLesson,
   toTypeCode,
   typeAfter,
   zoomInto,
@@ -607,5 +612,62 @@ test.describe('lesson 4 at 1024x768, where the Factory panel is taller than its 
     await typeAfter(page, TYPED.after, TYPED.insert);
     await expectAt(page, STEP.changeCode, STAGE.applyCode, 'the typed emit moved the card to Apply');
     await expectRingShown(page, STAGE.applyCode, 'apply', 'Apply');
+  });
+});
+
+test.describe('a lesson started from ? on first launch (104-VERIFICATION finding 1)', () => {
+  // The mock configs preset the first-run flag in storage and boot() presets it in an init script, so
+  // this block clears the first and boots with firstLaunch to skip the second: the welcome card shows.
+  test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1280, height: 800 } });
+
+  const WELCOME = 'Welcome to Fabrico';
+
+  for (const lesson of LESSONS) {
+    test(`starting ${lesson.title} from Help and Lessons closes the welcome card and sets its flag`, async ({ page }) => {
+      const h = await boot(page, { firstLaunch: true });
+      const heading = page.getByRole('heading', { name: WELCOME });
+      await expect(heading, 'the first-run card shows').toBeVisible();
+      await startLesson(page, h, lesson);
+      await expect(heading, 'by Step 1 the welcome card is gone').toHaveCount(0);
+      expect(await page.evaluate(() => localStorage.getItem('fab.onboarding.seen.v1')), 'and it stays gone').toBe('1');
+    });
+  }
+
+  test('lesson 4 started from ? on first launch: the Source and Factory floor rings sit under no panel', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page, { firstLaunch: true });
+    // The case reads rects, not a hit test: the welcome card sets pointer-events none on its body, so
+    // elementFromPoint at the ring's centre looks straight through it and would never see it cover a ring.
+    const visit = async (stageId: string): Promise<void> => {
+      if (stageId !== STAGE.sourceFloor && stageId !== STAGE.factoryFloor) return;
+      const ring = await ringAt(page, stageId);
+      const panels = await page.locator('aside.fab-panel').evaluateAll(
+        (els, card) =>
+          els
+            .filter((el) => el.closest(card) === null)
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              const s = getComputedStyle(el);
+              return {
+                name: el.getAttribute('aria-labelledby') ?? el.getAttribute('aria-label') ?? el.className,
+                x: Math.round(r.x),
+                y: Math.round(r.y),
+                width: Math.round(r.width),
+                height: Math.round(r.height),
+                shown: r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none',
+              };
+            })
+            .filter((p) => p.shown),
+        CARD,
+      );
+      const box = { x: Math.round(ring.x), y: Math.round(ring.y), width: Math.round(ring.width), height: Math.round(ring.height) };
+      console.log(`MEASURE first-launch ${stageId} ring=${JSON.stringify(box)} panels=${JSON.stringify(panels)}`);
+      const over = panels.filter(
+        (p) => p.x < ring.x + ring.width && ring.x < p.x + p.width && p.y < ring.y + ring.height && ring.y < p.y + p.height,
+      );
+      expect.soft(over.map((p) => p.name), `no panel meets the ${stageId} ring ${JSON.stringify(box)}`).toEqual([]);
+    };
+    const placed = await sourceOnTimer(page, h, host, visit);
+    await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick, undefined, visit);
+    await expect(page.getByRole('heading', { name: WELCOME }), 'the welcome card never came back').toHaveCount(0);
   });
 });
