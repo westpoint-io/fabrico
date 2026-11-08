@@ -19,6 +19,8 @@ crates/fabrico-app/gen/
 # the committed golden corpus; only the *.snap.new pending review files are noise.
 frontend/test-results/
 frontend/playwright-report/
+# A lesson walk shard's blob report, which CI merges in its walk verdict job.
+frontend/blob-report/
 crates/fabrico-scenario/**/*.snap.new
 
 # Dev-server logs from the hand-started live-e2e path (plan 66-01). The
