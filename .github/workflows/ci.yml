@@ -1543,10 +1543,13 @@ jobs:
   # would fall under the checker's floor, so each leg uploads a blob report instead, red or not, and
   # `e2e-walk-verdict` merges the three into one JSON report and runs the checker on it.
   #
-  # A LOST SHARD READS RED TWICE. A leg with no blob fails its upload (`if-no-files-found: error`),
-  # and the merged report then holds too few tests: the checker's MIN_TESTS equals the walk's test
-  # count, so any missing shard puts the total under it and the verdict exits 2. The checker's bite
-  # proof runs in the verdict job, before the merge. `ci_wiring_parity.rs` pins both jobs.
+  # A LOST SHARD READS RED. A leg with no blob fails its upload (`if-no-files-found: error`). The
+  # verdict job then counts the blobs before it merges them: `check-walk-report.sh --blobs 3` exits 2
+  # unless all-blob/ holds exactly report-1.zip, report-2.zip and report-3.zip. That count doesn't
+  # read the checker's MIN_TESTS, so it still catches a lost shard once the walk has more tests than
+  # the floor. The floor catches one as well while MIN_TESTS equals the walk's test count. The
+  # checker's bite proof runs in the verdict job, before the merge. `ci_wiring_parity.rs` pins both
+  # jobs.
   #
   # THE LIMIT. In CI run 42083745921 the whole walk took 42 minutes, and lesson-variants.walk.ts
   # alone 26.2 of them. Twice that, rounded up, is the 55 minute `globalTimeout` in the walk config,
@@ -1655,6 +1658,12 @@ jobs:
           pattern: walk-blob-*
           merge-multiple: true
           path: frontend/all-blob
+
+      # One blob per shard, named for its shard, or no verdict. The merge can't tell a lost shard
+      # from a small walk.
+      - name: Every walk shard's blob arrived
+        working-directory: frontend
+        run: bash ../scripts/check-walk-report.sh --blobs 3 all-blob
 
       - name: Merge the walk shards
         working-directory: frontend

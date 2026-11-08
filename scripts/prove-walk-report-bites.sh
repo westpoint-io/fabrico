@@ -35,6 +35,12 @@
 #   U11 an attempt to lower the floor with --min-tests  -> exit 2
 #   WM1 a merged report with one shard's files missing  -> exit 2, the floor named
 #   WM2 a merged report carrying a shard's timeout      -> exit 2, the error named
+#   WB1 --blobs 3, all three shard blobs                -> exit 0, verdict=OK
+#   WB2 --blobs 3, shard 3's blob missing               -> exit 2, the blob named
+#   WB3 --blobs 3, a blob from a fourth shard           -> exit 2, the blob named
+#   WB4 --blobs 3, blobs padded as for ten shards       -> exit 2, report-1.zip named missing
+#   WB5 --blobs 3, no blob folder                       -> exit 2
+#   WB6 --blobs 0                                       -> exit 2
 #
 # THE CHECKER UNDER TEST is `WALK_REPORT_CHECKER`, default the tracked scripts/check-walk-report.sh.
 # The override exists so a deliberately broken copy can be run through this proof and seen to turn it
@@ -251,8 +257,32 @@ jq '.errors = [ { message: "Timed out waiting 3300s for the test suite to run" }
 run_case "WM2 a merged report carrying a shard's timeout" 2 \
     "top-level error: Timed out waiting 3300s for the test suite to run" "$TMP/wm2.json"
 
-# The number of cases above, K1 to WM2. It counts cases, not tests, so it doesn't follow the floor.
-DECLARED_TOTAL=23
+# THE BLOB COUNT, as the walk verdict job runs it before the merge: `--blobs <n> <dir>`. It doesn't
+# read the floor, so a lost shard is exit 2 however many tests the walk holds. WB2 drops shard 3, the
+# smallest shard of the real walk (4 tests), which the floor stops catching once the walk outgrows
+# MIN_TESTS by 4. Each blob is an empty file named the way Playwright's blob reporter names shard i
+# of n.
+blobs() {
+    local dir="$TMP/$1"
+    shift
+    mkdir -p "$dir"
+    for name in "$@"; do
+        : > "$dir/$name"
+    done
+}
+blobs wb1 report-1.zip report-2.zip report-3.zip
+run_case "WB1 all three shard blobs" 0 "WALK BLOBS want=3 found=3 verdict=OK" --blobs 3 "$TMP/wb1"
+blobs wb2 report-1.zip report-2.zip
+run_case "WB2 shard 3's blob missing" 2 "MISSING report-3.zip" --blobs 3 "$TMP/wb2"
+blobs wb3 report-1.zip report-2.zip report-3.zip report-4.zip
+run_case "WB3 a blob from a fourth shard" 2 "UNEXPECTED report-4.zip" --blobs 3 "$TMP/wb3"
+blobs wb4 report-01.zip report-02.zip report-03.zip
+run_case "WB4 blobs padded as for ten shards" 2 "MISSING report-1.zip" --blobs 3 "$TMP/wb4"
+run_case "WB5 no blob folder" 2 "does not exist" --blobs 3 "$TMP/no-such-folder"
+run_case "WB6 a shard count of zero" 2 "not a whole number above 0" --blobs 0 "$TMP/wb1"
+
+# The number of cases above, K1 to WB6. It counts cases, not tests, so it doesn't follow the floor.
+DECLARED_TOTAL=29
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then
     failures+=("ran $executed cases, declared $DECLARED_TOTAL")
 fi

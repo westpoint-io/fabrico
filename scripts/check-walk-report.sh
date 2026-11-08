@@ -11,7 +11,14 @@
 # `e2e-walk-verdict` job merges the blobs with `playwright merge-reports` into one JSON report and runs
 # this script on it, so it grades the whole walk and never one shard. A shard that was lost, because
 # its leg crashed or its blob never reached the merge, leaves its tests out of the merged report. The
-# total then falls under MIN_TESTS, which equals the walk's test count, and that is exit 2.
+# total then falls under MIN_TESTS while MIN_TESTS equals the walk's test count, and that is exit 2.
+#
+# THE BLOB COUNT. That floor catches a lost shard only while someone keeps MIN_TESTS level with the
+# walk. Once the walk outgrows it, a merge that lost its smallest shard can still clear it. So before
+# the merge the verdict job runs this script in blobs mode, `--blobs <n> <dir>`: the folder must hold
+# exactly report-1.zip to report-<n>.zip, the names Playwright's blob reporter gives shard i of n
+# (padded to the digits of n), and nothing else. A missing, extra or misnamed blob is exit 2. This
+# check doesn't read MIN_TESTS, so it holds however large the walk grows.
 #
 # WHY NOT check-live-red-set.sh. That one lets tests titled `CUT - leg <n>` fail, because the live
 # suite declares them. The walk declares none, so a walk test with that title failing is a failure
@@ -39,11 +46,16 @@
 #   2  no verdict could be made, which is a failure and never a pass: a missing path, more than one
 #      path or any option; a report that is missing, empty or not JSON; no `jq`; no `suites` array; a
 #      non-empty top-level `errors`; fewer than MIN_TESTS tests; a status this script doesn't know
+# In blobs mode, 0 when the folder holds exactly the n blobs, and 2 otherwise: a count that isn't a
+# whole number above 0, a missing folder, a missing blob, or any other entry in the folder.
 #
 # The last stdout line is always:
 #   WALK REPORT total=<n> passed=<n> failed=<n> skipped=<n> did_not_run=<n> flaky=<n> verdict=<OK|RED|UNMEASURED>
+# or, in blobs mode:
+#   WALK BLOBS want=<n> found=<n> verdict=<OK|UNMEASURED>
 #
 # USAGE: check-walk-report.sh <report.json>
+#        check-walk-report.sh --blobs <shards> <blob-folder>
 #
 # scripts/prove-walk-report-bites.sh runs this over hand-made reports in the walk verdict job, before
 # the merge.
@@ -73,6 +85,52 @@ unmeasured() {
     summary UNMEASURED
     exit 2
 }
+
+# Blobs mode: count the shard blobs before the merge. Only as the first argument, with exactly a count
+# and a folder after it; anywhere else `--blobs` is an unknown option.
+if [ "${1:-}" = "--blobs" ]; then
+    want="${2:-}"
+    found=0
+    blobs_unmeasured() {
+        echo "check-walk-report: $1; NO VERDICT (exit 2 is a failure, not a pass)" >&2
+        echo "WALK BLOBS want=$want found=$found verdict=UNMEASURED"
+        exit 2
+    }
+    [ $# -eq 3 ] || blobs_unmeasured "--blobs takes a shard count and a folder, got $(($# - 1)) argument(s)"
+    case "$want" in
+        '' | *[!0-9]* | 0*) blobs_unmeasured "the shard count '$want' is not a whole number above 0" ;;
+    esac
+    dir="$3"
+    [ -d "$dir" ] || blobs_unmeasured "the blob folder '$dir' does not exist"
+    wanted=()
+    for ((i = 1; i <= want; i++)); do
+        wanted+=("report-$(printf "%0${#want}d" "$i").zip")
+    done
+    problems=0
+    for name in "${wanted[@]}"; do
+        if [ -f "$dir/$name" ]; then
+            found=$((found + 1))
+        else
+            echo "MISSING $name: a shard's blob never reached the merge"
+            problems=$((problems + 1))
+        fi
+    done
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        name="${entry##*/}"
+        case " ${wanted[*]} " in
+            *" $name "*) ;;
+            *)
+                echo "UNEXPECTED $name: not one of the $want shard blobs"
+                problems=$((problems + 1))
+                ;;
+        esac
+    done < <(find "$dir" -mindepth 1 -maxdepth 1)
+    [ "$problems" -eq 0 ] || blobs_unmeasured "the blob folder '$dir' does not hold exactly the $want shard blobs"
+    echo "check-walk-report: OK, all $want shard blobs are in '$dir'"
+    echo "WALK BLOBS want=$want found=$found verdict=OK"
+    exit 0
+fi
 
 report=""
 while [ $# -gt 0 ]; do

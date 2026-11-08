@@ -1660,6 +1660,17 @@ const WALK_CHECKER_RUN: &str =
     "run: bash ../scripts/check-walk-report.sh test-results/walk-report.json";
 /// The report check's bite proof, as the whole of its `run:` line.
 const WALK_BITES_RUN: &str = "run: bash scripts/prove-walk-report-bites.sh";
+/// The checker in blobs mode, which the verdict job runs before the merge.
+const WALK_BLOBS_NEEDLE: &str = "check-walk-report.sh --blobs";
+/// The checker in report mode, which reads the merged report.
+const WALK_REPORT_NEEDLE: &str = "check-walk-report.sh test-results";
+
+/// The blob count, as the whole of its `run:` line, built from `WALK_SHARDS`: exactly one blob per
+/// shard in the folder the merge reads, or exit 2. It doesn't read the checker's MIN_TESTS, so it
+/// catches a lost shard however far the walk outgrows that floor.
+fn walk_blobs_run() -> String {
+    format!("run: bash ../scripts/check-walk-report.sh --blobs {WALK_SHARDS} all-blob")
+}
 /// The artifact each walk leg uploads its blob report as.
 const WALK_BLOB_ARTIFACT: &str = "name: walk-blob-${{ matrix.shard }}";
 /// Where a walk leg's blob report is.
@@ -1698,26 +1709,33 @@ fn one_step_with<'a>(job: &[&'a str], key: &str, job_id: &str) -> Result<(usize,
 fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
     let mut wrong: Vec<String> = Vec::new();
     let blocks = job_blocks_in(yml);
-    let runs = [
-        (WALK_SUITE_RUN, "npm run e2e:walk", WALK_JOB),
-        (WALK_BITES_RUN, "scripts/prove-walk-report-bites.sh", WALK_VERDICT_JOB),
-        (WALK_MERGE_RUN, "merge-reports", WALK_VERDICT_JOB),
-        (WALK_CHECKER_RUN, "scripts/check-walk-report.sh", WALK_VERDICT_JOB),
+    let blobs_run = walk_blobs_run();
+    let runs: [(&[&str], &str, &str); 4] = [
+        (&[WALK_SUITE_RUN], "npm run e2e:walk", WALK_JOB),
+        (&[WALK_BITES_RUN], "scripts/prove-walk-report-bites.sh", WALK_VERDICT_JOB),
+        (&[WALK_MERGE_RUN], "merge-reports", WALK_VERDICT_JOB),
+        (
+            &[blobs_run.as_str(), WALK_CHECKER_RUN],
+            "scripts/check-walk-report.sh",
+            WALK_VERDICT_JOB,
+        ),
     ];
 
-    // Each one exactly once, in its own job, as the whole of its line. A whole-line match is what
-    // refuses `|| true`, `; true` and a pipe, each of which turns the step's failure into a pass.
+    // Each one exactly once, in its own job, as the whole of its line; the checker twice, the blob
+    // count first. A whole-line match is what refuses `|| true`, `; true` and a pipe, each of which
+    // turns the step's failure into a pass.
     for (expected, needle, job) in runs {
         let found: Vec<(&str, &str)> = blocks
             .iter()
             .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
             .filter(|(_, line)| line.starts_with("run:") && line.contains(needle))
             .collect();
-        if found != [(job, expected)] {
+        let want: Vec<(&str, &str)> = expected.iter().map(|line| (job, *line)).collect();
+        if found != want {
             wrong.push(format!(
-                "the `run:` lines invoking `{needle}` are {found:?}, expected exactly \
-                 [(\"{job}\", \"{expected}\")]. With anything else on that line, or the step \
-                 moved or gone, the walk can go green without its verdict."
+                "the `run:` lines invoking `{needle}` are {found:?}, expected exactly {want:?}. \
+                 With anything else on that line, or the step moved or gone, the walk can go \
+                 green without its verdict."
             ));
         }
     }
@@ -1802,14 +1820,18 @@ fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
                 .filter(|line| line.starts_with("run:"))
                 .collect();
             let at = |expected: &str| verdict_runs.iter().position(|line| *line == expected);
-            if let (Some(b), Some(m), Some(c)) =
-                (at(WALK_BITES_RUN), at(WALK_MERGE_RUN), at(WALK_CHECKER_RUN))
-                && !(b < m && m + 1 == c)
+            if let (Some(b), Some(k), Some(m), Some(c)) = (
+                at(WALK_BITES_RUN),
+                at(&blobs_run),
+                at(WALK_MERGE_RUN),
+                at(WALK_CHECKER_RUN),
+            ) && !(b < k && k < m && m + 1 == c)
             {
                 wrong.push(format!(
-                    "the bite proof, the merge and the report check are `run:` lines {b}, {m} and \
-                     {c} of job `{WALK_VERDICT_JOB}`. The proof must come before the merge, and \
-                     the check must be the line straight after it."
+                    "the bite proof, the blob count, the merge and the report check are `run:` \
+                     lines {b}, {k}, {m} and {c} of job `{WALK_VERDICT_JOB}`. The proof and the \
+                     blob count must come before the merge, in that order, and the check must be \
+                     the line straight after it."
                 ));
             }
 
@@ -1838,6 +1860,14 @@ fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
                             "job `{WALK_VERDICT_JOB}` runs the merge before it takes the blobs."
                         ));
                     }
+                    if let Some(k) = job.iter().position(|l| step_key(l) == blobs_run)
+                        && k < at
+                    {
+                        wrong.push(format!(
+                            "job `{WALK_VERDICT_JOB}` counts the blobs before it takes them, so \
+                             the count reads an empty folder."
+                        ));
+                    }
                 }
             }
 
@@ -1859,8 +1889,9 @@ fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
         WALK_VERDICT_JOB,
         &[
             "scripts/prove-walk-report-bites.sh",
+            WALK_BLOBS_NEEDLE,
             "merge-reports",
-            "scripts/check-walk-report.sh",
+            WALK_REPORT_NEEDLE,
         ],
     ));
 
@@ -1905,8 +1936,9 @@ fn walk_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
 /// the walk and falls under the checker's floor, so the legs upload blob reports and
 /// `WALK_VERDICT_JOB` merges them and grades the result. This rule used to pin the proof, the walk
 /// and the checker in one job; it now pins the walk and its shard env line in `WALK_JOB`, the blob
-/// upload between the jobs, and the proof, the download, the merge and the checker in
-/// `WALK_VERDICT_JOB`, with the guards on both. The verdict job's `needs:` line and its docs-only
+/// upload between the jobs, and the proof, the download, the blob count, the merge and the checker
+/// in `WALK_VERDICT_JOB`, with the guards on both. The blob count is the check that catches a lost
+/// shard without relying on the checker's MIN_TESTS keeping pace with the walk. The verdict job's `needs:` line and its docs-only
 /// gate are pinned by `job_classes_wrong`.
 #[test]
 fn the_walk_gate_verdict_cannot_be_switched_off() {
@@ -1929,6 +1961,8 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
     const CHECKER_STEP: &str = "      - name: Every walk test ran and passed\n";
     const MERGE_STEP: &str = "      - name: Merge the walk shards\n";
     const UPLOAD_STEP: &str = "      - name: Keep this shard's blob report for the verdict job\n";
+    const BLOBS_STEP: &str = "      - name: Every walk shard's blob arrived\n";
+    const DOWNLOAD_STEP: &str = "      - name: Take every shard's blob report\n";
     const WALK_HEADER: &str = "    name: lesson walk (real headless host)\n";
     const VERDICT_HEADER: &str = "    name: lesson walk verdict (all shards)\n";
     const MATRIX: &str = "      fail-fast: false\n      matrix:\n        shard: [1, 2, 3]\n";
@@ -1936,6 +1970,8 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
     let checker_line = format!("        {WALK_CHECKER_RUN}\n");
     let bites_line = format!("        {WALK_BITES_RUN}\n");
     let shard_env_line = format!("          {WALK_SHARD_ENV}\n");
+    let blobs_line = format!("        {}\n", walk_blobs_run());
+    let blobs_step = format!("{BLOBS_STEP}        working-directory: frontend\n{blobs_line}");
 
     // (what, the planted copy, which check reads it, what it must name)
     type WorkflowCheck = fn(&str) -> Vec<String>;
@@ -2049,8 +2085,40 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
             job_classes_wrong,
             format!("heavy job `{WALK_VERDICT_JOB}` is missing `{WALK_VERDICT_NEEDS}`"),
         ),
+        (
+            "the blob count deleted",
+            without_step(CI_YML, BLOBS_STEP),
+            walk,
+            "the `run:` lines invoking `scripts/check-walk-report.sh` are".to_string(),
+        ),
+        (
+            "the blob count lowered to two shards",
+            CI_YML.replace(&blobs_line, &blobs_line.replace("--blobs 3", "--blobs 2")),
+            walk,
+            "the `run:` lines invoking `scripts/check-walk-report.sh` are".to_string(),
+        ),
+        (
+            "the blob count's exit code swallowed",
+            CI_YML.replace(&blobs_line, &blobs_line.replace("all-blob", "all-blob || true")),
+            walk,
+            "the `run:` lines invoking `scripts/check-walk-report.sh` are".to_string(),
+        ),
+        (
+            "a condition on the blob count",
+            CI_YML.replace(BLOBS_STEP, &format!("{BLOBS_STEP}        if: false\n")),
+            walk,
+            format!("the step that runs `{WALK_BLOBS_NEEDLE}` in job `{WALK_VERDICT_JOB}`"),
+        ),
+        (
+            "the blob count moved before the download",
+            CI_YML
+                .replace(&format!("{blobs_step}\n"), "")
+                .replace(DOWNLOAD_STEP, &format!("{blobs_step}\n{DOWNLOAD_STEP}")),
+            walk,
+            "counts the blobs before it takes them".to_string(),
+        ),
     ];
-    assert_eq!(plants.len(), 16, "sixteen ways of switching the walk verdict off in ci.yml");
+    assert_eq!(plants.len(), 21, "twenty-one ways of switching the walk verdict off in ci.yml");
 
     let mut missed: Vec<String> = Vec::new();
     for (what, yml, check, must_name) in &plants {
