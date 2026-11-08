@@ -404,7 +404,9 @@ test.describe('Escape and the welcome card', () => {
   // The mock configs preset the first-run flag, so this block clears it to see the card.
   test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1280, height: 800 } });
 
-  test('the welcome card goes before a swapped lesson card', async ({ page }) => {
+  // Plan 104-10: a lesson start closes the welcome card, so it can't stand beside a lesson card any more,
+  // and the first Escape goes to the lesson card. Before, the first Escape went to the welcome card.
+  test('a lesson start takes the welcome card, so the first Escape closes a swapped lesson card', async ({ page }) => {
     const h = await mockRenderSocket(page);
     await page.goto('/');
     await waitForChrome(page);
@@ -417,11 +419,11 @@ test.describe('Escape and the welcome card', () => {
     await startLesson(page, h);
     h.inject(swappedBoard(2, 9));
     await expect(page.locator(CARD)).toContainText('Lesson paused');
-    await expect(welcome(page), 'the welcome card is still up beside the lesson card').toBeVisible();
+    await expect(welcome(page), 'the lesson start took the welcome card').toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('fab.onboarding.seen.v1')), 'for good').toBe('1');
     expect(await focusedTag(page), 'focus is on the page').toBe('BODY');
 
-    await escapeTo(page, { welcome: false, card: 'swapped' }, 'the first Escape dismisses the welcome card only');
-    await escapeTo(page, { welcome: false, card: 'none' }, 'the second closes the lesson card');
+    await escapeTo(page, { welcome: false, card: 'none' }, 'the first Escape closes the lesson card');
   });
 });
 
