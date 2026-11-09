@@ -17,7 +17,15 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Fabrico',
-      sidebar: [group('Get started', 'get-started')],
+      // Six groups in a fixed order, each listing its folder's pages. Groups start expanded.
+      sidebar: [
+        group('Get started', 'get-started'),
+        group('Concepts', 'concepts'),
+        group('Reference', 'reference'),
+        group('Patterns', 'patterns'),
+        group('Troubleshooting', 'troubleshooting'),
+        group('Contributing', 'contributing'),
+      ],
     }),
   ],
 });

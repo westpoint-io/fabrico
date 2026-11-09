@@ -3,4 +3,37 @@ title: Overview
 description: How to build automations in Fabrico, where machines placed on a grid and wired with belts are the program.
 ---
 
+import { LinkCard } from '@astrojs/starlight/components';
+
 Fabrico is an automation engine you build like a factory. You place machines on a grid and wire them together with belts, and events from the outside world ride the belts as items. The same board given the same events ends in the same state on every run.
+
+<LinkCard
+  title="Get started"
+  href="get-started/"
+  description="Install Fabrico and build your first factory, one step at a time, with a running board beside each step."
+/>
+<LinkCard
+  title="Concepts"
+  href="concepts/"
+  description="The ideas Fabrico is built on: machines, belts, items, ticks, faults, and why every replay ends in the same state."
+/>
+<LinkCard
+  title="Reference"
+  href="reference/"
+  description="A page for each machine kind and each engine rule, with ports, config fields and limits generated from the source code."
+/>
+<LinkCard
+  title="Patterns"
+  href="patterns/"
+  description="Ways to solve common automation problems with machines and belts, such as fan-out, retries, dead letters and backpressure."
+/>
+<LinkCard
+  title="Troubleshooting"
+  href="troubleshooting/"
+  description="Fixes for common problems, looked up by what you see: a fault reason, a refused edit, or a board that misbehaves."
+/>
+<LinkCard
+  title="Contributing"
+  href="contributing/"
+  description="How to build Fabrico from source, run its checks, and change these docs."
+/>
