@@ -346,10 +346,14 @@ test.describe('lesson 3 on the mock host', () => {
     // The deleted belt's own tiles from the Source's output, released on the tile before the Sink: the
     // Tail docked at the Source, the Head free.
     const short: InjectBelt = { id: REDRAWN_BELT_ID, tiles: board.belt.tiles, docks: [{ end: 'Tail', node: board.source.id, port: 0 }] };
+    // The lesson goes straight to step 3. A frame on step 4 first would show a went-back line for a step
+    // the user can't do, because delete-belt can't finish while the short belt sits on its tiles.
+    const sawStepFour = await watchCardFor(page, noteWords('wentBack', 4));
     board.tick += 1;
     h.inject(buildPacket({ full: false, tick: board.tick, generation: board.generation, swapFloor: FLOOR, belts: [short], canUndo: true }));
     const card = page.locator(CARD);
     await expect.soft(card, 'the short belt sends the lesson back to the draw, and the card says so').toContainText(noteWords('wentBack', 3));
+    expect.soft(await sawStepFour(), 'and the card never said step 4 needs doing again on the way').toBe(false);
 
     // A user who ignores the card: the Sink pressed and Backspace, then Ctrl+Z once.
     await page.keyboard.press('Escape');
