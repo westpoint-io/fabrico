@@ -19,6 +19,7 @@ site/public/fonts/
 site/src/styles/generated/
 site/src/generated/boards.json
 site/src/assets/generated/
+site/public/favicon.svg
 
 # ts-rs generated TS bindings (07-01 export target; regenerated on `cargo test`)
 crates/fabrico-protocol/bindings/

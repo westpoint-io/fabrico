@@ -17,6 +17,12 @@ const OG_IMAGE = `${SITE}${BASE}/og/default.png`;
 const OG_IMAGE_ALT =
   'The Fabrico wordmark above a conveyor belt carrying one amber item, with the line THE GRID IS THE PROGRAM.';
 
+/** A font the page head preloads. Head entries aren't given the base path, so it's written here. */
+const preloadFont = (file) => ({
+  tag: 'link',
+  attrs: { rel: 'preload', href: `${BASE}/fonts/${file}`, as: 'font', type: 'font/woff2', crossorigin: true },
+});
+
 /** One sidebar group listing every page in a folder under src/content/docs/. */
 const group = (label, directory) => ({ label, items: [{ autogenerate: { directory } }] });
 
@@ -36,15 +42,21 @@ export default defineConfig({
       // The edit URL is this base plus the page's path from site/, such as src/content/docs/....
       editLink: { baseUrl: `${REPO}/edit/main/site/` },
       social: [{ icon: 'github', label: 'GitHub', href: REPO }],
-      // The app's tokens first (written from its locked skin by build-site-assets.ts), then the
-      // theme that maps Starlight's variables onto them.
-      customCss: ['./src/styles/generated/fab-tokens.css', './src/styles/theme.css'],
+      // The brand icon beside the visible title, and the 16-unit cut as the favicon. The build copies
+      // both from docs/brand/. The alt is empty because the title next to the icon says the name.
+      logo: { src: './src/assets/generated/fabrico-icon-master.svg', alt: '' },
+      favicon: '/favicon.svg',
+      // The app's tokens first (written from its locked skin by build-site-assets.ts), then its
+      // two fonts, then the theme that maps Starlight's variables onto both.
+      customCss: ['./src/styles/generated/fab-tokens.css', './src/styles/fonts.css', './src/styles/theme.css'],
       head: [
         meta('property', 'og:image', OG_IMAGE),
         meta('property', 'og:image:width', '1200'),
         meta('property', 'og:image:height', '630'),
         meta('property', 'og:image:alt', OG_IMAGE_ALT),
         meta('name', 'twitter:image', OG_IMAGE),
+        preloadFont('MartianMono.woff2'),
+        preloadFont('Sono.woff2'),
       ],
       // Six groups in a fixed order, each listing its folder's pages. Groups start expanded.
       sidebar: [

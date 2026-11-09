@@ -87,3 +87,326 @@
 #starlight__sidebar ul ul li {
   border-inline-start: 1px solid var(--fab-substrate);
 }
+
+/*
+ * Type. Martian Mono for everything, Sono for h1, h2 and the labels the app sets in caps. Four sizes:
+ * 12 px labels, 16 px reading text, 18 px h2 and the site title, 24 px the page title. Headings
+ * stay the same size on wide screens. Two weights: 400 and 700.
+ */
+:root {
+  --site-font: 'Martian Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --site-font-heading: 'Sono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sl-font: var(--site-font);
+  --sl-font-mono: var(--site-font);
+  --sl-text-body: 1rem;
+  --sl-text-code: 1rem;
+  --sl-text-code-sm: 1em;
+  --sl-text-h1: 1.5rem;
+  --sl-text-h2: 1.125rem;
+  --sl-text-h3: 1rem;
+  --sl-text-h4: 1rem;
+  --sl-line-height: 1.7;
+  --sl-line-height-headings: 1.2;
+  --sl-content-width: 48rem;
+  /* The mobile menu toggle is a 44 px target, the house minimum. */
+  --sl-menu-button-size: var(--fab-min-target);
+}
+@media (min-width: 50em) {
+  :root {
+    --sl-text-h1: 1.5rem;
+    --sl-text-h2: 1.125rem;
+    --sl-text-h3: 1rem;
+    --sl-text-h4: 1rem;
+  }
+}
+
+/* The page title and h2 in Sono caps. The HTML keeps sentence case for search, titles and screen readers. */
+h1#_top,
+.sl-markdown-content :is(h1, h2):not(:where(.not-content *)) {
+  font-family: var(--site-font-heading);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Starlight's 600 weight becomes 700, so the site renders two weights. */
+.site-title,
+h1#_top,
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6, th, summary, strong, b, dt):not(:where(.not-content *)),
+.right-sidebar-panel h2,
+#starlight__sidebar .large,
+#starlight__sidebar a[aria-current='page'],
+.starlight-aside__title,
+.sl-link-card .title,
+.card .title,
+starlight-tabs [role='tab'][aria-selected='true'],
+#starlight__search .pagefind-ui__result-link,
+#starlight__search mark {
+  font-weight: 700;
+}
+
+/* Header: the 32 px icon, an 8 px gap, then the word in Sono 700 18 px caps. */
+.site-title {
+  gap: var(--fab-space-sm);
+  font-family: var(--site-font-heading);
+  font-size: 1.125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fab-ink);
+}
+.site-title img {
+  width: 32px;
+  height: 32px;
+}
+
+/* Left sidebar: group headings in Sono 700 12 px caps, 16 px above each group after the first. */
+#starlight__sidebar .large {
+  font-family: var(--site-font-heading);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fab-ink);
+}
+#starlight__sidebar .top-level > li + li {
+  margin-top: var(--fab-space-md);
+}
+/* Sidebar and table-of-contents links: 12 px rows at least 32 px tall. */
+#starlight__sidebar a,
+.right-sidebar-panel a,
+mobile-starlight-toc a {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+#starlight__sidebar a {
+  padding-inline: var(--fab-space-sm);
+}
+.right-sidebar-panel h2 {
+  font-family: var(--site-font-heading);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+mobile-starlight-toc summary {
+  font-size: 0.75rem;
+}
+mobile-starlight-toc a[aria-current='true'] {
+  font-weight: 700;
+}
+
+/* Prose spacing from the app's scale: 48 px above an h2, 32 px above an h3. */
+.sl-markdown-content > * + :is(.sl-heading-wrapper.level-h2, h2) {
+  margin-top: var(--fab-space-2xl);
+}
+.sl-markdown-content > * + :is(.sl-heading-wrapper.level-h3, h3) {
+  margin-top: var(--fab-space-xl);
+}
+
+/* Links in prose: ink, underlined at 1 px with a 2 px offset; hover thickens the line to 2 px. */
+.sl-markdown-content a:not(:where(.not-content *, .sl-link-card *, .card *)) {
+  color: var(--fab-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.sl-markdown-content a:not(:where(.not-content *, .sl-link-card *, .card *)):hover {
+  text-decoration-thickness: 2px;
+}
+
+/* Inline code: panel fill ground, the surrounding size, 4 px each side. */
+.sl-markdown-content code:not(:where(.not-content *, pre *)) {
+  margin-block: 0;
+  padding: 0 var(--fab-space-xs);
+}
+
+/* Tables: numbers line up in the fallback face too. */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Asides: no ground, a 3 px ink rail, the title in Sono 700 12 px caps. Danger uses the fault colour. */
+.starlight-aside {
+  background-color: transparent;
+  border-inline-start: 3px solid var(--fab-ink);
+  padding: var(--fab-space-md);
+}
+.starlight-aside__title {
+  font-family: var(--site-font-heading);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fab-ink);
+}
+.starlight-aside--danger {
+  border-inline-start-color: var(--fab-destructive);
+}
+.starlight-aside--danger .starlight-aside__title {
+  color: var(--fab-destructive);
+}
+
+/* Badges: panel fill and ink at 12 px. Danger is fault text and border on substrate. */
+.sl-badge {
+  --sl-color-bg-badge: var(--fab-panel-fill);
+  --sl-color-border-badge: var(--fab-panel-fill);
+  --sl-color-text-badge: var(--fab-ink);
+  font-size: 0.75rem;
+}
+.sl-badge.danger {
+  --sl-color-bg-badge: var(--fab-substrate);
+  --sl-color-border-badge: var(--fab-destructive);
+  --sl-color-text-badge: var(--fab-destructive);
+}
+
+/* Cards: no ground, a 1 px panel-fill border that lights to ink on hover, the title at 16 px. */
+.sl-link-card,
+.card {
+  background-color: transparent;
+  border: 1px solid var(--fab-panel-fill);
+  padding: var(--fab-space-md);
+}
+.sl-link-card:hover {
+  background-color: transparent;
+  border-color: var(--fab-ink);
+}
+.sl-link-card .title,
+.card .title {
+  font-size: 1rem;
+}
+
+/* Pagination: two boxes 24 px apart, at least 44 px tall; the label at 12 px, the page title at 16 px. */
+.pagination-links {
+  gap: var(--fab-space-lg);
+}
+.pagination-links a {
+  min-height: var(--fab-min-target);
+  border: 1px solid var(--fab-panel-fill);
+  font-size: 0.75rem;
+}
+.pagination-links a:hover {
+  border-color: var(--fab-ink);
+}
+.pagination-links .link-title {
+  font-size: 1rem;
+}
+
+/* Search button: a substrate well with a 1 px lit edge, 44 px tall; 240 px wide from 50rem. */
+site-search button[data-open-modal] {
+  justify-content: center;
+  min-width: var(--fab-min-target);
+  min-height: var(--fab-min-target);
+  border: 1px solid var(--fab-edge-lit);
+  background-color: var(--fab-substrate);
+  color: var(--fab-ink);
+}
+site-search button[data-open-modal] svg {
+  width: 1rem;
+  height: 1rem;
+}
+@media (min-width: 50rem) {
+  site-search button[data-open-modal] {
+    justify-content: flex-start;
+    width: 240px;
+    max-width: 240px;
+    height: var(--fab-min-target);
+    padding-inline: var(--fab-space-sm);
+    font-size: 0.75rem;
+  }
+  site-search button[data-open-modal]:hover {
+    border-color: var(--fab-ink);
+    color: var(--fab-ink);
+  }
+}
+site-search button[data-open-modal] > kbd {
+  font-size: 0.75rem;
+  background-color: var(--fab-panel-fill);
+}
+
+/* Search dialog: panel fill inside the bezel ring, which takes the place of a border and a shadow. */
+site-search dialog {
+  border: 0;
+  background-color: var(--fab-panel-fill);
+  box-shadow: var(--fab-bezel-ring-shadow);
+}
+site-search .dialog-frame {
+  padding: calc(var(--fab-space-md) + var(--fab-bezel-ring));
+}
+@media (min-width: 50rem) {
+  site-search dialog {
+    max-width: 40rem;
+  }
+  site-search .dialog-frame {
+    padding: calc(var(--fab-space-lg) + var(--fab-bezel-ring));
+  }
+}
+
+/*
+ * Search input and results. Pagefind sizes its input from --pagefind-ui-scale: 64 px at 1, so 0.6875
+ * gives the 44 px house target with the search glyph still centred. The text is then set to 16 px,
+ * which also keeps iOS from zooming on focus.
+ */
+#starlight__search {
+  --pagefind-ui-scale: 0.6875;
+  --pagefind-ui-border: var(--fab-edge-lit);
+  --pagefind-ui-background: var(--fab-substrate);
+  --pagefind-ui-border-radius: 0;
+  --sl-search-result-spacing: var(--fab-space-sm);
+}
+#starlight__search input:focus {
+  --pagefind-ui-border: var(--fab-edge-lit);
+}
+#starlight__search .pagefind-ui__search-input {
+  font-size: 1rem;
+}
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)),
+#starlight__search .pagefind-ui__result-nested {
+  background-color: var(--fab-substrate);
+  outline: 1px solid var(--fab-panel-fill);
+  outline-offset: -1px;
+}
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)):hover,
+#starlight__search .pagefind-ui__result-nested:hover {
+  outline-color: var(--fab-ink);
+}
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)):focus-within,
+#starlight__search .pagefind-ui__result-nested:focus-within {
+  background-color: var(--fab-substrate);
+  outline: 2px solid var(--fab-focus);
+  outline-offset: -2px;
+}
+#starlight__search .pagefind-ui__result-link {
+  font-size: 1rem;
+}
+#starlight__search .pagefind-ui__result-excerpt {
+  font-size: 0.75rem;
+}
+#starlight__search mark {
+  background-color: transparent;
+  color: var(--fab-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+/*
+ * Focus: a 2 px accent outline 2 px outside every focusable part the site owns, and 2 px inside
+ * boxes that would clip it. The accent marks focus and nothing else in the frame.
+ */
+:where(:not(fabrico-board, fabrico-board *)):focus-visible {
+  outline: 2px solid var(--fab-focus);
+  outline-offset: 2px;
+}
+:is(#starlight__search, mobile-starlight-toc) :focus-visible,
+.sl-markdown-content :is(pre, table):focus-visible {
+  outline-offset: -2px;
+}
+
+/* Motion: the sidebar caret stops turning, and anchor jumps don't scroll smoothly. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  #starlight__sidebar .caret,
+  mobile-starlight-toc .caret {
+    transition: none;
+  }
+}
