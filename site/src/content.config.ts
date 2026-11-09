@@ -4,10 +4,13 @@ import { docsLoader, i18nLoader } from '@astrojs/starlight/loaders';
 import { docsSchema, i18nSchema } from '@astrojs/starlight/schema';
 import { descriptionError } from './lib/frontmatter.ts';
 
-/** Starlight's `description`, required and held to the length rule in lib/frontmatter.ts. */
+/**
+ * Starlight's `description`, required and held to the length rule in lib/frontmatter.ts. It's a
+ * required string rather than an optional one with a check: Zod doesn't run an optional field's
+ * checks when the key is absent, so a page with no description would build.
+ */
 const description = z
-  .string()
-  .optional()
+  .string({ error: (issue) => (issue.input === undefined ? (descriptionError(undefined) ?? undefined) : undefined) })
   .superRefine((value, ctx) => {
     const message = descriptionError(value);
     if (message !== null) ctx.addIssue({ code: 'custom', message });
