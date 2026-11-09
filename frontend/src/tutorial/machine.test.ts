@@ -1445,19 +1445,113 @@ describe('lesson 3: Delete and Undo', () => {
     expect(twice(s, { ...reminted(60), generation: 4 }).card).toBe('finished');
   });
 
-  it('a belt redrawn between the Source and the Sink at delete-sink sends the lesson back to delete-belt, and it can still be finished', () => {
-    let s = frame(atDU(4), { nodes: [SRC, SNK], belts: [detour(20, SRC.id, SNK.id)] });
+  /** The deleted belt's five tiles with only the Tail docked at the Source: a redraw that stops one short of the Sink. */
+  const shortRedraw = (id: number, from: number): BoardBelt => ({ ...beltBetween(id, from, 0, false), docks: [{ end: 'Tail', node: from, port: 0 }] });
+  /** The held capture's belts, each as its tile count and its docks. */
+  const capturedBelts = (s: TutorialState) => s.capture?.shape.belts.map((b) => ({ tiles: b.tiles.length, docks: b.docks.map((d) => d.end) }));
+
+  it("WR-05: a belt redrawn on the deleted belt's tiles that stops short of the Sink sends the lesson back to step 3, and one Undo after the Sink's delete does not finish it", () => {
+    const at = atDU(4);
+    let s = frame(at, { nodes: [SRC, SNK], belts: [shortRedraw(20, SRC.id)] });
+    expect(step(s), 'the short belt sends the lesson back to the draw').toBe('draw-belt');
+    expect(s.note).toEqual({ kind: 'wentBack', a: 3, b: 3 });
+    expect(phrasePlain(noteTokens(s.note!))).toBe('Step 3 needs doing again, so the lesson went back.');
+    expect(s.capture, 'the capture taken as delete-belt began is the one held').toBe(at.capture);
+    expect(capturedBelts(s), 'and it still holds the original belt docked at both ends').toEqual([{ tiles: 5, docks: ['Head', 'Tail'] }]);
+    // A user who ignores the card deletes the Sink, then presses Undo once: the Source, the Sink and the
+    // short belt come back re-minted.
+    s = frame(s, { nodes: [SRC], belts: [shortRedraw(20, SRC.id)] });
+    s = twice(s, { nodes: [{ ...SRC, id: 40 }, { ...SNK, id: 41 }], belts: [shortRedraw(42, 40)], generation: 2 });
+    expect(s.card, 'one Undo with the joined belt never back does not finish the lesson').toBe('running');
+    expect(step(s)).toBe('draw-belt');
+  });
+
+  it('WR-05, carried on: the short belt joined to the Sink finishes the draw, and both deletes and two Undos finish the lesson', () => {
+    let s = frame(atDU(4), { nodes: [SRC, SNK], belts: [shortRedraw(20, SRC.id)] });
+    expect(step(s)).toBe('draw-belt');
+    s = frame(s, { nodes: [SRC, SNK], belts: [beltBetween(20, SRC.id, SNK.id)] });
     expect(step(s)).toBe('delete-belt');
-    expect(s.note).toEqual({ kind: 'wentBack', a: 4, b: 4 });
-    expect(phrasePlain(noteTokens(s.note!))).toBe('Step 4 needs doing again, so the lesson went back.');
-    expect(s.capture?.shape.belts.map((b) => b.tiles.length), 'the capture holds the redrawn belt').toEqual([7]);
+    expect(capturedBelts(s), 'delete-belt began again after the draw, and took the joined belt').toEqual([{ tiles: 5, docks: ['Head', 'Tail'] }]);
     s = frame(s, { nodes: [SRC, SNK], belts: [] });
     expect(step(s)).toBe('delete-sink');
     s = frame(s, { nodes: [SRC], belts: [] });
     expect(step(s)).toBe('bring-back');
     s = twice(s, { nodes: [{ ...SRC, id: 40 }, { ...SNK, id: 41 }], belts: [], generation: 2 });
     expect(s.card).toBe('running');
-    expect(twice(s, { nodes: [{ ...SRC, id: 50 }, { ...SNK, id: 51 }], belts: [detour(52, 50, 51)], generation: 3 }).card).toBe('finished');
+    expect(twice(s, { ...reminted(60), generation: 3 }).card).toBe('finished');
+  });
+
+  it("a belt redrawn on the deleted belt's tiles and joined at both ends sends the lesson back to delete-belt, and the capture held is the same one", () => {
+    const at = atDU(4);
+    const s = frame(at, { nodes: [SRC, SNK], belts: [beltBetween(20, SRC.id, SNK.id)] });
+    expect(step(s)).toBe('delete-belt');
+    expect(s.note).toEqual({ kind: 'wentBack', a: 4, b: 4 });
+    expect(s.capture, 'going back keeps the capture taken the first time delete-belt began').toBe(at.capture);
+  });
+
+  it('a Sink the host answers as Http before that redraw leaves the capture holding Debug', () => {
+    const http = { kind: 'Sink', target: { kind: 'Http', url: 'http://127.0.0.1:9/x', method: 0 } } as const;
+    const asHttp = (s: TutorialState, b: Partial<BoardFacts>): AppliedConfig[] => answersFor(s, b).map((a) => (a.node === SNK.id ? { ...a, config: http } : a));
+    let s = atDU(4);
+    const gone = { nodes: [SRC, SNK], belts: [] };
+    s = frame(s, gone, { appliedConfigs: asHttp(s, gone) });
+    expect(step(s)).toBe('delete-sink');
+    const redrawn = { nodes: [SRC, SNK], belts: [beltBetween(20, SRC.id, SNK.id)] };
+    s = frame(s, redrawn, { appliedConfigs: asHttp(s, redrawn) });
+    expect(step(s)).toBe('delete-belt');
+    expect(s.capture?.shape.machines.find((m) => m.kind === SINK)?.config, 'the capture still holds the Sink as it was before the first delete').toEqual({ value: DEBUG });
+  });
+
+  it('a capture still waiting for answers when the first Undo lands keeps its belt, and only the second Undo finishes the lesson', () => {
+    const none = { appliedConfigs: [] };
+    let s = startedDU();
+    s = frame(s, { nodes: [SRC] }, none);
+    s = frame(s, { nodes: [SRC, SNK] }, none);
+    s = frame(s, { nodes: [SRC, SNK], belts: [BELT] }, none);
+    expect(step(s)).toBe('delete-belt');
+    s = frame(s, { nodes: [SRC, SNK], belts: [] }, none);
+    s = frame(s, { nodes: [SRC], belts: [] }, none);
+    expect(step(s)).toBe('bring-back');
+    expect(s.capture?.shape.complete, 'no answer came on any frame, so the capture is incomplete').toBe(false);
+    const sinkBack = { nodes: [{ ...SRC, id: 40 }, { ...SNK, id: 41 }], belts: [], generation: 2 };
+    // The keyframe frame carries no answer about the new handles; the frame after it does.
+    let r = shown(s, sinkBack);
+    expect(r.s.card, 'the keyframe frame').toBe('running');
+    r = shown(r.s, sinkBack);
+    expect(r.s.card, 'the frame with the answers about the new handles').toBe('running');
+    expect(r.s.capture?.shape.complete, 'the capture took the answers about the same machines').toBe(true);
+    expect(capturedBelts(r.s), 'and still holds the belt').toEqual([{ tiles: 5, docks: ['Head', 'Tail'] }]);
+    expect(r.stage).toBe('undo-belt');
+    expect(twice(r.s, { ...reminted(60), generation: 3 }).card).toBe('finished');
+  });
+
+  // Rule change (104-11, UI-SPEC Assumption 13). The capture is taken once and kept, so a belt joining
+  // the two machines on other tiles can never match it at bring-back. That belt isn't the deleted belt
+  // coming back: the lesson stays on delete-sink, and bring-back asks for Ctrl+Z until the original returns.
+  it('a belt redrawn between the Source and the Sink on other tiles at delete-sink is a new belt: the lesson stays, and finishes once the original belt is back', () => {
+    let s = frame(atDU(4), { nodes: [SRC, SNK], belts: [detour(20, SRC.id, SNK.id)] });
+    expect(step(s), 'the detour leaves the lesson on delete-sink').toBe('delete-sink');
+    expect(s.note, 'with no note').toBeNull();
+    // The Sink's delete takes the detour with it.
+    s = frame(s, { nodes: [SRC], belts: [] });
+    expect(step(s)).toBe('bring-back');
+    const n = (gen: number) => [{ ...SRC, id: gen * 10 }, { ...SNK, id: gen * 10 + 1 }];
+    const withDocks = (gen: number, ends: readonly string[]): BoardBelt => {
+      const b = detour(gen * 10 + 2, gen * 10, gen * 10 + 1);
+      return { ...b, docks: b.docks.filter((d) => ends.includes(d.end)) };
+    };
+    const undos: [string, Partial<BoardFacts>][] = [
+      ['the Sink and the detour back', { nodes: n(2), belts: [withDocks(2, ['Tail', 'Head'])], generation: 2 }],
+      ["the detour's Head dock gone", { nodes: n(3), belts: [withDocks(3, ['Tail'])], generation: 3 }],
+      ["the detour's Tail dock gone", { nodes: n(4), belts: [withDocks(4, [])], generation: 4 }],
+      ['the detour gone', { nodes: n(5), belts: [], generation: 5 }],
+    ];
+    for (const [what, b] of undos) {
+      s = twice(s, b);
+      expect(s.card, what).toBe('running');
+      expect(stageOn(s, b), what).toBe('undo-belt');
+    }
+    expect(twice(s, { ...reminted(60), generation: 6 }).card, 'the original belt back finishes the lesson').toBe('finished');
   });
 
   describe("delete-belt's beltGone and the gone stage give the same answer", () => {
@@ -1466,6 +1560,8 @@ describe('lesson 3: Delete and Undo', () => {
       ['the original back on its tiles with no docks', [beltBetween(9, SRC.id, SNK.id, false)]],
       ['only a stray that shares the first tile', [stray(20, SRC.id)]],
       ['no belt at all', []],
+      ['a detour joining the two machines on other tiles', [detour(20, SRC.id, SNK.id)]],
+      ['the original tiles with only the Tail docked', [shortRedraw(20, SRC.id)]],
     ];
     for (const [name, belts] of boards) {
       it(`on the board with ${name}`, () => {

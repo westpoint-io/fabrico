@@ -4,12 +4,14 @@ import { EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
 import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { noteTokens } from '../src/tutorial/machine';
 import { phrasePlain } from '../src/tutorial/phrase';
-import { CELL, buildPacket, screenCellCentre, type Harness, type InjectBelt } from './support/wire';
+import { CELL, CMD, buildPacket, screenCellCentre, type Harness, type InjectBelt } from './support/wire';
 import {
   CARD,
   LINE_BELT_ID,
   OUTSET,
   SINK_DEBUG,
+  SINK_ID,
+  SOURCE_ID,
   SOURCE_TIMER,
   SOURCE_WEBHOOK,
   boot,
@@ -27,6 +29,7 @@ import {
   ringAt,
   selectedBelt,
   selectedNode,
+  sentCount,
   startLesson,
   undoBoth,
   undosSent,
@@ -94,6 +97,8 @@ const STAGE = {
 const BELT_ID = LINE_BELT_ID;
 /** A belt handle no step of the lesson uses, for a stray belt a case draws. */
 const STRAY_BELT_ID = 8;
+/** The handle of a belt a case redraws on the deleted belt's tiles. */
+const REDRAWN_BELT_ID = 40;
 type Board = LineBoard;
 const FLOOR = 1;
 
@@ -332,6 +337,118 @@ test.describe('lesson 3 on the mock host', () => {
     host.set(back.nodes[1]!.id, SINK_DEBUG);
     h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 3, swapFloor: FLOOR, nodes: back.nodes, belts: back.belts, canUndo: true, canRedo: true }));
     await expect.poll(async () => (await readProbe(page)).card, { message: 'the original belt back finished the lesson' }).toBe('finished');
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
+  });
+
+  test("WR-05: a belt redrawn on the deleted belt's tiles that stops short of the Sink sends the lesson to step 3, and one Undo after the Sink's delete doesn't finish it", async ({ page }) => {
+    const { h, host, board } = await toSelectBelt(page);
+    await deleteBelt(page, h, board);
+    // The deleted belt's own tiles from the Source's output, released on the tile before the Sink: the
+    // Tail docked at the Source, the Head free.
+    const short: InjectBelt = { id: REDRAWN_BELT_ID, tiles: board.belt.tiles, docks: [{ end: 'Tail', node: board.source.id, port: 0 }] };
+    board.tick += 1;
+    h.inject(buildPacket({ full: false, tick: board.tick, generation: board.generation, swapFloor: FLOOR, belts: [short], canUndo: true }));
+    const card = page.locator(CARD);
+    await expect.soft(card, 'the short belt sends the lesson back to the draw, and the card says so').toContainText(noteWords('wentBack', 3));
+
+    // A user who ignores the card: the Sink pressed and Backspace, then Ctrl+Z once.
+    await page.keyboard.press('Escape');
+    const at = await screenCellCentre(page, board.sink.cell_x, board.sink.cell_y);
+    await page.mouse.click(at.x + 3, at.y - 2);
+    await expect.poll(() => selectedNode(page), { message: "the press on the Sink's cell selected the Sink" }).toBe(board.sink.id);
+    await page.keyboard.press('Backspace');
+    await expect.poll(() => deletesSent(h), { message: "Backspace sent the Sink's delete" }).toContain(board.sink.id);
+    board.tick += 1;
+    h.inject(buildPacket({ full: false, tick: board.tick, generation: board.generation, swapFloor: FLOOR, removed: [board.sink.id], canUndo: true }));
+    // The lesson reads the board once a frame, so the Undo waits until the Sink's removal is in the model.
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __fabrico: { scene(): { nodes: unknown[] } } }).__fabrico.scene().nodes.length), {
+        message: 'the Sink is off the board',
+      })
+      .toBe(1);
+    await expect.soft(card, 'the Sink gone sends the lesson back to step 2').toContainText(noteWords('wentBack', 2));
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => undosSent(h), { message: 'Ctrl+Z sent an Undo' }).toBe(1);
+    const back = reminted({ nodes: [board.source, board.sink], belts: [short] }, 10);
+    host.set(back.nodes[0]!.id, SOURCE_WEBHOOK);
+    host.set(back.nodes[1]!.id, SINK_DEBUG);
+    board.generation += 1;
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: board.generation, swapFloor: FLOOR, nodes: back.nodes, belts: back.belts, canUndo: true, canRedo: true }));
+    await expect.poll(async () => (await readProbe(page)).bound.sink ?? null, { message: 'the Sink back under its new handle' }).toBe(back.nodes[1]!.id);
+    // Give the config answers about the new handles time to come.
+    await page.waitForTimeout(1000);
+    expect((await readProbe(page)).card, 'one Undo with the joined belt never back does not finish the lesson').toBe('running');
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toHaveCount(0);
+    await expect(card).toContainText(`Step 3 of ${STEPS}`);
+
+    // Carried on: the Belt armed through its ring, and a drag from the short belt's end to the ring at the Sink's input.
+    await pressRing(page, await ringAt(page, STAGE.beltTool));
+    const carry = await ringAt(page, 'belt-carry-on');
+    const [ex, ey] = short.tiles[short.tiles.length - 1]!;
+    const end = await screenCellCentre(page, ex, ey);
+    const draws = sentCount(h, CMD.DrawBelt);
+    await page.mouse.move(end.x, end.y);
+    await page.mouse.down();
+    await page.mouse.move((end.x + centreOf(carry).x) / 2, (end.y + centreOf(carry).y) / 2, { steps: 5 });
+    await page.mouse.move(centreOf(carry).x, centreOf(carry).y, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => sentCount(h, CMD.DrawBelt), { message: 'the drag from the end to the ring sent a draw' }).toBe(draws + 1);
+    const joined: InjectBelt = { ...back.belts[0]!, docks: [...(back.belts[0]!.docks ?? []), { end: 'Head', node: back.nodes[1]!.id, port: 1 }] };
+    board.tick += 1;
+    h.inject(buildPacket({ full: false, tick: board.tick, generation: board.generation, swapFloor: FLOOR, belts: [joined], canUndo: true }));
+    await expect(card, 'the joined belt finished the draw').toContainText(`Step 4 of ${STEPS}`);
+    const line: LineBoard = { source: back.nodes[0]!, sink: back.nodes[1]!, belt: joined, extra: null, tick: board.tick, generation: board.generation };
+    await deleteBelt(page, h, line);
+    await deleteSink(page, h, line);
+    await undoBoth(page, h, host, line);
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
+  });
+
+  test('a capture still waiting for config answers when the first Undo lands keeps its belt, and only the second Undo finishes the lesson', async ({ page }) => {
+    const host = configByNode();
+    // Every config query about the line's machines is refused, so the capture taken as delete-belt
+    // begins never gets its answers.
+    host.hold(SOURCE_ID);
+    host.hold(SINK_ID);
+    const h = await boot(page, host.opts);
+    await startLesson(page, h, LESSON);
+    const board = await buildLine(page, h, host);
+    await page.keyboard.press('Escape');
+    await ringAt(page, STAGE.selectBelt);
+    await deleteBelt(page, h, board);
+    const waiting = (await readProbe(page)).capture;
+    expect(waiting?.since).toBe(STEP.deleteBelt);
+    expect(waiting?.configKinds, 'the capture is still waiting for both answers').toEqual(['missing', 'missing']);
+    await deleteSink(page, h, board);
+
+    // The first Undo, every handle fresh and none of them held.
+    await pressRing(page, await ringAt(page, STAGE.undoSink));
+    await expect.poll(() => undosSent(h), { message: 'the Undo button sent an Undo' }).toBe(1);
+    const first = reminted({ nodes: [board.source, board.sink] }, 10);
+    host.set(first.nodes[0]!.id, SOURCE_WEBHOOK);
+    host.set(first.nodes[1]!.id, SINK_DEBUG);
+    board.generation += 1;
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: board.generation, swapFloor: FLOOR, nodes: first.nodes, canUndo: true, canRedo: true }));
+    for (const n of first.nodes) {
+      await expect.poll(() => host.answers(n.id), { message: `the layer asked about the new handle ${n.id}` }).toBeGreaterThanOrEqual(1);
+    }
+    await page.waitForTimeout(1000);
+    const card = page.locator(CARD);
+    const probe = await readProbe(page);
+    expect(probe.card, 'one Undo with the belt still gone does not finish the lesson').toBe('running');
+    await expect(card.getByRole('heading', { name: 'Lesson done' })).toHaveCount(0);
+    await expect(card).toContainText(wordsOf(STEP.bringBack, STAGE.undoBelt));
+    expect(probe.capture?.configKinds, 'the capture took the answers about the new handles').toEqual(['Source', 'Sink']);
+
+    // Ctrl+Z with the belt back finishes it.
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => undosSent(h), { message: 'Ctrl+Z sent the second Undo' }).toBe(2);
+    const second = reminted({ nodes: [board.source, board.sink], belts: [board.belt] }, 20);
+    host.set(second.nodes[0]!.id, SOURCE_WEBHOOK);
+    host.set(second.nodes[1]!.id, SINK_DEBUG);
+    board.generation += 1;
+    h.inject(buildPacket({ full: true, tick: ++board.tick, generation: board.generation, swapFloor: FLOOR, nodes: second.nodes, belts: second.belts, canUndo: true, canRedo: true }));
+    await expect.poll(async () => (await readProbe(page)).card, { message: 'the line back as it was finished the lesson' }).toBe('finished');
     await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
   });
 

@@ -96,7 +96,7 @@ export type Check =
   | { is: 'itemArrived'; at: BindingName }
   /** The bound machine left the board while the generation stayed where it was when the step began: a Delete, not an Undo. */
   | { is: 'nodeGone'; of: BindingName }
-  /** No belt joins the two machines `BELT_ENDS` names for this binding, with the generation unchanged since the step began. */
+  /** The bound belt is gone by `boundGone` (a belt the capture holds counts as back only on its own tiles), with the generation unchanged since the step began. */
   | { is: 'beltGone'; of: BindingName }
   /** The board's shape, with no handle in it, equals the shape captured when the step `since` began. */
   | { is: 'restored'; since: string }
@@ -120,9 +120,10 @@ export type StageWhen =
   | { is: 'notSelected'; of: BindingName }
   /**
    * The bound thing is off the board, by `boundGone` in check.ts, the rule the delete checks read too. A
-   * machine: no node holds its `nodeKey`. A belt: no belt joins its two machines, and no belt's tiles
-   * include every tile it had in the restored check's capture. A belt sharing only some of them is a
-   * different belt.
+   * machine: no node holds its `nodeKey`. A belt the restored check's capture holds: no belt's tiles
+   * include every tile it had there, docked or not. A belt joining its two machines on other tiles, or
+   * sharing only some of the tiles, is a different belt. A belt with no capture to read: no belt joins
+   * its two machines.
    */
   | { is: 'gone'; of: BindingName }
   /**

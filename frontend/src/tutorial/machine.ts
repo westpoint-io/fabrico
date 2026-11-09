@@ -458,7 +458,11 @@ function captureOf(since: string, board: BoardFacts, chrome: ChromeFacts, bindin
   };
 }
 
-/** The capture to hold once step `stepIndex` begins: a fresh one if a later `restored` check names it, else the one held. */
+/**
+ * The capture to hold once step `stepIndex` begins in `advance`: a fresh one if a later `restored` check
+ * names it, else the one held. Only `advance` calls this, so lesson 3's capture is taken each time
+ * delete-belt begins after draw-belt finishes, and never when the lesson goes back to delete-belt.
+ */
 function captureAt(
   lesson: Lesson,
   stepIndex: number,
@@ -474,17 +478,26 @@ function captureAt(
 }
 
 /**
- * A capture still missing a machine's config stays open. At its own generation it takes each missing
- * config from the answer about the handle that machine had when the capture was read, so a belt deleted
- * meanwhile stays in it. A generation change first, which only an Undo or a board swap makes, takes the
- * capture again from the board as it stands.
+ * A capture still missing a machine's config stays open, and keeps its shape: it's never read from the
+ * board again. At its own generation it takes each missing config from the answer about the handle that
+ * machine had when the capture was read, so a belt deleted meanwhile stays in it. A generation change,
+ * which only an Undo or a board swap makes, moves the capture to the new generation and the handles the
+ * board now gives the same machines, by `nodeKey`, and the configs come from the answers about those. A
+ * captured machine that's off the board now, such as the deleted Sink, has no handle until an Undo brings
+ * it back, and takes its config then.
  */
 function withCaptureFilled(s: TutorialState, board: BoardFacts, chrome: ChromeFacts): TutorialState {
   const held = s.capture;
   if (held === null || held.shape.complete) return s;
-  if (board.generation !== held.generation) return { ...s, capture: captureOf(held.since, board, chrome, s.bindings) };
-  const shape = withConfigs(held.shape, held.handles, chrome.appliedConfigs, held.generation);
-  return shape === held.shape ? s : { ...s, capture: { ...held, shape } };
+  const moved = board.generation !== held.generation;
+  const now = handlesByKey(board);
+  const handles = moved
+    ? Object.fromEntries(held.shape.machines.flatMap((m) => (now[m.nodeKey] === undefined ? [] : [[m.nodeKey, now[m.nodeKey] as number]])))
+    : held.handles;
+  const generation = moved ? board.generation : held.generation;
+  const shape = withConfigs(held.shape, handles, chrome.appliedConfigs, generation);
+  if (!moved && shape === held.shape) return s;
+  return { ...s, capture: { ...held, generation, handles, shape } };
 }
 
 /** `deliberate` once a step with this check has finished on this frame. Only a delete step adds to it. */
@@ -580,13 +593,16 @@ function bindingOf(check: Check): BindingName | null {
 
 /**
  * The bindings a Delete has taken off the board on purpose, as far as this frame can tell: the ones
- * `deliberate` holds at this generation, and, while the current step is a delete step and the generation
- * is the one it began at, the target of it and of each delete step straight after it that is gone now.
- * The second part is what lets a Delete finish its step at all, because going back is worked out before
- * the steps are checked, and it covers a Sink deleted at the belt's step, which takes its belt with it.
+ * `deliberate` holds at this generation whose target is still gone, and, while the current step is a
+ * delete step and the generation is the one it began at, the target of it and of each delete step
+ * straight after it that is gone now. The second part is what lets a Delete finish its step at all,
+ * because going back is worked out before the steps are checked, and it covers a Sink deleted at the
+ * belt's step, which takes its belt with it. A target that's back on the board isn't deliberately gone
+ * any more, so the earlier step that bound it has to stand on its own again.
  */
 function deliberatelyGone(s: TutorialState, steps: readonly Step[], board: BoardFacts): Set<BindingName> {
-  const names = new Set<BindingName>(s.deliberate !== null && s.deliberate.generation === board.generation ? s.deliberate.names : []);
+  const held = s.deliberate !== null && s.deliberate.generation === board.generation ? s.deliberate.names : [];
+  const names = new Set<BindingName>(held.filter((name) => boundGone(name, board, s.bindings, s.capture)));
   if (s.baseline === null || board.generation !== s.baseline.generation) return names;
   for (const step of steps.slice(s.stepIndex)) {
     if (!isDeleteCheck(step.done)) break;
@@ -598,13 +614,16 @@ function deliberatelyGone(s: TutorialState, steps: readonly Step[], board: Board
 /**
  * If Undo, Delete or a config change took away an earlier step's result, go back to the earliest such
  * step. The bindings from it on are cleared and their keys forgotten, so a machine that's still there
- * counts again when its step comes back round.
+ * counts again when its step comes back round. The capture held stays as it is: it was taken the first
+ * time the step a `restored` check names began, and going back to that step doesn't take it again.
  *
  * A DELIBERATE DELETE ISN'T A STEP UNDONE. While a delete step's target is gone with the generation
- * unchanged, the earlier step that bound it still stands (`deliberatelyGone`). A delete step itself stands
- * while its target stays gone, so an Undo that brings the target back sends the lesson back to it. Once a
- * `restored` step is current, nothing goes back: that step is where the user brings things back, and the
- * board passes through every earlier shape on the way.
+ * unchanged, the earlier step that bound it still stands (`deliberatelyGone`), and only while it's gone:
+ * a belt drawn back on the deleted belt's tiles that stops short of the Sink brings the target back, and
+ * the draw step, which needs the belt joined, goes back. A delete step itself stands while its target
+ * stays gone, so an Undo that brings the target back sends the lesson back to it. Once a `restored` step
+ * is current, nothing goes back: that step is where the user brings things back, and the board passes
+ * through every earlier shape on the way.
  */
 function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
   const lesson = lessons.find((l) => l.id === s.lessonId);
@@ -635,7 +654,6 @@ function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings),
     spot: null,
     note: { kind: 'wentBack', a: gone + 1, b: gone + 1 },
-    capture: captureAt(lesson, gone, board, chrome, bindings, s.capture),
     deliberate: null,
   };
 }

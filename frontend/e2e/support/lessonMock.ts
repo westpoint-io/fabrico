@@ -728,7 +728,7 @@ export async function expectCaptureComplete(page: Page): Promise<void> {
 
 /**
  * Lesson 3's step 4 from tool-down: the tool down, the belt selected through its ring and Delete, then
- * the host's diff without it. Ends at delete-sink's select-sink.
+ * the host's diff without it, at the board's own generation and belt handle. Ends at delete-sink's select-sink.
  */
 export async function deleteBelt(page: Page, h: Harness, board: LineBoard, visit?: Visit): Promise<void> {
   if ((await readProbe(page)).stageId === 'tool-down') {
@@ -737,13 +737,13 @@ export async function deleteBelt(page: Page, h: Harness, board: LineBoard, visit
   }
   await stopAt(page, 'select-belt', visit);
   await pressRing(page, await ringAt(page, 'select-belt'));
-  await expect.poll(() => selectedBelt(page), { message: 'the press on the belt ring selected the belt' }).toBe(LINE_BELT_ID);
+  await expect.poll(() => selectedBelt(page), { message: 'the press on the belt ring selected the belt' }).toBe(board.belt.id);
   await expectAt(page, 'delete-belt', 'press-delete', 'a selected belt moves the card to the Delete key');
   await stopAt(page, 'press-delete', visit);
   await page.keyboard.press('Delete');
-  await expect.poll(() => deletesSent(h), { message: "Delete sent the belt's delete" }).toContain(LINE_BELT_ID);
+  await expect.poll(() => deletesSent(h), { message: "Delete sent the belt's delete" }).toContain(board.belt.id);
   board.tick += 1;
-  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: 1, removed: [LINE_BELT_ID], canUndo: true }));
+  h.inject(buildPacket({ full: false, tick: board.tick, generation: board.generation, swapFloor: 1, removed: [board.belt.id], canUndo: true }));
   await expectAt(page, 'delete-sink', 'select-sink', 'the belt gone finished delete-belt');
 }
 
@@ -767,14 +767,14 @@ export async function deleteSink(page: Page, h: Harness, board: LineBoard, visit
   await page.keyboard.press('Backspace');
   await expect.poll(() => deletesSent(h), { message: "Backspace sent the Sink's delete" }).toContain(board.sink.id);
   board.tick += 1;
-  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: 1, removed: [board.sink.id], canUndo: true }));
+  h.inject(buildPacket({ full: false, tick: board.tick, generation: board.generation, swapFloor: 1, removed: [board.sink.id], canUndo: true }));
   await expectAt(page, 'bring-back', 'undo-sink', 'the Sink gone finished delete-sink');
 }
 
 /**
  * Lesson 3's step 6 from undo-sink: the Undo button under its ring, then Ctrl+Z, each answered with a
- * keyframe that re-mints every handle, the unbound second Source's too when the board has one. Ends
- * with the lesson finished.
+ * keyframe that re-mints every handle, the unbound second Source's too when the board has one. Each
+ * keyframe raises the board's generation by one. Ends with the lesson finished.
  */
 export async function undoBoth(page: Page, h: Harness, host: ReturnType<typeof configByNode>, board: LineBoard, visit?: Visit): Promise<void> {
   await stopAt(page, 'undo-sink', visit);
@@ -784,14 +784,16 @@ export async function undoBoth(page: Page, h: Harness, host: ReturnType<typeof c
   const machines = [board.source, board.sink, ...(board.extra === null ? [] : [board.extra])];
   const first = reminted({ nodes: machines }, 10);
   for (const n of first.nodes) host.set(n.id, n.kind === board.sink.kind ? SINK_DEBUG : SOURCE_WEBHOOK);
-  h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 2, swapFloor: 1, nodes: first.nodes, canUndo: true, canRedo: true }));
+  board.generation += 1;
+  h.inject(buildPacket({ full: true, tick: ++board.tick, generation: board.generation, swapFloor: 1, nodes: first.nodes, canUndo: true, canRedo: true }));
   await expectAt(page, 'bring-back', 'undo-belt', 'the Sink back moved the card to the belt');
   await stopAt(page, 'undo-belt', visit);
   await page.keyboard.press('Control+z');
   await expect.poll(() => undosSent(h), { message: 'Ctrl+Z sent the second Undo' }).toBe(undos + 2);
   const second = reminted({ nodes: machines, belts: [board.belt] }, 20);
   for (const n of second.nodes) host.set(n.id, n.kind === board.sink.kind ? SINK_DEBUG : SOURCE_WEBHOOK);
-  h.inject(buildPacket({ full: true, tick: ++board.tick, generation: 3, swapFloor: 1, nodes: second.nodes, belts: second.belts, canUndo: true, canRedo: true }));
+  board.generation += 1;
+  h.inject(buildPacket({ full: true, tick: ++board.tick, generation: board.generation, swapFloor: 1, nodes: second.nodes, belts: second.belts, canUndo: true, canRedo: true }));
   await expect.poll(async () => (await readProbe(page)).card, { message: 'the line back as it was finished the lesson' }).toBe('finished');
 }
 

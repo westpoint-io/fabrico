@@ -314,12 +314,16 @@ export function boundBeltJoining(board: Pick<BoardFacts, 'belts'>, bindings: Tut
 
 /**
  * Is the bound thing off the board? The one rule for "gone", read by the delete steps' checks, by the
- * test that a delete step's result still stands, and by the gone stage, so the three can't disagree.
- * A machine is gone when no node holds its `nodeKey`. A belt is on the board when a belt joins the two
- * machines `BELT_ENDS` names for it, found through the current bindings, or, when the capture holds that
- * belt, when one belt's tiles include every tile the captured belt had: that's the original back without
- * its docks, which an Undo of the draw leaves. A belt that shares only some of those tiles, such as a
- * stray drawn from the Source's output, doesn't count. Gone is the opposite.
+ * test that a delete step's result still stands, by `deliberatelyGone` and by the gone stage, so they
+ * can't disagree. A machine is gone when no node holds its `nodeKey`.
+ *
+ * A belt, when the capture holds it (docked to the two machines `BELT_ENDS` names for it), is on the
+ * board only if one belt's tiles include every tile the captured belt had, docked or not: that's the
+ * original back, with or without the docks an Undo of the draw takes first. A belt joining the two
+ * machines on other tiles is a new belt and doesn't count, because the capture is kept once taken and a
+ * board holding that belt could never match it. A belt sharing only some of the tiles, such as a stray
+ * drawn from the Source's output, doesn't count either. With no captured belt, a belt is on the board
+ * when a belt joins its two machines, found through the current bindings. Gone is the opposite.
  */
 export function boundGone(
   name: BindingName,
@@ -331,11 +335,10 @@ export function boundGone(
   if (bound === undefined) return false;
   const ends = BELT_ENDS[name];
   if (ends === undefined) return !board.nodes.some((n) => nodeKey(n) === bound.nodeKey);
-  if (boundBeltJoining(board, bindings, name) !== undefined) return false;
   const a = bindings[ends[0]];
   const b = bindings[ends[1]];
   const tiles = capture === null || a === undefined || b === undefined ? null : beltTilesIn(capture.shape, a.nodeKey, b.nodeKey);
-  if (tiles === null || tiles.length === 0) return true;
+  if (tiles === null || tiles.length === 0) return boundBeltJoining(board, bindings, name) === undefined;
   const back = board.belts.some((belt) => tiles.every((c) => belt.tiles.some((t) => t.cell_x === c.cell_x && t.cell_y === c.cell_y)));
   return !back;
 }
