@@ -1,0 +1,89 @@
+/*
+ * The site's theme: Starlight's variables and parts restyled to look like the app.
+ *
+ * Every colour here is a var(--fab-*) token. The tokens come from fab-tokens.css, which
+ * frontend/scripts/build-site-assets.ts writes from the app's locked skin before each build, so
+ * this file types no colour value of its own. tests/unit/styles.test.ts fails on a colour literal
+ * in any file in this folder outside generated/.
+ *
+ * Starlight puts its own CSS in cascade layers. This file stays outside every layer, so its rules
+ * win over Starlight's whatever their specificity. Don't wrap it in a layer.
+ */
+
+/* Colours: Starlight's variables, each mapped onto an app token. */
+:root,
+::backdrop {
+  --sl-color-white: var(--fab-ink);
+  --sl-color-gray-1: var(--fab-ink);
+  --sl-color-gray-2: var(--fab-ink);
+  --sl-color-gray-3: var(--fab-ink);
+  --sl-color-gray-4: var(--fab-ink);
+  --sl-color-gray-5: var(--fab-panel-fill);
+  --sl-color-gray-6: var(--fab-panel-fill);
+  --sl-color-black: var(--fab-substrate);
+
+  --sl-color-text: var(--fab-ink);
+  --sl-color-text-accent: var(--fab-ink);
+  --sl-color-text-invert: var(--fab-substrate);
+
+  --sl-color-accent: var(--fab-focus);
+  --sl-color-accent-high: var(--fab-focus);
+  --sl-color-accent-low: var(--fab-panel-fill);
+
+  --sl-color-bg: var(--fab-substrate);
+  --sl-color-hairline-shade: var(--fab-substrate);
+  --sl-color-bg-nav: var(--fab-panel-fill);
+  --sl-color-bg-sidebar: var(--fab-panel-fill);
+  --sl-color-bg-inline-code: var(--fab-panel-fill);
+  --sl-color-hairline: var(--fab-panel-fill);
+  --sl-color-hairline-light: var(--fab-panel-fill);
+
+  /* The four hue families Starlight uses for asides, badges and cards all read as ink. */
+  --sl-color-orange-low: var(--fab-substrate);
+  --sl-color-orange: var(--fab-ink);
+  --sl-color-orange-high: var(--fab-ink);
+  --sl-color-green-low: var(--fab-substrate);
+  --sl-color-green: var(--fab-ink);
+  --sl-color-green-high: var(--fab-ink);
+  --sl-color-blue-low: var(--fab-substrate);
+  --sl-color-blue: var(--fab-ink);
+  --sl-color-blue-high: var(--fab-ink);
+  --sl-color-purple-low: var(--fab-substrate);
+  --sl-color-purple: var(--fab-ink);
+  --sl-color-purple-high: var(--fab-ink);
+  --sl-color-red-low: var(--fab-substrate);
+  --sl-color-red: var(--fab-destructive);
+  --sl-color-red-high: var(--fab-destructive);
+
+  --sl-color-backdrop-overlay: color-mix(in srgb, var(--fab-substrate) 80%, transparent);
+
+  /* The house has no shadows. The search dialog uses the bezel ring for its edge instead. */
+  --sl-shadow-sm: none;
+  --sl-shadow-md: none;
+  --sl-shadow-lg: none;
+}
+
+/* Square corners on everything the site styles. The board element and its contents are left alone. */
+:where(:not(fabrico-board, fabrico-board *)),
+:where(:not(fabrico-board, fabrico-board *))::before,
+:where(:not(fabrico-board, fabrico-board *))::after {
+  border-radius: 0;
+}
+
+/* The header and the left sidebar sit on panel fill, each with a shadow line along its edge. */
+.page > .header {
+  border-bottom: 1px solid var(--fab-edge-shadow);
+}
+.sidebar-pane {
+  background-color: var(--fab-panel-fill);
+}
+@media (min-width: 50rem) {
+  .sidebar-pane {
+    border-inline-end: 1px solid var(--fab-edge-shadow);
+  }
+}
+
+/* A nested sidebar list draws its rail in substrate, since panel fill on panel fill wouldn't show. */
+#starlight__sidebar ul ul li {
+  border-inline-start: 1px solid var(--fab-substrate);
+}

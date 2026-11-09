@@ -7,15 +7,18 @@
 //   - copies frontend/dist-embed/fabrico-board.js to site/public/embed/fabrico-board.js;
 //   - copies each board's poster, frontend/dist-embed/posters/<id>.png, to site/public/boards/<id>.png;
 //   - writes site/src/generated/boards.json, `{ "boards": [ { id, path, title, posterAlt } ] }`
-//     sorted by id, which the site's <Board> component reads for each poster's alt text.
+//     sorted by id, which the site's <Board> component reads for each poster's alt text;
+//   - writes site/src/styles/generated/fab-tokens.css, the app's `--fab-*` custom properties from
+//     skinToCssVars(LOCKED_SKIN), so the site's colours, spacing and fonts come from the same skin
+//     as the app and the boards, from the same commit.
 //
 // Titles and captions come from the player itself: the script loads the player module named by
 // FABRICO_PLAYER_WASM in Node and asks each board for its info, the way build-offline.ts does. The
-// alt text comes from the embed's own rule in src/embed/boardIds.ts. All three outputs are
-// gitignored. It copies named files only, never a whole folder.
+// alt text comes from the embed's own rule in src/embed/boardIds.ts. Every output is gitignored. It copies named files only, never a whole folder.
 //
 // OUTPUT, exactly one line on stdout:
-//   SITE_ASSETS boards=<n> posters=<n> bundle=<bytes>
+//   SITE_ASSETS boards=<n> posters=<n> bundle=<bytes> tokens=<n>
+// tokens counts the `--fab-*` custom properties written to fab-tokens.css.
 //
 // ENVIRONMENT
 //   FABRICO_PLAYER_WASM  the built player module (scripts/build-wasm.sh writes it).
@@ -52,11 +55,16 @@ function refuse(message: string): never {
 }
 
 type PlayerWasm = typeof import('../src/player/playerWasm.ts');
+type SkinCss = typeof import('../src/render/synth/chrome/skinToCssVars.ts');
+type Locked = typeof import('../src/render/synth/skins/locked.ts');
 
-/** Load the player loader through Vite's module runner; plain Node can't strip it. */
-async function loadPlayerWasm(): Promise<PlayerWasm> {
+/**
+ * Load a frontend module through Vite's module runner, the way build-offline.ts does. Plain Node
+ * can't load these: they import without file extensions.
+ */
+async function load<T>(rel: string): Promise<T> {
   const { runnerImport } = await import('vite');
-  const { module } = await runnerImport<PlayerWasm>(path.join(FRONTEND, 'src/player/playerWasm.ts'), {
+  const { module } = await runnerImport<T>(path.join(FRONTEND, rel), {
     configFile: false,
     root: FRONTEND,
     logLevel: 'silent',
@@ -81,7 +89,11 @@ if (missing.length > 0) {
   refuse(`no poster for ${missing.join(', ')} in ${path.relative(REPO, POSTERS)}/. Run scripts/build-embed.sh.`);
 }
 
-const playerWasm = await loadPlayerWasm();
+const [playerWasm, { skinToCssVars }, { LOCKED_SKIN }] = await Promise.all([
+  load<PlayerWasm>('src/player/playerWasm.ts'),
+  load<SkinCss>('src/render/synth/chrome/skinToCssVars.ts'),
+  load<Locked>('src/render/synth/skins/locked.ts'),
+]);
 const player = await playerWasm.loadPlayerModule(wasmBytes);
 const boards: SiteBoard[] = files.map(({ id, path: rel }) => {
   const board = player.createBoard(fs.readFileSync(path.join(REPO, rel), 'utf8'), { order: 'forward' });
@@ -97,12 +109,24 @@ boards.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 const embedDir = path.join(SITE, 'public', 'embed');
 const boardsDir = path.join(SITE, 'public', 'boards');
 const generatedDir = path.join(SITE, 'src', 'generated');
+const stylesDir = path.join(SITE, 'src', 'styles', 'generated');
 // Start each folder empty, so a board removed from examples/boards/ leaves no stale poster.
 fs.rmSync(boardsDir, { recursive: true, force: true });
-for (const dir of [embedDir, boardsDir, generatedDir]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [embedDir, boardsDir, generatedDir, stylesDir]) fs.mkdirSync(dir, { recursive: true });
 
 fs.copyFileSync(BUNDLE, path.join(embedDir, 'fabrico-board.js'));
 for (const b of boards) fs.copyFileSync(path.join(POSTERS, `${b.id}.png`), path.join(boardsDir, `${b.id}.png`));
 fs.writeFileSync(path.join(generatedDir, 'boards.json'), `${JSON.stringify({ boards }, null, 2)}\n`);
 
-console.log(`SITE_ASSETS boards=${boards.length} posters=${boards.length} bundle=${fs.statSync(BUNDLE).size}`);
+// The app's tokens, declared on :root. The site's theme.css maps Starlight's variables onto them.
+const tokens = skinToCssVars(LOCKED_SKIN, 1, ':root');
+const tokenCount = (tokens.match(/^--fab-[a-z0-9-]+:/gm) ?? []).length;
+if (tokenCount === 0) throw new Error('skinToCssVars wrote no --fab-* custom property');
+fs.writeFileSync(
+  path.join(stylesDir, 'fab-tokens.css'),
+  `/* Written by frontend/scripts/build-site-assets.ts from the app's locked skin. Don't edit it. */\n${tokens}\n`,
+);
+
+console.log(
+  `SITE_ASSETS boards=${boards.length} posters=${boards.length} bundle=${fs.statSync(BUNDLE).size} tokens=${tokenCount}`,
+);

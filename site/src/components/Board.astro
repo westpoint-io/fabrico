@@ -62,8 +62,9 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 </script>
 
 <style>
+  /* 32 px above and below, from the app's spacing scale. */
   .fab-board-slot {
-    margin-block: 2rem;
+    margin-block: var(--fab-space-xl);
   }
   .fab-board-slot img {
     display: block;

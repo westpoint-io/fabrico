@@ -36,6 +36,9 @@ export default defineConfig({
       // The edit URL is this base plus the page's path from site/, such as src/content/docs/....
       editLink: { baseUrl: `${REPO}/edit/main/site/` },
       social: [{ icon: 'github', label: 'GitHub', href: REPO }],
+      // The app's tokens first (written from its locked skin by build-site-assets.ts), then the
+      // theme that maps Starlight's variables onto them.
+      customCss: ['./src/styles/generated/fab-tokens.css', './src/styles/theme.css'],
       head: [
         meta('property', 'og:image', OG_IMAGE),
         meta('property', 'og:image:width', '1200'),
