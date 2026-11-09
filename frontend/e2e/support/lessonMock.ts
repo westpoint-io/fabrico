@@ -971,8 +971,8 @@ export async function twoSinks(
 export interface FactoryBuildOptions {
   /**
    * Step 8 drawn from the Factory's second Out: the first Sink goes in front of that Out instead of in
-   * its ring, and the drag starts on that Out's doorstep instead of the ring. Step 9's free Out is then
-   * the first.
+   * its ring, and the drag starts on that Out's doorstep, which step 8's ring marks too, because the first
+   * Sink sits on that Out's line (review WR-06). Step 9's free Out is then the first.
    */
   secondFirst?: boolean;
   /** The first Sink this many columns east of its ring's cell, off its ring (review WR-03). */

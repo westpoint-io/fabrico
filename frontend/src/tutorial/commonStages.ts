@@ -82,8 +82,11 @@ export interface BeltEnd {
 
 /** What a lesson may change in `beltStages`. Each one left out keeps lesson 1's. */
 export interface BeltStageOptions {
-  /** `free` starts the drag from the first output no belt holds yet, for a machine with more than one. */
-  pick?: 'free';
+  /**
+   * `free` starts the drag from the first output no belt holds yet, for a machine with more than one.
+   * `facing` starts it from the Out the `to` machine sits on the line of, else the first Out.
+   */
+  pick?: 'free' | 'facing';
   /** The plain drag's words. */
   draw?: readonly PhraseToken[];
   /** The carry-on stage's words. */

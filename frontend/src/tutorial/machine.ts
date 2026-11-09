@@ -19,6 +19,7 @@ import {
   lineStuck,
   lowestSlotInto,
   nodeKey,
+  outputFacing,
   outputsOf,
   slotRoseNow,
   watchedNames,
@@ -276,10 +277,11 @@ function keyCell(key: string | undefined): readonly [number, number] | null {
 /**
  * The Out port of `factory` a Sink spot faces. `firstOutputSink` faces the first Out in port order.
  * `freeOutputSink`, once a belt docks on some Out, faces the first Out no belt docks and no machine sits
- * in front of. With no belt drawn yet, step 8's ring marks the first Out, so it faces an Out the first
- * Sink's belt won't use: the first in port order other than the one the bound first Sink sits in front
- * of, or the last Out when that Sink sits in front of neither, so the ring never lands between the first
- * Out and a first Sink placed off its ring (review WR-03). Null with no Out.
+ * in front of. With no belt drawn yet it faces an Out the first Sink's belt won't use. Step 8's ring marks
+ * the Out the bound first Sink sits on the line of, by `outputFacing`, the same rule read here: so the
+ * second Sink faces the first Out in port order other than that one, or the last Out when the first Sink
+ * is on no Out's line and step 8's ring marks the first Out. Either way the two belts run along their own
+ * rows (reviews WR-03 and WR-06). Null with no Out.
  */
 function outputFor(
   spot: 'firstOutputSink' | 'freeOutputSink',
@@ -295,8 +297,8 @@ function outputFor(
   };
   const free = freeOutputs(factory, board.belts);
   if (free.length === outs.length && firstSink !== undefined) {
-    const taken = outs.find((p) => inFront(firstSink, p));
-    return taken === undefined ? (outs[outs.length - 1] ?? null) : (outs.find((p) => p !== taken) ?? null);
+    const taken = outputFacing(factory, firstSink);
+    return taken === null ? (outs[outs.length - 1] ?? null) : (outs.find((p) => p !== taken) ?? null);
   }
   return free.find((p) => !board.nodes.some((n) => inFront(n, p))) ?? free[0] ?? outs[0] ?? null;
 }

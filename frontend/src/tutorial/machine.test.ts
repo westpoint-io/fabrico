@@ -2008,6 +2008,11 @@ describe('floorSpot for lesson 4', () => {
     it('the first Sink in its ring in front of the first output: the second output', () => {
       expect(second(L4_SINK)).toEqual([12, 6]);
     });
+
+    // Review WR-06: on the second output's line at any distance counts, not only the cell four out.
+    it("the first Sink one cell past the second output's ring cell: the first output, not the cell in front of the first Sink's input", () => {
+      expect(second(sinkAt(32, 13, 6))).toEqual([12, 5]);
+    });
   });
 
   it("with the Legend open the line's lower row stays above the Legend once the inspector lifts it", () => {

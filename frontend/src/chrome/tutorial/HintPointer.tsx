@@ -28,13 +28,13 @@ import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObjec
 import { CELL } from '../../../shared/geometry';
 import { KIND_NAMES } from '../../../shared/kindNames';
 import type { PortView } from '../../protocol/decode';
-import { effectiveBox } from '../../protocol/footprint';
+import { cellsOfFootprint, effectiveBox } from '../../protocol/footprint';
 import { machine_kind } from '../../protocol/kinds';
 import { doorstepCell, dropHitRadiusWorld, nubAnchor } from '../../protocol/ports';
 import { FACTORY_EDITOR_LABELS } from '../FactoryConfigBody';
 import { ADD_OUTPUT_LABEL } from '../PortsSection';
 import type { SceneHandle } from '../../render/pixiApp';
-import { freeOutputs } from '../../tutorial/check';
+import { freeOutputs, outputFacing } from '../../tutorial/check';
 import type { BoundNode, TutorialState } from '../../tutorial/machine';
 import type { BindingName, HintAnchor, PanelTarget, PortRoleName } from '../../tutorial/types';
 import { readCamera } from './cameraRead';
@@ -210,8 +210,10 @@ function boundNode(nodes: SceneNodes | undefined, bound: BoundNode | undefined) 
 /**
  * A bound machine's port ring through the camera: a disc on an In port's dot, a square on an Out port's
  * doorstep. The port is the first with the role in the machine's port order, or with `pick: 'free'` the
- * first that no belt dock names. Read each frame, so the ring follows the user if they took the other
- * output first, and hides once every output has a belt.
+ * first that no belt dock names. With `pick: 'facing'` it's the Out the bound `to` machine sits on the
+ * line of, by the same `outputFacing` rule the second Sink's floor spot reads, else the first Out. Read
+ * each frame, so the ring follows the user if they took the other output first, and hides once every
+ * output has a belt.
  */
 function portBox(
   nodes: SceneNodes | undefined,
@@ -219,13 +221,20 @@ function portBox(
   bindings: TutorialState['bindings'],
   of: BindingName,
   role: PortRoleName,
-  pick?: 'free',
+  pick?: 'free' | 'facing',
+  to?: BindingName,
 ): RingBox | null {
   const node = boundNode(nodes, bindings[of]);
   const cam = readCamera();
   if (node === null || cam === null) return null;
+  const toNode = pick === 'facing' && to !== undefined ? boundNode(nodes, bindings[to]) : null;
+  const facing = toNode === null ? null : outputFacing(node, { cells: cellsOfFootprint(toNode.cell_x, toNode.cell_y, toNode.w, toNode.h, toNode.rot) });
   const port =
-    pick === 'free' && role === 'out' ? freeOutputs(node, belts?.values() ?? [])[0] : node.ports.find((p) => p.role === PORT_ROLE[role]);
+    pick === 'free' && role === 'out'
+      ? freeOutputs(node, belts?.values() ?? [])[0]
+      : role === 'out' && facing !== null
+        ? facing
+        : node.ports.find((p) => p.role === PORT_ROLE[role]);
   if (port === undefined) return null;
   if (role === 'out') return { ...doorstepSquareBox(port, cam), zIndex: BOARD_TARGET_Z };
   const disc = dropDiscBox(nubAnchor(port.cell_x, port.cell_y, port.side), cam);
@@ -327,7 +336,7 @@ function ringBox(
       zIndex: PANEL_TARGET_Z,
     };
   }
-  if (hint.on === 'port') return portBox(nodes, belts, target.bindings, hint.of, hint.role, hint.pick);
+  if (hint.on === 'port') return portBox(nodes, belts, target.bindings, hint.of, hint.role, hint.pick, hint.to?.of);
   const cam = readCamera();
   if (cam === null) return null;
   if (hint.on === 'belt') return beltBox(belts, target.bindings[hint.of], cam);

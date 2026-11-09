@@ -177,7 +177,11 @@ export const TWO_OUTPUTS: Lesson = {
         ...beltStages(
           { bind: 'factory', kind: FACTORY_KIND },
           { bind: 'sink', kind: SINK_KIND },
-          { draw: ['Drag from the ', { kind: FACTORY_KIND }, "'s output dot to the first ", { kind: SINK_KIND }, "'s input dot."] },
+          {
+            // The ring marks the output the first Sink sits on the line of, so this belt runs along its own row.
+            pick: 'facing',
+            draw: ['Drag from the ', { kind: FACTORY_KIND }, "'s output dot to the first ", { kind: SINK_KIND }, "'s input dot."],
+          },
         ),
       ],
       done: { is: 'beltJoins', a: 'factory', b: 'sink', bind: 'beltOut' },

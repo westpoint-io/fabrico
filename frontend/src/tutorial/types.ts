@@ -175,8 +175,10 @@ export type HintAnchor =
   /**
    * A bound machine's port: the first in its port order with this role. With `pick: 'free'` on an
    * output, the first output no belt docks (`freeOutputs` in `check.ts`), and nothing when every one has a belt.
+   * With `pick: 'facing'` on an output, the Out the `to` machine sits on the line of (`outputFacing` in
+   * `check.ts`), else the first Out.
    */
-  | { on: 'port'; of: BindingName; role: PortRoleName; pick?: 'free'; to?: { of: BindingName; role: PortRoleName } };
+  | { on: 'port'; of: BindingName; role: PortRoleName; pick?: 'free' | 'facing'; to?: { of: BindingName; role: PortRoleName } };
 
 export type Gesture =
   | { do: 'pressHint' }

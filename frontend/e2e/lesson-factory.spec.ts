@@ -6,7 +6,7 @@ import { ADD_OUTPUT_WORDS, TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutput
 import { LESSONS } from '../src/tutorial/lessons';
 import { phrasePlain } from '../src/tutorial/phrase';
 import { doorstepCell } from '../src/protocol/ports';
-import { CELL, CMD, buildPacket, cameraOf, waitForBoard, type Harness, type InjectPort } from './support/wire';
+import { CELL, CMD, buildPacket, cameraOf, drawBeltCells, waitForBoard, type Harness, type InjectPort } from './support/wire';
 import {
   BELT_OUT2_ID,
   BELT_OUT_ID,
@@ -20,6 +20,7 @@ import {
   boot,
   buildBoard,
   centreOf,
+  dragThroughRings,
   expectAt,
   factoryConfig,
   factoryWithTwoOutputs,
@@ -481,6 +482,46 @@ async function stopFrames(page: Page): Promise<FrameRead[]> {
     return w.__fabFrames ?? [];
   });
 }
+
+// Review WR-06, the mirror of WR-03. The first Sink on the second output's line, on its ring cell or one
+// past it. Step 8's ring must mark the second output, and the second Sink's ring must face the first, so
+// the belt a user draws by following step 8's rings runs along its own row and leaves the first output's
+// straight run free for step 9.
+test.describe("lesson 4 with the first Sink on the second output's line (review WR-06)", () => {
+  test.use({ viewport: { width: 1280, height: 720 } });
+
+  const cases: [string, { firstEast?: number }][] = [
+    ["on the second output's ring cell", {}],
+    ['one cell past it', { firstEast: 1 }],
+  ];
+  for (const [name, extra] of cases) {
+    test(`with the first Sink ${name}, step 8's ring marks the second output and the hint-drawn belt keeps off step 9's row`, async ({ page }) => {
+      const { h, host } = await startFactoryLesson(page);
+      const board = await buildBoard(page, h, host, { beltsDrawn: 1, secondFirst: true, ...extra });
+      await expectAt(page, STEP.beltOut, STAGE.beltDraw, 'belt-in drawn, and the Belt tool is still armed');
+      const firstOut = portOf(board.factory, FACTORY_OUT);
+      const secondOut = portOf(board.factory, FACTORY_OUT2);
+      const [fx, fy] = doorstepCell(firstOut);
+      expect(board.sink.cell_y, "the first Sink is on the second output's row").toBe(doorstepCell(secondOut)[1]);
+      const ring = await ringAt(page, STAGE.beltDraw);
+      const atFirst = rectError(ring, await doorstepRing(page, firstOut)) <= 1;
+      const atSecond = rectError(ring, await doorstepRing(page, secondOut)) <= 1;
+      const sink2: readonly [number, number] = [board.sink2.cell_x, board.sink2.cell_y];
+      const before = h.sent.length;
+      await dragThroughRings(page, h);
+      const drawn = h.sent.slice(before).map(drawBeltCells).find((cells) => cells !== null) ?? [];
+      // Step 9's belt runs from the first output's doorstep to the cell before the second Sink.
+      const run: [number, number][] = [];
+      for (let x = fx; x < sink2[0]; x++) run.push([x, fy]);
+      const crossing = drawn.filter(([x, y]) => run.some(([rx, ry]) => rx === x && ry === y));
+      console.log(`MEASURE wr06 ${name.replaceAll(' ', '-')} ring=${atSecond ? 'second' : atFirst ? 'first' : 'neither'} sink2=${JSON.stringify(sink2)} path=${JSON.stringify(drawn)}`);
+      expect.soft(atSecond, `step 8's ring marks the second output's doorstep (ring ${JSON.stringify(ring)})`).toBe(true);
+      expect.soft(sink2[1], "the second Sink is on the first output's row").toBe(fy);
+      expect(drawn.length, 'the drag sent a DrawBelt with cells').toBeGreaterThan(0);
+      expect.soft(crossing, `the hint-drawn belt holds no cell of the first output's straight run ${JSON.stringify(run)}`).toEqual([]);
+    });
+  }
+});
 
 test.describe('lesson 4 when a ring loses its target (103 review IN-01)', () => {
   test.use({ viewport: { width: 1280, height: 720 } });

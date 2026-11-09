@@ -665,6 +665,36 @@ export function gestureSubject(frame: Buffer): { cmd?: string; node?: number } {
 }
 
 /**
+ * The cells a DrawBelt frame carries, Tail first, read the way `encodeGridCommand` in
+ * `src/protocol/decode.ts` writes them: the discriminant, a varint count, then each cell as two zigzag
+ * varints. Null for any other frame.
+ */
+export function drawBeltCells(frame: Buffer): [number, number][] | null {
+  if (frame.length === 0 || frame[0] !== CMD.DrawBelt) return null;
+  let i = 1;
+  const varint = (): number => {
+    let n = 0;
+    let shift = 1;
+    for (;;) {
+      const b = frame[i++];
+      if (b === undefined) throw new Error('a DrawBelt frame ended inside a varint');
+      n += (b & 0x7f) * shift;
+      if ((b & 0x80) === 0) return n;
+      shift *= 128;
+    }
+  };
+  const unzig = (z: number): number => (z % 2 === 0 ? z / 2 : -(z + 1) / 2);
+  const count = varint();
+  const cells: [number, number][] = [];
+  for (let k = 0; k < count; k++) {
+    const x = unzig(varint());
+    const y = unzig(varint());
+    cells.push([x, y]);
+  }
+  return cells;
+}
+
+/**
  * What `answerQuery` returns to refuse a query: the page's `invoke` rejects with `error`, as it
  * does when the host answers `{ok: false}` (a Factory's `validate_factory_js` on code that won't parse).
  */

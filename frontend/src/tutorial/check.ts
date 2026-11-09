@@ -4,7 +4,7 @@
 // relation and compares with the step's baseline. It never counts nodes, because a count can be
 // satisfied by a machine the user didn't place for this step.
 
-import { PORT_ROLE, beltEndPort, doorstepCell } from '../protocol/ports';
+import { PORT_ROLE, beltEndPort, doorstepCell, unitDelta } from '../protocol/ports';
 import type { BoundNode, StepBaseline, TutorialState } from './machine';
 import { beltTilesIn, boardShape, sameShape, type BoardShape } from './shape';
 import type { BindingName, BoardBelt, BoardFacts, BoardNode, Check, ChromeFacts } from './types';
@@ -277,6 +277,29 @@ export function freeOutputs<P extends { role: number }>(
   return node.ports
     .filter((p) => p.role === PORT_ROLE.OUT)
     .filter((_, ordinal) => !all.some((b) => b.docks.some((d) => d.end === 'Tail' && d.node === node.id && d.port === ordinal)));
+}
+
+/**
+ * The first Out of `factory`, in port order, whose straight line out, along the side it faces, passes
+ * through a cell of `machine`, at any distance. Null when the machine is on no Out's line. Lesson 4's
+ * step 8 ring and the second Sink's floor spot both read this, so they agree on which output the first
+ * Sink faces.
+ */
+export function outputFacing<P extends { role: number; cell_x: number; cell_y: number; side: number }>(
+  factory: { ports: readonly P[] },
+  machine: { cells: ReadonlyArray<readonly number[]> },
+): P | null {
+  for (const p of factory.ports) {
+    if (p.role !== PORT_ROLE.OUT) continue;
+    const [dx, dy] = unitDelta(p.side);
+    const onLine = machine.cells.some((c) => {
+      const ox = (c[0] as number) - p.cell_x;
+      const oy = (c[1] as number) - p.cell_y;
+      return dx !== 0 ? oy === 0 && ox * dx > 0 : ox === 0 && oy * dy > 0;
+    });
+    if (onLine) return p;
+  }
+  return null;
 }
 
 /** How many ports with role Out the bound machine holds, found by its `nodeKey`. 0 when it isn't on the board. */

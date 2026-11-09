@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, type CheckContext } from './check.ts';
+import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, outputFacing, type CheckContext } from './check.ts';
 import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
@@ -668,6 +668,38 @@ describe('freeOutputs', () => {
   it("a belt docked at another machine's first output doesn't take this one's", () => {
     const elsewhere = belt(40, [], [{ end: 'Tail', node: 99, port: 0 }]);
     expect(freeOutputs(TWO_OUTS, [elsewhere]).map((p) => p.index)).toEqual([1, 3]);
+  });
+});
+
+describe('outputFacing', () => {
+  // Lesson 4's unit Factory: a 3 by 3 at (6, 4), its first Out at (8, 5) and its second at (8, 6), both facing east.
+  const factory: BoardNode = {
+    id: 31,
+    kind: 2,
+    cells: [0, 1, 2].flatMap((dy) => [0, 1, 2].map((dx) => [6 + dx, 4 + dy] as [number, number])),
+    ports: [
+      { index: 0, cell_x: 6, cell_y: 5, side: 3, role: 0 },
+      { index: 1, cell_x: 8, cell_y: 5, side: 1, role: 1 },
+      { index: 2, cell_x: 7, cell_y: 6, side: 2, role: 2 },
+      { index: 3, cell_x: 8, cell_y: 6, side: 1, role: 1 },
+    ],
+  };
+  const at = (x: number, y: number): BoardNode => ({ id: 32, kind: 7, cells: [[x, y]], ports: [] });
+  const facing = (x: number, y: number): number | null => outputFacing(factory, at(x, y))?.index ?? null;
+
+  it("a machine on the second output's line faces it, at its ring cell or past it", () => {
+    expect(facing(12, 6)).toBe(3);
+    expect(facing(13, 6)).toBe(3);
+  });
+
+  it("a machine on the first output's line faces the first", () => {
+    expect(facing(12, 5)).toBe(1);
+    expect(facing(13, 5)).toBe(1);
+  });
+
+  it("a machine on neither line, or behind the Factory on the first output's row, faces neither", () => {
+    expect(facing(12, 8)).toBeNull();
+    expect(facing(2, 5)).toBeNull();
   });
 });
 
