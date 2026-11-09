@@ -7,6 +7,18 @@ frontend/dist
 # The read-only board bundle, its test pages and the offline examples file (build outputs).
 frontend/dist-embed/
 frontend/dist-examples/
+# The docs site's install, its build outputs, and the files its build copies or writes from the
+# embed build and the app's skin. scripts/build-site.sh makes all of them.
+site/node_modules/
+site/dist/
+site/dist-fixtures/
+site/.astro/
+site/public/embed/
+site/public/boards/
+site/public/fonts/
+site/src/styles/generated/
+site/src/generated/boards.json
+site/src/assets/generated/
 
 # ts-rs generated TS bindings (07-01 export target; regenerated on `cargo test`)
 crates/fabrico-protocol/bindings/

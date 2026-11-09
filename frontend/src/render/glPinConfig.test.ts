@@ -53,6 +53,7 @@ const CONFIG_FILES = [
   'playwright.embed.config.ts',
   'playwright.player.config.ts',
   'playwright.offline.config.ts',
+  'playwright.docs.config.ts',
 ] as const;
 
 /** cwd-independent resolution (the `src/protocol/route.test.ts` idiom). */
@@ -163,8 +164,8 @@ describe('the no-WebGL project is the one allowed extra', () => {
 });
 
 describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () => {
-  it('checks exactly 8 configs (a shrinking list cannot pass vacuously)', () => {
-    expect(CONFIG_FILES).toHaveLength(8);
+  it('checks exactly 9 configs (a shrinking list cannot pass vacuously)', () => {
+    expect(CONFIG_FILES).toHaveLength(9);
   });
 
   for (const name of CONFIG_FILES) {

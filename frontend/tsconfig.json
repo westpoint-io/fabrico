@@ -56,6 +56,7 @@
     "e2e-player",
     "e2e-embed",
     "e2e-offline",
+    "e2e-docs",
     "vite.config.ts",
     "vite.embed.config.ts",
     "vitest.config.ts",
@@ -67,6 +68,7 @@
     "playwright.player.config.ts",
     "playwright.walk.config.ts",
     "playwright.embed.config.ts",
-    "playwright.offline.config.ts"
+    "playwright.offline.config.ts",
+    "playwright.docs.config.ts"
   ]
 }
