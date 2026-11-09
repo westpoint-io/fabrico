@@ -1,0 +1,14 @@
+---
+title: Two boards on one page
+description: A test page for the docs suite with two running boards, to check the page loads the board script once.
+---
+
+import Board from '../../components/Board.astro';
+
+This page holds two boards, so the docs suite can check that the board script loads once per page. The first board is the demo factory.
+
+<Board name="demo_scene" />
+
+The second board sends three webhooks on the same tick and merges their items onto one belt.
+
+<Board name="docs-arrival-order" />

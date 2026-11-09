@@ -9,10 +9,15 @@
 # `astro build`, which writes the static site to site/dist/. Building all three every time keeps
 # the site's player, renderer and boards from one commit.
 #
+# Then it builds the site a second time with `npm run build:fixtures`, which also takes the test
+# pages whose file name starts with _ and writes to site/dist-fixtures/. The docs suite serves that
+# folder on a second port. site/dist/, the folder that gets published, never holds a test page.
+#
 # OUTPUT, exactly one line on stdout after the builds' own output:
-#   SITE_BUILD pages=<n> boards=<n> bytes=<n>
+#   SITE_BUILD pages=<n> boards=<n> bytes=<n> fixtures=<n>
 # pages counts the index.html files under site/dist, boards counts the <fabrico-board openings
-# across them, and bytes is the total size of site/dist.
+# across them, bytes is the total size of site/dist, and fixtures counts the test pages built into
+# site/dist-fixtures (its index.html files that site/dist doesn't have).
 #
 # ENVIRONMENT
 #   WASM_OPT          the wasm-opt binary, from scripts/install-wasm-opt.sh. Required.
@@ -46,9 +51,15 @@ bash "$ROOT/scripts/build-embed.sh"
 
 WASM="$(cd "$OUT" && pwd -P)/fabrico_player.wasm"
 (cd "$ROOT/site" && FABRICO_PLAYER_WASM="$WASM" npm run build)
+(cd "$ROOT/site" && FABRICO_PLAYER_WASM="$WASM" npm run build:fixtures)
 
 DIST="$ROOT/site/dist"
 PAGES="$(find "$DIST" -name index.html -type f | wc -l)"
 BOARDS="$( (find "$DIST" -name index.html -type f -print0 | xargs -0 grep -o '<fabrico-board' || true) | wc -l)"
 BYTES="$(du -sb "$DIST" | cut -f1)"
-echo "SITE_BUILD pages=$((PAGES)) boards=$((BOARDS)) bytes=$((BYTES))"
+FIXTURE_DIST="$ROOT/site/dist-fixtures"
+FIXTURES=0
+while IFS= read -r -d '' page; do
+  if [ ! -f "$DIST/${page#"$FIXTURE_DIST"/}" ]; then FIXTURES=$((FIXTURES + 1)); fi
+done < <(find "$FIXTURE_DIST" -name index.html -type f -print0)
+echo "SITE_BUILD pages=$((PAGES)) boards=$((BOARDS)) bytes=$((BYTES)) fixtures=$((FIXTURES))"

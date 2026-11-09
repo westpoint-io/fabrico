@@ -29,9 +29,17 @@ const group = (label, directory) => ({ label, items: [{ autogenerate: { director
 /** A `<meta>` head entry. */
 const meta = (key, name, content) => ({ tag: 'meta', attrs: { [key]: name, content } });
 
+/**
+ * With FABRICO_DOCS_FIXTURES=1 the build also takes the test pages whose file name starts with _
+ * (src/content.config.ts) and writes to dist-fixtures/, which the docs suite serves on a second
+ * port. dist/ is the folder that gets published, and it never holds a test page.
+ */
+const OUT_DIR = process.env.FABRICO_DOCS_FIXTURES === '1' ? './dist-fixtures' : './dist';
+
 export default defineConfig({
   site: SITE,
   base: BASE,
+  outDir: OUT_DIR,
   // The dev server reads the board files under ../examples/.
   vite: { server: { fs: { allow: ['..'] } } },
   integrations: [

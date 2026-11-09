@@ -1,5 +1,6 @@
 // Shared helpers for the docs suite. The suite runs over the built site that scripts/check-docs.sh
-// serves, at the URL it exports as FABRICO_DOCS_URL (ending in /fabrico/).
+// serves, at the URL it exports as FABRICO_DOCS_URL (ending in /fabrico/), and over the fixture
+// build (the same site plus the test pages whose file name starts with _), at FABRICO_DOCS_FIXTURES_URL.
 //
 // Nothing here imports a file under site/: a docs-only change doesn't run the frontend's type
 // check, so the suite must not depend on site/ source at compile time. Anything it needs from
@@ -17,17 +18,31 @@ export function docsRoot(): string {
   return root.endsWith('/') ? root : `${root}/`;
 }
 
+/** The served fixture build's root, `http://127.0.0.1:<port>/fabrico/`. Throws when the variable is unset. */
+export function fixturesRoot(): string {
+  const root = process.env.FABRICO_DOCS_FIXTURES_URL;
+  if (root === undefined || root === '') {
+    throw new Error('FABRICO_DOCS_FIXTURES_URL is unset. Run the docs suite through scripts/check-docs.sh.');
+  }
+  return root.endsWith('/') ? root : `${root}/`;
+}
+
 /** A page or file of the served site, by its path under /fabrico/ (`get-started/`, `sitemap-index.xml`). */
 export function docsUrl(path: string): string {
   return new URL(path.replace(/^\/+/, ''), docsRoot()).href;
 }
 
-/** A published URL from a sitemap, moved onto the local server. */
-export function toLocal(published: string): string {
+/** A page or file of the served fixture build, by its path under /fabrico/. */
+export function fixturesUrl(path: string): string {
+  return new URL(path.replace(/^\/+/, ''), fixturesRoot()).href;
+}
+
+/** A published URL from a sitemap, moved onto the local server (or the fixture server). */
+export function toLocal(published: string, root: string = docsRoot()): string {
   if (!published.startsWith(PUBLISHED_ROOT)) {
     throw new Error(`the sitemap lists ${published}, which is outside ${PUBLISHED_ROOT}`);
   }
-  return docsUrl(published.slice(PUBLISHED_ROOT.length));
+  return new URL(published.slice(PUBLISHED_ROOT.length), root).href;
 }
 
 /** The text of a served file. Throws on any status but 200. */
@@ -46,12 +61,31 @@ export function locsOf(xml: string): string[] {
  * Every page the site's sitemap lists, as local URLs, sorted. Reads sitemap-index.xml, then each
  * sitemap it names.
  */
-export async function sitemapPages(): Promise<string[]> {
+export async function sitemapPages(root: string = docsRoot()): Promise<string[]> {
   const pages: string[] = [];
-  for (const sitemap of locsOf(await fetchText(docsUrl('sitemap-index.xml')))) {
-    for (const page of locsOf(await fetchText(toLocal(sitemap)))) pages.push(toLocal(page));
+  for (const sitemap of locsOf(await fetchText(new URL('sitemap-index.xml', root).href))) {
+    for (const page of locsOf(await fetchText(toLocal(sitemap, root)))) pages.push(toLocal(page, root));
   }
   return pages.sort();
+}
+
+/**
+ * The fixture build's test pages, as local URLs on the fixture server, sorted: the pages its
+ * sitemap lists whose path has a part starting with _. Fails when there are none, so a fixture
+ * build that skipped its test pages can't pass a check by running nothing.
+ */
+export async function fixturePages(): Promise<string[]> {
+  const root = fixturesRoot();
+  const pages = (await sitemapPages(root)).filter((url) => url.slice(root.length).split('/').some((part) => part.startsWith('_')));
+  if (pages.length === 0) throw new Error(`the fixture build's sitemap at ${root} lists no test page`);
+  return pages;
+}
+
+/** The one fixture page whose path holds `name`, such as `_fixture-two-boards`. Throws on none or several. */
+export async function fixturePage(name: string): Promise<string> {
+  const found = (await fixturePages()).filter((url) => url.includes(`/${name}/`));
+  if (found.length !== 1) throw new Error(`the fixture build has ${found.length} pages named ${name}, not 1`);
+  return found[0];
 }
 
 /** The `name` of every `<fabrico-board>` in a page's HTML, in page order. */
