@@ -28,6 +28,19 @@ async function loadAndSettle(page: Page, url: string): Promise<string[]> {
 
 const bundleRequests = (requests: string[]): string[] => requests.filter((r) => new URL(r).pathname.endsWith(BUNDLE));
 
+/**
+ * The `<script>` elements in the page that load the board script. Counting requests alone can't see
+ * a second copy: Chromium serves a second script with the same address from its memory cache with no
+ * new request, and the script itself skips defining <fabrico-board> when it is already defined, so
+ * a page that adds the script twice makes one request and throws nothing.
+ */
+async function bundleScripts(page: Page): Promise<number> {
+  return page.evaluate(
+    (bundle) => [...document.querySelectorAll('script[src]')].filter((s) => new URL((s as HTMLScriptElement).src).pathname.endsWith(bundle)).length,
+    BUNDLE,
+  );
+}
+
 test('the site has published pages with no board to check', () => {
   expect(withoutBoard.length, 'published pages with no board').toBeGreaterThanOrEqual(1);
 });
@@ -36,6 +49,7 @@ for (const { url } of withoutBoard) {
   test(`${pathOf(url)}: a page with no board doesn't fetch the board script`, async ({ page }) => {
     const requests = await loadAndSettle(page, url);
     expect(bundleRequests(requests), `${pathOf(url)}: requests for ${BUNDLE}`).toEqual([]);
+    expect(await bundleScripts(page), `${pathOf(url)}: <script> elements loading ${BUNDLE}`).toBe(0);
   });
 }
 
@@ -45,7 +59,7 @@ test('the two-board test page fetches the board script once', async ({ page }) =
   const requests = await loadAndSettle(page, url);
   expect(await page.locator('fabrico-board').count(), `${pathOf(url)}: boards in the page`).toBe(2);
   expect(bundleRequests(requests), `${pathOf(url)}: requests for ${BUNDLE}`).toHaveLength(1);
-  // A second copy of the script would define <fabrico-board> twice, which throws.
+  expect(await bundleScripts(page), `${pathOf(url)}: <script> elements loading ${BUNDLE}`).toBe(1);
   errors.assertNone(`on ${pathOf(url)}`);
 });
 

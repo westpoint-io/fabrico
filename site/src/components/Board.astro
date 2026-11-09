@@ -55,7 +55,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 <script>
   // A processed script: Astro bundles it and adds it to a page once, however many boards the page
-  // has. An inline script would run once per board and define the element twice, which throws.
+  // has. An inline script would run once per board and add the board script once per board.
   const script = document.createElement('script');
   script.src = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/embed/fabrico-board.js`;
   document.head.append(script);
