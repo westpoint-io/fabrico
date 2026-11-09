@@ -422,6 +422,12 @@ site-search .dialog-frame {
   outline: 2px solid var(--fab-focus);
   outline-offset: 2px;
 }
+
+/* The skip link shows on focus as an ink box with substrate text, the house's selected look. */
+.sl-skip-link:focus {
+  background-color: var(--fab-ink);
+  color: var(--fab-substrate);
+}
 :is(#starlight__search, mobile-starlight-toc) :focus-visible,
 .sl-markdown-content :is(pre, table):focus-visible {
   outline-offset: -2px;
