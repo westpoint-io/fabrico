@@ -230,6 +230,28 @@ mobile-starlight-toc a[aria-current='true'] {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Wide content. A code block or table wider than the column scrolls inside its own box, never the
+ * page. Starlight already makes a table a block that scrolls; these rules keep both boxes inside the
+ * column. The page itself isn't clipped on purpose: a part that overflows should show up as a
+ * sideways scroll the docs suite catches, not be hidden. An overflowing table gets tabindex="0"
+ * from components/FocusableTables.astro, and Expressive Code gives an overflowing code block
+ * tabindex="0" itself, so a keyboard can scroll both.
+ */
+.sl-markdown-content :is(table, .expressive-code, .expressive-code pre):not(:where(.not-content *)) {
+  max-width: 100%;
+}
+.sl-markdown-content .expressive-code pre:focus-visible,
+.sl-markdown-content table:not(:where(.not-content *)):focus-visible {
+  outline: 2px solid var(--fab-focus);
+  outline-offset: -2px;
+}
+
+/* A long page title wraps inside the 300 px sidebar instead of running out of it. */
+#starlight__sidebar a {
+  overflow-wrap: anywhere;
+}
+
 /* Asides: no ground, a 3 px ink rail, the title in Sono 700 12 px caps. Danger uses the fault colour. */
 .starlight-aside {
   background-color: transparent;

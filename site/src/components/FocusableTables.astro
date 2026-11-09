@@ -1,0 +1,25 @@
+---
+// Makes a markdown table that is wider than the column reachable by keyboard. Starlight shows such
+// a table as a box that scrolls sideways, and a box a keyboard user can't focus can't be scrolled
+// without a mouse. This gives a table tabindex="0" while it overflows and takes it away when it no
+// longer does, the way Expressive Code treats an overflowing code block. Rendered on every page by
+// overrides/ThemeProvider.astro.
+---
+
+<script>
+  // A processed script: Astro bundles it as a module, which runs once the page has been parsed.
+  const MARK = 'data-fab-scroll-focus';
+  const update = (table: Element): void => {
+    if (table.scrollWidth > table.clientWidth) {
+      if (!table.hasAttribute('tabindex')) table.setAttribute('tabindex', '0');
+      table.setAttribute(MARK, '');
+    } else if (table.hasAttribute(MARK)) {
+      table.removeAttribute('tabindex');
+      table.removeAttribute(MARK);
+    }
+  };
+  const observer = new ResizeObserver((entries) => {
+    for (const entry of entries) update(entry.target);
+  });
+  for (const table of document.querySelectorAll('.sl-markdown-content table')) observer.observe(table);
+</script>

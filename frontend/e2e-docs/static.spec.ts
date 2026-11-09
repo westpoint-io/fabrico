@@ -124,6 +124,13 @@ test('the sitemap lists exactly the built pages other than 404', async () => {
   expect(listed.length, 'pages in sitemap-0.xml').toBeGreaterThanOrEqual(7);
 });
 
+test('the published site holds no test page', async () => {
+  // Test pages have a file name starting with _ and build only into site/dist-fixtures/.
+  const listed = locsOf(await fetchText(docsUrl('sitemap-0.xml')));
+  expect(listed.filter((u) => u.includes('_fixture')), 'sitemap-0.xml URLs with _fixture').toEqual([]);
+  expect(builtPages().filter((u) => u.slice(PUBLISHED_ROOT.length).split('/').some((p) => p.startsWith('_'))), 'pages in site/dist/ under a name starting with _').toEqual([]);
+});
+
 for (const url of pages) {
   const pagePath = pathOf(url);
   const where = `/fabrico/${pagePath}`;

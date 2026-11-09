@@ -3,9 +3,15 @@
 // palette, and boards draw on the dark substrate. This sets the dark theme before the page first
 // paints, whatever localStorage or prefers-color-scheme say. Starlight's scripts still call
 // StarlightThemeProvider.updatePickers, so it stays defined and does nothing.
+//
+// It also renders FocusableTables, because this override is on every page and the site keeps to two
+// overrides.
+import FocusableTables from '../FocusableTables.astro';
 ---
 
 <script is:inline>
   document.documentElement.dataset.theme = 'dark';
   window.StarlightThemeProvider = { updatePickers() {} };
 </script>
+
+<FocusableTables />
