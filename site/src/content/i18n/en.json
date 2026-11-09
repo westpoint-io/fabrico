@@ -1,0 +1,7 @@
+{
+  "search.devWarning": "Search only works on a built site. Run npm run build and then npm run preview from site/ to try it.",
+  "pagefind.zero_results": "No pages match \"[SEARCH_TERM]\". Try a machine name such as Router or Factory, or a fault reason.",
+  "page.editLink": "Edit page",
+  "page.previousLink": "Previous",
+  "page.nextLink": "Next"
+}
