@@ -15,7 +15,7 @@ const REPO = 'https://github.com/westpoint-io/fabrico';
  */
 const OG_IMAGE = `${SITE}${BASE}/og/default.png`;
 const OG_IMAGE_ALT =
-  'The Fabrico wordmark above a conveyor belt carrying one amber item, with the line THE GRID IS THE PROGRAM.';
+  'The Fabrico wordmark with an amber square as the dot of the i, above a conveyor belt and the line THE GRID IS THE PROGRAM.';
 
 /** A font the page head preloads. Head entries aren't given the base path, so it's written here. */
 const preloadFont = (file) => ({
@@ -49,6 +49,11 @@ export default defineConfig({
       // The app's tokens first (written from its locked skin by build-site-assets.ts), then its
       // two fonts, then the theme that maps Starlight's variables onto both.
       customCss: ['./src/styles/generated/fab-tokens.css', './src/styles/fonts.css', './src/styles/theme.css'],
+      // Dark only: the theme is set before first paint, and the light, dark and auto picker is gone.
+      components: {
+        ThemeProvider: './src/components/overrides/ThemeProvider.astro',
+        ThemeSelect: './src/components/overrides/ThemeSelect.astro',
+      },
       head: [
         meta('property', 'og:image', OG_IMAGE),
         meta('property', 'og:image:width', '1200'),

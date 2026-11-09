@@ -10,6 +10,11 @@
  * win over Starlight's whatever their specificity. Don't wrap it in a layer.
  */
 
+/* The site is dark only, so scrollbars and form controls are dark too. */
+:root {
+  color-scheme: dark;
+}
+
 /* Colours: Starlight's variables, each mapped onto an app token. */
 :root,
 ::backdrop {

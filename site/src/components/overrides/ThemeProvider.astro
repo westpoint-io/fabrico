@@ -1,0 +1,11 @@
+---
+// Replaces Starlight's ThemeProvider. The site is dark only: the app's locked skin has no light
+// palette, and boards draw on the dark substrate. This sets the dark theme before the page first
+// paints, whatever localStorage or prefers-color-scheme say. Starlight's scripts still call
+// StarlightThemeProvider.updatePickers, so it stays defined and does nothing.
+---
+
+<script is:inline>
+  document.documentElement.dataset.theme = 'dark';
+  window.StarlightThemeProvider = { updatePickers() {} };
+</script>

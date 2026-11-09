@@ -132,3 +132,24 @@ test('the header shows the brand icon at 32 px beside the word Fabrico, and the 
   expect(favicon, 'the favicon link').toBe('/fabrico/favicon.svg');
   expect((await request.get(new URL('/fabrico/favicon.svg', docsUrl('')).href)).status(), 'the favicon status').toBe(200);
 });
+
+// Dark only. The app's skin has no light palette, so a reader whose system asks for light still
+// gets the dark theme, and there is no theme picker.
+
+test.describe('with a light colour scheme requested', () => {
+  test.use({ colorScheme: 'light' });
+
+  test('the page is still dark and has no theme picker', async ({ page }) => {
+    await page.goto(docsUrl('get-started/'));
+    const state = await page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+      prefersLight: matchMedia('(prefers-color-scheme: light)').matches,
+      pickers: document.querySelectorAll('starlight-theme-select').length,
+    }));
+    expect(state.prefersLight, 'the browser reports a light colour scheme').toBe(true);
+    expect(state.theme, '<html data-theme>').toBe('dark');
+    expect(state.scheme, 'the root color-scheme').toBe('dark');
+    expect(state.pickers, 'starlight-theme-select elements').toBe(0);
+  });
+});

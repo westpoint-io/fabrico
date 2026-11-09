@@ -11,6 +11,10 @@
 //   - writes site/src/styles/generated/fab-tokens.css, the app's `--fab-*` custom properties from
 //     skinToCssVars(LOCKED_SKIN), so the site's colours, spacing and fonts come from the same skin
 //     as the app and the boards, from the same commit;
+//   - writes site/src/styles/generated/code-theme.json, the code-block colour theme site/ec.config.mjs
+//     loads, with the same colours the board embed gives code: keywords and operators in the focus
+//     blue, strings in the working green, numbers and literals in the item amber, comments in the
+//     lit edge, everything else in ink, on the substrate;
 //   - copies the app's two fonts, src/assets/fonts/MartianMono.woff2 and Sono.woff2, with their two
 //     OFL licence texts, to site/public/fonts/;
 //   - copies the brand icon, docs/brand/fabrico-icon-master.svg, without its comments, to
@@ -58,6 +62,80 @@ const BRAND_COPIES: readonly { from: string; to: string }[] = [
   { from: 'fabrico-icon-master.svg', to: path.join('src', 'assets', 'generated', 'fabrico-icon-master.svg') },
   { from: 'fabrico-icon-16.svg', to: path.join('public', 'favicon.svg') },
 ];
+
+/** A VS Code colour theme, the shape Expressive Code reads. */
+export interface CodeTheme {
+  name: string;
+  type: 'dark';
+  colors: Record<string, string>;
+  tokenColors: { name?: string; scope?: string[]; settings: { foreground?: string; background?: string } }[];
+}
+
+/** Every `--fab-name:#rrggbb` declaration in skinToCssVars' output, by name without the dashes. */
+export function tokenColours(css: string): Map<string, string> {
+  return new Map([...css.matchAll(/^--fab-([a-z0-9-]+):(#[0-9a-f]{6});$/gm)].map((m) => [m[1], m[2]]));
+}
+
+/**
+ * The code-block theme, built from the app's tokens so no colour is typed by hand. The token
+ * groups follow the embed's code view (src/embed/codeView.ts and styles.ts).
+ */
+export function codeTheme(colours: Map<string, string>): CodeTheme {
+  const get = (name: string): string => {
+    const value = colours.get(name);
+    if (value === undefined) throw new Error(`skinToCssVars wrote no --fab-${name} colour`);
+    return value;
+  };
+  const substrate = get('substrate');
+  const panel = get('panel-fill');
+  const ink = get('ink');
+  const lit = get('edge-lit');
+  const focus = get('focus');
+  return {
+    name: 'fabrico-locked-skin',
+    type: 'dark',
+    colors: {
+      'editor.background': substrate,
+      'editor.foreground': ink,
+      'editorLineNumber.foreground': lit,
+      'editor.selectionBackground': panel,
+      focusBorder: focus,
+      'titleBar.activeBackground': panel,
+      'titleBar.activeForeground': ink,
+      'titleBar.border': panel,
+      'editorGroupHeader.tabsBackground': panel,
+      'editorGroupHeader.tabsBorder': panel,
+      'tab.activeBackground': substrate,
+      'tab.activeForeground': ink,
+      'tab.activeBorder': substrate,
+      'tab.activeBorderTop': focus,
+      'tab.inactiveBackground': panel,
+      'tab.inactiveForeground': ink,
+      'tab.border': panel,
+      'scrollbarSlider.background': panel,
+      'scrollbarSlider.hoverBackground': lit,
+    },
+    tokenColors: [
+      { settings: { foreground: ink, background: substrate } },
+      {
+        name: 'keywords and operators',
+        scope: ['keyword', 'keyword.control', 'keyword.operator', 'storage', 'storage.type', 'storage.modifier'],
+        settings: { foreground: focus },
+      },
+      {
+        name: 'strings',
+        scope: ['string', 'string.quoted', 'string.template', 'punctuation.definition.string'],
+        settings: { foreground: get('accent-working') },
+      },
+      {
+        name: 'numbers and literals',
+        scope: ['constant.numeric', 'constant.language', 'constant.character', 'constant.other', 'support.constant'],
+        settings: { foreground: get('accent-item') },
+      },
+      { name: 'comments', scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: lit } },
+    ],
+  };
+}
 
 /** One board's line in boards.json. */
 export interface SiteBoard {
@@ -154,6 +232,10 @@ if (tokenCount === 0) throw new Error('skinToCssVars wrote no --fab-* custom pro
 fs.writeFileSync(
   path.join(stylesDir, 'fab-tokens.css'),
   `/* Written by frontend/scripts/build-site-assets.ts from the app's locked skin. Don't edit it. */\n${tokens}\n`,
+);
+fs.writeFileSync(
+  path.join(stylesDir, 'code-theme.json'),
+  `${JSON.stringify(codeTheme(tokenColours(tokens)), null, 2)}\n`,
 );
 
 // The fonts with their licences, copied byte for byte.

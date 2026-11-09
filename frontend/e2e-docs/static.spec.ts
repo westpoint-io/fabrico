@@ -16,7 +16,7 @@ const DIST_DIR = path.join(SITE_DIR, 'dist');
 
 const OG_IMAGE = `${PUBLISHED_ROOT}og/default.png`;
 const OG_IMAGE_ALT =
-  'The Fabrico wordmark above a conveyor belt carrying one amber item, with the line THE GRID IS THE PROGRAM.';
+  'The Fabrico wordmark with an amber square as the dot of the i, above a conveyor belt and the line THE GRID IS THE PROGRAM.';
 
 /** Curly quotes made straight and runs of space made one, so markdown and HTML compare as text. */
 function plain(text: string): string {
