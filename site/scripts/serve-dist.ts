@@ -114,7 +114,21 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
-  fs.createReadStream(file).pipe(res);
+  // A read can fail after the checks above, for example when the build is rewritten mid-run. Without
+  // this listener the stream error ends the whole server, and every later request in the suite fails
+  // with a refused connection that hides the cause. Log it and fail only this request.
+  const stream = fs.createReadStream(file);
+  stream.on('error', (err) => {
+    console.error(`SERVE_DIST read error ${file}: ${err.message}`);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('content-type', TYPES['.txt']);
+      res.end('Read error');
+    } else {
+      res.destroy(err);
+    }
+  });
+  stream.pipe(res);
 });
 
 server.listen(port, '127.0.0.1', () => {
