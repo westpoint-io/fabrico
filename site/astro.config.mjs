@@ -40,8 +40,11 @@ export default defineConfig({
   site: SITE,
   base: BASE,
   outDir: OUT_DIR,
-  // The dev server reads the board files under ../examples/.
-  vite: { server: { fs: { allow: ['..'] } } },
+  // The dev server serves only this folder, the board files under ../examples/boards/ and the one
+  // frontend file the board helpers import. Allowing the whole checkout would also serve the
+  // ignored files beside it, such as private notes, to anyone who can reach a dev server started
+  // with --host. Setting `allow` leaves Vite's default deny list (.env, keys, .git) in place.
+  vite: { server: { fs: { allow: ['.', '../examples/boards', '../frontend/src/embed/boardIds.ts'] } } },
   integrations: [
     starlight({
       title: 'Fabrico',
