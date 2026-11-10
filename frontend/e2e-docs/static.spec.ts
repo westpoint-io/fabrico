@@ -147,6 +147,7 @@ for (const url of pages) {
     const canonical = headTags(html, 'link').filter((l) => l.rel === 'canonical');
     expect(canonical.length, `${where}: canonical links`).toBe(1);
     expect(canonical[0].href, `${where}: canonical link`).toBe(PUBLISHED_ROOT + pagePath);
+    expect(metaContent(html, 'property', 'og:url', where), `${where}: og:url`).toBe(PUBLISHED_ROOT + pagePath);
 
     expect(metaContent(html, 'property', 'og:image', where), `${where}: og:image`).toBe(OG_IMAGE);
     expect(metaContent(html, 'name', 'twitter:image', where), `${where}: twitter:image`).toBe(OG_IMAGE);
