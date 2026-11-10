@@ -10,9 +10,9 @@ import { test } from 'node:test';
 import { BANNED_PHRASES, formatFinding, lintFiles, run } from '../../scripts/lint-prose.ts';
 
 const PAGE = 'site/src/content/docs/patterns/index.mdx';
-const EM = '—';
-const EN = '–';
-const CURLY = '’';
+const EM = '\u2014';
+const EN = '\u2013';
+const CURLY = '\u2019';
 
 /** The finding lines for one page's text. */
 function lint(text: string, page = PAGE): string[] {
@@ -172,5 +172,21 @@ test('a folder git cannot list exits 2', () => {
     assert.equal(result.code, 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the lint and this test hold the dashes and the curly apostrophe only as escapes', () => {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const sources = [path.join(here, '../../scripts/lint-prose.ts'), new URL(import.meta.url).pathname];
+  for (const file of sources) {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      for (const ch of [EM, EN, CURLY]) {
+        assert.ok(
+          !line.includes(ch),
+          `${path.basename(file)}:${i + 1} holds U+${ch.codePointAt(0)!.toString(16).toUpperCase()} as a literal; write it as an escape`,
+        );
+      }
+    });
   }
 });

@@ -32,7 +32,7 @@ import { blank } from './lint-fact-literals.ts';
 export const MIN_FILES = 8;
 
 /** The em dash, written as an escape so this file doesn't hold one. */
-const EM_DASH = '—';
+const EM_DASH = '\u2014';
 
 /** Phrases that read as filler or as machine-written prose. Lowercase, straight apostrophes. */
 export const BANNED_PHRASES: readonly string[] = [
@@ -74,11 +74,11 @@ function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** The phrase as a pattern: any run of white space may be any other, an apostrophe may be curly. */
+/** The phrase as a pattern: any run of white space may be any other, an apostrophe may be curly (U+2019). */
 function phrasePattern(phrase: string): RegExp {
   const body = phrase
     .split(/\s+/)
-    .map((word) => escape(word).replaceAll("'", "['’]"))
+    .map((word) => escape(word).replaceAll("'", "['\u2019]"))
     .join('\\s+');
   return new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?![\\p{L}\\p{N}_])`, 'giu');
 }
