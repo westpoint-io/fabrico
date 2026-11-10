@@ -1300,14 +1300,15 @@ jobs:
   # GATE. It runs unless the classifier says the change is root markdown only: the gate skips only
   # on the exact string `false`, so a failed classifier, whose output is empty, runs it.
   #
-  # TIME LIMIT. 20 minutes is a first estimate from a local run of these steps. After the first
-  # GitHub run it becomes about 1.7 times that run's length.
+  # TIME LIMIT. The first GitHub run of this job took 5 min 51 s on a cold cargo cache (the facts
+  # step compiled fabrico-host for 74 s and the site build took 2 min 10 s). The limit is 1.7 times
+  # that, rounded up to the next whole minute.
   docs:
     name: the docs site builds and passes its checks
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
       CC_wasm32_unknown_unknown: clang
