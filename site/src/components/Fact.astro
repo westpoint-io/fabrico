@@ -1,0 +1,30 @@
+---
+// A value from the code on a page: <Fact id="limit.max_belt_tiles" />. The value comes from
+// src/generated/facts.json, which `npm run facts` writes from the source, so the page changes
+// when the code does. A wrong id fails the build. `bare` drops a quantity's unit, for a table
+// whose heading names it.
+//
+// It looks like the rest of the sentence on purpose: quantities are plain text, names and
+// messages are inline code, and shortcuts are one <kbd> per key. The title gives the source file
+// on hover, and data-fact lets the docs suite and the literal lint find the value in the built HTML.
+import facts from '../generated/facts.json';
+import { formatFact, resolveFact, type FactsFile } from '../lib/facts.ts';
+
+interface Props {
+  id?: string;
+  bare?: boolean;
+}
+
+const { id, bare } = Astro.props;
+const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
+const fact = resolveFact(id, page, facts as unknown as FactsFile);
+const view = formatFact(fact, { bare });
+const title = `Generated from ${fact.source}`;
+const className = view.kind === 'quantity' && view.bare ? 'fab-fact fab-fact-bare' : 'fab-fact';
+---
+
+{view.kind === 'quantity' && <span class={className} data-fact={id} title={title}>{view.text}</span>}
+{view.kind === 'code' && <code class={className} data-fact={id} title={title}>{view.text}</code>}
+{view.kind === 'shortcut' && (
+  <span class={className} data-fact={id} title={title}>{view.groups.map((group, g) => <Fragment>{g > 0 && ' or '}{group.map((key, k) => <Fragment>{k > 0 && '+'}<kbd>{key}</kbd></Fragment>)}</Fragment>)}{view.mac !== null && <Fragment> ({view.mac.map((group, g) => <Fragment>{g > 0 && ' or '}{group.map((key, k) => <Fragment>{k > 0 && '+'}<kbd>{key}</kbd></Fragment>)}</Fragment>)} on macOS)</Fragment>}</span>
+)}

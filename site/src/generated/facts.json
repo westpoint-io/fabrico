@@ -1,0 +1,33 @@
+{
+  "facts": {
+    "app.tick_pause_ms": {
+      "also": [
+        "milliseconds"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-host/src/sim_loop.rs",
+      "symbol": "TICK_PAUSE",
+      "unit": "ms",
+      "value": 16
+    },
+    "embed.ticks_per_second": {
+      "also": [
+        "ticks per second"
+      ],
+      "kind": "quantity",
+      "source": "frontend/src/embed/controller.ts",
+      "symbol": "TICKS_PER_SECOND",
+      "unit": "ticks a second",
+      "value": 60
+    },
+    "shortcut.playPause": {
+      "kind": "shortcut",
+      "label": "Space",
+      "labelMac": "Space",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    }
+  },
+  "machines": [],
+  "schema": 1
+}
