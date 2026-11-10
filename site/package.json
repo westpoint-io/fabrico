@@ -10,7 +10,8 @@
     "build:fixtures": "node ../frontend/scripts/build-site-assets.ts && node -e \"require('node:child_process').execFileSync(process.execPath, ['node_modules/astro/bin/astro.mjs', 'build'], { stdio: 'inherit', env: { ...process.env, FABRICO_DOCS_FIXTURES: '1' } })\"",
     "preview": "astro preview",
     "test:unit": "node --test \"tests/unit/*.test.ts\"",
-    "facts": "node scripts/facts.ts"
+    "facts": "node scripts/facts.ts",
+    "lint:facts": "node scripts/lint-fact-literals.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.7",
