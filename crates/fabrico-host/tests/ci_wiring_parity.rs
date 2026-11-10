@@ -1090,6 +1090,216 @@ fn the_wasm_job_checks_name_each_way_of_switching_them_off() {
     );
 }
 
+/// The exact lines the docs job runs: install the site's packages with no install script, regenerate
+/// the facts and fail when the committed file differs, both lints, the site's unit tests, the build
+/// and the docs suite. No other job runs any of them.
+const DOCS_RUN_LINES: [&str; 8] = [
+    "run: npm ci --ignore-scripts",
+    "run: npm run facts",
+    "run: git diff --exit-code -- site/src/generated/facts.json",
+    "run: npm run lint:prose",
+    "run: npm run lint:facts",
+    "run: npm run test:unit",
+    "run: bash scripts/build-site.sh",
+    "run: bash scripts/check-docs.sh",
+];
+/// The docs job's Node line. astro 7.4.4 refuses Node 22 below 22.23.4.
+const DOCS_NODE: &str = "node-version: 24";
+/// The classifier's second output, exported by the `changes` job.
+const DOCS_SUITE_OUTPUT: &str = "docs_suite: ${{ steps.classify.outputs.docs_suite }}";
+
+/// Everything wrong with how `yml` wires the docs job and the output its gate reads. Empty means
+/// right.
+fn docs_job_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let code: Vec<&str> = yml
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let job_lines = |job: &str| -> Vec<&str> {
+        blocks
+            .iter()
+            .find(|(id, _)| *id == job)
+            .map(|(_, lines)| lines.clone())
+            .unwrap_or_default()
+    };
+    let docs = job_lines(DOCS_JOB);
+    let changes = job_lines("changes");
+
+    for line in DOCS_RUN_LINES {
+        let in_job = docs.iter().filter(|l| step_key(l) == line).count();
+        let in_file = code.iter().filter(|l| step_key(l) == line).count();
+        if in_job != 1 || in_file != 1 {
+            wrong.push(format!(
+                "`{line}` appears {in_job} time(s) in job `{DOCS_JOB}` and {in_file} time(s) in \
+                 the workflow, expected 1 and 1."
+            ));
+        }
+    }
+
+    // The freshness diff is the very next command after the facts are regenerated, so nothing in
+    // between can rewrite or restore the file it compares.
+    let runs: Vec<&str> = docs
+        .iter()
+        .map(|l| step_key(l))
+        .filter(|l| l.starts_with("run:"))
+        .collect();
+    let facts_at = runs.iter().position(|l| *l == DOCS_RUN_LINES[1]);
+    let diff_at = runs.iter().position(|l| *l == DOCS_RUN_LINES[2]);
+    if let (Some(f), Some(d)) = (facts_at, diff_at)
+        && d != f + 1
+    {
+        wrong.push(format!(
+            "job `{DOCS_JOB}` runs `{}` as run line {d} and `{}` as run line {f}; the freshness \
+             diff must be the run line straight after the facts are regenerated.",
+            DOCS_RUN_LINES[2], DOCS_RUN_LINES[1]
+        ));
+    }
+
+    let node = docs.iter().filter(|l| **l == DOCS_NODE).count();
+    if node != 1 {
+        wrong.push(format!(
+            "`{DOCS_NODE}` appears {node} time(s) in job `{DOCS_JOB}`, expected 1. The site's \
+             astro refuses an older Node, so the job would fail on setup or test a Node nobody \
+             builds with."
+        ));
+    }
+
+    let in_changes = changes.iter().filter(|l| **l == DOCS_SUITE_OUTPUT).count();
+    let in_file = code.iter().filter(|l| **l == DOCS_SUITE_OUTPUT).count();
+    if in_changes != 1 || in_file != 1 {
+        wrong.push(format!(
+            "`{DOCS_SUITE_OUTPUT}` appears {in_changes} time(s) in job `changes` and {in_file} \
+             time(s) in the workflow, expected 1 and 1. Without it the docs gate reads an empty \
+             output on every push."
+        ));
+    }
+    wrong
+}
+
+/// The docs job regenerates the facts and fails on a difference, runs both lints and the site's
+/// unit tests, builds the site and runs the docs suite, on Node 24, reading the classifier's
+/// second output. Each run line is matched whole, so a trailing `|| true` drops it from the count.
+#[test]
+fn the_docs_job_builds_the_site_and_runs_every_check() {
+    let wrong = docs_job_wrong(CI_YML);
+    assert!(
+        wrong.is_empty(),
+        "the docs job isn't wired as it has to be:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// The docs job can't be switched off one step at a time: no `continue-on-error` anywhere in it,
+/// and no condition on a step that runs one of its checks.
+#[test]
+fn the_docs_job_cannot_be_switched_off_a_step_at_a_time() {
+    let wrong = step_guards_wrong(CI_YML, DOCS_JOB, &DOCS_RUN_LINES);
+    assert!(
+        wrong.is_empty(),
+        "the docs job carries a step condition or continue-on-error:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// `job_classes_wrong`, `gate_lines_wrong`, `docs_job_wrong` and `step_guards_wrong` can fail on the
+/// docs job: each break below is planted in a copy of the real workflow, and a check has to name it.
+#[test]
+fn the_docs_job_checks_name_each_way_of_switching_it_off() {
+    const DOCS_HEADER: &str = "    name: the docs site builds and passes its checks\n";
+    const FRESHNESS_STEP: &str = "      - name: Fail when the committed facts differ from the code\n";
+
+    let all = |yml: &str| {
+        let mut wrong = job_classes_wrong(yml);
+        wrong.extend(gate_lines_wrong(yml));
+        wrong.extend(docs_job_wrong(yml));
+        wrong.extend(step_guards_wrong(yml, DOCS_JOB, &DOCS_RUN_LINES));
+        wrong.join("\n")
+    };
+    let mut missed: Vec<String> = Vec::new();
+    let mut check = |what: &str, yml: String, must_name: &str| {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = all(&yml);
+        if !named.contains(must_name) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    };
+
+    // 1. The docs gate turned round to skip on `true`, which is the heavy gate's polarity.
+    check(
+        "the docs gate rewritten to != 'true'",
+        CI_YML.replace(
+            &format!("    {DOCS_GATE}\n"),
+            "    if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'true' }}\n",
+        ),
+        &format!("docs job `{DOCS_JOB}` is missing `{HEAVY_NEEDS}` (present: true) or the exact gate"),
+    );
+
+    // 2. A condition on the step that runs the docs suite.
+    check(
+        "`if: false` on the check-docs.sh step",
+        CI_YML.replace(
+            "        run: bash scripts/check-docs.sh\n",
+            "        if: false\n        run: bash scripts/check-docs.sh\n",
+        ),
+        &format!(
+            "the step that runs `run: bash scripts/check-docs.sh` in job `{DOCS_JOB}` carries `if: false`"
+        ),
+    );
+
+    // 3. continue-on-error on the whole job.
+    check(
+        "continue-on-error on the docs job",
+        CI_YML.replace(
+            DOCS_HEADER,
+            &format!("{DOCS_HEADER}    continue-on-error: true\n"),
+        ),
+        &format!("job `{DOCS_JOB}` carries `continue-on-error: true`"),
+    );
+
+    // 4. The freshness diff step taken out.
+    check(
+        "the freshness diff step deleted",
+        without_step(CI_YML, FRESHNESS_STEP),
+        &format!("`{}` appears 0 time(s) in job `{DOCS_JOB}`", DOCS_RUN_LINES[2]),
+    );
+
+    // 5. The docs job on Node 22.
+    check(
+        "node-version 24 changed to 22 in the docs job",
+        CI_YML.replace(&format!("          {DOCS_NODE}\n"), "          node-version: 22\n"),
+        &format!("`{DOCS_NODE}` appears 0 time(s) in job `{DOCS_JOB}`"),
+    );
+
+    // 6. The changes job stops exporting docs_suite.
+    check(
+        "the docs_suite output removed from the changes job",
+        CI_YML.replace(&format!("      {DOCS_SUITE_OUTPUT}\n"), ""),
+        &format!("`{DOCS_SUITE_OUTPUT}` appears 0 time(s) in job `changes`"),
+    );
+
+    // 7. The docs job's needs line taken out.
+    check(
+        "the docs job's needs: changes removed",
+        CI_YML.replace(
+            &format!("{DOCS_HEADER}    {HEAVY_NEEDS}\n"),
+            DOCS_HEADER,
+        ),
+        &format!("docs job `{DOCS_JOB}` is missing `{HEAVY_NEEDS}` (present: false)"),
+    );
+
+    assert!(
+        missed.is_empty(),
+        "{} planted break(s) went unnamed:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+}
+
 /// Rule (f) of `ci_spend_controls_are_wired_fail_safe` over any workflow text: every non-comment
 /// line that reads the classifier's output is `HEAVY_GATE`, or is `DOCS_GATE` inside `DOCS_JOB`,
 /// and `DOCS_GATE` appears exactly once in the file. Empty means right.
