@@ -30,6 +30,21 @@
 #   - a tracked file whose name says text but which holds a NUL byte. That is UTF-16 or a
 #     smuggled binary, and the byte search below cannot read either reliably.
 #
+# THE DOCS SITE FAMILY, for tracked files under `site/` only. The published docs pages are
+# written beside the private planning notes, which label their work with ids a reader of
+# the site can't look up. Under `site/` four more patterns must match nothing:
+#   - a phase id: `phase` or `Phase`, an optional space or hyphen, then a digit;
+#   - a requirement id: one of the requirement prefixes, a hyphen and two digits, with no
+#     letter or digit on either side (`SITE-04`);
+#   - a plan id: `plan` or `Plan`, an optional space or hyphen, a number of two or three
+#     digits with an optional `.N`, a hyphen and two digits (`plan 96-03`);
+#   - a decision id: `D-` and two digits, with no letter or digit on either side.
+# A date such as 2026-11-09 matches none of them. The family is scoped to `site/` because
+# code comments elsewhere in the tree cite phase and plan ids on purpose, as a pointer to
+# the history of a rule; on a published page the same id is a dead reference. The run
+# prints how many `site/` files the family searched. It has no floor of its own, because a
+# tree with no `site/` is a legitimate tree; the main scan's floor still applies.
+#
 # The names are stored rot13-encoded and decoded when the script starts, so this file
 # does not itself spell them out. The encoding hides nothing from a reader; it only keeps
 # a plain-text search of the tree from finding them here.
@@ -114,6 +129,17 @@ PATTERNS=(
     "desktop environment	i	omarchy"
     "window manager	i	hyprland"
     "first name, as a word	-	${WB}${P_FIRST}${NB}"
+)
+
+# The docs site family: searched only in tracked paths that start with `site/`. Same
+# `label<TAB>flags<TAB>ERE` form. See THE DOCS SITE FAMILY above.
+SITE_PREFIX="site/"
+REQ_PREFIXES='BOARD|CONC|EMBED|ENGINE|HELP|LATER|LAUNCH|OFFLINE|PAT|REF|SITE|START|WASM'
+SITE_PATTERNS=(
+    "phase id under site/	-	[Pp]hase[ -]?[0-9]"
+    "requirement id under site/	-	(^|[^A-Za-z0-9])(${REQ_PREFIXES})-[0-9]{2}([^A-Za-z0-9]|$)"
+    "plan id under site/	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
+    "decision id under site/	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
 )
 
 EXCLUSIONS=(
@@ -285,19 +311,23 @@ is_allowed() {
 
 # --- The assertion -------------------------------------------------------------------
 GREP_ERR="${SCAN_TMPDIR}/grep.err"
-echo "asserting ${#PATTERNS[@]} pattern(s) match nothing:"
-for entry in "${PATTERNS[@]}"; do
+
+# assert_absent SET_FILE SET_COUNT ENTRY: searches the NUL-delimited paths in SET_FILE for
+# the entry's pattern, names every offending line, and sets `failed` or `cannot_assert`.
+assert_absent() {
+    local set_file="$1" set_count="$2" entry="$3"
+    local label flags regex hits found hit hit_file rest hit_line hit_text
+    local case_flag=()
     IFS='	' read -r label flags regex <<<"$entry"
-    case_flag=()
     if [ "$flags" = "i" ]; then
         case_flag=(-i)
     fi
     hits=""
-    if [ "$scan_count" -gt 0 ]; then
+    if [ "$set_count" -gt 0 ]; then
         # grep exits 1 for "no match" and 2 for an error, and xargs folds both into 123, so
         # an error is told apart by its message: any message means a file went unread.
         # A NUL in a matched line is printed as `?`; bash would drop it with a warning.
-        hits="$(xargs -0 grep -a -H -n -E ${case_flag[@]+"${case_flag[@]}"} -e "$regex" -- <"$SCAN_SET" 2>"$GREP_ERR" | tr '\000' '?')"
+        hits="$(xargs -0 grep -a -H -n -E ${case_flag[@]+"${case_flag[@]}"} -e "$regex" -- <"$set_file" 2>"$GREP_ERR" | tr '\000' '?')"
         if [ -s "$GREP_ERR" ]; then
             echo "FAIL: searching for the ${label} pattern reported an error, so a file may" >&2
             echo "      have gone unread:" >&2
@@ -330,6 +360,11 @@ for entry in "${PATTERNS[@]}"; do
     else
         echo "  ${label}: 0"
     fi
+}
+
+echo "asserting ${#PATTERNS[@]} pattern(s) match nothing:"
+for entry in "${PATTERNS[@]}"; do
+    assert_absent "$SCAN_SET" "$scan_count" "$entry"
 done
 
 # --- Text files that hold a NUL -------------------------------------------------------
@@ -358,6 +393,24 @@ else
     echo "  text file holding NUL bytes: 0"
 fi
 
+# --- The docs site family, over tracked paths under site/ -----------------------------
+SITE_SET="${SCAN_TMPDIR}/site.z"
+: >"$SITE_SET"
+site_count=0
+while IFS= read -r -d '' path; do
+    case "$path" in
+        "$SITE_PREFIX"*)
+            printf '%s\0' "$path" >>"$SITE_SET"
+            site_count=$((site_count + 1))
+            ;;
+    esac
+done <"$SCAN_SET"
+echo "site/ scan set: ${site_count} tracked file(s) under ${SITE_PREFIX} searched"
+echo "asserting ${#SITE_PATTERNS[@]} docs site pattern(s) match nothing under ${SITE_PREFIX}:"
+for entry in "${SITE_PATTERNS[@]}"; do
+    assert_absent "$SITE_SET" "$site_count" "$entry"
+done
+
 if [ "$cannot_assert" -ne 0 ]; then
     echo >&2
     echo "EXIT 2: this run could not MAKE its assertion (see above). That is a FAILURE," >&2
@@ -372,5 +425,5 @@ if [ "$failed" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: no private residue in ${scan_count} tracked file(s); positive control found in ${control_hits}."
+echo "OK: no private residue in ${scan_count} tracked file(s), ${site_count} of them under ${SITE_PREFIX} also free of planning ids; positive control found in ${control_hits}."
 exit 0

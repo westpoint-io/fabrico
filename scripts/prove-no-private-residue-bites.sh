@@ -40,6 +40,10 @@
 #       gate under another name bites; the three allowed `.gitignore` lines pass, and a
 #       comment line in `.gitignore` naming them bites; an UNTRACKED probe passes, because
 #       the scan is tracked files only.
+#   S   THE DOCS SITE FAMILY. A phase id, a requirement id, a plan id and a decision id in
+#       a tracked file under `site/` each exit EXACTLY 1 and name the file; the same phase
+#       id in a `crates/` file exits 0, because code elsewhere cites those ids on purpose;
+#       and a `site/` file holding a date exits 0, because a date is not a plan id.
 #   X   COULD NOT ASSERT. A scan set below the floor, a positive control that cannot be
 #       found, and a missing exclusion must each exit EXACTLY 2, never 0.
 #
@@ -99,7 +103,7 @@ HANDLE="$(rot13 'zniqv')"
 FIRST_UP="$(printf '%s' "$FIRST" | tr 'a-z' 'A-Z')"
 HOME_ROOT="/home"
 
-DECLARED_TOTAL=52
+DECLARED_TOTAL=58
 
 # The gate runs under a UTF-8 locale when this machine has one, as it does on CI's ubuntu
 # runners. That is the locale in which GNU grep classes a file holding one Latin-1 byte as
@@ -290,6 +294,26 @@ check E4 0 "-"
 new_repo
 printf '%s\n' "Drafted with Claude." >"$REPO/untracked-probe.md"
 check E5 0 "-"
+
+echo "prove-no-private-residue-bites: the docs site family (site/ only)"
+new_repo
+track "site/src/content/docs/concepts/index.md" "The belt rules arrive in phase 97."
+check S1 1 "site/src/content/docs/concepts/index.md"
+new_repo
+track "crates/probe/src/lib.rs" "// The belt rules arrive in phase 97."
+check S2 0 "-"
+new_repo
+track "site/src/content/docs/reference/index.mdx" "Generated facts cover SITE-04."
+check S3 1 "site/src/content/docs/reference/index.mdx"
+new_repo
+track "site/src/content/docs/get-started/index.mdx" "Written in plan 96-03."
+check S4 1 "site/src/content/docs/get-started/index.mdx"
+new_repo
+track "site/src/content/docs/patterns/index.mdx" "Search follows D-07."
+check S5 1 "site/src/content/docs/patterns/index.mdx"
+new_repo
+track "site/src/generated/facts.json" '{ "generated": "2026-11-09", "schema": 1 }'
+check S6 0 "-"
 
 echo "prove-no-private-residue-bites: could not assert"
 new_repo
