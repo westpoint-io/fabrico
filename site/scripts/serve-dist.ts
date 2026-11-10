@@ -4,7 +4,9 @@
 //
 // The site is built with the base /fabrico, so every link in it starts with /fabrico/, while Astro
 // writes the files at the top of the folder. This server mounts the folder at /fabrico/:
-// /fabrico/x/ serves <folder>/x/index.html and /fabrico/x.png serves <folder>/x.png. A path outside
+// /fabrico/x/ serves <folder>/x/index.html and /fabrico/x.png serves <folder>/x.png. A folder
+// that holds an index.html, asked for without the trailing slash (/fabrico/x, or /fabrico itself),
+// gets status 301 to the same path with the slash and the same query, as Pages does. A path outside
 // /fabrico/, a path that would leave the folder, and a file that isn't there all get status 404
 // with <folder>/404.html as the body, as Pages does. It listens on 127.0.0.1 only and prints one
 // line once it is listening:
@@ -80,8 +82,26 @@ function notFound(res: http.ServerResponse): void {
   res.end(fs.existsSync(page) ? fs.readFileSync(page) : 'Not found');
 }
 
+/**
+ * True when a request path without a trailing slash names a folder inside the build that holds an
+ * index.html: /fabrico itself, or /fabrico/x where <folder>/x/index.html exists. fileFor keeps the
+ * folder inside the build, so the redirect never points outside /fabrico/.
+ */
+function isFolderWithoutSlash(urlPath: string): boolean {
+  if (urlPath.endsWith('/')) return false;
+  if (`${urlPath}/` === BASE) return fs.existsSync(path.join(dist, 'index.html'));
+  const folder = fileFor(urlPath);
+  return folder !== null && fs.existsSync(path.join(folder, 'index.html')) && fs.statSync(folder).isDirectory();
+}
+
 const server = http.createServer((req, res) => {
-  const urlPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const urlPath = url.pathname;
+  if (isFolderWithoutSlash(urlPath)) {
+    res.writeHead(301, { location: `${urlPath}/${url.search}`, 'cache-control': 'no-store' });
+    res.end();
+    return;
+  }
   const file = fileFor(urlPath);
   if (file === null || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     notFound(res);

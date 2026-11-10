@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { PUBLISHED_ROOT, docsUrl, fetchText, locsOf, sitemapPages, toLocal } from './support/site.ts';
+import { PUBLISHED_ROOT, docsRoot, docsUrl, fetchText, locsOf, sitemapPages, toLocal } from './support/site.ts';
 
 // What a crawler or a link preview reads, fetched with no browser: each page's title, description,
 // canonical link, preview-image tags and first paragraph; the sitemap; the preview image itself;
@@ -165,6 +165,28 @@ test('the preview image is served as a 1200 x 630 PNG', async () => {
   const png = Buffer.from(await response.arrayBuffer());
   expect(png.subarray(1, 4).toString('latin1'), 'og/default.png PNG signature').toBe('PNG');
   expect([png.readUInt32BE(16), png.readUInt32BE(20)], 'og/default.png width and height').toEqual([1200, 630]);
+});
+
+test('a folder asked for without its trailing slash gets status 301 to the path with the slash, query kept', async () => {
+  // GitHub Pages answers this way, so a link written without the slash works once published. The
+  // static link check accepts `x` for `x/index.html`, and the served site must agree with it.
+  const origin = new URL(docsRoot()).origin;
+  const cases: [string, string][] = [
+    ['/fabrico/get-started', '/fabrico/get-started/'],
+    ['/fabrico/get-started?from=probe', '/fabrico/get-started/?from=probe'],
+    ['/fabrico', '/fabrico/'],
+  ];
+  for (const [asked, location] of cases) {
+    const response = await fetch(origin + asked, { redirect: 'manual' });
+    expect(response.status, `${asked} status`).toBe(301);
+    expect(response.headers.get('location'), `${asked} location`).toBe(location);
+    const followed = await fetch(origin + asked);
+    expect(followed.status, `${asked}, redirect followed, status`).toBe(200);
+  }
+  const missing = await fetch(`${origin}/fabrico/no-such-page`, { redirect: 'manual' });
+  expect(missing.status, '/fabrico/no-such-page status').toBe(404);
+  const file = await fetch(`${origin}/fabrico/og/default.png`, { redirect: 'manual' });
+  expect(file.status, '/fabrico/og/default.png, a file, status').toBe(200);
 });
 
 test('an unknown address gets status 404 and the not-found page', async () => {
