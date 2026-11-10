@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "sections": [
+    { "name": "Get started", "folder": "get-started", "pages": ["get-started/index.mdx"] },
+    { "name": "Concepts", "folder": "concepts", "pages": ["concepts/index.mdx"] },
+    { "name": "Reference", "folder": "reference", "pages": ["reference/index.mdx"] },
+    { "name": "Patterns", "folder": "patterns", "pages": ["patterns/index.mdx"] },
+    { "name": "Troubleshooting", "folder": "troubleshooting", "pages": ["troubleshooting/index.mdx"] },
+    { "name": "Contributing", "folder": "contributing", "pages": ["contributing/index.mdx"] }
+  ]
+}

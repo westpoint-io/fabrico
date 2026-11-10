@@ -92,3 +92,18 @@ export async function fixturePage(name: string): Promise<string> {
 export function boardNames(html: string): string[] {
   return [...html.matchAll(/<fabrico-board\b[^>]*?\sname="([^"]*)"/g)].map((m) => m[1]);
 }
+
+/**
+ * The built file a source page becomes, by its path under site/src/content/docs/, as a path under
+ * the build folder: `get-started/index.mdx` is `get-started/index.html`, `concepts/belts.md` is
+ * `concepts/belts/index.html`, and the root `index.mdx` is `index.html`. Throws on a path that
+ * isn't a .md or .mdx file.
+ */
+export function distFileFor(sourcePath: string): string {
+  const match = /^(.*?)\.mdx?$/.exec(sourcePath);
+  if (match === null) throw new Error(`${sourcePath} is not a .md or .mdx page`);
+  const stem = match[1];
+  if (stem === 'index') return 'index.html';
+  if (stem.endsWith('/index')) return `${stem}.html`;
+  return `${stem}/index.html`;
+}
