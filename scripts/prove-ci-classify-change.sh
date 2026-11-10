@@ -29,20 +29,30 @@
 #          workflow_dispatch, schedule, an empty event, an empty / all-zero / missing /
 #          revision-expression push base, an empty pull_request base. F9 unsets
 #          GITHUB_OUTPUT and requires a non-zero exit and an output file with no line.
+#   F10    GITHUB_OUTPUT names a directory, which can't be appended to: a non-zero exit,
+#          and the directory stays empty, so neither output line exists anywhere.
 #   S1-S5  SHAPES built in a second throwaway repository: a rename out of code into a
 #          root markdown file (false/true, only visible with --no-renames), a root README
 #          change (true/false), a docs/ markdown change (false/true), a markdown change
 #          under crates/ (false/true), and a depth-2 shallow clone over a root-README-only
 #          range (false/true, the shallow rule alone decides it).
-#   S6     a change only under site/ (true/true).
+#   S6-S13 THE DOCS SITE, both directions: a change only under site/ (true/true), site/
+#          plus root markdown (true/true); site/ plus frontend/src (false/true), site/ plus
+#          crates/ (false/true), a rename from frontend/src into site/ (false/true, only
+#          visible with --no-renames), docs/site/x.md (false/true), a root file named
+#          site.txt (false/true) and a sites/ folder (false/true).
+#   I1     IDEMPOTENCY: S6's push classified twice into two fresh output files gives two
+#          byte-identical files.
 #
 # Every case except F9 must exit 0 and leave EXACTLY TWO lines in its own fresh
 # GITHUB_OUTPUT file, one `docs_only=` and one `docs_suite=`. All five CLASSIFY_*
 # variables are unset before each case and only the ones that case names are set, so
 # nothing leaks from the previous case.
 #
-# NON-VACUITY. The number of executed cases must equal the declared total, and at least
-# one true and one false docs_only outcome must have been observed, or this exits 1.
+# NON-VACUITY. The number of executed cases must equal the declared total, at least one
+# true and one false docs_only outcome must have been observed, and each of the three
+# pairs true/false, true/true and false/true must have come out of a case that expected
+# it, or this exits 1.
 #
 # EXIT CODES (the repository's prover convention):
 #   0  every case as expected.
@@ -87,7 +97,7 @@ prover_on_exit remove_tmproot
 # shellcheck disable=SC2119  # no probes: this run writes only under mktemp -d
 prover_isolate_untracked
 
-DECLARED_TOTAL=24
+DECLARED_TOTAL=33
 executed=0
 saw_true=0
 saw_false=0
@@ -130,7 +140,21 @@ run_case() {
             echo "  $id: WRONG, exit $rc but an output line was written"
             failures+=("$id: exit $rc, but the output file holds a line")
         else
-            echo "  $id: exit $rc as required (GITHUB_OUTPUT unset), no line written"
+            # A case may name GITHUB_OUTPUT itself (F10, a directory). Whatever it names must
+            # still hold nothing afterwards.
+            local arg target=""
+            for arg in "$@"; do
+                case "$arg" in GITHUB_OUTPUT=*) target="${arg#GITHUB_OUTPUT=}" ;; esac
+            done
+            if [ -n "$target" ] && [ -d "$target" ] && [ -n "$(ls -A "$target")" ]; then
+                echo "  $id: WRONG, exit $rc but something was written under $target"
+                failures+=("$id: exit $rc, but $target is no longer empty")
+            elif [ -n "$target" ] && [ -f "$target" ] && [ -s "$target" ]; then
+                echo "  $id: WRONG, exit $rc but $target holds a line"
+                failures+=("$id: exit $rc, but $target holds a line")
+            else
+                echo "  $id: exit $rc as required, no line written"
+            fi
         fi
         return
     fi
@@ -241,6 +265,9 @@ run_case F6 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$MISSIN
 run_case F7 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="${R1_AFTER}^" CLASSIFY_PUSH_AFTER="$R1_AFTER"
 run_case F8 false/true "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE= CLASSIFY_PR_HEAD="$R1_AFTER"
 run_case F9 nonzero "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=push
+mkdir -p "$TMPROOT/output-is-a-directory" || exit 2
+run_case F10 nonzero "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=push \
+    GITHUB_OUTPUT="$TMPROOT/output-is-a-directory"
 
 echo "prove-ci-classify-change: shapes in a second throwaway repository"
 REPO="$TMPROOT/repo"
@@ -276,12 +303,58 @@ mkdir -p "$REPO/site/src/content/docs"
 printf -- '---\ntitle: x\n---\n' >"$REPO/site/src/content/docs/x.md"
 printf '{ "name": "site" }\n' >"$REPO/site/package.json"
 if ! C6="$(commit_all c6-site-only)"; then exit 2; fi
+printf -- '---\ntitle: y\n---\n' >"$REPO/site/src/content/docs/y.md"
+printf '# readme\nmore\nagain\nsite\n' >"$REPO/README.md"
+if ! C7="$(commit_all c7-site-and-root-markdown)"; then exit 2; fi
+mkdir -p "$REPO/frontend/src"
+printf 'export const g = 1;\n' >"$REPO/frontend/src/g.ts"
+printf -- '---\ntitle: y2\n---\n' >"$REPO/site/src/content/docs/y.md"
+if ! C8="$(commit_all c8-site-and-frontend)"; then exit 2; fi
+printf 'fn b() {}\n' >"$REPO/crates/x/lib.rs"
+printf -- '---\ntitle: y3\n---\n' >"$REPO/site/src/content/docs/y.md"
+if ! C9="$(commit_all c9-site-and-crates)"; then exit 2; fi
+g mv frontend/src/g.ts site/g.ts || exit 2
+if ! C10="$(commit_all c10-rename-frontend-into-site)"; then exit 2; fi
+mkdir -p "$REPO/docs/site"
+printf '# not the site\n' >"$REPO/docs/site/x.md"
+if ! C11="$(commit_all c11-docs-site-folder)"; then exit 2; fi
+printf 'not the site\n' >"$REPO/site.txt"
+if ! C12="$(commit_all c12-root-site-txt)"; then exit 2; fi
+mkdir -p "$REPO/sites"
+printf '# not the site\n' >"$REPO/sites/x.md"
+if ! C13="$(commit_all c13-sites-folder)"; then exit 2; fi
 
 run_case S1 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C0" CLASSIFY_PUSH_AFTER="$C1"
 run_case S2 true/false "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C1" CLASSIFY_PUSH_AFTER="$C2"
 run_case S3 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C2" CLASSIFY_PUSH_AFTER="$C3"
 run_case S4 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C3" CLASSIFY_PUSH_AFTER="$C4"
 run_case S6 true/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C5" CLASSIFY_PUSH_AFTER="$C6"
+run_case S7 true/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C6" CLASSIFY_PUSH_AFTER="$C7"
+run_case S8 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C7" CLASSIFY_PUSH_AFTER="$C8"
+run_case S9 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C8" CLASSIFY_PUSH_AFTER="$C9"
+run_case S10 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C9" CLASSIFY_PUSH_AFTER="$C10"
+run_case S11 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C10" CLASSIFY_PUSH_AFTER="$C11"
+run_case S12 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C11" CLASSIFY_PUSH_AFTER="$C12"
+run_case S13 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C12" CLASSIFY_PUSH_AFTER="$C13"
+
+echo "prove-ci-classify-change: the same push classified twice"
+executed=$((executed + 1))
+I1_A="$TMPROOT/idem-a"
+I1_B="$TMPROOT/idem-b"
+for f in "$I1_A" "$I1_B"; do
+    (cd "$REPO" && env -u CLASSIFY_PR_BASE -u CLASSIFY_PR_HEAD GITHUB_OUTPUT="$f" \
+        CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C5" CLASSIFY_PUSH_AFTER="$C6" \
+        bash "$CLASSIFIER") >/dev/null 2>&1
+done
+if [ ! -s "$I1_A" ] || [ "$(wc -l <"$I1_A" | tr -d ' ')" != "2" ]; then
+    echo "  I1: WRONG, the first run did not write two lines"
+    failures+=("I1: the first run did not write exactly two lines")
+elif ! cmp -s "$I1_A" "$I1_B"; then
+    echo "  I1: WRONG, two runs over the same push wrote different files"
+    failures+=("I1: two runs over the same push wrote different output files")
+else
+    echo "  I1: two runs over the same push wrote the same two lines"
+fi
 
 SHALLOW="$TMPROOT/shallow"
 if ! git -c core.hooksPath=/dev/null clone -q --depth 2 "file://$REPO" "$SHALLOW" 2>/dev/null; then
@@ -301,6 +374,12 @@ fi
 if [ "$saw_true" -ne 1 ] || [ "$saw_false" -ne 1 ]; then
     failures+=("both outcomes must be observed (saw true: $saw_true, saw false: $saw_false)")
 fi
+for pair in true/false true/true false/true; do
+    case "$seen_pairs" in
+        *" $pair "*) ;;
+        *) failures+=("outcome pair $pair was never observed as expected (seen:${seen_pairs% })") ;;
+    esac
+done
 
 if [ "${#failures[@]}" -gt 0 ]; then
     echo "NOT PROVEN: ${#failures[@]} problem(s):"
@@ -309,5 +388,5 @@ if [ "${#failures[@]}" -gt 0 ]; then
     done
     exit 1
 fi
-echo "PROVEN: $executed of $DECLARED_TOTAL cases as expected; both outcomes observed (true and false)."
+echo "PROVEN: $executed of $DECLARED_TOTAL cases as expected; all three outcome pairs observed (true/false, true/true, false/true)."
 exit 0
