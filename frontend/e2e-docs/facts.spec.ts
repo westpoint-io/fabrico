@@ -93,3 +93,41 @@ test('the Reference page shows the board tick rate and the play/pause shortcut',
   const playPause = page.locator('main [data-fact="shortcut.playPause"] kbd');
   await expect(playPause).toHaveText(['Space']);
 });
+
+test('a key in a shortcut fact looks like a key: 12 px, ink on panel fill, square, lit and shadow bands', async ({ page }) => {
+  await page.goto(docsUrl('reference/'), { waitUntil: 'load' });
+  const look = await page.locator('main [data-fact="shortcut.playPause"] kbd').evaluate((kbd) => {
+    // Each token resolved to the colour the browser computes, through a probe element.
+    const resolve = (token: string): string => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${token})`;
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    };
+    const style = getComputedStyle(kbd);
+    return {
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fontFamily: style.fontFamily,
+      color: style.color,
+      background: style.backgroundColor,
+      radius: style.borderTopLeftRadius,
+      padding: `${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft}`,
+      shadow: style.boxShadow,
+      ink: resolve('--fab-ink'),
+      panel: resolve('--fab-panel-fill'),
+      lit: resolve('--fab-edge-lit'),
+      dark: resolve('--fab-edge-shadow'),
+    };
+  });
+  expect(look.fontSize).toBe('12px');
+  expect(look.fontWeight).toBe('400');
+  expect(look.fontFamily).toContain('Martian Mono');
+  expect(look.color).toBe(look.ink);
+  expect(look.background).toBe(look.panel);
+  expect(look.radius).toBe('0px');
+  expect(look.padding).toBe('0px 4px 0px 4px');
+  expect(look.shadow).toBe(`${look.lit} 0px 1px 0px 0px inset, ${look.dark} 0px -1px 0px 0px inset`);
+});

@@ -225,6 +225,30 @@ mobile-starlight-toc a[aria-current='true'] {
   padding: 0 var(--fab-space-xs);
 }
 
+/*
+ * Facts from the code (components/Fact.astro). A quantity is plain text in the sentence's own font,
+ * size and colour, on purpose, so a paragraph with several facts doesn't read as a row of chips.
+ * A bare number lines its digits up for tables.
+ */
+.fab-fact-bare {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keys: 12 px, ink on panel fill, 4 px each side, a lit band on top and a shadow band below. */
+.sl-markdown-content kbd:not(:where(.not-content *)) {
+  font-family: var(--site-font);
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--fab-ink);
+  background-color: var(--fab-panel-fill);
+  padding: 0 var(--fab-space-xs);
+  border: 0;
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 var(--fab-edge-lit),
+    inset 0 -1px 0 var(--fab-edge-shadow);
+}
+
 /* Tables: numbers line up in the fallback face too. */
 .sl-markdown-content table:not(:where(.not-content *)) {
   font-variant-numeric: tabular-nums;

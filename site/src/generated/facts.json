@@ -10,6 +10,114 @@
       "unit": "ms",
       "value": 16
     },
+    "config.Belt": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Belt"
+    },
+    "config.Belt.ticks_per_slot": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "ticks_per_slot"
+    },
+    "config.Endpoint": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Endpoint"
+    },
+    "config.Endpoint.path": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "path"
+    },
+    "config.Factory": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Factory"
+    },
+    "config.Factory.source": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "source"
+    },
+    "config.Label": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Label"
+    },
+    "config.Label.colour": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "colour"
+    },
+    "config.Label.h": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "h"
+    },
+    "config.Label.text": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "text"
+    },
+    "config.Label.w": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "w"
+    },
+    "config.Router": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Router"
+    },
+    "config.Router.default": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "default"
+    },
+    "config.Router.routes": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "routes"
+    },
+    "config.Sink": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Sink"
+    },
+    "config.Sink.target": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "target"
+    },
+    "config.Source": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "Source"
+    },
+    "config.Source.trigger": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MachineConfig",
+      "value": "trigger"
+    },
     "embed.ticks_per_second": {
       "also": [
         "ticks per second"
@@ -20,14 +128,1139 @@
       "unit": "ticks a second",
       "value": 60
     },
+    "fault.BranchBusy": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "BranchBusy"
+    },
+    "fault.CommandFailure": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "CommandFailure"
+    },
+    "fault.CommandTimeout": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "CommandTimeout"
+    },
+    "fault.FactoryError": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "FactoryError"
+    },
+    "fault.FactoryTimeout": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "FactoryTimeout"
+    },
+    "fault.NoEntryWire": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "NoEntryWire"
+    },
+    "fault.NoMatch": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "NoMatch"
+    },
+    "fault.OutputRefused": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "OutputRefused"
+    },
+    "fault.WireOverflow": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/fault.rs",
+      "symbol": "FaultReason",
+      "value": "WireOverflow"
+    },
+    "limit.default_ticks_per_slot": {
+      "also": [
+        "ticks per slot"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/belt_slots.rs",
+      "symbol": "DEFAULT_TICKS_PER_SLOT",
+      "unit": "ticks a slot",
+      "value": 2
+    },
+    "limit.endpoint_deadline_ticks": {
+      "also": [
+        "ticks for a reply"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-engine/src/envelope.rs",
+      "symbol": "DEFAULT_ENDPOINT_DEADLINE_TICKS",
+      "unit": "ticks to reply",
+      "value": 300
+    },
+    "limit.endpoint_ingress_capacity": {
+      "also": [
+        "queued requests"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-host/src/ingress/endpoint.rs",
+      "symbol": "ENDPOINT_INGRESS_CAPACITY",
+      "unit": "waiting requests",
+      "value": 256
+    },
+    "limit.factory_emits_per_port": {
+      "also": [
+        "emits per port"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "FACTORY_EMITS_PER_PORT",
+      "unit": "emits a port",
+      "value": 16
+    },
+    "limit.factory_gas_budget": {
+      "also": [
+        "gas units per tick"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "DEFAULT_GAS_BUDGET",
+      "unit": "gas units a tick",
+      "value": 256
+    },
+    "limit.factory_memory": {
+      "also": [
+        "MiB of memory"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "DEFAULT_MEM_LIMIT",
+      "unit": "MiB",
+      "value": 8
+    },
+    "limit.factory_stack_desktop": {
+      "also": [
+        "KiB of stack"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "DEFAULT_STACK_LIMIT",
+      "unit": "KiB",
+      "value": 512
+    },
+    "limit.fault_queue_cap": {
+      "also": [
+        "faults per machine"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/admit.rs",
+      "symbol": "FAULT_QUEUE_CAP",
+      "unit": "faults a machine",
+      "value": 16
+    },
+    "limit.grid_max": {
+      "also": [],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "GRID_MAX",
+      "unit": "on each axis",
+      "value": 512
+    },
+    "limit.grid_min": {
+      "also": [],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "GRID_MIN",
+      "unit": "on each axis",
+      "value": -512
+    },
+    "limit.label_max_h": {
+      "also": [
+        "cells tall"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-command/src/command.rs",
+      "symbol": "LABEL_MAX_H",
+      "unit": "cells deep",
+      "value": 8
+    },
+    "limit.label_max_w": {
+      "also": [],
+      "kind": "quantity",
+      "source": "crates/fabrico-command/src/command.rs",
+      "symbol": "LABEL_MAX_W",
+      "unit": "cells wide",
+      "value": 16
+    },
+    "limit.max_belt_tiles": {
+      "also": [
+        "tiles a belt",
+        "tiles per belt",
+        "belt tiles"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MAX_BELT_TILES",
+      "unit": "tiles",
+      "value": 1024
+    },
+    "limit.max_config_bytes": {
+      "also": [
+        "MiB a config",
+        "MiB per config"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MAX_CONFIG_BYTES",
+      "unit": "MiB",
+      "value": 4
+    },
+    "limit.max_endpoint_path_bytes": {
+      "also": [
+        "bytes per path"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MAX_ENDPOINT_PATH_BYTES",
+      "unit": "bytes a path",
+      "value": 1024
+    },
+    "limit.max_footprint_dim": {
+      "also": [
+        "cells per side"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "MAX_FOOTPRINT_DIM",
+      "unit": "cells a side",
+      "value": 64
+    },
+    "limit.max_label_bytes": {
+      "also": [
+        "bytes per label"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MAX_LABEL_BYTES",
+      "unit": "bytes a label",
+      "value": 512
+    },
+    "limit.max_route_expect_bytes": {
+      "also": [
+        "bytes per route match"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MAX_ROUTE_EXPECT_BYTES",
+      "unit": "bytes a route match",
+      "value": 1024
+    },
+    "limit.max_routes": {
+      "also": [
+        "routes a Router",
+        "routes per Router"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "MAX_ROUTES",
+      "unit": "routes",
+      "value": 1024
+    },
+    "limit.mechanical_inbox_cap": {
+      "also": [
+        "items per inbox"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/admit.rs",
+      "symbol": "MECHANICAL_INBOX_CAP",
+      "unit": "items an inbox",
+      "value": 16
+    },
+    "limit.router_out_arity": {
+      "also": [
+        "Router outputs"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-command/src/command.rs",
+      "symbol": "ROUTER_OUT_ARITY",
+      "unit": "outputs a Router",
+      "value": 3
+    },
+    "limit.slots_per_tile": {
+      "also": [
+        "slots per tile"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/belt_slots.rs",
+      "symbol": "SLOTS_PER_TILE",
+      "unit": "slots a tile",
+      "value": 4
+    },
+    "limit.source_pending_cap": {
+      "also": [
+        "pending items per Source"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/admit.rs",
+      "symbol": "SOURCE_PENDING_CAP",
+      "unit": "pending items a Source",
+      "value": 16
+    },
+    "limit.wire_budget": {
+      "also": [
+        "wire forwards"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/wire.rs",
+      "symbol": "DEFAULT_WIRE_BUDGET",
+      "unit": "forwards",
+      "value": 64
+    },
+    "limit.wire_inflight_cap": {
+      "also": [
+        "wire requests in flight"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/wire.rs",
+      "symbol": "WIRE_INFLIGHT_CAP",
+      "unit": "requests in flight",
+      "value": 256
+    },
+    "machine.Balancer.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "4"
+    },
+    "machine.Belt.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "1"
+    },
+    "machine.Endpoint.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "9"
+    },
+    "machine.Factory.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "2"
+    },
+    "machine.Handler.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "10"
+    },
+    "machine.Label.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "11"
+    },
+    "machine.Merge.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "6"
+    },
+    "machine.Router.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "5"
+    },
+    "machine.Sink.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "7"
+    },
+    "machine.Source.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "0"
+    },
+    "machine.Tee.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "3"
+    },
+    "machine.Wire.kind": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "machine_kind",
+      "value": "8"
+    },
+    "refusal.BeltEndTaken": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That belt end is already joined. Use a free end."
+    },
+    "refusal.BeltEndsApart": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "These ends do not touch."
+    },
+    "refusal.BeltJoinTurnsBack": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A join cannot turn back the way it came."
+    },
+    "refusal.BeltNotPlaceable": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A belt is drawn, not placed. Use the Belt tool."
+    },
+    "refusal.BeltTooLong": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That belt is too long. Draw it in shorter runs."
+    },
+    "refusal.BoardChanged": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "The board changed first. That edit was not made."
+    },
+    "refusal.DuplicatePath": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That path is already used by another Route."
+    },
+    "refusal.FootprintCollision": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That space is taken. Clear it or try elsewhere."
+    },
+    "refusal.GrowBlocked": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "No room to grow. Clear the space first."
+    },
+    "refusal.GrowCoversBelt": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Growing would cover a belt. Move that belt first."
+    },
+    "refusal.IncompatiblePorts": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A wire connects two machines, output to input."
+    },
+    "refusal.InvalidBeltJoin": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Join a belt's end to the start of another belt."
+    },
+    "refusal.InvalidDock": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A belt runs from an output to an input, right next to it."
+    },
+    "refusal.InvalidPath": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That is not a web path the app can serve."
+    },
+    "refusal.LabelDoesNotConnect": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Labels are notes. They do not connect."
+    },
+    "refusal.MachineTooBig": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That machine would grow past the size limit."
+    },
+    "refusal.Malformed": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "The host could not read that gesture."
+    },
+    "refusal.MediumMismatch": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Belts and wires use different ports."
+    },
+    "refusal.NoSuchPort": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That port is not on the machine."
+    },
+    "refusal.NothingToRedo": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Nothing left to redo."
+    },
+    "refusal.NothingToUndo": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Nothing left to undo."
+    },
+    "refusal.OutOfBounds": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That cell is past the edge of the grid."
+    },
+    "refusal.OverLimit": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That is outside the limits the app allows."
+    },
+    "refusal.PaceOutOfRange": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That pace is outside the Belt pace scale."
+    },
+    "refusal.PortOccupied": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That output is already connected. Disconnect it first."
+    },
+    "refusal.ResizeCovers": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That size would cover something. Go smaller."
+    },
+    "refusal.RotateBlocked": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "No room to turn. Clear the space first."
+    },
+    "refusal.RotateCoversBelt": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "Turning would cover a belt. Move that belt first."
+    },
+    "refusal.RouteEmpty": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That belt has no path."
+    },
+    "refusal.RouteNonAdjacent": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A belt path moves one cell at a time."
+    },
+    "refusal.RouteSelfCrossing": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A belt path cannot cross itself."
+    },
+    "refusal.UndoDoesNotFit": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That step no longer fits the board."
+    },
+    "refusal.UndoSpaceTaken": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That space is taken now. Nothing was undone."
+    },
+    "refusal.UnknownKind": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That machine kind is not available."
+    },
+    "refusal.UnknownNode": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That is no longer on the board."
+    },
+    "refusal.UnknownOption": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That choice is not one the app offers."
+    },
+    "refusal.WrongKind": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "That edit does not apply to what you picked."
+    },
+    "refusal.ZeroBeltInterval": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "REFUSAL_COPY",
+      "value": "A belt needs a speed above zero."
+    },
+    "shortcut.delete": {
+      "kind": "shortcut",
+      "label": "Delete or Backspace",
+      "labelMac": "Delete or Backspace",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.escape": {
+      "kind": "shortcut",
+      "label": "Esc",
+      "labelMac": "Esc",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.fit": {
+      "kind": "shortcut",
+      "label": "Home",
+      "labelMac": "Home",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.names": {
+      "kind": "shortcut",
+      "label": "Alt",
+      "labelMac": "Alt",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.newBoard": {
+      "kind": "shortcut",
+      "label": "Ctrl+N",
+      "labelMac": "Cmd+N",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.open": {
+      "kind": "shortcut",
+      "label": "Ctrl+O",
+      "labelMac": "Cmd+O",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
     "shortcut.playPause": {
       "kind": "shortcut",
       "label": "Space",
       "labelMac": "Space",
       "source": "frontend/src/input/shortcuts.ts",
       "symbol": "shortcutTable"
+    },
+    "shortcut.redo": {
+      "kind": "shortcut",
+      "label": "Ctrl+Shift+Z",
+      "labelMac": "Cmd+Shift+Z",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.redoY": {
+      "helpOmits": true,
+      "kind": "shortcut",
+      "label": "Ctrl+Y",
+      "labelMac": "Cmd+Y",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.rotate": {
+      "kind": "shortcut",
+      "label": "R",
+      "labelMac": "R",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.rotateBack": {
+      "kind": "shortcut",
+      "label": "Shift+R",
+      "labelMac": "Shift+R",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.save": {
+      "kind": "shortcut",
+      "label": "Ctrl+S",
+      "labelMac": "Cmd+S",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.saveAs": {
+      "helpOmits": true,
+      "kind": "shortcut",
+      "label": "Ctrl+Shift+S",
+      "labelMac": "Cmd+Shift+S",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.step": {
+      "kind": "shortcut",
+      "label": ".",
+      "labelMac": ".",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "shortcut.undo": {
+      "kind": "shortcut",
+      "label": "Ctrl+Z",
+      "labelMac": "Cmd+Z",
+      "source": "frontend/src/input/shortcuts.ts",
+      "symbol": "shortcutTable"
+    },
+    "trigger.Timer": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "SourceTrigger",
+      "value": "Timer"
+    },
+    "trigger.Timer.interval_ticks": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "SourceTrigger",
+      "value": "interval_ticks"
+    },
+    "trigger.Webhook": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/edit.rs",
+      "symbol": "SourceTrigger",
+      "value": "Webhook"
     }
   },
-  "machines": [],
+  "machines": [
+    {
+      "catalog": true,
+      "config": "Source",
+      "configFields": [
+        "trigger"
+      ],
+      "footprint": {
+        "h": 1,
+        "w": 1
+      },
+      "kind": 0,
+      "name": "Source",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": "Belt",
+      "configFields": [
+        "ticks_per_slot"
+      ],
+      "footprint": {
+        "h": 1,
+        "w": 1
+      },
+      "kind": 1,
+      "name": "Belt",
+      "ports": []
+    },
+    {
+      "catalog": true,
+      "config": "Factory",
+      "configFields": [
+        "source"
+      ],
+      "footprint": {
+        "h": 3,
+        "w": 3
+      },
+      "kind": 2,
+      "name": "Factory",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            2,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            1,
+            2
+          ],
+          "medium": "Mechanical",
+          "role": "Fault",
+          "side": "S"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": null,
+      "configFields": [],
+      "footprint": {
+        "h": 2,
+        "w": 2
+      },
+      "kind": 3,
+      "name": "Tee",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            1,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            1,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": null,
+      "configFields": [],
+      "footprint": {
+        "h": 2,
+        "w": 2
+      },
+      "kind": 4,
+      "name": "Balancer",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            0,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            1,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            1,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": "Router",
+      "configFields": [
+        "routes",
+        "default"
+      ],
+      "footprint": {
+        "h": 3,
+        "w": 2
+      },
+      "kind": 5,
+      "name": "Router",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            1,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            1,
+            2
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            1,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            0,
+            2
+          ],
+          "medium": "Mechanical",
+          "role": "Fault",
+          "side": "S"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": null,
+      "configFields": [],
+      "footprint": {
+        "h": 2,
+        "w": 2
+      },
+      "kind": 6,
+      "name": "Merge",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            0,
+            1
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            1,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "Out",
+          "side": "E"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": "Sink",
+      "configFields": [
+        "target"
+      ],
+      "footprint": {
+        "h": 1,
+        "w": 1
+      },
+      "kind": 7,
+      "name": "Sink",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Mechanical",
+          "role": "Fault",
+          "side": "S"
+        }
+      ]
+    },
+    {
+      "catalog": false,
+      "config": null,
+      "configFields": [],
+      "footprint": null,
+      "kind": 8,
+      "name": "Wire",
+      "ports": []
+    },
+    {
+      "catalog": true,
+      "config": "Endpoint",
+      "configFields": [
+        "path"
+      ],
+      "footprint": {
+        "h": 1,
+        "w": 1
+      },
+      "kind": 9,
+      "name": "Endpoint",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Electrical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            0,
+            0
+          ],
+          "medium": "Electrical",
+          "role": "Out",
+          "side": "E"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": "Factory",
+      "configFields": [
+        "source"
+      ],
+      "footprint": {
+        "h": 3,
+        "w": 3
+      },
+      "kind": 10,
+      "name": "Handler",
+      "ports": [
+        {
+          "local_offset": [
+            0,
+            1
+          ],
+          "medium": "Electrical",
+          "role": "In",
+          "side": "W"
+        },
+        {
+          "local_offset": [
+            2,
+            1
+          ],
+          "medium": "Electrical",
+          "role": "Out",
+          "side": "E"
+        },
+        {
+          "local_offset": [
+            1,
+            2
+          ],
+          "medium": "Mechanical",
+          "role": "Fault",
+          "side": "S"
+        }
+      ]
+    },
+    {
+      "catalog": true,
+      "config": "Label",
+      "configFields": [
+        "text",
+        "colour",
+        "w",
+        "h"
+      ],
+      "footprint": {
+        "h": 1,
+        "w": 4
+      },
+      "kind": 11,
+      "name": "Label",
+      "ports": []
+    }
+  ],
   "schema": 1
 }
