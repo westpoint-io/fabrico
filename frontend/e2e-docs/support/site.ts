@@ -94,15 +94,31 @@ export function boardNames(html: string): string[] {
 }
 
 /**
+ * A path part Astro publishes under its own name. Astro turns each part of a page's path into a
+ * slug (lowercase, spaces to hyphens, most punctuation dropped), and a part made only of lowercase
+ * letters, digits, hyphens and underscores is already one.
+ */
+const SLUG_PART = /^[a-z0-9_-]+$/;
+
+/**
  * The built file a source page becomes, by its path under site/src/content/docs/, as a path under
  * the build folder: `get-started/index.mdx` is `get-started/index.html`, `concepts/belts.md` is
  * `concepts/belts/index.html`, and the root `index.mdx` is `index.html`. Throws on a path that
- * isn't a .md or .mdx file.
+ * isn't a .md or .mdx file, and on a path with a part Astro would rename (`concepts/Belts.md` is
+ * published at `concepts/belts/`), so a check never looks for a page under a name it wasn't built at.
  */
 export function distFileFor(sourcePath: string): string {
   const match = /^(.*?)\.mdx?$/.exec(sourcePath);
   if (match === null) throw new Error(`${sourcePath} is not a .md or .mdx page`);
   const stem = match[1];
+  for (const part of stem.split('/')) {
+    if (!SLUG_PART.test(part)) {
+      const renamed = part.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '');
+      throw new Error(
+        `${sourcePath} has the part "${part}", which Astro publishes under a different name. Use only lowercase letters, digits, hyphens and underscores in page paths, such as "${renamed}".`,
+      );
+    }
+  }
   if (stem === 'index') return 'index.html';
   if (stem.endsWith('/index')) return `${stem}.html`;
   return `${stem}/index.html`;

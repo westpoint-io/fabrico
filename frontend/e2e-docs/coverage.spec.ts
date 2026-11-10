@@ -62,8 +62,29 @@ test('the coverage manifest names the sidebar sections in order, each with at le
         true,
       );
       expect(/\.mdx?$/.test(page), `section "${section.name}" lists ${page}, which is not a .md or .mdx page`).toBe(true);
+      let problem = '';
+      try {
+        distFileFor(page);
+      } catch (error) {
+        problem = error instanceof Error ? error.message : String(error);
+      }
+      expect(problem, `section "${section.name}" lists ${page}, a path Astro publishes as written`).toBe('');
     }
   }
+});
+
+test('a page path maps to the file Astro builds, and a path Astro would rename is refused', () => {
+  expect(distFileFor('index.mdx'), 'the root page').toBe('index.html');
+  expect(distFileFor('get-started/index.mdx'), 'a section index').toBe('get-started/index.html');
+  expect(distFileFor('concepts/belts.md'), 'a page in a section').toBe('concepts/belts/index.html');
+  expect(distFileFor('reference/_fixture-long-title.mdx'), 'a test page').toBe('reference/_fixture-long-title/index.html');
+  // Astro publishes these at reference/machine-ports/ and concepts/belts/, so a check that looked
+  // for the file under the written name would report a built page as missing.
+  expect(() => distFileFor('reference/Machine Ports.mdx'), 'a part with capitals and a space').toThrow(
+    /"Machine Ports".*"machine-ports"/,
+  );
+  expect(() => distFileFor('Concepts/belts.md'), 'a folder with a capital').toThrow(/"Concepts"/);
+  expect(() => distFileFor('concepts/belts.mdx.txt'), 'a file that is not a page').toThrow(/not a \.md or \.mdx page/);
 });
 
 test('every page the coverage manifest lists was built', () => {
