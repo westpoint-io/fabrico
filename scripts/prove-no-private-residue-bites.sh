@@ -43,7 +43,10 @@
 #   S   THE DOCS SITE FAMILY. A phase id, a requirement id, a plan id and a decision id in
 #       a tracked file under `site/` each exit EXACTLY 1 and name the file; the same phase
 #       id in a `crates/` file exits 0, because code elsewhere cites those ids on purpose;
-#       and a `site/` file holding a date exits 0, because a date is not a plan id.
+#       and a `site/` file holding a date exits 0, because a date is not a plan id. A
+#       requirement id with a prefix from another workstream (`GATE-07`) also exits 1; an
+#       allowed token (`UTF-16`) exits 0; and the allowed token beside a requirement id on
+#       one line still exits 1.
 #   X   COULD NOT ASSERT. A scan set below the floor, a positive control that cannot be
 #       found, and a missing exclusion must each exit EXACTLY 2, never 0.
 #
@@ -103,7 +106,7 @@ HANDLE="$(rot13 'zniqv')"
 FIRST_UP="$(printf '%s' "$FIRST" | tr 'a-z' 'A-Z')"
 HOME_ROOT="/home"
 
-DECLARED_TOTAL=58
+DECLARED_TOTAL=61
 
 # The gate runs under a UTF-8 locale when this machine has one, as it does on CI's ubuntu
 # runners. That is the locale in which GNU grep classes a file holding one Latin-1 byte as
@@ -314,6 +317,15 @@ check S5 1 "site/src/content/docs/patterns/index.mdx"
 new_repo
 track "site/src/generated/facts.json" '{ "generated": "2026-11-09", "schema": 1 }'
 check S6 0 "-"
+new_repo
+track "site/src/content/docs/troubleshooting/index.mdx" "This closes GATE-07."
+check S7 1 "site/src/content/docs/troubleshooting/index.mdx"
+new_repo
+track "site/src/lib/frontmatter.ts" "// A file saved as UTF-16 has a byte-order mark."
+check S8 0 "-"
+new_repo
+track "site/src/content/docs/concepts/index.md" "Read as UTF-16, see GATE-07."
+check S9 1 "site/src/content/docs/concepts/index.md"
 
 echo "prove-no-private-residue-bites: could not assert"
 new_repo

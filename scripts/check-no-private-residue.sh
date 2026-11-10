@@ -34,12 +34,19 @@
 # written beside the private planning notes, which label their work with ids a reader of
 # the site can't look up. Under `site/` four more patterns must match nothing:
 #   - a phase id: `phase` or `Phase`, an optional space or hyphen, then a digit;
-#   - a requirement id: one of the requirement prefixes, a hyphen and two digits, with no
-#     letter or digit on either side (`SITE-04`);
+#   - a requirement id: two to eight capital letters, a hyphen and two digits, with no
+#     letter or digit on either side (`SITE-04`, `GATE-07`). Any prefix counts, because the
+#     planning notes hold ids from every workstream and milestone, and a list of known
+#     prefixes misses the ones a docs author is most likely to copy from an older note;
 #   - a plan id: `plan` or `Plan`, an optional space or hyphen, a number of two or three
 #     digits with an optional `.N`, a hyphen and two digits (`plan 96-03`);
 #   - a decision id: `D-` and two digits, with no letter or digit on either side.
-# A date such as 2026-11-09 matches none of them. The family is scoped to `site/` because
+# A date such as 2026-11-09 matches none of them. A real token of the same shape that a page
+# may need is listed in SITE_ALLOWED_TOKENS (`UTF-16`). A line is excused only when every
+# run of letters, digits and hyphens on it that matches the pattern is exactly an allowed
+# token, so `UTF-16` beside `GATE-07` on one line still fails. Add a token there only
+# when it is a real name readers use, never to let a planning id through.
+# The family is scoped to `site/` because
 # code comments elsewhere in the tree cite phase and plan ids on purpose, as a pointer to
 # the history of a rule; on a published page the same id is a dead reference. The run
 # prints how many `site/` files the family searched. It has no floor of its own, because a
@@ -134,13 +141,17 @@ PATTERNS=(
 # The docs site family: searched only in tracked paths that start with `site/`. Same
 # `label<TAB>flags<TAB>ERE` form. See THE DOCS SITE FAMILY above.
 SITE_PREFIX="site/"
-REQ_PREFIXES='BOARD|CONC|EMBED|ENGINE|HELP|LATER|LAUNCH|OFFLINE|PAT|REF|SITE|START|WASM'
+REQ_PREFIX='[A-Z]{2,8}'
 SITE_PATTERNS=(
     "phase id under site/	-	[Pp]hase[ -]?[0-9]"
-    "requirement id under site/	-	(^|[^A-Za-z0-9])(${REQ_PREFIXES})-[0-9]{2}([^A-Za-z0-9]|$)"
+    "requirement id under site/	-	(^|[^A-Za-z0-9])${REQ_PREFIX}-[0-9]{2}([^A-Za-z0-9]|$)"
     "plan id under site/	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
     "decision id under site/	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
 )
+
+# Real tokens of the requirement-id shape that a page may hold, space-separated. Each is
+# matched as a whole run of letters, digits and hyphens. See THE DOCS SITE FAMILY above.
+SITE_ALLOWED_TOKENS='UTF-16'
 
 EXCLUSIONS=(
     "scripts/check-no-private-residue.sh"
@@ -309,13 +320,33 @@ is_allowed() {
     return 1
 }
 
+# True when every run of letters, digits and hyphens on a hit line that matches the
+# entry's pattern is exactly one of the allowed tokens, and at least one run does. A line
+# whose match spans something else (a phase id is two runs) is never excused.
+tokens_allowed() {
+    local text="$1" regex="$2" allow="$3" run matched=0
+    shift 3
+    while IFS= read -r run; do
+        [ -z "$run" ] && continue
+        printf '%s\n' "$run" | grep -a -q -E "$@" -e "$regex" || continue
+        matched=1
+        case " ${allow} " in
+            *" ${run} "*) ;;
+            *) return 1 ;;
+        esac
+    done < <(printf '%s\n' "$text" | grep -a -o -E '[A-Za-z0-9-]+')
+    [ "$matched" -eq 1 ]
+}
+
 # --- The assertion -------------------------------------------------------------------
 GREP_ERR="${SCAN_TMPDIR}/grep.err"
 
-# assert_absent SET_FILE SET_COUNT ENTRY: searches the NUL-delimited paths in SET_FILE for
-# the entry's pattern, names every offending line, and sets `failed` or `cannot_assert`.
+# assert_absent SET_FILE SET_COUNT ENTRY [ALLOWED_TOKENS]: searches the NUL-delimited
+# paths in SET_FILE for the entry's pattern, names every offending line, and sets `failed`
+# or `cannot_assert`. With ALLOWED_TOKENS, a line whose matches are all allowed tokens is
+# excused (see tokens_allowed).
 assert_absent() {
-    local set_file="$1" set_count="$2" entry="$3"
+    local set_file="$1" set_count="$2" entry="$3" allow="${4:-}"
     local label flags regex hits found hit hit_file rest hit_line hit_text
     local case_flag=()
     IFS='	' read -r label flags regex <<<"$entry"
@@ -345,6 +376,9 @@ assert_absent() {
             hit_text="${rest#*:}"
             hit_text="${hit_text%$'\r'}"
             if is_allowed "$hit_file" "$hit_text"; then
+                continue
+            fi
+            if [ -n "$allow" ] && tokens_allowed "$hit_text" "$regex" "$allow" ${case_flag[@]+"${case_flag[@]}"}; then
                 continue
             fi
             if [ "$found" -eq 0 ]; then
@@ -407,8 +441,9 @@ while IFS= read -r -d '' path; do
 done <"$SCAN_SET"
 echo "site/ scan set: ${site_count} tracked file(s) under ${SITE_PREFIX} searched"
 echo "asserting ${#SITE_PATTERNS[@]} docs site pattern(s) match nothing under ${SITE_PREFIX}:"
+echo "allowed tokens under ${SITE_PREFIX}: ${SITE_ALLOWED_TOKENS}"
 for entry in "${SITE_PATTERNS[@]}"; do
-    assert_absent "$SITE_SET" "$site_count" "$entry"
+    assert_absent "$SITE_SET" "$site_count" "$entry" "$SITE_ALLOWED_TOKENS"
 done
 
 if [ "$cannot_assert" -ne 0 ]; then

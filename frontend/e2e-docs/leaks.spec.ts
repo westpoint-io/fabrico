@@ -9,9 +9,9 @@ import { expect, test } from '@playwright/test';
 // path, no absolute path of this checkout and no pointer into the private planning folder. The
 // built HTML and XML must also hold none of the planning ids the residue gate refuses under site/.
 //
-// The id patterns are read from the residue gate at run time, so the two can't drift apart. They
-// apply to HTML and XML only: minified JavaScript, ours or a dependency's, can hold a string such as
-// `D-10` as code.
+// The id patterns and the allowed tokens (real names such as `UTF-16` that have the requirement-id
+// shape) are read from the residue gate at run time, so the two can't drift apart. They apply to HTML
+// and XML only: minified JavaScript, ours or a dependency's, can hold a string such as `D-10` as code.
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const FOLDERS = [path.join(REPO, 'site/dist'), path.join(REPO, 'site/dist-fixtures')];
@@ -50,15 +50,22 @@ function walk(root: string): string[] {
 }
 
 /**
- * The residue gate's site/ id patterns, as `{ label, pattern }`, read from its SITE_PATTERNS array.
- * Throws unless exactly four come out, so a change to the gate's layout fails here loudly.
+ * The residue gate's site/ id patterns, as `{ label, pattern }`, read from its SITE_PATTERNS array,
+ * and its allowed tokens. Throws unless exactly four patterns and at least one token come out, so a
+ * change to the gate's layout fails here loudly.
+ *
+ * The gate's ERE boundaries `(^|[^A-Za-z0-9])` and `([^A-Za-z0-9]|$)` become lookarounds here. As
+ * written they take the character beside a match, so a global search would skip `GATE-07` right after
+ * `UTF-16 ` (the space already taken), and the allowed token would hide the id beside it. The gate
+ * reads whole lines with grep, which has no such gap.
  */
-function sitePatterns(): { label: string; pattern: RegExp }[] {
+function sitePatterns(): { patterns: { label: string; pattern: RegExp }[]; allowed: Set<string> } {
   const gate = fs.readFileSync(RESIDUE_GATE, 'utf8');
-  const prefixes = /^REQ_PREFIXES='([^']+)'$/m.exec(gate);
+  const prefix = /^REQ_PREFIX='([^']+)'$/m.exec(gate);
+  const tokens = /^SITE_ALLOWED_TOKENS='([^']*)'$/m.exec(gate);
   const block = /^SITE_PATTERNS=\(\n([\s\S]*?)\n\)$/m.exec(gate);
-  if (prefixes === null || block === null) {
-    throw new Error(`${RESIDUE_GATE} has no REQ_PREFIXES line or SITE_PATTERNS array to read`);
+  if (prefix === null || tokens === null || block === null) {
+    throw new Error(`${RESIDUE_GATE} has no REQ_PREFIX line, SITE_ALLOWED_TOKENS line or SITE_PATTERNS array to read`);
   }
   const patterns = block[1]
     .split('\n')
@@ -66,12 +73,31 @@ function sitePatterns(): { label: string; pattern: RegExp }[] {
     .filter((m): m is RegExpExecArray => m !== null)
     .map((m) => ({
       label: m[1],
-      pattern: new RegExp(m[3].replaceAll('${REQ_PREFIXES}', prefixes[1]), m[2] === 'i' ? 'gim' : 'gm'),
+      pattern: new RegExp(
+        m[3]
+          .replaceAll('${REQ_PREFIX}', prefix[1])
+          .replaceAll('(^|[^A-Za-z0-9])', '(?<![A-Za-z0-9])')
+          .replaceAll('([^A-Za-z0-9]|$)', '(?![A-Za-z0-9])'),
+        m[2] === 'i' ? 'gim' : 'gm',
+      ),
     }));
   if (patterns.length !== 4) {
     throw new Error(`read ${patterns.length} site/ patterns from ${RESIDUE_GATE}, expected 4`);
   }
-  return patterns;
+  const allowed = new Set(tokens[1].split(/\s+/).filter((t) => t !== ''));
+  if (allowed.size === 0) throw new Error(`read no allowed token from ${RESIDUE_GATE}`);
+  return { patterns, allowed };
+}
+
+/**
+ * True when a match is an allowed token standing alone, with no letter, digit or hyphen on either
+ * side: the gate's rule, which excuses a whole run of letters, digits and hyphens and nothing else.
+ */
+function isAllowedToken(text: string, index: number, token: string, allowed: Set<string>): boolean {
+  if (!allowed.has(token)) return false;
+  const before = index === 0 ? '' : text[index - 1];
+  const after = text[index + token.length] ?? '';
+  return !/[A-Za-z0-9-]/.test(before) && !/[A-Za-z0-9-]/.test(after);
 }
 
 /**
@@ -86,13 +112,28 @@ function leaksIn(rel: string, shown: string, text: string, ids: ReturnType<typeo
   if (text.includes(REPO)) out.push(`${shown}: the repo path ${REPO}`);
   if (text.includes(PLANNING_PATH)) out.push(`${shown}: the private planning path ${PLANNING_PATH}`);
   if (ID_EXTENSIONS.has(path.extname(rel))) {
-    for (const { label, pattern } of ids) {
+    for (const { label, pattern } of ids.patterns) {
       pattern.lastIndex = 0;
-      for (const m of text.matchAll(pattern)) out.push(`${shown}: ${label}: "${m[0].trim()}"`);
+      for (const m of text.matchAll(pattern)) {
+        if (isAllowedToken(text, m.index, m[0], ids.allowed)) continue;
+        out.push(`${shown}: ${label}: "${m[0].trim()}"`);
+      }
     }
   }
   return out;
 }
+
+test('the id patterns refuse a requirement id with any prefix and excuse an allowed token only when it stands alone', () => {
+  const ids = sitePatterns();
+  const scan = (text: string): string[] => leaksIn('probe.html', 'probe.html', text, ids);
+  const req = 'requirement id under site/';
+  expect(scan('<p>This closes GATE-07.</p>'), 'an id from outside the docs workstream').toEqual([`probe.html: ${req}: "GATE-07"`]);
+  expect(scan('<p>Generated facts cover SITE-04.</p>'), 'an id from the docs workstream').toEqual([`probe.html: ${req}: "SITE-04"`]);
+  expect(scan('<p>A file saved as UTF-16 has a byte-order mark.</p>'), 'an allowed token').toEqual([]);
+  expect(scan('<p>UTF-16 GATE-07</p>'), 'an allowed token right before an id').toEqual([`probe.html: ${req}: "GATE-07"`]);
+  expect(scan('<p>x-UTF-16</p>'), 'an allowed token inside a longer run').toEqual([`probe.html: ${req}: "UTF-16"`]);
+  expect(scan('<p>Built 2026-11-09, UTF-8, ISO-8601, SHA-256.</p>'), 'a date and tokens of other shapes').toEqual([]);
+});
 
 for (const folder of FOLDERS) {
   const name = path.relative(REPO, folder);
