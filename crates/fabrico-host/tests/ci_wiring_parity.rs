@@ -425,6 +425,18 @@ const HEAVY_GATE: &str = "if: ${{ !cancelled() && needs.changes.outputs.docs_onl
 /// The heavy jobs' dependency on the classifier.
 const HEAVY_NEEDS: &str = "needs: changes";
 
+/// The docs job's gate: skip only on the exact string `false`, which the classifier writes only
+/// for a change made entirely of root markdown. A failed classifier leaves the output empty, and
+/// empty runs the job.
+const DOCS_GATE: &str = "if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'false' }}";
+
+/// The job that builds the docs site and runs its suite.
+const DOCS_JOB: &str = "docs";
+
+/// Jobs gated on the classifier's second output, `docs_suite`. Each carries `HEAVY_NEEDS` and
+/// `DOCS_GATE` and nothing else that reads the classifier.
+const DOCS_JOBS: [&str; 1] = [DOCS_JOB];
+
 /// The `embed` job's dependency: the classifier, and the job whose module it takes.
 const EMBED_NEEDS: &str = "needs: [changes, wasm-player]";
 
@@ -451,7 +463,10 @@ fn needs_of(id: &str) -> &'static str {
 const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["ubuntu-24.04","macos-latest","windows-latest"]') }}"#;
 
 /// Jobs skipped on a docs-only change. None of them read a markdown file at the
-/// repository root when measured on 2026-09-30. The `unit` job's
+/// repository root when measured on 2026-09-30, and none reads a file under `site/` when
+/// measured on 2026-11-10: outside the docs suite (`frontend/e2e-docs/`), the site's asset and
+/// facts scripts and the docs job's own scripts, nothing under `crates/`, `frontend/` or
+/// `scripts/` reads there except the always-on residue gate. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
 const HEAVY_JOBS: [&str; 11] = [
@@ -558,9 +573,12 @@ fn job_blocks_in(yml: &str) -> Vec<(&str, Vec<&str>)> {
     blocks
 }
 
-/// Everything wrong with how `yml` classes its jobs: every job is heavy or always-on, each heavy
-/// job carries its `needs:` line and the exact docs-only gate, and no always-on job carries either.
-/// A heavy job's `needs:` line is the one `JOB_NEEDS` gives it, or `HEAVY_NEEDS`. Empty means right.
+/// Everything wrong with how `yml` classes its jobs: every job is heavy, docs or always-on, each
+/// heavy job carries its `needs:` line and the exact docs-only gate, each docs job carries
+/// `HEAVY_NEEDS` and the exact docs gate and no other line that reads the classifier, no heavy job
+/// carries the docs gate, and no always-on job carries a `needs:` line on the classifier or either
+/// gate. A heavy job's `needs:` line is the one `JOB_NEEDS` gives it, or `HEAVY_NEEDS`. Empty means
+/// right.
 fn job_classes_wrong(yml: &str) -> Vec<String> {
     let mut wrong: Vec<String> = Vec::new();
     let blocks = job_blocks_in(yml);
@@ -568,6 +586,7 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
     found_ids.sort_unstable();
     let mut expected_ids: Vec<&str> = HEAVY_JOBS
         .iter()
+        .chain(DOCS_JOBS.iter())
         .chain(ALWAYS_ON_JOBS.iter())
         .copied()
         .collect();
@@ -577,14 +596,16 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
             "the job ids under `jobs:` are {found_ids:?}, expected exactly {expected_ids:?}.\n\
              Every job must be classified. A job that reads a markdown file at the \
              repository root is ALWAYS-ON (add it to ALWAYS_ON_JOBS, \
-             no `needs: changes`, no gate). Otherwise it is HEAVY (add it to HEAVY_JOBS and \
-             give it `{HEAVY_NEEDS}` and `{HEAVY_GATE}`)."
+             no `needs: changes`, no gate). A job that checks the docs site is DOCS (add it to \
+             DOCS_JOBS and give it `{HEAVY_NEEDS}` and `{DOCS_GATE}`). Otherwise it is HEAVY \
+             (add it to HEAVY_JOBS and give it `{HEAVY_NEEDS}` and `{HEAVY_GATE}`)."
         ));
     }
     for (id, lines) in &blocks {
         let needs = needs_of(id);
         let has_needs = lines.contains(&needs);
         let has_gate = lines.contains(&HEAVY_GATE);
+        let has_docs_gate = lines.contains(&DOCS_GATE);
         if HEAVY_JOBS.contains(id) && !(has_needs && has_gate) {
             wrong.push(format!(
                 "heavy job `{id}` is missing `{needs}` (present: {has_needs}) or the \
@@ -592,12 +613,37 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
                  never skips or skips on the wrong verdict."
             ));
         }
+        if HEAVY_JOBS.contains(id) && has_docs_gate {
+            wrong.push(format!(
+                "heavy job `{id}` carries the docs gate `{DOCS_GATE}`. It would run on a change \
+                 made of root markdown and site/ only, and skip on its own verdict's opposite."
+            ));
+        }
+        if DOCS_JOBS.contains(id) {
+            let has_docs_needs = lines.contains(&HEAVY_NEEDS);
+            if !(has_docs_needs && has_docs_gate) {
+                wrong.push(format!(
+                    "docs job `{id}` is missing `{HEAVY_NEEDS}` (present: {has_docs_needs}) or the \
+                     exact gate `{DOCS_GATE}` (present: {has_docs_gate}). Without both, it either \
+                     never runs on a site change or runs on the wrong verdict."
+                ));
+            }
+            for line in lines
+                .iter()
+                .filter(|line| line.contains("needs.changes.outputs") && **line != DOCS_GATE)
+            {
+                wrong.push(format!(
+                    "docs job `{id}` carries `{line}`, which reads the classifier but is not the \
+                     exact gate `{DOCS_GATE}`."
+                ));
+            }
+        }
         let has_any_needs = lines.contains(&HEAVY_NEEDS)
             || JOB_NEEDS.iter().any(|(_, needs)| lines.contains(needs));
-        if ALWAYS_ON_JOBS.contains(id) && (has_any_needs || has_gate) {
+        if ALWAYS_ON_JOBS.contains(id) && (has_any_needs || has_gate || has_docs_gate) {
             wrong.push(format!(
-                "always-on job `{id}` carries a `needs:` line on the classifier or the docs-only \
-                 gate. It reads files a docs-only change can edit, so it must run on every push."
+                "always-on job `{id}` carries a `needs:` line on the classifier or a gate on its \
+                 output. It reads files a docs-only change can edit, so it must run on every push."
             ));
         }
     }
@@ -1044,6 +1090,46 @@ fn the_wasm_job_checks_name_each_way_of_switching_them_off() {
     );
 }
 
+/// Rule (f) of `ci_spend_controls_are_wired_fail_safe` over any workflow text: every non-comment
+/// line that reads the classifier's output is `HEAVY_GATE`, or is `DOCS_GATE` inside `DOCS_JOB`,
+/// and `DOCS_GATE` appears exactly once in the file. Empty means right.
+fn gate_lines_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let code: Vec<&str> = yml
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    for line in code
+        .iter()
+        .filter(|line| line.contains("needs.changes.outputs"))
+    {
+        if *line != HEAVY_GATE && *line != DOCS_GATE {
+            wrong.push(format!(
+                "non-comment line `{line}` reads the classifier's output but is neither the exact \
+                 gate `{HEAVY_GATE}` nor `{DOCS_GATE}`. Only skip-on-exactly-true for the heavy \
+                 jobs and skip-on-exactly-false for the docs job, under `!cancelled()`, are \
+                 fail-safe: a failed classifier leaves the output empty, and that must run \
+                 everything."
+            ));
+        }
+    }
+    let docs_gate_homes: Vec<&str> = job_blocks_in(yml)
+        .iter()
+        .filter(|(_, lines)| lines.contains(&DOCS_GATE))
+        .map(|(id, _)| *id)
+        .collect();
+    let in_file = code.iter().filter(|line| **line == DOCS_GATE).count();
+    if in_file != 1 || docs_gate_homes != [DOCS_JOB] {
+        wrong.push(format!(
+            "`{DOCS_GATE}` appears {in_file} time(s) in the workflow, in job(s) \
+             {docs_gate_homes:?}, expected once, in job `{DOCS_JOB}` only. On any other job it \
+             would run that job on the opposite verdict."
+        ));
+    }
+    wrong
+}
+
 /// The CI spend controls are wired, and wired in the fail-safe direction.
 ///
 /// Every fact is collected before the single assert, so one run names everything wrong.
@@ -1089,19 +1175,8 @@ fn ci_spend_controls_are_wired_fail_safe() {
     let blocks = job_blocks();
     wrong.extend(job_classes_wrong(CI_YML));
 
-    // (f): no other polarity of the gate anywhere.
-    for line in code
-        .iter()
-        .filter(|line| line.contains("needs.changes.outputs"))
-    {
-        if *line != HEAVY_GATE {
-            wrong.push(format!(
-                "non-comment line `{line}` reads the classifier's output but is not the exact \
-                 gate `{HEAVY_GATE}`. Only skip-on-exactly-true under `!cancelled()` is fail-safe: \
-                 a failed classifier leaves the output empty, and that must run everything."
-            ));
-        }
-    }
+    // (f): no other polarity of either gate anywhere, and the docs gate only in the docs job.
+    wrong.extend(gate_lines_wrong(CI_YML));
 
     // (g): each script invoked exactly once.
     wrong.extend(check_run_invocations(

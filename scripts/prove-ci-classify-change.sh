@@ -1,40 +1,48 @@
 #!/usr/bin/env bash
 #
 # prove-ci-classify-change.sh - the both-ways proof for scripts/ci-classify-change.sh, the
-# script that lets a docs-only change skip the heavy CI jobs (2026-09-30).
+# script that lets a docs-only change skip the heavy CI jobs (2026-09-30), and decides
+# whether the docs site's suite runs.
 #
 # WHY IT RUNS IN CI, BEFORE THE CLASSIFIER. The classifier is the one script in this
 # repository whose verdict can switch other gates OFF. A classifier that has drifted
 # towards "true" skips real verification silently. So the `changes` job in
 # .github/workflows/ci.yml runs this prover first, in the same job; if it fails, the job
 # fails, the classifier never runs, the job's output stays empty, and every heavy job
-# runs (the workflow skips only on the exact string `true`).
+# runs (the heavy gate skips only on the exact string `true`, the docs gate only on the
+# exact string `false`).
+#
+# EACH CASE EXPECTS A PAIR, docs_only/docs_suite: true/false (root markdown only),
+# true/true (root markdown and site/ paths, at least one under site/), or false/true
+# (anything else, and every fail-safe path).
 #
 # WHAT EACH CASE GROUP PROVES.
 #   R1-R9  HISTORY SHAPES built in a throwaway repository (a master line with a merged
 #          feature branch), so the proof needs no particular history in this checkout.
 #          R1/R7 (a commit that changed only root markdown, as a push and as a
-#          pull_request) must be true; code, non-markdown evidence beside a root markdown
-#          file (R3), a PR merge commit, a multi-commit push and a code PR must be false;
-#          a push whose base is not an ancestor of its head (R8, force push) and an empty
-#          range (R9) must be false.
+#          pull_request) must be true/false; code, non-markdown evidence beside a root
+#          markdown file (R3), a PR merge commit, a multi-commit push and a code PR must be
+#          false/true; a push whose base is not an ancestor of its head (R8, force push)
+#          and an empty range (R9) must be false/true.
 #   F1-F9  FAIL-SAFE paths. Each holds R1's docs-only SHAs in every variable it does not
-#          vary, so its expected false can only come from the one field under test:
+#          vary, so its expected false/true can only come from the one field under test:
 #          workflow_dispatch, schedule, an empty event, an empty / all-zero / missing /
 #          revision-expression push base, an empty pull_request base. F9 unsets
-#          GITHUB_OUTPUT and requires a non-zero exit.
+#          GITHUB_OUTPUT and requires a non-zero exit and an output file with no line.
 #   S1-S5  SHAPES built in a second throwaway repository: a rename out of code into a
-#          root markdown file (false, only visible with --no-renames), a root README change (true), a
-#          docs/ markdown change (false), a markdown change under crates/ (false), and a
-#          depth-2 shallow clone over a root-README-only range (false, the shallow rule
-#          alone decides it).
+#          root markdown file (false/true, only visible with --no-renames), a root README
+#          change (true/false), a docs/ markdown change (false/true), a markdown change
+#          under crates/ (false/true), and a depth-2 shallow clone over a root-README-only
+#          range (false/true, the shallow rule alone decides it).
+#   S6     a change only under site/ (true/true).
 #
-# Every case except F9 must exit 0 and leave EXACTLY ONE `docs_only=` line in its own
-# fresh GITHUB_OUTPUT file. All five CLASSIFY_* variables are unset before each case and
-# only the ones that case names are set, so nothing leaks from the previous case.
+# Every case except F9 must exit 0 and leave EXACTLY TWO lines in its own fresh
+# GITHUB_OUTPUT file, one `docs_only=` and one `docs_suite=`. All five CLASSIFY_*
+# variables are unset before each case and only the ones that case names are set, so
+# nothing leaks from the previous case.
 #
 # NON-VACUITY. The number of executed cases must equal the declared total, and at least
-# one true and one false outcome must have been observed, or this exits 1.
+# one true and one false docs_only outcome must have been observed, or this exits 1.
 #
 # EXIT CODES (the repository's prover convention):
 #   0  every case as expected.
@@ -79,31 +87,50 @@ prover_on_exit remove_tmproot
 # shellcheck disable=SC2119  # no probes: this run writes only under mktemp -d
 prover_isolate_untracked
 
-DECLARED_TOTAL=23
+DECLARED_TOTAL=24
 executed=0
 saw_true=0
 saw_false=0
 failures=()
 
+# record_pair PAIR - remembers each outcome pair a case produced as expected.
+seen_pairs=" "
+record_pair() {
+    case "$seen_pairs" in
+        *" $1 "*) ;;
+        *) seen_pairs="${seen_pairs}$1 " ;;
+    esac
+}
+
 # run_case ID EXPECTED DIR [NAME=VALUE ...]
-#   EXPECTED is true, false, or nonzero (the classifier must exit non-zero, F9).
+#   EXPECTED is a docs_only/docs_suite pair (true/false, true/true or false/true), or
+#   nonzero (the classifier must exit non-zero and write no line, F9).
 #   DIR is the working directory the classifier runs in.
 run_case() {
     local id="$1" expected="$2" dir="$3"
     shift 3
-    local out rc lines value
+    local out rc total only_lines suite_lines only suite got
     executed=$((executed + 1))
 
     local -a envargs=(-u CLASSIFY_EVENT -u CLASSIFY_PR_BASE -u CLASSIFY_PR_HEAD
         -u CLASSIFY_PUSH_BEFORE -u CLASSIFY_PUSH_AFTER -u GITHUB_OUTPUT)
     if [ "$expected" = "nonzero" ]; then
-        (cd "$dir" && env "${envargs[@]}" "$@" bash "$CLASSIFIER") >/dev/null 2>&1
+        # GITHUB_OUTPUT stays unset for the classifier; the file next to it shows nothing was
+        # written anywhere a later read could pick up.
+        out="$(mktemp "$TMPROOT/out.XXXXXX")" || {
+            echo "prove-ci-classify-change: mktemp failed; COULD NOT PROVE" >&2
+            exit 2
+        }
+        (cd "$dir" && env "${envargs[@]}" "$@" bash "$CLASSIFIER") >"$out.log" 2>&1
         rc=$?
-        if [ "$rc" -ne 0 ]; then
-            echo "  $id: exit $rc as required (GITHUB_OUTPUT unset)"
-        else
+        if [ "$rc" -eq 0 ]; then
             echo "  $id: WRONG, exit 0 with GITHUB_OUTPUT unset"
             failures+=("$id: exit 0 with GITHUB_OUTPUT unset, expected non-zero")
+        elif [ -s "$out" ]; then
+            echo "  $id: WRONG, exit $rc but an output line was written"
+            failures+=("$id: exit $rc, but the output file holds a line")
+        else
+            echo "  $id: exit $rc as required (GITHUB_OUTPUT unset), no line written"
         fi
         return
     fi
@@ -114,23 +141,28 @@ run_case() {
     }
     (cd "$dir" && env "${envargs[@]}" GITHUB_OUTPUT="$out" "$@" bash "$CLASSIFIER") >"$out.log" 2>&1
     rc=$?
-    lines="$(grep -c '^docs_only=' "$out")"
-    value="$(sed -n 's/^docs_only=//p' "$out")"
+    total="$(wc -l <"$out" | tr -d ' ')"
+    only_lines="$(grep -c '^docs_only=' "$out")"
+    suite_lines="$(grep -c '^docs_suite=' "$out")"
+    only="$(sed -n 's/^docs_only=//p' "$out")"
+    suite="$(sed -n 's/^docs_suite=//p' "$out")"
+    got="$only/$suite"
 
-    if [ "$value" = "true" ]; then saw_true=1; fi
-    if [ "$value" = "false" ]; then saw_false=1; fi
+    if [ "$only" = "true" ]; then saw_true=1; fi
+    if [ "$only" = "false" ]; then saw_false=1; fi
 
     if [ "$rc" -ne 0 ]; then
         echo "  $id: WRONG, classifier exit $rc"
         failures+=("$id: classifier exited $rc, expected 0 ($(head -n 1 "$out.log"))")
-    elif [ "$lines" != "1" ] || [ "$(wc -l <"$out" | tr -d ' ')" != "1" ]; then
-        echo "  $id: WRONG, GITHUB_OUTPUT holds $(wc -l <"$out" | tr -d ' ') line(s), $lines docs_only= line(s)"
-        failures+=("$id: GITHUB_OUTPUT must hold exactly one docs_only= line")
-    elif [ "$value" != "$expected" ]; then
-        echo "  $id: WRONG, docs_only=$value, expected $expected ($(head -n 1 "$out.log"))"
-        failures+=("$id: docs_only=$value, expected $expected")
+    elif [ "$total" != "2" ] || [ "$only_lines" != "1" ] || [ "$suite_lines" != "1" ]; then
+        echo "  $id: WRONG, GITHUB_OUTPUT holds $total line(s): $only_lines docs_only= and $suite_lines docs_suite="
+        failures+=("$id: GITHUB_OUTPUT must hold exactly two lines, one docs_only= and one docs_suite=")
+    elif [ "$got" != "$expected" ]; then
+        echo "  $id: WRONG, docs_only/docs_suite=$got, expected $expected ($(head -n 1 "$out.log"))"
+        failures+=("$id: docs_only/docs_suite=$got, expected $expected")
     else
-        echo "  $id: docs_only=$value as expected"
+        record_pair "$got"
+        echo "  $id: docs_only/docs_suite=$got as expected"
     fi
 }
 
@@ -187,27 +219,27 @@ R4_AFTER="$H4"           # a PR merge commit
 R6_HEAD="$FEATURE_HEAD"  # a code PR head
 
 echo "prove-ci-classify-change: history shapes"
-run_case R1 true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_BEFORE" CLASSIFY_PUSH_AFTER="$R1_AFTER"
-run_case R2 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R2_BEFORE" CLASSIFY_PUSH_AFTER="$R2_AFTER"
-run_case R3 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R3_BEFORE" CLASSIFY_PUSH_AFTER="$R3_AFTER"
-run_case R4 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R4_BEFORE" CLASSIFY_PUSH_AFTER="$R4_AFTER"
-run_case R5 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R4_BEFORE" CLASSIFY_PUSH_AFTER="$R1_AFTER"
-run_case R6 false "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE="$R4_BEFORE" CLASSIFY_PR_HEAD="$R6_HEAD"
-run_case R7 true "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE="$R1_BEFORE" CLASSIFY_PR_HEAD="$R1_AFTER"
-run_case R8 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_AFTER" CLASSIFY_PUSH_AFTER="$R1_BEFORE"
-run_case R9 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_AFTER" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case R1 true/false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_BEFORE" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case R2 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R2_BEFORE" CLASSIFY_PUSH_AFTER="$R2_AFTER"
+run_case R3 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R3_BEFORE" CLASSIFY_PUSH_AFTER="$R3_AFTER"
+run_case R4 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R4_BEFORE" CLASSIFY_PUSH_AFTER="$R4_AFTER"
+run_case R5 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R4_BEFORE" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case R6 false/true "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE="$R4_BEFORE" CLASSIFY_PR_HEAD="$R6_HEAD"
+run_case R7 true/false "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE="$R1_BEFORE" CLASSIFY_PR_HEAD="$R1_AFTER"
+run_case R8 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_AFTER" CLASSIFY_PUSH_AFTER="$R1_BEFORE"
+run_case R9 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_AFTER" CLASSIFY_PUSH_AFTER="$R1_AFTER"
 
 echo "prove-ci-classify-change: fail-safe paths (R1's docs-only SHAs held everywhere else)"
 DOCS_ENV=(CLASSIFY_PR_BASE="$R1_BEFORE" CLASSIFY_PR_HEAD="$R1_AFTER"
     CLASSIFY_PUSH_BEFORE="$R1_BEFORE" CLASSIFY_PUSH_AFTER="$R1_AFTER")
-run_case F1 false "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=workflow_dispatch
-run_case F2 false "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=schedule
-run_case F3 false "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=
-run_case F4 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE= CLASSIFY_PUSH_AFTER="$R1_AFTER"
-run_case F5 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$ZERO_SHA" CLASSIFY_PUSH_AFTER="$R1_AFTER"
-run_case F6 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$MISSING_SHA" CLASSIFY_PUSH_AFTER="$R1_AFTER"
-run_case F7 false "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="${R1_AFTER}^" CLASSIFY_PUSH_AFTER="$R1_AFTER"
-run_case F8 false "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE= CLASSIFY_PR_HEAD="$R1_AFTER"
+run_case F1 false/true "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=workflow_dispatch
+run_case F2 false/true "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=schedule
+run_case F3 false/true "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=
+run_case F4 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE= CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case F5 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$ZERO_SHA" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case F6 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$MISSING_SHA" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case F7 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="${R1_AFTER}^" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case F8 false/true "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE= CLASSIFY_PR_HEAD="$R1_AFTER"
 run_case F9 nonzero "$HIST" "${DOCS_ENV[@]}" CLASSIFY_EVENT=push
 
 echo "prove-ci-classify-change: shapes in a second throwaway repository"
@@ -240,11 +272,16 @@ printf '# crate readme\nmore\n' >"$REPO/crates/x/README.md"
 if ! C4="$(commit_all c4-crate-readme)"; then exit 2; fi
 printf '# readme\nmore\nagain\n' >"$REPO/README.md"
 if ! C5="$(commit_all c5-root-readme-again)"; then exit 2; fi
+mkdir -p "$REPO/site/src/content/docs"
+printf -- '---\ntitle: x\n---\n' >"$REPO/site/src/content/docs/x.md"
+printf '{ "name": "site" }\n' >"$REPO/site/package.json"
+if ! C6="$(commit_all c6-site-only)"; then exit 2; fi
 
-run_case S1 false "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C0" CLASSIFY_PUSH_AFTER="$C1"
-run_case S2 true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C1" CLASSIFY_PUSH_AFTER="$C2"
-run_case S3 false "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C2" CLASSIFY_PUSH_AFTER="$C3"
-run_case S4 false "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C3" CLASSIFY_PUSH_AFTER="$C4"
+run_case S1 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C0" CLASSIFY_PUSH_AFTER="$C1"
+run_case S2 true/false "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C1" CLASSIFY_PUSH_AFTER="$C2"
+run_case S3 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C2" CLASSIFY_PUSH_AFTER="$C3"
+run_case S4 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C3" CLASSIFY_PUSH_AFTER="$C4"
+run_case S6 true/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C5" CLASSIFY_PUSH_AFTER="$C6"
 
 SHALLOW="$TMPROOT/shallow"
 if ! git -c core.hooksPath=/dev/null clone -q --depth 2 "file://$REPO" "$SHALLOW" 2>/dev/null; then
@@ -255,7 +292,7 @@ if [ "$(git -C "$SHALLOW" rev-parse --is-shallow-repository)" != "true" ]; then
     echo "prove-ci-classify-change: the depth-2 clone is not shallow; COULD NOT PROVE" >&2
     exit 2
 fi
-run_case S5 false "$SHALLOW" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C4" CLASSIFY_PUSH_AFTER="$C5"
+run_case S5 false/true "$SHALLOW" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C4" CLASSIFY_PUSH_AFTER="$C5"
 
 echo
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then
