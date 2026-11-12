@@ -702,6 +702,15 @@ export class QueryRefusal {
   constructor(readonly error: string) {}
 }
 
+/**
+ * What `answerQuery` returns to answer a query later: the reply goes out when `answer` settles, with
+ * its value (null for undefined), or as a refusal when it settles to a {@link QueryRefusal}. Lets a
+ * case hold the host's answer while it reads what the page shows in the meantime.
+ */
+export class DeferredAnswer {
+  constructor(readonly answer: Promise<unknown>) {}
+}
+
 /** Options for `mockRenderSocket` - every member optional and defaulted, so all
  *  existing call sites compile and behave unchanged. */
 export interface MockSocketOpts {
@@ -855,7 +864,14 @@ export async function mockRenderSocket(page: Page, opts: MockSocketOpts = {}): P
           `mockRenderSocket: answerQuery threw for verb "${req.verb}": ${String(err)}`,
         );
       }
-      if (value instanceof QueryRefusal) {
+      if (value instanceof DeferredAnswer) {
+        // Answered when the case settles it, on the same socket, as a host that took its time would.
+        const reqId = req.reqId;
+        void value.answer.then((settled) => {
+          if (settled instanceof QueryRefusal) ws.send(JSON.stringify({ reqId, ok: false, error: settled.error }));
+          else ws.send(JSON.stringify({ reqId, ok: true, value: settled ?? null }));
+        });
+      } else if (value instanceof QueryRefusal) {
         ws.send(JSON.stringify({ reqId: req.reqId, ok: false, error: value.error }));
       } else if (value !== undefined) {
         ws.send(JSON.stringify({ reqId: req.reqId, ok: true, value }));

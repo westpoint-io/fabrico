@@ -17,6 +17,7 @@ import type { Lesson } from '../../src/tutorial/types';
 import {
   CELL,
   CMD,
+  DeferredAnswer,
   QueryRefusal,
   buildPacket,
   cameraOf,
@@ -28,6 +29,7 @@ import {
   type InjectBelt,
   type InjectNode,
   type InjectPort,
+  type InjectWire,
 } from './wire';
 
 /** The ring's outset on each side of its target. */
@@ -852,9 +854,22 @@ export interface FactoryBoard {
 
 type ConfigHost = ReturnType<typeof configByNode>;
 
-/** Inject the board as it stands, as a diff on generation 1. */
-export function injectBoard(h: Harness, board: { nodes: InjectNode[]; belts?: InjectBelt[]; tick: number }): void {
-  h.inject(buildPacket({ full: false, tick: board.tick, generation: 1, swapFloor: 1, nodes: board.nodes, belts: board.belts ?? [] }));
+/** Inject the board as it stands, as a diff, on generation 1 unless the board names another. */
+export function injectBoard(
+  h: Harness,
+  board: { nodes: InjectNode[]; belts?: InjectBelt[]; wires?: InjectWire[]; tick: number; generation?: number },
+): void {
+  h.inject(
+    buildPacket({
+      full: false,
+      tick: board.tick,
+      generation: board.generation ?? 1,
+      swapFloor: 1,
+      nodes: board.nodes,
+      belts: board.belts ?? [],
+      wires: board.wires ?? [],
+    }),
+  );
 }
 
 /** A port of a fixture machine, by index. */
@@ -1122,4 +1137,158 @@ export async function typeAndApply(page: Page, h: Harness, visit?: Visit): Promi
   await expect.poll(() => sentCount(h, CMD.Configure), { message: 'Apply under its ring sent the code' }).toBe(configures + 1);
   await expectAt(page, 'change-code', 'watch', 'Apply moved the card to the watch stage');
   await stopAt(page, 'watch', visit);
+}
+
+// Lesson 5, Answer a web request.
+
+export const ROUTE_ID = 2;
+export const HANDLER_ID = 3;
+/** The forward wire, Route Out to Handler In, and the return wire, Handler Out to Route In. */
+export const WIRE_FORWARD_ID = 4;
+export const WIRE_RETURN_ID = 5;
+/** The Route's port indices, as `decode.ts` lists the ENDPOINT row: In first, then Out. */
+export const ROUTE_IN = 0;
+export const ROUTE_OUT = 1;
+/** The Handler's port indices, as `decode.ts` lists the HANDLER row. */
+export const HANDLER_IN = 0;
+export const HANDLER_OUT = 1;
+export const HANDLER_FAULT = 2;
+/** The `medium` byte for an electrical port (Mechanical=0, Electrical=1, `wire.ts` InjectPort). */
+const ELECTRICAL = 1;
+const MECHANICAL = 0;
+
+/**
+ * The REPLY pulse direction byte. Transcribed from `WIRE_DIR_REPLY` in `src/render/sceneState.ts`
+ * (0 = forward, 1 = reply), which that module doesn't export. The scene counts a wire's replies off it.
+ */
+export const WIRE_DIR_REPLY = 1;
+
+/** A Route on one cell: the electrical In facing west at index 0 and the electrical Out facing east at index 1. */
+export function routeAt(cell: readonly [number, number], id: number = ROUTE_ID): InjectNode {
+  const [x, y] = cell;
+  return {
+    id,
+    kind: 9,
+    cell_x: x,
+    cell_y: y,
+    ports: [
+      { index: ROUTE_IN, cell_x: x, cell_y: y, side: 3, role: 0, medium: ELECTRICAL },
+      { index: ROUTE_OUT, cell_x: x, cell_y: y, side: 1, role: 1, medium: ELECTRICAL },
+    ],
+  };
+}
+
+/**
+ * A 3 by 3 HTTP Handler with its top left at `cell`, on the Factory's chassis: the electrical In at
+ * local (0, 1) facing west, the electrical Out at (2, 1) east and the mechanical Fault at (1, 2) south.
+ */
+export function handlerAt(cell: readonly [number, number], id: number = HANDLER_ID): InjectNode {
+  const [x, y] = cell;
+  return {
+    id,
+    kind: 10,
+    cell_x: x,
+    cell_y: y,
+    w: 3,
+    h: 3,
+    ports: [
+      { index: HANDLER_IN, cell_x: x, cell_y: y + 1, side: 3, role: 0, medium: ELECTRICAL },
+      { index: HANDLER_OUT, cell_x: x + 2, cell_y: y + 1, side: 1, role: 1, medium: ELECTRICAL },
+      { index: HANDLER_FAULT, cell_x: x + 1, cell_y: y + 2, side: 2, role: 2, medium: MECHANICAL },
+    ],
+  };
+}
+
+/** One wire from a port of `from` to a port of `to`, by raw port index, with no path and the pulses given. */
+export function wireBetween(
+  id: number,
+  from: InjectNode,
+  fromPort: number,
+  to: InjectNode,
+  toPort: number,
+  pulses: InjectWire['pulses'] = [],
+): InjectWire {
+  portOf(from, fromPort);
+  portOf(to, toPort);
+  return { id, from: { node: from.id, port: fromPort }, to: { node: to.id, port: toPort }, pulses };
+}
+
+/** One reply pulse entering at `tick`. */
+export function replyPulse(tick: number): { entry_tick: number; hop_ticks: number; direction: number } {
+  return { entry_tick: tick, hop_ticks: 2, direction: WIRE_DIR_REPLY };
+}
+
+/** The two legs one wire drag lays between a Route and a Handler, with `replyAt` putting a reply pulse on the return leg. */
+export function wireLegs(route: InjectNode, handler: InjectNode, replyAt?: number, shift = 0): InjectWire[] {
+  return [
+    wireBetween(WIRE_FORWARD_ID + shift, route, ROUTE_OUT, handler, HANDLER_IN),
+    wireBetween(WIRE_RETURN_ID + shift, handler, HANDLER_OUT, route, ROUTE_IN, replyAt === undefined ? [] : [replyPulse(replyAt)]),
+  ];
+}
+
+/** The Route's config as a new Route holds it, at `path`. */
+export function routeConfig(path: string): MachineConfig {
+  return { kind: 'Endpoint', path };
+}
+
+/**
+ * `configByNode`'s host, which also answers `webhook_url`. `setUrl` changes the answer (null is the host's
+ * "no bound URL", which the row shows as Webhook not ready). `holdUrl` keeps every later `webhook_url`
+ * query waiting until `releaseUrl`, which answers them all with the URL held at that moment. `urlAsked`
+ * counts the queries.
+ */
+export function requestHost(url: string | null): ReturnType<typeof configByNode> & {
+  setUrl(next: string | null): void;
+  holdUrl(): void;
+  releaseUrl(): void;
+  urlAsked(): number;
+  urlWaiting(): number;
+} {
+  const base = configByNode();
+  let current = url;
+  let held = false;
+  let asked = 0;
+  const waiting: ((value: unknown) => void)[] = [];
+  const inner = base.opts?.answerQuery;
+  return {
+    ...base,
+    opts: {
+      ...base.opts,
+      answerQuery: (verb, args) => {
+        if (verb !== 'webhook_url') return inner?.(verb, args);
+        asked += 1;
+        if (!held) return current;
+        return new DeferredAnswer(new Promise((resolve) => waiting.push(resolve)));
+      },
+    },
+    setUrl: (next) => {
+      current = next;
+    },
+    holdUrl: () => {
+      held = true;
+    },
+    releaseUrl: () => {
+      held = false;
+      for (const resolve of waiting.splice(0)) resolve(current);
+    },
+    urlAsked: () => asked,
+    urlWaiting: () => waiting.length,
+  };
+}
+
+export type RequestHost = ReturnType<typeof requestHost>;
+
+/** Lesson 5's board as the case has injected it so far. */
+export interface RequestBoard {
+  route: InjectNode;
+  handler: InjectNode;
+  wires: InjectWire[];
+  tick: number;
+  generation: number;
+}
+
+/** The curl word the card should show for this page's browser, decided here by its own test of the user agent. */
+export async function expectedCurlWord(page: Page): Promise<string> {
+  const ua = await page.evaluate(() => navigator.userAgent);
+  return ua.includes('Windows') ? 'curl.exe' : 'curl';
 }
