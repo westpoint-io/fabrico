@@ -13,6 +13,8 @@ import { boardNames, docsRoot, fetchText, sitemapPages } from './support/site.ts
 // Every board on every page of the built docs site runs in Chromium: it mounts, it draws (its frame
 // count rises and its belt pixels change), it reaches the end tick hashes.manifest pins, its end
 // hash equals the manifest's, and its badge reads "match". The page logs no error while it runs.
+// A board whose slot carries data-faults-about (a <Board faultsAbout> on the page) must have entered
+// FAULTED at least once by its end tick, by the probe's count; any other board must show zero faults.
 //
 // The pages come from the site's own sitemap, so a page added to the site is checked with no change
 // here. One test per page that holds a board, plus one that fails when the site holds no board at
@@ -41,13 +43,14 @@ for (const { url, boards } of pages) {
     await autoContinueCaptions(page);
 
     await page.goto(url);
-    // Tag each board with its place on the page, so two boards of one name stay apart.
-    const count = await page.evaluate(() => {
+    // Tag each board with its place on the page, so two boards of one name stay apart, and read the
+    // fault reasons each board's slot says it shows on purpose (null when it says none).
+    const faultsAbout = await page.evaluate(() => {
       const all = document.querySelectorAll('fabrico-board');
       all.forEach((el, i) => el.setAttribute('data-docs-board', String(i)));
-      return all.length;
+      return [...all].map((el) => el.closest('.fab-board-slot')?.getAttribute('data-faults-about') ?? null);
     });
-    expect(count, `${pathOf(url)}: boards in the page`).toBe(boards.length);
+    expect(faultsAbout.length, `${pathOf(url)}: boards in the page`).toBe(boards.length);
 
     for (const [i, id] of boards.entries()) {
       const selector = `fabrico-board[data-docs-board="${i}"]`;
@@ -68,10 +71,25 @@ for (const { url, boards } of pages) {
         })
         .toBe(expected.endTick);
       const end = await readProbeAt(page, selector);
-      console.log(`${label}: end tick ${end.endTick}, hash ${end.endHash}, frames ${end.frames}, verdict ${end.verdict}`);
+      const about = faultsAbout[i];
+      console.log(
+        `${label}: end tick ${end.endTick}, hash ${end.endHash}, frames ${end.frames}, verdict ${end.verdict}, ` +
+          `faults ${end.faultEntries} on ${end.faultedNodes} nodes, faultsAbout ${about ?? 'none'}`,
+      );
       expect(end.endHash, `${label} at tick ${expected.endTick}: the end hash`).toBe(expected.hash);
       expect(end.verdict, `${label}: the badge's verdict`).toBe('match');
       expect(end.decodeErrors, `${label}: refused render packets`).toBe(0);
+      if (about === null) {
+        expect(
+          end.faultEntries,
+          `${label} has no faultsAbout, so it must not fault, and it entered FAULTED ${end.faultEntries} times`,
+        ).toBe(0);
+      } else {
+        expect(
+          end.faultEntries,
+          `${label} says it faults on purpose with ${about}, and it entered FAULTED ${end.faultEntries} times`,
+        ).toBeGreaterThan(0);
+      }
     }
 
     errors.assertNone(`on ${pathOf(url)}`);

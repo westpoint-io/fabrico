@@ -3,16 +3,24 @@
 // files under examples/boards/ while the site builds, and a wrong or missing name fails the build.
 // The board's poster sits inside the element, so a reader without JavaScript sees the board's end
 // state, and the element's own shadow root replaces it once the embed script defines the element.
-import { boardIdsOf, resolveBoard, type KnownBoard } from '../lib/boards.ts';
+//
+// A board that faults on purpose names its fault reasons: <Board name="..." faultsAbout="NoMatch" />.
+// Each name must be a fault reason in facts.json. The slot then carries data-faults-about, which the
+// docs suite reads (a board without it must show zero faults, one with it at least one), and a line
+// under the board tells the reader the fault is intended.
+import facts from '../generated/facts.json';
+import { boardIdsOf, faultLabelParts, faultReasonsOf, resolveBoard, type KnownBoard } from '../lib/boards.ts';
 
 interface Props {
   name?: string;
   height?: number;
   noCode?: boolean;
   order?: 'forward' | 'reversed';
+  /** The fault reasons this board shows on purpose, separated by single spaces. */
+  faultsAbout?: string;
 }
 
-const { name, height, noCode, order } = Astro.props;
+const { name, height, noCode, order, faultsAbout } = Astro.props;
 const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
 
 // Every board file on disk, by repo path. Only the keys matter here.
@@ -37,10 +45,14 @@ const known: KnownBoard[] = ids.map((id) => {
 });
 
 const board = resolveBoard(name, page, known);
+const reasons = Object.keys(facts.facts)
+  .filter((id) => id.startsWith('fault.'))
+  .map((id) => id.slice('fault.'.length));
+const faultNames = faultsAbout === undefined ? null : faultReasonsOf(faultsAbout, page, reasons, board.id);
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
-<div class="fab-board-slot not-content">
+<div class="fab-board-slot not-content" data-faults-about={faultNames === null ? undefined : faultNames.join(' ')}>
   <fabrico-board name={board.id} height={height} no-code={noCode ? '' : undefined} order={order}>
     <img
       src={`${base}/boards/${board.id}.png`}
@@ -51,6 +63,20 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
       decoding="async"
     />
   </fabrico-board>
+  {
+    faultNames !== null && (
+      <p class="fab-board-note">
+        This board faults on purpose:{' '}
+        {faultLabelParts(faultNames).map((part) => (
+          <>
+            <code>{part.name}</code>
+            {part.after}
+          </>
+        ))}
+        .
+      </p>
+    )
+  }
 </div>
 
 <script>
@@ -65,6 +91,22 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
   /* 32 px above and below, from the app's spacing scale. */
   .fab-board-slot {
     margin-block: var(--fab-space-xl);
+  }
+  /* The fault line: Martian Mono 12/400 in ink. The slot is not-content, so the inline-code look
+     is written here. */
+  .fab-board-note {
+    margin: var(--fab-space-sm) 0 0;
+    font-family: var(--site-font);
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--fab-ink);
+  }
+  .fab-board-note code {
+    background-color: var(--fab-panel-fill);
+    padding: 0 var(--fab-space-xs);
+    font-family: inherit;
+    font-size: inherit;
   }
   .fab-board-slot img {
     display: block;

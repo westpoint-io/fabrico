@@ -68,6 +68,50 @@ export function editDistance(a: string, b: string): number {
   return previous[b.length];
 }
 
+/**
+ * The fault reasons a `<Board faultsAbout>` names, in the author's order, or a thrown Error with the
+ * message an author sees in the build log. `prop` is one or more names separated by single spaces;
+ * each must be one of `known` (the names after `fault.` in facts.json), and none may repeat.
+ */
+export function faultReasonsOf(prop: string, page: string, known: readonly string[], board: string): string[] {
+  const list = known.join(', ');
+  const names = prop.split(' ');
+  if (prop.trim() === '' || names.some((n) => n === '')) {
+    throw new Error(
+      `[Board] ${page} gives board "${board}" the faultsAbout value "${prop}". ` +
+        `Name each fault reason the board shows, separated by single spaces. Known reasons: ${list}.`,
+    );
+  }
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (!known.includes(name)) {
+      throw new Error(
+        `[Board] ${page} says board "${board}" faults on purpose with "${name}", and ` +
+          `site/src/generated/facts.json has no fault reason with that name. Known reasons: ${list}.`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(`[Board] ${page} names "${name}" twice in the faultsAbout of board "${board}". Name each reason once.`);
+    }
+    seen.add(name);
+  }
+  return names;
+}
+
+/** One name in the board's fault line and the text that follows it: ", ", " and " or nothing. */
+export interface FaultLabelPart {
+  name: string;
+  after: string;
+}
+
+/** The fault line's pieces: A; A and B; A, B and C. */
+export function faultLabelParts(names: readonly string[]): FaultLabelPart[] {
+  return names.map((name, i) => ({
+    name,
+    after: i === names.length - 1 ? '' : i === names.length - 2 ? ' and ' : ', ',
+  }));
+}
+
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }

@@ -7,6 +7,7 @@
 
 import { CELL } from '../../shared/geometry';
 import { effectiveBox } from '../protocol/footprint';
+import { state_tag } from '../protocol/kinds';
 import { uToPx } from '../render/layers/machineChassis';
 import { GAUGE_OUTSET_U, GAUGE_THICK_U, MAX_NUB_REACH_PX } from '../render/layers/machineState';
 import type { Point } from '../render/camera';
@@ -62,6 +63,14 @@ export interface BoardProbe {
    * healthy board reads 0.
    */
   decodeErrors: number;
+  /**
+   * Times any node's state moved into FAULTED since connect or the last Restart. A node that
+   * faults on consecutive ticks without leaving FAULTED counts once; one that leaves and comes
+   * back counts again. A board that isn't meant to fault reads 0.
+   */
+  faultEntries: number;
+  /** Distinct nodes that entered FAULTED at least once since connect or the last Restart. */
+  faultedNodes: number;
   endHash: string | null;
   /** The selected speed, 0.25 to 4. */
   speed: number;
@@ -99,6 +108,43 @@ export interface BoardProbe {
 /** A copy of a trace: every tick and its hash, as plain pairs. */
 export function tickHashes(trace: readonly (readonly [number, string])[]): [number, string][] {
   return trace.map(([tick, hash]) => [tick, hash]);
+}
+
+/** The running fault count behind {@link BoardProbe.faultEntries} and `faultedNodes`. */
+export interface FaultTally {
+  /** Times a node's state moved into FAULTED. */
+  entries: number;
+  /** The ids of every node that did. */
+  nodes: Set<number>;
+}
+
+/** A tally at zero. */
+export function createFaultTally(): FaultTally {
+  return { entries: 0, nodes: new Set() };
+}
+
+/**
+ * Count each node whose state is FAULTED after a packet and wasn't before it. `before` maps node
+ * id to the state byte it had before the packet; a node missing from it counts as not faulted,
+ * so a node that first appears already faulted is an entry.
+ */
+export function tallyFaults(
+  before: ReadonlyMap<number, number>,
+  after: ReadonlyMap<number, { state: number }>,
+  tally: FaultTally,
+): void {
+  for (const [id, node] of after) {
+    if (node.state === state_tag.FAULTED && before.get(id) !== state_tag.FAULTED) {
+      tally.entries += 1;
+      tally.nodes.add(id);
+    }
+  }
+}
+
+/** Back to zero, as Restart does. */
+export function resetFaultTally(tally: FaultTally): void {
+  tally.entries = 0;
+  tally.nodes.clear();
 }
 
 /**

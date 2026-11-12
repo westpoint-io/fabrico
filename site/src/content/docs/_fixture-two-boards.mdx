@@ -7,7 +7,7 @@ import Board from '../../components/Board.astro';
 
 This page holds two boards, so the docs suite can check that the board script loads once per page. The first board is the demo factory.
 
-<Board name="demo_scene" />
+<Board name="demo_scene" faultsAbout="FactoryError" />
 
 The second board sends three webhooks on the same tick and merges their items onto one belt.
 

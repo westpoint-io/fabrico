@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { beltTiles, MACHINE_REACH_PX, TILE_INSET, type BeltTile, type CanvasBox, type ProbeRect, type TileScene } from './probe';
+import { state_tag } from '../protocol/kinds';
+import {
+  beltTiles,
+  createFaultTally,
+  MACHINE_REACH_PX,
+  resetFaultTally,
+  TILE_INSET,
+  tallyFaults,
+  type BeltTile,
+  type CanvasBox,
+  type ProbeRect,
+  type TileScene,
+} from './probe';
 
 // World px to screen px at scale 0.5 with the board's origin at (10, 20) on the canvas, so a 32 px
 // cell is 16 screen px.
@@ -112,5 +124,58 @@ describe('beltTiles', () => {
       ]),
     });
     expect(round(beltTiles(s, toScreen, CANVAS, VIEW, []))).toEqual(round([tile(0, 0), tile(1, 0), tile(2, 0)]));
+  });
+});
+
+// Node id to state byte, the shape the board's pipeline hooks hand the tally.
+const states = (pairs: [number, number][]): Map<number, number> => new Map(pairs);
+// The scene's node collection after a packet: only `state` matters to the tally.
+const after = (pairs: [number, number][]): Map<number, { state: number }> =>
+  new Map(pairs.map(([id, state]) => [id, { state }]));
+const { IDLE, WORKING, FAULTED } = state_tag;
+
+describe('tallyFaults', () => {
+  it('counts a node moving from idle to faulted as one entry on one node', () => {
+    const t = createFaultTally();
+    tallyFaults(states([[4, IDLE]]), after([[4, FAULTED]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([1, 1]);
+  });
+
+  it('leaves both counts alone while the node stays faulted on the next packet', () => {
+    const t = createFaultTally();
+    tallyFaults(states([[4, IDLE]]), after([[4, FAULTED]]), t);
+    tallyFaults(states([[4, FAULTED]]), after([[4, FAULTED]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([1, 1]);
+  });
+
+  it('counts a second entry, on the same node, when the node leaves faulted and enters it again', () => {
+    const t = createFaultTally();
+    tallyFaults(states([[4, IDLE]]), after([[4, FAULTED]]), t);
+    tallyFaults(states([[4, FAULTED]]), after([[4, WORKING]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([1, 1]);
+    tallyFaults(states([[4, WORKING]]), after([[4, FAULTED]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([2, 1]);
+  });
+
+  it('counts two nodes entering faulted in one packet as two entries on two nodes', () => {
+    const t = createFaultTally();
+    tallyFaults(states([[1, IDLE], [2, WORKING], [3, IDLE]]), after([[1, FAULTED], [2, FAULTED], [3, WORKING]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([2, 2]);
+  });
+
+  it('counts a node that first appears already faulted as an entry', () => {
+    const t = createFaultTally();
+    tallyFaults(states([]), after([[9, FAULTED]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([1, 1]);
+  });
+
+  it('reads 0 and 0 after a reset', () => {
+    const t = createFaultTally();
+    tallyFaults(states([[1, IDLE], [2, IDLE]]), after([[1, FAULTED], [2, FAULTED]]), t);
+    resetFaultTally(t);
+    expect([t.entries, t.nodes.size]).toEqual([0, 0]);
+    // A node faulted before the reset counts again when it next enters faulted.
+    tallyFaults(states([[1, IDLE]]), after([[1, FAULTED]]), t);
+    expect([t.entries, t.nodes.size]).toEqual([1, 1]);
   });
 });

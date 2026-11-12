@@ -79,7 +79,7 @@ import {
   type ErrorCopy,
 } from './errors';
 import { createLabelOverlay, type LabelOverlay } from './labelOverlay';
-import { beltTiles, overlayBoxes, tickHashes, type BoardProbe } from './probe';
+import { beltTiles, createFaultTally, overlayBoxes, resetFaultTally, tallyFaults, tickHashes, type BoardProbe, type FaultTally } from './probe';
 import { boardText, bundledInfo, compiledPlayer, manifestEntry, onBoardRegistered, posterAlt, posterFor } from './registry';
 import { pageIsHidden, pageScheduler, prefersReducedMotion, type ScheduledBoard } from './scheduler';
 import { boardStylesheet, injectFonts } from './styles';
@@ -139,6 +139,8 @@ interface Board {
   frames: { n: number };
   /** The path each render packet takes into the scene; its counters go on the probe. */
   pipeline: PacketPipeline;
+  /** Times nodes entered FAULTED since connect or the last Restart; the probe reports it. */
+  faults: FaultTally;
   /** Has the board been mounted and started once? The first mount autoplays. */
   started: boolean;
 }
@@ -369,6 +371,8 @@ export class FabricoBoardElement extends HTMLElement {
       posterAlt: this.#posterLayer.hidden || this.#poster === null || this.#poster.hidden ? null : this.#poster.alt,
       frames: b?.frames.n ?? 0,
       ...(b?.pipeline.stats() ?? { packetsApplied: 0, decodeErrors: 0 }),
+      faultEntries: b?.faults.entries ?? 0,
+      faultedNodes: b?.faults.nodes.size ?? 0,
       cameraSnapshot: v?.handle.cameraSnapshot() ?? null,
       beltTiles:
         v === null
@@ -801,7 +805,12 @@ export class FabricoBoardElement extends HTMLElement {
       const info = player.boardInfo();
       const scene = createSceneState();
       let dropped: { error: unknown } | null = null;
-      const pipeline = createPacketPipeline(() => scene, {
+      const faults = createFaultTally();
+      const pipeline = createPacketPipeline<ReadonlyMap<number, number>>(() => scene, {
+        // Each node's state before the packet. A keyframe starts a fresh scene (create, or the
+        // Restart that reset the tally), so a node already faulted in it counts as an entry.
+        beforeApply: (packet, s) => (packet.full ? new Map() : new Map([...s.nodes].map(([id, n]) => [id, n.state]))),
+        afterApply: (_packet, s, before) => tallyFaults(before, s.nodes, faults),
         onDropped: (error) => {
           dropped ??= { error };
         },
@@ -832,13 +841,16 @@ export class FabricoBoardElement extends HTMLElement {
           drainPackets();
           this.#drainEffects(player);
         },
-        onRestart: () => this.#log.clear(),
+        onRestart: () => {
+          this.#log.clear();
+          resetFaultTally(faults);
+        },
         onChange: () => this.#refresh(),
         onFault: (error) => this.#onFault(name, error),
         trace: traceRequested(),
       });
       clock.setSpeed(this.#speed);
-      this.#board = { player, info, scene, clock, frames: { n: 0 }, pipeline, started: false };
+      this.#board = { player, info, scene, clock, frames: { n: 0 }, pipeline, faults, started: false };
       return this.#board;
     } catch (error) {
       try {

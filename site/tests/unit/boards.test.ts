@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boardIdsOf, editDistance, resolveBoard, suggest, type KnownBoard } from '../../src/lib/boards.ts';
+import { boardIdsOf, editDistance, faultLabelParts, faultReasonsOf, resolveBoard, suggest, type KnownBoard } from '../../src/lib/boards.ts';
 
 const PAGE = 'site/src/content/docs/get-started/index.mdx';
 const IDS = ['advanced', 'demo_scene', 'docs-arrival-order', 'docs-script-outcomes', 'order_processing'];
@@ -75,4 +75,57 @@ test('the suggestion stops at 3 edits', () => {
   assert.equal(suggest('xxvanced', IDS), 'advanced');
   assert.equal(suggest('xxxanced', IDS), 'advanced');
   assert.equal(suggest('xxxxnced', IDS), null);
+});
+
+const REASONS = ['NoMatch', 'FactoryError', 'FactoryTimeout'];
+
+/** The message faultReasonsOf throws for this prop, or a failed assertion when it returns. */
+function faultThrown(prop: string): string {
+  try {
+    const names = faultReasonsOf(prop, PAGE, REASONS, 'demo_scene');
+    assert.fail(`faultReasonsOf(${JSON.stringify(prop)}) returned ${names.join(' ')} instead of throwing`);
+  } catch (err) {
+    if (err instanceof assert.AssertionError) throw err;
+    assert.ok(err instanceof Error);
+    return err.message;
+  }
+}
+
+test('faultsAbout with two known reasons returns both, in the order written', () => {
+  assert.deepEqual(faultReasonsOf('NoMatch FactoryError', PAGE, REASONS, 'demo_scene'), ['NoMatch', 'FactoryError']);
+});
+
+test('an empty or blank faultsAbout throws, naming the page, the board and the known reasons', () => {
+  const blank = (prop: string): string =>
+    `[Board] ${PAGE} gives board "demo_scene" the faultsAbout value "${prop}". ` +
+    'Name each fault reason the board shows, separated by single spaces. Known reasons: NoMatch, FactoryError, FactoryTimeout.';
+  assert.equal(faultThrown(''), blank(''));
+  assert.equal(faultThrown('  '), blank('  '));
+  assert.equal(faultThrown('NoMatch  FactoryError'), blank('NoMatch  FactoryError'));
+});
+
+test('a reason missing from facts.json throws the [Board] line with the known reasons', () => {
+  assert.equal(
+    faultThrown('NoMatch NotAReason'),
+    `[Board] ${PAGE} says board "demo_scene" faults on purpose with "NotAReason", and ` +
+      'site/src/generated/facts.json has no fault reason with that name. Known reasons: NoMatch, FactoryError, FactoryTimeout.',
+  );
+});
+
+test('a reason given twice throws', () => {
+  assert.equal(
+    faultThrown('NoMatch NoMatch'),
+    `[Board] ${PAGE} names "NoMatch" twice in the faultsAbout of board "demo_scene". Name each reason once.`,
+  );
+});
+
+test('the fault line joins one name alone, two with and, three as A, B and C', () => {
+  const line = (names: string[]): string => faultLabelParts(names).map((p) => p.name + p.after).join('');
+  assert.equal(line(['A']), 'A');
+  assert.equal(line(['A', 'B']), 'A and B');
+  assert.equal(line(['A', 'B', 'C']), 'A, B and C');
+  assert.deepEqual(faultLabelParts(['A', 'B']), [
+    { name: 'A', after: ' and ' },
+    { name: 'B', after: '' },
+  ]);
 });
