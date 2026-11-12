@@ -7,7 +7,7 @@
 import type { ShortcutId } from '../input/shortcuts';
 import type { MachineConfig } from '../protocol/decode';
 
-export type LessonId = 'your-first-line' | 'delete-and-undo' | 'a-factory-with-two-outputs';
+export type LessonId = 'your-first-line' | 'delete-and-undo' | 'a-factory-with-two-outputs' | 'answer-a-web-request';
 /**
  * What a step can bind. `belt`, `beltIn`, `beltOut` and `beltOut2` are belts, each found by the two
  * machines `BELT_ENDS` in `check.ts` names for it; the rest are machines, each found by its `nodeKey`.
@@ -251,6 +251,11 @@ export type Gesture =
   | { do: 'watch' }
   /** Type `insert` into the code editor just after the text `after`, on the line the ring marks. */
   | { do: 'typeCode'; after: string; insert: string }
+  /**
+   * Send the request the card's request line shows. The app has no control for it: the user runs the line
+   * in a terminal, so the walk sends it from the test process to the URL it reads off the panel.
+   */
+  | { do: 'request' }
   | { do: 'none' };
 
 /**
@@ -297,7 +302,12 @@ export interface Lesson {
   refused: {
     atStep: string;
     atStage: string;
-    press: { on: 'machine'; of: BindingName };
+    /**
+     * Where the press lands: on a bound machine's body, or on one of its ports. The port form names a
+     * Fault, which no hint can mark (`PortRoleName` has no Fault), so a lesson can point the walk at it
+     * without ever ringing it for the user.
+     */
+    press: { on: 'machine'; of: BindingName } | { on: 'port'; of: BindingName; role: 'fault' };
     /** The refusal tag the press draws from the app, so the walk knows which coaching line to expect. */
     tag: string;
   };

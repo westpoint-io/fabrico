@@ -4,15 +4,16 @@ import { CELL } from '../../shared/geometry';
 import { KIND_NAMES } from '../../src/chrome/kindNames';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
 import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
-import { NUB_RING_R, NUB_RING_STROKE, PORT_ROLE, doorstepCell } from '../../src/protocol/ports';
+import { MEDIUM_ELECTRICAL, NUB_RING_R, NUB_RING_STROKE, PORT_ROLE, doorstepCell, nubAnchor } from '../../src/protocol/ports';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import { BELT_ENDS, beltJoining, lineDoorstep, nodeKey, watchedNames } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { BindingName, Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
-import { LESSON_WALKS, REFUSED_SENTENCE, type LessonWalk } from './lessonWalks';
+import { LESSON_WALKS, REFUSED_SENTENCES, type LessonWalk } from './lessonWalks';
 import {
   DRAWN_STATE_FRAMES,
+  ENDPOINT_URL_SHAPE,
   HAND_MOVE_FRAMES,
   captureClip,
   captureRefusalText,
@@ -23,11 +24,13 @@ import {
   handPath,
   latchRejectFlashCells,
   pollScene,
+  readPanelUrl,
   readScene,
   rejectFlashCell,
   rejectFlashCellsSeen,
   screenCellCentre,
   stopRejectFlashLatch,
+  webhookUrl,
 } from './oracle';
 import { decodePngRows } from './pngRows';
 
@@ -64,6 +67,10 @@ const TOOLBAR_TICKS = 4;
 const TOOLBAR_FRAMES = 8;
 /** Drawn frames for the card's note to follow the band: both come from one refusal, a render apart. */
 const CARD_NOTE_FRAMES = 20;
+/** The body the HTTP Handler's preset code answers with, which the host sends back to the caller. */
+const HANDLER_PRESET_BODY = 'hello from fabrico';
+/** How long the walk's request may take, the `curl --max-time` a user's terminal would give it. */
+const REQUEST_TIMEOUT_MS = 20_000;
 /** Drawn frames for the Lessons list to show a row's buttons after it opens. */
 const ROW_FRAMES = 20;
 /**
@@ -956,8 +963,10 @@ function checkRefusalReached(lesson: Lesson, state: WalkState, stepIndex: number
  * names another stage, so the record was a frame behind, the leg didn't press, and the walk goes back to
  * waiting on the record.
  *
- * The press point comes from the model and not from a ring, and the press lands on the bound machine's
- * own cell, so it collides with that machine and doesn't sit beside it. The reject flash lives 180 ms,
+ * The press point comes from the model and not from a ring. A press on a machine lands on the bound
+ * machine's own cell, so it collides with that machine and doesn't sit beside it; a press on a port lands
+ * near the port's dot, which no ring marks, and the band's sentence comes from the walk's table by the
+ * lesson's refused tag. The reject flash lives 180 ms,
  * the refusal comes back through the host and is polled at 100 to 500 ms, and a CI runner draws about 5
  * frames a second, so a single read after the sentence could miss the flash. The latch reads every
  * frame, and it stays on for a settle window so a second flash would fail the read too. The sentence is
@@ -966,34 +975,53 @@ function checkRefusalReached(lesson: Lesson, state: WalkState, stepIndex: number
  * checked as well.
  */
 async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepIndex: number): Promise<boolean> {
-  const { atStage, press } = lesson.refused;
+  const { atStage, press, tag } = lesson.refused;
   const label = refusalLabel(lesson, stepIndex);
   const probe = await probeAtStage(page, stepIndex, atStage);
   if (probe === null) return false;
+  const sentenceWanted = REFUSED_SENTENCES[tag];
+  if (sentenceWanted === undefined) throw new Error(`${label}: the walk holds no band sentence for the tag ${tag}`);
   const lengthBefore = (await readRecord(page)).length;
   const before = await readScene(page);
   const boundId = probe.bound[press.of];
-  const cells = before.nodes.find((n) => n.id === boundId)?.cells;
-  if (cells === undefined || cells.length === 0) {
+  const node = before.nodes.find((n) => n.id === boundId);
+  const cells = node?.cells;
+  if (node === undefined || cells === undefined || cells.length === 0) {
     throw new Error(`${label}: the bound ${press.of} (${String(boundId)}) isn't on the board`);
   }
-  // Anywhere in the machine's whole footprint, from its centre, so a 3 by 3 machine is pressed off its
-  // middle cell. On a 1 by 1 machine this is the cell itself, as it always was.
-  const xs = cells.map((c) => c[0] as number);
-  const ys = cells.map((c) => c[1] as number);
   const cam = await cameraOf(page);
   const size = CELL * cam.scale;
-  const footprint: HintRect = {
-    x: Math.min(...xs) * size + cam.x,
-    y: Math.min(...ys) * size + cam.y,
-    width: (Math.max(...xs) - Math.min(...xs) + 1) * size,
-    height: (Math.max(...ys) - Math.min(...ys) + 1) * size,
-    shape: 'square',
-  };
-  const point = pointInRect(footprint, fromOffset(state.walk.refusedOffset ?? state.walk.pressOffset));
-  const cx = Math.floor((point.x - cam.x) / size);
-  const cy = Math.floor((point.y - cam.y) / size);
-  console.log(`REFUSAL-PRESS ${label}: cell (${cx},${cy}) of the ${press.of}'s ${footprint.width / size}x${footprint.height / size} footprint`);
+  const offset = fromOffset(state.walk.refusedOffset ?? state.walk.pressOffset);
+  let point: { x: number; y: number };
+  // The cell the app flashes. A press on a machine flashes the cell under the press; a press on a port
+  // flashes the port's own cell, wherever in the hit circle the press landed.
+  let cx: number;
+  let cy: number;
+  if (press.on === 'port') {
+    const port = node.ports.find((p) => p.role === PORT_ROLE.FAULT);
+    if (port === undefined) throw new Error(`${label}: the bound ${press.of} has no Fault port to press`);
+    const dot = nubAnchor(port.cell_x, port.cell_y, port.side);
+    point = { x: dot.x * cam.scale + cam.x + offset.x, y: dot.y * cam.scale + cam.y + offset.y };
+    cx = port.cell_x;
+    cy = port.cell_y;
+    console.log(`REFUSAL-PRESS ${label}: (${offset.x},${offset.y}) px from the ${press.of}'s Fault dot on cell (${cx},${cy})`);
+  } else {
+    // Anywhere in the machine's whole footprint, from its centre, so a 3 by 3 machine is pressed off its
+    // middle cell. On a 1 by 1 machine this is the cell itself, as it always was.
+    const xs = cells.map((c) => c[0] as number);
+    const ys = cells.map((c) => c[1] as number);
+    const footprint: HintRect = {
+      x: Math.min(...xs) * size + cam.x,
+      y: Math.min(...ys) * size + cam.y,
+      width: (Math.max(...xs) - Math.min(...xs) + 1) * size,
+      height: (Math.max(...ys) - Math.min(...ys) + 1) * size,
+      shape: 'square',
+    };
+    point = pointInRect(footprint, offset);
+    cx = Math.floor((point.x - cam.x) / size);
+    cy = Math.floor((point.y - cam.y) / size);
+    console.log(`REFUSAL-PRESS ${label}: cell (${cx},${cy}) of the ${press.of}'s ${footprint.width / size}x${footprint.height / size} footprint`);
+  }
   await expectOnTheBoard(page, label, 'the press is', [point]);
 
   expect(((await page.locator('#fab-refusal').textContent()) ?? '').trim(), `${label}: no refusal is showing before the press`).toBe('');
@@ -1002,7 +1030,7 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   await pressPointByHand(page, point);
 
   const sentence = await captureRefusalText(page, `${label}: the app says why it refused`);
-  expect(sentence, `${label}: the app says the space is taken`).toBe(REFUSED_SENTENCE);
+  expect(sentence, `${label}: the band says why, in the app's sentence for ${tag}`).toBe(sentenceWanted);
   console.log(`REFUSAL ${label}: "${sentence}"`);
 
   // The card says why and how to try again, in the words the walk table holds for this lesson. They
@@ -1036,13 +1064,15 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   await page.waitForTimeout(addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES * 2), `${label}: the second-flash window`));
   const flashes = await rejectFlashCellsSeen(page);
   await stopRejectFlashLatch(page);
-  expect(flashes, `${label}: one flash, on the cell of the bound ${press.of} under the press`).toEqual([{ cx, cy }]);
+  expect(flashes, `${label}: one flash, on the ${press.on === 'port' ? 'pressed port\'s own cell' : 'cell under the press'} of the bound ${press.of}`).toEqual([{ cx, cy }]);
 
   const after = await readProbe(page);
   expect(after.stepIndex, `${label}: the refusal moved the step on`).toBe(stepIndex);
   expect(after.stageId, `${label}: the refusal moved the stage on`).toBe(atStage);
   expect((await readRecord(page)).length, `${label}: the step record grew across the refusal, so the step moved and came back`).toBe(lengthBefore);
-  expect((await readScene(page)).nodes.length, `${label}: the refused press placed a machine`).toBe(before.nodes.length);
+  const afterScene = await readScene(page);
+  expect(afterScene.nodes.length, `${label}: the refused press placed a machine`).toBe(before.nodes.length);
+  expect(afterScene.wires.length, `${label}: the refused press laid a wire`).toBe(before.wires.length);
   return true;
 }
 
@@ -1147,8 +1177,14 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const end = pointInRect(walk.reverseDrags === true ? rects.hint : rects.hintTo, fromOffset(walk.dragTo));
         if (walk.reverseDrags === true) console.log(`REVERSED ${lesson.id} step ${stepIndex + 1}`);
         await expectOnTheBoard(page, label, "both ends of the drag are", [start, end]);
-        beltClip = await middleTileClip(page, label, stage, rects.hint);
-        beltBefore = await captureWithGhostGone(page, beltClip.clip);
+        // A wire is drawn as a cable, not a belt, so the belt's rail-ink read has nothing to read. The
+        // step's own check reads both wires off the model once the step is done.
+        if (!(await dragsAWire(page, stage))) {
+          beltClip = await middleTileClip(page, label, stage, rects.hint);
+          beltBefore = await captureWithGhostGone(page, beltClip.clip);
+        } else {
+          console.log(`WIRE-DRAG ${lesson.id} step ${stepIndex + 1} from (${Math.round(start.x)},${Math.round(start.y)}) to (${Math.round(end.x)},${Math.round(end.y)})`);
+        }
         await dragByHand(page, start, end);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
@@ -1174,6 +1210,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       if (rects !== null) {
         await expectRingPainted(page, state, label, stepIndex, stage, [rects.hint]);
         await walkTypeCode(page, label, rects.hint, gesture);
+        actedOn.add(stageKey(stepIndex, stage.id));
+      }
+    } else if (gesture.do === 'request') {
+      if ((await probeAtStage(page, stepIndex, stage.id)) !== null) {
+        await walkRequest(page, lesson, stepIndex, label);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
     } else if (gesture.do === 'key') {
@@ -1211,6 +1252,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     const node = (await readScene(page)).nodes.find((n) => n.id === id);
     expect(node?.kind, `${label}: the bound ${step.done.bind} is on the board with the right kind`).toBe(step.done.kind);
   }
+  if (step.done.is === 'wireJoins') await expectWiresJoin(page, label, step.done.a, step.done.b);
   if (goneTarget !== null) await expectTargetGone(page, label, goneTarget);
   if (handlesBefore !== null) {
     const after = (await readProbe(page)).bound;
@@ -1365,6 +1407,64 @@ async function expectTargetGone(page: Page, label: string, target: DeleteTarget)
   } else {
     expect(beltJoining(scene, target.a, target.b)?.id, `${label}: no belt joins the two machines the ${target.name} joined`).toBeUndefined();
   }
+}
+
+/** Does this drag stage start on an electrical port, so the drag lays a wire and not a belt? */
+async function dragsAWire(page: Page, stage: Stage): Promise<boolean> {
+  const hint = stage.hint;
+  if (hint?.on !== 'port') return false;
+  const { bound } = await readProbe(page);
+  const node = (await readScene(page)).nodes.find((n) => n.id === bound[hint.of]);
+  const port = node?.ports.find((p) => p.role === PORT_ROLE[hint.role === 'out' ? 'OUT' : 'IN']);
+  return port?.medium === MEDIUM_ELECTRICAL;
+}
+
+/** A wire from `a` to `b` and one back are both on the board, each found by its two machines, never by wire id. */
+async function expectWiresJoin(page: Page, label: string, a: BindingName, b: BindingName): Promise<void> {
+  const { bound } = await readProbe(page);
+  const from = bound[a];
+  const to = bound[b];
+  expect(from !== undefined && to !== undefined, `${label}: the ${a} and the ${b} are both bound`).toBe(true);
+  const wires = (await readScene(page)).wires;
+  const legs = wires.map((w) => `${w.from.node}->${w.to.node}`);
+  console.log(`WIRES ${label} ${a}=${String(from)} ${b}=${String(to)} legs=${legs.join(',')}`);
+  expect(wires.some((w) => w.from.node === from && w.to.node === to), `${label}: a wire runs from the ${a} to the ${b} (wires: ${legs.join(', ')})`).toBe(true);
+  expect(wires.some((w) => w.from.node === to && w.to.node === from), `${label}: a wire runs back from the ${b} to the ${a} (wires: ${legs.join(', ')})`).toBe(true);
+}
+
+/**
+ * Send the request the card shows, the way a user does from a terminal. The URL comes off the inspector's
+ * POST URL row, the place the user copies it from, and has to equal the host's own answer for the bound
+ * Route and the URL on the card's request line, so a card that built its URL any other way fails here. The
+ * request goes from the test process with no body, as the card's line has none, and the step must then be
+ * marked done by the reply coming back along the return wire.
+ */
+async function walkRequest(page: Page, lesson: Lesson, stepIndex: number, label: string): Promise<void> {
+  const { bound } = await readProbe(page);
+  const route = bound.route;
+  if (route === undefined) throw new Error(`${label}: no Route is bound to send the request to`);
+  const url = await readPanelUrl(page);
+  expect(url, `${label}: the POST URL row shows a loopback endpoint URL`).toMatch(ENDPOINT_URL_SHAPE);
+  expect(url, `${label}: the panel's URL is the host's URL for the bound Route`).toBe(await webhookUrl(page, route));
+  const line = page.locator('[data-fab-step-card] [data-fab-request-line]');
+  await expect(line, `${label}: the card shows a request line`).toHaveCount(1);
+  const card = ((await line.textContent()) ?? '').trim();
+  const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false });
+  const status = resp.status();
+  const body = await resp.text();
+  console.log(`REQUEST ${lesson.id} url=${url} status=${status} body=${body} card=${card}`);
+  expect(card, `${label}: the card's request line is curl -X POST and the panel's URL`).toBe(`curl -X POST ${url}`);
+  expect(status, `${label}: the Route answered the request`).toBe(200);
+  expect(body, `${label}: with the HTTP Handler's preset reply`).toBe(HANDLER_PRESET_BODY);
+  await expect
+    .poll(
+      async () => {
+        const p = await readProbe(page);
+        return p.card === 'finished' || p.stepIndex > stepIndex ? 'done' : `${p.card} index ${p.stepIndex} stage ${p.stageId ?? 'none'}`;
+      },
+      { message: `${label}: the reply came back and the step was marked done`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
+    )
+    .toBe('done');
 }
 
 /**

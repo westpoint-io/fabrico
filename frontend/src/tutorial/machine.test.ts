@@ -1280,7 +1280,7 @@ describe('lesson 3: Delete and Undo', () => {
 
   it('has six steps in order, each opening with the paused stage, inside the card budgets', () => {
     const du = LESSONS.find((l) => l.id === DU);
-    expect(LESSONS.map((l) => l.id)).toEqual(['your-first-line', 'delete-and-undo', 'a-factory-with-two-outputs']);
+    expect(LESSONS.map((l) => l.id)).toEqual(['your-first-line', 'delete-and-undo', 'a-factory-with-two-outputs', 'answer-a-web-request']);
     expect(du?.title).toBe('Delete and Undo');
     expect(du?.steps.map((s) => s.id)).toEqual(['place-source', 'place-sink', 'draw-belt', 'delete-belt', 'delete-sink', 'bring-back']);
     for (const s of du?.steps ?? []) expect(s.stages[0]?.id, s.id).toBe('board-paused');
@@ -1694,13 +1694,14 @@ describe('lesson 1 on the shared stages', () => {
   });
 });
 
-describe('rowViews with three lessons', () => {
+describe('rowViews with four lessons', () => {
   it('puts the accent on Start for Delete and Undo once lesson 1 is Done, with the rows in teaching order', () => {
     const views = rowViews({ lessons: LESSONS, progress: withLessonDone(EMPTY_PROGRESS, 'your-first-line'), state: IDLE, swapFloor: FLOOR, simStopped: false });
     expect(views.map((v) => [v.id, v.title, v.status, v.accent])).toEqual([
       ['your-first-line', 'Your first line', 'done', null],
       ['delete-and-undo', 'Delete and Undo', 'notStarted', 'start'],
       ['a-factory-with-two-outputs', 'A Factory with two outputs', 'notStarted', null],
+      ['answer-a-web-request', 'Answer a web request', 'notStarted', null],
     ]);
   });
 });

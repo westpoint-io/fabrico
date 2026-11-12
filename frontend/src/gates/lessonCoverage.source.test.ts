@@ -18,11 +18,14 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCE } from '../../e2e-live/support/lessonWalks.ts';
+import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCES } from '../../e2e-live/support/lessonWalks.ts';
+import { ROUTE_URL_LABEL, WIRE_TOOL_LABEL } from '../chrome/controlLabels.ts';
 import { ADD_OUTPUT_LABEL } from '../chrome/PortsSection.tsx';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
+import { COPY_LABELS } from '../chrome/WebhookUrlRow.tsx';
 import { SHORTCUTS } from '../input/shortcuts.ts';
 import { LESSONS } from '../tutorial/lessons/index.ts';
+import { ANSWER_A_WEB_REQUEST, COPY_WORD, ROUTE_URL_WORDS, WIRE_WORDS } from '../tutorial/lessons/answerAWebRequest.ts';
 import { ADD_OUTPUT_WORDS } from '../tutorial/lessons/twoOutputs.ts';
 import { MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
@@ -220,6 +223,12 @@ const REAL: CoverageArgs = {
 };
 const FIRST = LESSONS[0] as Lesson;
 
+/** The typed words of one stage's text, joined, with every token left out. */
+function wordsOf(lesson: Lesson, stepId: string, stageId: string): string {
+  const stage = lesson.steps.find((s) => s.id === stepId)?.stages.find((s) => s.id === stageId);
+  return stage?.text.filter((t): t is string => typeof t === 'string').join('') ?? '';
+}
+
 function withStage(change: (stage: Stage) => Stage): Lesson {
   const [step, ...rest] = FIRST.steps;
   const [stage, ...stages] = step!.stages;
@@ -246,12 +255,23 @@ describe('every lesson has a walk', () => {
     expect(Object.keys(LESSON_WALKS).length).toBe(LESSONS.length);
   });
 
-  it('lets the runner drive the seven gestures', () => {
-    expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint dragToHint key none pressHint typeCode watch');
+  it('lets the runner drive the eight gestures', () => {
+    expect([...DRIVABLE_GESTURES].sort().join(' ')).toBe('dragHint dragToHint key none pressHint request typeCode watch');
   });
 
-  it("holds the app's own sentence for the refusal the walk reads", () => {
-    expect(REFUSED_SENTENCE).toBe(REFUSAL_COPY.FootprintCollision);
+  it("holds each sentence the walk reads for a refusal to the app's own, by tag", () => {
+    const tags = Object.keys(REFUSED_SENTENCES);
+    expect(tags.length, 'the walk holds sentences to check').toBeGreaterThan(0);
+    for (const tag of tags) {
+      const app = Object.hasOwn(REFUSAL_COPY, tag) ? (REFUSAL_COPY as Record<string, string>)[tag] : (CLIENT_REFUSAL_COPY as Record<string, string>)[tag];
+      expect(REFUSED_SENTENCES[tag], `${tag}: the walk's sentence against the app's`).toBe(app);
+    }
+  });
+
+  it('holds a walk sentence for every lesson\'s refused tag', () => {
+    for (const lesson of LESSONS) {
+      expect(Object.hasOwn(REFUSED_SENTENCES, lesson.refused.tag), `${lesson.id}: the walk has a sentence for ${lesson.refused.tag}`).toBe(true);
+    }
   });
 
   it("holds lesson 4's typed + Add output to the button's own label", () => {
@@ -259,6 +279,23 @@ describe('every lesson has a walk', () => {
     const step = LESSONS.flatMap((l) => l.steps).find((s) => s.id === 'add-output');
     const words = step?.stages.flatMap((stage) => stage.text.filter((t): t is string => typeof t === 'string')).join('') ?? '';
     expect(words, 'the add-output stage says the label it marks').toContain(ADD_OUTPUT_LABEL);
+  });
+
+  // Lesson 5's typed control words, each against the constant its control renders, so a rename of the
+  // control reaches the lesson or fails here.
+  it("holds lesson 5's typed Copy to the Copy button's resting word", () => {
+    expect(COPY_WORD).toBe(COPY_LABELS.idle);
+    expect(wordsOf(ANSWER_A_WEB_REQUEST, 'answer', 'send-request'), 'the send stage says the word it marks').toContain(COPY_LABELS.idle);
+  });
+
+  it("holds lesson 5's typed POST URL to the URL row's label", () => {
+    expect(ROUTE_URL_WORDS).toBe(ROUTE_URL_LABEL);
+    expect(wordsOf(ANSWER_A_WEB_REQUEST, 'answer', 'select-route'), 'the select stage says the row it points to').toContain(ROUTE_URL_LABEL);
+  });
+
+  it("holds lesson 5's typed Wire to the palette's Wire tool word", () => {
+    expect(WIRE_WORDS).toBe(WIRE_TOOL_LABEL);
+    expect(wordsOf(ANSWER_A_WEB_REQUEST, 'wire', 'wire-tool'), 'the wire-tool stage says the tool it marks').toContain(WIRE_TOOL_LABEL);
   });
 
   it('finds nothing in the real tree', () => {
@@ -296,7 +333,7 @@ describe('every lesson has a walk', () => {
     });
 
     it('a file under lessons/ that index.ts imports and leaves out of LESSONS', () => {
-      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, DELETE_AND_UNDO, TWO_OUTPUTS]', '[DELETE_AND_UNDO, TWO_OUTPUTS]');
+      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST]', '[DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST]');
       expect(indexSource, 'the substitution landed').not.toBe(REAL.indexSource);
       expect(audit({ indexSource })).toMatch(/yourFirstLine\.ts: lessons\/index\.ts imports this file and leaves it out/);
     });

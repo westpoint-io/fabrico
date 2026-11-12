@@ -36,9 +36,10 @@ export interface LessonWalk {
    */
   reverseDrags?: boolean;
   /**
-   * Where the refused press lands, in screen pixels from the centre of the bound machine's whole
-   * footprint. Left out, the press uses `pressOffset`. A 3 by 3 machine needs a bigger offset than a
-   * 1 by 1 one for the press to land off its centre cell.
+   * Where the refused press lands, in screen pixels: from the centre of the bound machine's whole
+   * footprint for a press on a machine, or from the port's dot for a press on a port. Left out, the press
+   * uses `pressOffset`. A 3 by 3 machine needs a bigger offset than a 1 by 1 one for the press to land off
+   * its centre cell; a port press stays within half the Wire tool's 22 px reach of the dot.
    */
   refusedOffset?: { dx: number; dy: number };
 }
@@ -73,14 +74,29 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
     // At zoom 1 the Factory is 96 px square, so this lands in its top right cell, not its centre.
     refusedOffset: { dx: 20, dy: -18 },
   },
+  'answer-a-web-request': {
+    pressOffset: { dx: -3, dy: 4 },
+    floorOffset: { dx: 4, dy: -3 },
+    // Both inside the 22 px reach the Wire tool's press and release hit-test at zoom 1.
+    dragFrom: { dx: 3, dy: -4 },
+    dragTo: { dx: -4, dy: 3 },
+    refusedCardNote: "Wires can't use that dot. Start the drag from the Route's output dot, in the ring.",
+    // From the Fault's dot, 7.8 px away: well inside the Wire tool's reach of the Fault, and over 60 px
+    // from the Handler's electrical Out, so the press can't start a wire instead.
+    refusedOffset: { dx: 6, dy: -5 },
+  },
 };
 
 /** The gestures `walkStep` in `lessonRunner.ts` knows how to make. */
-export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'dragToHint', 'key', 'watch', 'none', 'typeCode'];
+export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dragHint', 'dragToHint', 'key', 'watch', 'none', 'typeCode', 'request'];
 
 /**
- * The app's sentence for a footprint collision, transcribed because `RefusalMessage.tsx` pulls in the
- * render assets, which Playwright can't load. `lessonCoverage.source.test.ts` compares it with
- * `REFUSAL_COPY`, so it can't drift from what the app says.
+ * The band's sentence for each refusal a lesson's walk draws, keyed by tag. Transcribed because
+ * `RefusalMessage.tsx` pulls in the render assets, which Playwright can't load.
+ * `lessonCoverage.source.test.ts` compares each with `REFUSAL_COPY` or `CLIENT_REFUSAL_COPY`, and fails a
+ * lesson whose refused tag has no entry here, so none can drift from what the app says.
  */
-export const REFUSED_SENTENCE = 'That space is taken. Clear it or try elsewhere.';
+export const REFUSED_SENTENCES: Readonly<Record<string, string>> = {
+  FootprintCollision: 'That space is taken. Clear it or try elsewhere.',
+  BeltOnlyPort: 'That port takes belts, not wires.',
+};
