@@ -1,0 +1,57 @@
+---
+title: Ports
+description: What a port's role, medium and side mean, which ports take belts and which take wires, and where a machine's faults leave it.
+sidebar:
+  order: 1
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+A port is a spot on a machine's edge where a belt or a wire connects. Each port has a role, which says whether things go in or come out, a medium, which says whether it takes a belt or a wire, and a side, which says which edge of the machine it faces. The page for each machine lists its ports with all three.
+
+In the example below, a Source sends items into a Router's input on its west side. The Router sends them out of two outputs on its east side, and a belt waits on its Fault port on the south side. Underneath, a Route and an HTTP Handler are joined by wire ports, and a request goes over and its reply comes back.
+
+<Board name="docs-rules-ports" />
+
+## Roles
+
+| Role | What it does |
+|---|---|
+| <Fact id="port.role.In" /> | Takes items or requests into the machine. |
+| <Fact id="port.role.Out" /> | Sends items or requests out of the machine. A machine with more than one output numbers them, and a Router's routes pick an output by its number. |
+| <Fact id="port.role.Fault" /> | Sends the machine's faults out, apart from its normal outputs. |
+
+A belt runs from an output to an input. Its tail docks on an output or a Fault port, and its head docks on an input. A wire also runs from an output to an input.
+
+## The Fault port
+
+When a machine can't handle an item, the fault leaves by its Fault port, never with the normal items. Dock a belt there and lead it to a Debug Sink to keep each fault where you can read it. With nothing docked, the fault goes no further and the machine shows as faulted. A Route and a Tee have no Fault port on the grid. In the example above, the belts on the Router's and the Handler's Fault ports stay empty, because nothing faults. The [Fault reasons](../fault-reasons/) page says which machine gives each reason and where its fault goes.
+
+## Media
+
+| Medium | Takes | Found on |
+|---|---|---|
+| <Fact id="port.medium.Mechanical" /> | A belt | Every port of the Source, Router, Tee, Balancer, Merge, Factory and Sink, and the HTTP Handler's Fault port |
+| <Fact id="port.medium.Electrical" /> | A wire | The input and output of a Route, and the input and output of an HTTP Handler |
+
+The app refuses a belt docked on a wire port, or a wire on a belt port. [How to fix](../../../troubleshooting/refusals/#refusal-medium-mismatch)
+
+## Sides
+
+| Side | Edge of the machine |
+|---|---|
+| <Fact id="port.side.N" /> | North, the top edge |
+| <Fact id="port.side.E" /> | East, the right edge |
+| <Fact id="port.side.S" /> | South, the bottom edge |
+| <Fact id="port.side.W" /> | West, the left edge |
+
+A port faces the cell just outside its side, and a belt docks on it only when the belt's end sits on that cell. The app refuses a dock anywhere else. [How to fix](../../../troubleshooting/refusals/#refusal-invalid-dock)
+
+The sides on each machine page are for the machine before any turn. Turning a machine turns its ports with it, so a port on the west side faces north after one turn clockwise. The [Docking, unlinking and rotation](../docking-unlinking-rotation/) page says what a turn does to the belts docked there.
+
+## Related pages
+
+- [Docking, unlinking and rotation](../docking-unlinking-rotation/): joining a belt to a port, taking it off, and turning a machine.
+- [Router](../../machines/router/): the machine with three outputs and a Fault port.
+- [Wire](../../machines/wire/): the cable between a Route and an HTTP Handler.

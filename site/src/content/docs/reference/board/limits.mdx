@@ -1,0 +1,85 @@
+---
+title: Limits
+description: Every limit the engine and the app enforce, with its value from the source code and what happens when you reach it.
+sidebar:
+  order: 5
+---
+
+import Fact from '../../../../components/Fact.astro';
+
+Fabrico puts a ceiling on how big a grid, a belt, a label or a routing table can get, how much work a Factory's code can do on one item, and how many items or requests can wait in one place. This page lists each limit with its value and says what happens when you reach it. Where the app refuses an edit at a limit, the link goes to the fix for that refusal.
+
+## Grid and machines
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Lowest cell | <Fact id="limit.grid_min" /> | The app refuses a machine, belt or label with any cell further out. [How to fix](../../../troubleshooting/refusals/#refusal-out-of-bounds) |
+| Highest cell | <Fact id="limit.grid_max" /> | The same refusal as the lowest cell. [How to fix](../../../troubleshooting/refusals/#refusal-out-of-bounds) |
+| Machine size | <Fact id="limit.max_footprint_dim" /> | Adding a port grows a machine to fit, and the app refuses a port that would grow it past this. [How to fix](../../../troubleshooting/refusals/#refusal-machine-too-big) |
+| Router outputs when placed | <Fact id="limit.router_out_arity" /> | A new Router starts with this many outputs. You can add more, and the Router grows to fit them. |
+| Tee, Balancer and Merge branches | <Fact id="limit.default_arity" /> | A new Tee has this many outputs, a new Merge this many inputs, and a new Balancer this many of each. |
+
+## Belts
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Belt length | <Fact id="limit.max_belt_tiles" /> | The app refuses a longer belt. Draw two belts and join them. [How to fix](../../../troubleshooting/refusals/#refusal-belt-too-long) |
+| Items on one tile | <Fact id="limit.slots_per_tile" /> | A belt holds at most this many items for each tile it covers. A belt that is full takes no more until its end hands an item on. |
+| Pace of a new belt | <Fact id="limit.default_ticks_per_slot" /> | A belt you draw moves at this pace until you set another. |
+| Fastest pace | <Fact id="limit.belt_pace_min" /> | A smaller number is a faster belt. The app refuses a pace faster than this. [How to fix](../../../troubleshooting/refusals/#refusal-pace-out-of-range) |
+| Slowest pace | <Fact id="limit.belt_pace_max" /> | The app refuses a pace slower than this. [How to fix](../../../troubleshooting/refusals/#refusal-pace-out-of-range) |
+
+## Factories
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Work for one item | <Fact id="limit.factory_gas_budget" /> | The code stops, sends nothing, and the Factory faults with `FactoryTimeout`. [How to fix](../../../troubleshooting/fault-reasons/#fault-factory-timeout) |
+| Memory | <Fact id="limit.factory_memory" /> | The allocation fails, and code that doesn't catch the error faults with `FactoryError`. [How to fix](../../../troubleshooting/fault-reasons/#fault-factory-error) |
+| Stack, in the desktop app | <Fact id="limit.factory_stack_desktop" /> | Recursion that goes too deep faults with `FactoryError`. The boards on this site run in a browser, which has its own stack limit. [How to fix](../../../troubleshooting/fault-reasons/#fault-factory-error) |
+| Emits on one output in one run | <Fact id="limit.factory_emits_per_port" /> | Each emit past this isn't sent and faults with its own `FactoryError`. The rest of the run stands. [How to fix](../../../troubleshooting/fault-reasons/#fault-factory-error) |
+| Factory code size | <Fact id="limit.max_config_bytes" /> | The engine's reader for a stored edit refuses longer code. The app doesn't call that reader when you edit or open a project, so this page can't say what you would see. |
+
+## Routers
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Routes in one Router | <Fact id="limit.max_routes" /> | The app refuses a routing table with more. [How to fix](../../../troubleshooting/refusals/#refusal-over-limit) |
+| Length of one route's match | <Fact id="limit.max_route_expect_bytes" /> | The app refuses a route whose match is longer. [How to fix](../../../troubleshooting/refusals/#refusal-over-limit) |
+
+## Routes and Handlers
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Route path length | <Fact id="limit.max_endpoint_path_bytes" /> | The app refuses a longer path. [How to fix](../../../troubleshooting/refusals/#refusal-invalid-path) |
+| Time to reply | <Fact id="limit.endpoint_deadline_ticks" /> | If no reply reaches the Route in time, the app answers the caller with a 504 timeout. |
+| Requests waiting to get in | <Fact id="limit.endpoint_ingress_capacity" /> | While this many requests wait for the engine to take them in, the app answers each new one with a 503. |
+| Wire-to-wire forwards | <Fact id="limit.wire_budget" /> | A request that would make one more forward faults with `WireOverflow`. [How to fix](../../../troubleshooting/fault-reasons/#fault-wire-overflow) |
+| Requests on one wire | <Fact id="limit.wire_inflight_cap" /> | The next request faults with `WireOverflow` instead of joining the wire. [How to fix](../../../troubleshooting/fault-reasons/#fault-wire-overflow) |
+
+## Labels
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Label width | <Fact id="limit.label_max_w" /> | The app refuses a change to a wider label. A label from a file that is already wider stays as it is. [How to fix](../../../troubleshooting/refusals/#refusal-over-limit) |
+| Label depth | <Fact id="limit.label_max_h" /> | The same rule as the width. [How to fix](../../../troubleshooting/refusals/#refusal-over-limit) |
+| Label text | <Fact id="limit.max_label_bytes" /> | The app refuses longer text. Letters outside plain English take two bytes or more each, so the text holds fewer of them. [How to fix](../../../troubleshooting/refusals/#refusal-over-limit) |
+
+## Queues
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Items waiting at an input | <Fact id="limit.mechanical_inbox_cap" /> | The machine turns away more items, the belt feeding it stops at its end, and the machine shows backed up. A Tee whose output belt is this full faults the copy with `BranchBusy`. The same limit applies at the start of a belt. |
+| Webhooks waiting at a Source | <Fact id="limit.source_pending_cap" /> | The Source drops each further webhook and shows backed up until its belt takes some. |
+| Faults waiting at a machine | <Fact id="limit.fault_queue_cap" /> | With no belt on the Fault port to carry them off, further faults are dropped. The machine still shows faulted. |
+
+## Files
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Project file size | <Fact id="limit.max_project_bytes" /> | The app refuses to open a bigger project file and says it is too large. |
+
+## Related pages
+
+- [Machine states](../machine-states/): what backed up and faulted look like.
+- [Fault reasons](../fault-reasons/): what each fault reason above means, with running examples.
+- [Refused edits](../../../troubleshooting/refusals/): every refusal message and its fix.

@@ -1,0 +1,45 @@
+---
+title: Undo and redo
+description: What undo and redo take back and put back, the keys for each, and the messages the app shows when there is nothing to undo or a step no longer fits.
+sidebar:
+  order: 6
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+Undo takes back your last edit and redo puts it back. The app keeps one line of edits, so each undo steps one edit further back and each redo steps one edit forward again. Undo and redo work while a run is going, and they change the grid, not the items: they bring back machines, belts and docks, and they don't bring back items that were on a belt you deleted.
+
+In the example below, a Source on a timer sends items along a belt to a Sink. A scripted edit deletes the Sink, an undo puts it back, a redo deletes it again, and a second undo takes back the redo.
+
+<Board name="docs-rules-undo-redo" />
+
+## What one undo takes back
+
+One undo reverses one edit, including everything the edit did along the way:
+
+- Deleting a machine also deletes the belts docked to it. Undoing the delete puts back the machine and those belts, docked as they were. In the example, the Delete on tick 80 removes the Sink and its belt, and the undo on tick 160 brings both back. The items that were on the belt are gone, and new items start along it.
+- Turning a machine can take belts off its ports and dock others. Undoing the turn turns the machine back and reverses those docks too.
+- Deleting either end of the wire between a Route and an HTTP Handler deletes both cables. One undo puts both back.
+
+The commands that build an example on this site come before its history starts, so an undo in its script can only reach the edits made after that.
+
+## Commands and keys
+
+| Action | Command | Keys |
+|---|---|---|
+| Undo | <Fact id="command.Undo" /> | <Fact id="shortcut.undo" /> |
+| Redo | <Fact id="command.Redo" /> | <Fact id="shortcut.redo" /> or <Fact id="shortcut.redoY" /> |
+
+## When the app refuses
+
+- There is nothing left to undo. [How to fix](../../../troubleshooting/refusals/#refusal-nothing-to-undo)
+- There is nothing left to redo. [How to fix](../../../troubleshooting/refusals/#refusal-nothing-to-redo)
+- The cells the undo would restore are taken. Ordinary editing can't get here, because anything placed after a delete is undone before the delete is. It guards against a damaged history. [How to fix](../../../troubleshooting/refusals/#refusal-undo-space-taken)
+- The step no longer fits the grid, which happens with a damaged history or one from an older version. The step stays where it was. [How to fix](../../../troubleshooting/refusals/#refusal-undo-does-not-fit)
+
+## Related pages
+
+- [Docking, unlinking and rotation](../docking-unlinking-rotation/): the edits a turn makes, which one undo reverses.
+- [Machine states](../machine-states/): how a machine looks while it runs.
+- [Sink](../../machines/sink/): the machine the example deletes.

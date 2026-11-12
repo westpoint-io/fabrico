@@ -1,0 +1,88 @@
+// A docs board that shows ports on several sides and both media. A Source belts items into a
+// Router's input on its west side. The Router sends a body that starts with {"to":"a" out its top
+// output and everything else out its bottom output, both on its east side, each to a Sink. A belt
+// from the Router's Fault port, on its south side, leads to a third Sink and stays empty, since every
+// item matches a route or the default. Below, a Route's output is wired to an HTTP Handler's input.
+// One DrawWire mints both cables, one for the request and one for the reply. The Handler's Fault
+// port has a belt to a Sink too, and it stays empty because the code never throws. The run makes no
+// outbound call.
+//
+//   row 1:                          ROUTER 1 Out (top)    -b9--> SINK 2
+//   row 2:   SOURCE 0 -b8-> ROUTER 1 In
+//   row 3:                          ROUTER 1 Out (bottom) -b10-> SINK 3
+//   row 4-5:                 ROUTER 1 Fault (south) -b11-------> SINK 4
+//   row 8:   ROUTE 5 =wires 13, 14= HTTP HANDLER 6
+//   row 10-11:                      HTTP HANDLER 6 Fault -b12--> SINK 7
+//
+// Handles mint in command order: the Source 0, the Router 1, the Sinks 2 to 4, the Route 5, the
+// HTTP Handler 6, the Sink 7, the belts 8 to 12, then the cables 13 and 14. The 27 commands and the
+// history seal end the boot on tick 28.
+//
+// machine_kind u8 legend: SOURCE=0, ROUTER=5, SINK=7, ROUTE=9, HTTP HANDLER=10. Dock and DrawWire
+// `port` values are catalog port indexes: SOURCE Out=0; ROUTER In=0, Out=2 (bottom), Out=3 (top),
+// Fault=4; SINK In=0; ROUTE In=0, Out=1; HTTP HANDLER In=0, Out=1, Fault=2.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Ports",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 5, cell_x: 6, cell_y: 1),        // 1: ROUTER, 2x3
+        Place(kind: 7, cell_x: 10, cell_y: 1),       // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 10, cell_y: 3),       // 3: SINK
+        Place(kind: 7, cell_x: 10, cell_y: 5),       // 4: SINK, gets the Router's faults
+        Place(kind: 9, cell_x: 2, cell_y: 8),        // 5: ROUTE
+        Place(kind: 10, cell_x: 6, cell_y: 7),       // 6: HTTP HANDLER, 3x3
+        Place(kind: 7, cell_x: 10, cell_y: 10),      // 7: SINK, gets the Handler's faults
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2)]),                  // 8
+        DrawBelt(cells: [(8, 1), (9, 1)]),                                  // 9
+        DrawBelt(cells: [(8, 3), (9, 3)]),                                  // 10
+        DrawBelt(cells: [(6, 4), (6, 5), (7, 5), (8, 5), (9, 5)]),          // 11
+        DrawBelt(cells: [(7, 10), (8, 10), (9, 10)]),                       // 12
+        Dock(belt: 8, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 8, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 9, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 10, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 10, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 11, endpoint: Tail, node: 1, port: 4),
+        Dock(belt: 11, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 12, endpoint: Tail, node: 6, port: 2),
+        Dock(belt: 12, endpoint: Head, node: 7, port: 0),
+        Configure(node: 1, config: Router(routes: [
+            // {"to":"a"  -> emit 2, the top output
+            ((offset: 0, expect: [123, 34, 116, 111, 34, 58, 34, 97, 34]), 2),
+        ], default: Some(1))),
+        Configure(node: 5, config: Endpoint(path: "/hello")),
+        Configure(node: 6, config: Factory(source: r#"// reply to each request
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: {},
+    body: "got " + input.body,
+  }, 0);
+}"#)),
+        // One command mints both cables: 13 the request, then 14 the reply.
+        DrawWire(from_node: 5, from_port: 1, to_node: 6, to_port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"to":"a","order":1}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"to":"b","order":2}"#)),
+        At(tick: 160, input: Request(route: 5, method: "POST", path: "/endpoint/hello", body: r#"{"order":3}"#)),
+    ],
+    captions: [
+        // Measured: the Router steps on 71 and 131, the Route puts the request on cable 13 on 161,
+        // the Handler runs and replies on 162 and the Route takes the reply on 163. Nothing faults.
+        Caption(tick: 71, highlight: 1, text: "This body came in on the Router's west side. It starts with {\"to\":\"a\", so it leaves by the top output on the east side."),
+        Caption(tick: 131, highlight: 1, text: "This body matches no route, so it leaves by the default output, the bottom one. The belt from the Fault port on the south side stays empty."),
+        Caption(tick: 162, highlight: 6, text: "The Route put a request on the first cable into the Handler's input. The Handler ran its code and put its reply on the second cable."),
+        Caption(tick: 163, highlight: 5, text: "The reply reached the Route on the second cable, one tick after the Handler sent it."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 240,
+)

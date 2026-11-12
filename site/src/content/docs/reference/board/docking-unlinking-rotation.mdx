@@ -1,0 +1,54 @@
+---
+title: Docking, unlinking and rotation
+description: How a belt end joins a machine's port, how to take it off again, and what turning a machine does to the belts docked on it.
+sidebar:
+  order: 2
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+Drawing a belt doesn't connect it to anything. Docking joins one end of a belt to a port on a machine, unlinking takes that end off again, and rotating turns a machine a quarter-turn with its ports. All three are edits you can make while a run is going, and each one is a command the app sends to the engine.
+
+In the example below, a Source on a timer sends items along a belt to a Sink. Partway through, scripted edits unlink the belt from the Sink, dock it again, turn the Sink away from the belt and turn it back.
+
+<Board name="docs-rules-docking" />
+
+## Docking
+
+<Fact id="command.Dock" /> joins one end of a belt to one port. The belt's tail docks on an output or a Fault port, and its head docks on an input, so items always run from an output to an input. The belt's end has to sit on the cell the port faces. From there the belt can run straight on or turn.
+
+In the example, the Dock on tick 140 joins the belt back to the Sink's input, and the items that were waiting at the end of the belt move in.
+
+The app refuses a dock in these cases:
+
+- The roles don't match, or the belt's end isn't on the cell the port faces. [How to fix](../../../troubleshooting/refusals/#refusal-invalid-dock)
+- The output already feeds a belt or a wire. [How to fix](../../../troubleshooting/refusals/#refusal-port-occupied)
+- The port takes wires, and a belt can't dock on a wire port. [How to fix](../../../troubleshooting/refusals/#refusal-medium-mismatch)
+
+A wire between a Route and an HTTP Handler isn't docked. You draw it from an output to an input, and the app refuses a wire that doesn't run that way. [How to fix](../../../troubleshooting/refusals/#refusal-incompatible-ports)
+
+## Unlinking
+
+<Fact id="command.Unlink" /> takes one docked end of a belt off its port. The belt stays where it is with the items on it. It names the same belt end and port as the dock that made the link, and the app refuses it when the end and the port don't match that way. [How to fix](../../../troubleshooting/refusals/#refusal-invalid-dock)
+
+In the example, the Unlink on tick 80 takes the belt's head off the Sink. Items keep arriving from the Source and wait at the end of the belt until the Dock on tick 140.
+
+## Rotation
+
+<Fact id="command.Rotate" /> turns a machine a quarter-turn, clockwise or anticlockwise. The machine keeps its top-left cell and its ports turn with it, so a port on the west side faces north after one turn clockwise.
+
+A turn changes which belts are docked. A docked belt whose end the port no longer faces comes off. A loose belt end that a port now faces, with the right role, gets docked in the same edit. One undo reverses the turn and the docks it made or removed.
+
+In the example, the Rotate on tick 220 turns the Sink so its input faces north, away from the belt, and the belt comes off. The Rotate on tick 280 turns the Sink back. Its input faces the belt's end again, so the turn docks the belt and items flow without a separate Dock.
+
+The app refuses a turn in these cases:
+
+- The turned machine would cover a belt. [How to fix](../../../troubleshooting/refusals/#refusal-rotate-covers-belt)
+- The turned machine would cover another machine or a label. [How to fix](../../../troubleshooting/refusals/#refusal-rotate-blocked)
+
+## Related pages
+
+- [Ports](../ports/): roles, media and sides.
+- [Undo and redo](../undo-and-redo/): taking back an edit, a turn included.
+- [Belt](../../machines/belt/): drawing a belt and setting its pace.

@@ -1,0 +1,51 @@
+// A docs board that deletes a machine, undoes the delete and redoes it while it runs. A Source on a
+// timer puts an item on its belt every 8 ticks, and the belt carries each one to a Debug Sink. On
+// tick 80 a scripted Delete removes the Sink, and the belt docked to it goes too, with the items on
+// it. On tick 160 an Undo puts back the Sink and the belt, both docked as before, and new items flow
+// again. The items the belt held don't come back. On tick 240 a Redo deletes them again, and on tick
+// 300 a second Undo puts them back. Each Undo gives the Sink and the belt new handles: 3 and 4, then
+// 5 and 6. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b2-> SINK 1
+//
+// Handles mint in command order: the Source 0, the Sink 1, then the belt 2. The 6 commands and the
+// history seal end the boot on tick 7.
+//
+// machine_kind u8 legend: SOURCE=0, SINK=7. Dock `port` is the catalog port index: SOURCE Out=0;
+// SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Undo and redo",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 7, cell_x: 7, cell_y: 2),        // 1: SINK, Debug by default
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2), (6, 2)]),        // 2
+        Dock(belt: 2, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 2, endpoint: Head, node: 1, port: 0),
+        Configure(node: 0, config: Source(trigger: Timer(interval_ticks: 8))),
+    ],
+    script: [
+        At(tick: 80, input: Edit(Delete(node: 1))),
+        At(tick: 160, input: Edit(Undo)),
+        At(tick: 240, input: Edit(Redo)),
+        At(tick: 300, input: Edit(Undo)),
+    ],
+    captions: [
+        // Measured: the Sink and the belt are gone from 81 to 160, back as handles 3 and 4 from 161
+        // with both docks, gone again from 241, and back as 5 and 6 from 301. A restored belt starts
+        // empty.
+        Caption(tick: 60, highlight: 1, text: "Items travel from the Source along the belt into the Sink."),
+        Caption(tick: 81, highlight: 0, text: "A scripted Delete removed the Sink on tick 80. The belt docked to it went too, with the items on it."),
+        Caption(tick: 165, highlight: 0, text: "An Undo on tick 160 put the Sink and its belt back, docked as before. The old items didn't come back, and new ones move along the belt."),
+        Caption(tick: 241, highlight: 0, text: "A Redo on tick 240 deleted the Sink and its belt again."),
+        Caption(tick: 301, highlight: 0, text: "A second Undo on tick 300 took back the Redo, so the Sink and its belt are back again."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 380,
+)
