@@ -286,6 +286,11 @@ mobile-starlight-toc a[aria-current='true'] {
   font-variant-numeric: tabular-nums;
 }
 
+/* The glossary: 24 px above each term after the first. Starlight already puts 4 px between a term and its definition. */
+.sl-markdown-content dd + dt:not(:where(.not-content *)) {
+  margin-top: var(--fab-space-lg);
+}
+
 /* A short link that reads badly broken over lines, such as each How to fix on the Refusal messages page. */
 .sl-markdown-content .fab-nowrap {
   white-space: nowrap;

@@ -1,0 +1,57 @@
+---
+title: Glossary
+description: The words the reference pages use, from belt to wire, each in one to three sentences with a link to the page that covers it.
+sidebar:
+  order: 5
+---
+
+import Fact from '../../../../components/Fact.astro';
+
+These are the words the reference pages use, in alphabetical order. Each one says what the word means here, and most link to the page that covers them.
+
+<dl>
+<dt id="term-belt">Belt</dt>
+<dd>A line of tiles that carries items from the machine at its start to the machine at its end, at a pace you set. You draw it cell by cell, and it connects to nothing until you dock its ends. See [Belt](../../machines/belt/).</dd>
+<dt id="term-board">Board</dt>
+<dd>The grid you build on, with everything placed on it. A project file saves one, and each example on these pages is a small one running in the page.</dd>
+<dt id="term-caption">Caption</dt>
+<dd>A note written into an example. When the example reaches the caption's tick it holds there, shows the note in the strip under it and rings the machine the note is about, until you press Continue.</dd>
+<dt id="term-command">Command</dt>
+<dd>One edit as the engine receives it, such as placing a machine or docking a belt. The [Commands](../commands/) page lists them all.</dd>
+<dt id="term-dock">Dock</dt>
+<dd>To join one end of a belt to a port on a machine, or to the start of another belt. Unlinking takes the end off again. See [Docking, unlinking and rotation](../../board/docking-unlinking-rotation/).</dd>
+<dt id="term-factory">Factory</dt>
+<dd>A machine that runs your JavaScript on each item it gets and sends out what the code emits. See [Factory](../../machines/factory/) and the [Factory JavaScript API](../../code-and-http/factory-api/).</dd>
+<dt id="term-fault">Fault</dt>
+<dd>What a machine sends instead of a normal output when it can't handle an item. A fault carries a fault reason and leaves by the machine's fault port, if it has one. See [Fault reasons](../../board/fault-reasons/).</dd>
+<dt id="term-fault-port">Fault port</dt>
+<dd>A port kept apart from a machine's numbered outputs, where its faults leave. Dock a belt on it to collect the faults, or they go no further. See [Ports](../../board/ports/).</dd>
+<dt id="term-fault-reason">Fault reason</dt>
+<dd>The name a fault carries to say why the machine faulted, such as <Fact id="fault.NoMatch" /> for an item a Router can't match to any of its outputs. See [Fault reasons](../../board/fault-reasons/), and the [fixes for each reason](../../../troubleshooting/fault-reasons/).</dd>
+<dt id="term-http-handler">HTTP Handler</dt>
+<dd>A machine that runs your JavaScript on each request a Route sends it over a wire, and sends back a reply. See [HTTP Handler](../../machines/http-handler/) and [Handler requests and replies](../../code-and-http/handler-requests-and-replies/).</dd>
+<dt id="term-item">Item</dt>
+<dd>One piece of data moving through your factory. A Source makes one for each webhook call or timer firing, belts carry it, and machines read, change, copy or send it on.</dd>
+<dt id="term-kind">Kind</dt>
+<dd>Which sort of machine something is, such as a Source, a Router or a Belt. Each kind has its own page under [Machines](../../#machines).</dd>
+<dt id="term-limit">Limit</dt>
+<dd>A fixed largest or smallest value the engine accepts, such as the longest belt. See [Limits](../../board/limits/).</dd>
+<dt id="term-machine-state">Machine state</dt>
+<dd>One of four states a machine is in on each tick: idle, working, faulted or backed up. The app draws it on the machine. See [Machine states](../../board/machine-states/).</dd>
+<dt id="term-port">Port</dt>
+<dd>A spot on a machine's edge where a belt or a wire connects. Each port has a role (in, out or fault), a medium (belt or wire) and a side. See [Ports](../../board/ports/).</dd>
+<dt id="term-project-file">Project file</dt>
+<dd>The `.fab` file the app writes when you save. See [Project files](../project-files/).</dd>
+<dt id="term-refusal">Refusal</dt>
+<dd>The engine's answer to an edit it won't apply. The grid stays as it was and the app shows a message saying why. See [Refusal messages](../refusal-messages/).</dd>
+<dt id="term-route">Route</dt>
+<dd>A machine that answers HTTP requests at a path you choose and sends each one down its wire to an HTTP Handler. See [Route](../../machines/route/).</dd>
+<dt id="term-sink">Sink</dt>
+<dd>A machine at the end of a line that sends each item out as an HTTP request, or records it. See [Sink](../../machines/sink/) and [HTTP Sink requests](../../code-and-http/http-sink-requests/).</dd>
+<dt id="term-source">Source</dt>
+<dd>A machine that makes a new item for each webhook call it gets, or on a timer. See [Source](../../machines/source/) and [Webhook ingress](../../code-and-http/webhook-ingress/).</dd>
+<dt id="term-tick">Tick</dt>
+<dd>One step of the engine's clock. Everything on the grid happens on a tick, and the same edits and events on the same ticks give the same result every time. The examples on these pages play at <Fact id="embed.ticks_per_second" />.</dd>
+<dt id="term-wire">Wire</dt>
+<dd>The connection between a Route and an HTTP Handler. It carries each request to the Handler and the reply back. See [Wire](../../machines/wire/).</dd>
+</dl>

@@ -1,0 +1,49 @@
+---
+title: Keyboard shortcuts
+description: The keys the app answers to for running, editing, saving and viewing your factory, with the macOS form where it differs.
+sidebar:
+  order: 3
+---
+
+import Fact from '../../../../components/Fact.astro';
+
+The app answers to the keys below. On macOS, Cmd takes the place of Ctrl, and the Keys column shows the macOS form in parentheses where it differs. While you type in a text field, the field keeps the keys, except Alt. The Help panel in the app lists most of these keys next to the mouse gestures.
+
+## Running a board
+
+| Action | Keys |
+| --- | --- |
+| Play or pause | <Fact id="shortcut.playPause" /> |
+| Run one tick. On a playing factory, this pauses it first. | <Fact id="shortcut.step" /> |
+
+## Editing
+
+| Action | Keys |
+| --- | --- |
+| Delete what you have selected | <Fact id="shortcut.delete" /> |
+| Turn a machine a quarter turn clockwise | <Fact id="shortcut.rotate" /> |
+| Turn a machine a quarter turn counter-clockwise | <Fact id="shortcut.rotateBack" /> |
+| Undo the last edit | <Fact id="shortcut.undo" /> |
+| Redo the edit you last undid | <Fact id="shortcut.redo" /> |
+| Redo, with a second key | <Fact id="shortcut.redoY" /> |
+| Cancel what you are doing | <Fact id="shortcut.escape" /> |
+
+The turn keys act on the machine you are about to place, or else on the selected one. A label doesn't turn. <Fact id="shortcut.escape" /> cancels a drag, or a belt or wire you are drawing. With none of those, it puts down the tool you picked, and with no tool, it clears the selection.
+
+## Files
+
+| Action | Keys |
+| --- | --- |
+| Start a new, empty factory | <Fact id="shortcut.newBoard" /> |
+| Open a project file | <Fact id="shortcut.open" /> |
+| Save | <Fact id="shortcut.save" /> |
+| Save under a new name | <Fact id="shortcut.saveAs" /> |
+
+## The view
+
+| Action | Keys |
+| --- | --- |
+| Fit the whole factory in the window | <Fact id="shortcut.fit" /> |
+| Show machine names while you hold the key | <Fact id="shortcut.names" /> |
+
+Undo and redo take back edits only, not items. [Undo and redo](../../board/undo-and-redo/) says what one undo covers, and [Project files](../project-files/) says what a save writes.

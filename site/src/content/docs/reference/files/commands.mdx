@@ -1,0 +1,42 @@
+---
+title: Commands
+description: The commands every edit reaches the engine as, what each one does, and which commands the gestures without a command of their own send.
+sidebar:
+  order: 1
+---
+
+import Fact from '../../../../components/Fact.astro';
+
+Every edit you make, in the app or in a script that edits a running example, reaches the engine as one of the commands below. The engine checks each command against the grid, then applies it or refuses it with one of the [refusal messages](../refusal-messages/) to say why. The table lists the commands in the order the engine defines them.
+
+| Command | What it does |
+| --- | --- |
+| <Fact id="command.Place" /> | Puts a new machine of one kind at a grid cell. It always arrives unturned. |
+| <Fact id="command.Delete" /> | Removes a machine, a label, a belt or a wire. Deleting a machine also deletes the belts docked to it. |
+| <Fact id="command.Rotate" /> | Turns a placed machine a quarter turn, clockwise or counter-clockwise. The machine stays at the same cell and its ports turn with it. |
+| <Fact id="command.DrawBelt" /> | Draws a belt along the cells you dragged across, in order. The engine works out each tile's shape, and refuses the whole belt if one cell is taken. A new belt isn't docked to anything. |
+| <Fact id="command.Dock" /> | Joins one end of a belt to a machine's port or to the start of another belt. A belt's last cell, where items leave, docks to an input, and its first cell, where items get on, docks to an output. |
+| <Fact id="command.Undo" /> | Takes back the last edit that is still in effect. |
+| <Fact id="command.Redo" /> | Puts back the edit you last undid. |
+| <Fact id="command.AddPort" /> | Adds a port to a placed machine. The machine grows to make room for it. |
+| <Fact id="command.RemovePort" /> | Removes a port from a machine by its number. The machine never shrinks below its kind's starting size. |
+| <Fact id="command.Configure" /> | Sets a machine's settings: a Factory's or HTTP Handler's code, a Source's trigger, a Sink's request, a belt's pace, a Router's rules, a Route's path, or a label's text, colour and size. |
+| <Fact id="command.DrawWire" /> | Draws a wire from a Route's output to an HTTP Handler's input. |
+| <Fact id="command.Unlink" /> | Takes a belt end off the port or belt it is docked to. The belt stays where it is. |
+
+Undo and redo have their own page, [Undo and redo](../../board/undo-and-redo/), and [Docking, unlinking and rotation](../../board/docking-unlinking-rotation/) covers docking, unlinking and turning a machine.
+
+## Gestures that send another command
+
+Some things you do in the app have no command of their own. Each one sends one or more of the commands above:
+
+| You do this | What reaches the engine |
+| --- | --- |
+| Draw a belt from an output to an input | One <Fact id="command.DrawBelt" />, then a <Fact id="command.Dock" /> for each end that starts or stops at a port. |
+| Join two belts | One <Fact id="command.Dock" /> that names the second belt where a machine would go. Drawing on from just past a belt's end sends a <Fact id="command.DrawBelt" /> for the new belt, then that <Fact id="command.Dock" />. |
+| Resize a label | One <Fact id="command.Configure" /> with the label's new width and height. |
+| Press + Add output | One <Fact id="command.AddPort" />. The machine grows one row, or one column if it is turned. |
+| Move a machine | There is no move command, and the app has no gesture that drags a placed machine somewhere else. Delete it and place it again, which sends a <Fact id="command.Delete" /> and then a <Fact id="command.Place" />. |
+| Place a machine you turned first | One <Fact id="command.Place" />, then one <Fact id="command.Rotate" /> for each quarter turn once the machine is on the grid. |
+| Set the pace of a run of belts | A <Fact id="command.Configure" /> for each belt in the run, all taken back by a single undo. |
+| Disconnect a wire | One <Fact id="command.Delete" /> for the wire. Disconnecting a belt sends <Fact id="command.Unlink" />. |

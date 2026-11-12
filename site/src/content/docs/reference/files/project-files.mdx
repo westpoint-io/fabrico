@@ -1,0 +1,54 @@
+---
+title: Project files
+description: What a .fab project file holds, which file versions the app opens, the size limit, when a save happens and what an interrupted save leaves.
+sidebar:
+  order: 2
+---
+
+import Fact from '../../../../components/Fact.astro';
+
+A project file is the `.fab` file the app writes when you save. It holds your factory at one tick together with the record of everything that led there, so opening it puts the factory back exactly as it was and it runs on from that tick the same way it would have.
+
+## Versions
+
+Each file starts with its version number. This version of the app writes version <Fact id="project.file_version" />, and checks the number before it reads anything else:
+
+| A file at version | What the app does |
+| --- | --- |
+| Above <Fact id="project.file_version" /> | Refuses it, because a newer version of the app wrote it. |
+| <Fact id="project.file_version" /> | Opens it. |
+| <Fact id="project.pre_speed_change_version" /> | Refuses it, with a message that says the file predates a change to how belts carry their speed and isn't corrupt. |
+| <Fact id="project.pre_slot_change_version" /> | Refuses it, with a message that says the file predates a change to how items are spaced on a belt and isn't corrupt. |
+| Any other version below <Fact id="project.file_version" /> | Refuses it as too old, with a message that gives the file's version and the one the app reads. |
+
+The app doesn't convert old files, and opening one doesn't change it on disk.
+
+## Size
+
+The app refuses to open a project file larger than <Fact id="limit.max_project_bytes" />. It checks the size on disk before it reads the file. It doesn't check the size when it saves.
+
+## What a file saves
+
+- The whole factory at the tick you saved: each machine and belt, their settings and states, the items on the belts, each Factory's saved state and the random number state the engine uses.
+- Every edit you made, in order.
+- Every event that came in from outside, such as a webhook call, and the answer to each request the app sent, each with the tick it arrived on.
+
+## What a file doesn't save
+
+- Where you were looking: the zoom, the scroll position and what you had selected.
+- The list of delivery ids that stops a repeated webhook call making a second item. Opening a file starts a new, empty list. See [Webhook ingress](../../code-and-http/webhook-ingress/).
+- Requests still waiting for an answer. The app waits until there are none, as the next section explains.
+
+## When the app saves
+
+The app saves only when no request it sent, such as an HTTP Sink's, is still waiting for an answer. A file saved with one waiting would reopen with that request timed out, even if it had worked.
+
+- On a playing factory, the app holds back new input and timers and lets the factory run until the belts are empty and every answer is in, or for a few seconds at most. Then it writes the file and plays on.
+- On a paused factory, the app writes the file straight away if no request is waiting, items on the belts included. If one is waiting, it runs the factory until the answer comes, then writes.
+- If an answer still hasn't come after a few seconds of running, the save fails. The app shows Save failed and keeps the factory marked as unsaved.
+
+## If a save is interrupted
+
+The app writes the file in place: it empties the file at the path you chose, then writes the new contents into it. It doesn't write to a separate file first. If the app or the computer stops partway through, the file is left cut short, and the version that was there before is gone. Opening a cut-short file fails with a message that the file is malformed.
+
+To keep a factory you care about safe, save copies under new names with Save As now and then.
