@@ -5,7 +5,7 @@
     { "name": "Concepts", "folder": "concepts", "pages": ["concepts/index.mdx"] },
     { "name": "Reference", "folder": "reference", "pages": ["reference/index.mdx"] },
     { "name": "Patterns", "folder": "patterns", "pages": ["patterns/index.mdx"] },
-    { "name": "Troubleshooting", "folder": "troubleshooting", "pages": ["troubleshooting/index.mdx", "troubleshooting/refusals.mdx"] },
+    { "name": "Troubleshooting", "folder": "troubleshooting", "pages": ["troubleshooting/index.mdx", "troubleshooting/common-problems.mdx", "troubleshooting/fault-reasons.mdx", "troubleshooting/refusals.mdx"] },
     { "name": "Contributing", "folder": "contributing", "pages": ["contributing/index.mdx"] }
   ]
 }

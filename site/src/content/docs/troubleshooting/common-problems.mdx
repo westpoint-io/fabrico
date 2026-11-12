@@ -1,0 +1,35 @@
+---
+title: Common problems
+description: "Fixes for things you might see on a board: items that stop, machines that back up, webhooks that never arrive."
+sidebar:
+  order: 1
+---
+
+import Fact from '../../../components/Fact.astro';
+import Fix from '../../../components/Fix.astro';
+
+This page starts from what you see on a board or from outside the app, not from a message. Each heading describes the problem in a few words. Under it, the first sentence says what causes it and the rest says what to change.
+
+## On the board
+
+<Fix symptom="Items stop at the end of a belt">
+The belt's last cell isn't docked to a machine's input, so items reach the end and wait there, and the belt fills back toward its start. The engine holds the items rather than dropping them. Delete the belt and draw it again so it ends on the cell right outside a machine's input. If the end is docked and items still stop, the machine there is full: see [A machine shows backed up](#symptom-a-machine-shows-backed-up).
+</Fix>
+
+<Fix symptom="A machine shows backed up">
+The machine is holding work it can't pass on: its inbox already holds <Fact id="limit.mechanical_inbox_cap" bare /> items (for a Source, its backlog holds <Fact id="limit.source_pending_cap" bare /> pending items), or one of its outputs can't take one more item. Follow its outputs to the first machine or belt that isn't backed up. That's where the line is held. Give that point a way out, for example by docking a loose belt end, choosing a faster Belt pace, or splitting the flow with a Balancer. A Sink with no fault belt never backs up. With a fault belt docked, it backs up when that belt is full.
+</Fix>
+
+<Fix symptom="The badge under a board says the hash differs">
+The board ended its run in a different state from the one this site pins for it, and the badge reads mismatch. The engine gives the same result on every run of the same board, so a mismatch is a bug. Report it on the [issue tracker](https://github.com/westpoint-io/fabrico/issues) with the board's name and your browser; hold the pointer over the badge to see the pinned value. A badge that reads order-dependent isn't a failure. That board was fed its same-tick events in reverse order to show that the order changes the result. A badge that reads not pinned means the site has no value for that board yet.
+</Fix>
+
+## Webhooks and code
+
+<Fix symptom="A webhook call gets connection refused">
+Nothing is listening at that address. The app takes webhooks only while it is running, only on the loopback address 127.0.0.1, and on a port it picks each time it starts, so a URL copied from an earlier launch, or a call from another computer, finds nothing there. Start the app, select the Source, press Copy beside its webhook URL, and send to that URL from the same computer. Keep the listener on loopback: don't forward its port to your network, because it has no sign-in of its own.
+</Fix>
+
+<Fix symptom="A Factory emits nothing">
+Either the code never called `ctx.emit` for that item, or the run failed and the engine threw away everything it emitted, or the output it emitted on has no belt, so the item was dropped. Check that every path through the code reaches a `ctx.emit` call and that its port number names an output with a belt docked. If the Factory shows as faulted, look up the reason on [Fault reasons](../fault-reasons/#fault-factory-error). One run sends at most <Fact id="limit.factory_emits_per_port" bare /> items on each output, and each emit past that becomes a fault.
+</Fix>

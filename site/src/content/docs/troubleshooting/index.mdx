@@ -1,6 +1,26 @@
 ---
 title: Troubleshooting
 description: "Fixes for common problems, looked up by what you see: a fault reason, a refused edit, or a board that misbehaves."
+sidebar:
+  order: 0
 ---
 
-This section will list fixes by the symptom you see. Its pages aren't written yet.
+import { LinkCard } from '@astrojs/starlight/components';
+
+Look up the fix by what you see. Pick the page that matches it: something on the board looks wrong, an item carries a fault reason, or the app refused an edit.
+
+<LinkCard
+  title="Common problems"
+  href="common-problems/"
+  description="Fixes for things you might see on a board, such as items that stop or webhooks that never arrive."
+/>
+<LinkCard
+  title="Fault reasons"
+  href="fault-reasons/"
+  description="What each fault reason on an item means, what causes it, and how to fix it."
+/>
+<LinkCard
+  title="Refused edits"
+  href="refusals/"
+  description="Each message the app shows when it refuses an edit, and the change that gets the edit accepted."
+/>

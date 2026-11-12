@@ -43,3 +43,143 @@ The end you dropped isn't on the cell right next to the other belt's start: it i
 <Fix id="refusal.BeltEndTaken">
 One of the two belt ends is already joined to something, and a belt end feeds one thing only. Use a belt end that isn't joined yet, or draw a new belt. To send the same items two ways, end the belt at a Tee, which copies each item to every output, or at a Router, which picks one output per item.
 </Fix>
+
+## Placing, moving and resizing
+
+<Fix id="refusal.FootprintCollision">
+One of the cells the machine or belt would cover already holds another machine, belt or label. The flash on the board shows the cell. Move or delete what is there first, or place, move or draw it on free cells.
+</Fix>
+
+<Fix id="refusal.OutOfBounds">
+Part of the machine, belt or label would sit past the edge of the grid, which runs from <Fact id="limit.grid_min" bare /> to <Fact id="limit.grid_max" bare /> on each axis. Place, draw, turn or resize it further from the edge, so every cell it covers is inside.
+</Fix>
+
+<Fix id="refusal.UnknownKind">
+The edit asked for a machine kind this version of the app doesn't have. The palette offers only kinds the app has, so this comes from a command sent some other way, such as a script talking to the app. Place the machine from the palette, or fix the kind number in the script.
+</Fix>
+
+<Fix id="refusal.MachineTooBig">
+Adding the output would make the machine more than <Fact id="limit.max_footprint_dim" />. Use the outputs it already has: put a Router after one of them to send items several ways, or split the work across a second machine.
+</Fix>
+
+<Fix id="refusal.RotateCoversBelt">
+Turned, the machine would cover a cell that holds a belt. A belt docked to the machine's own output counts too, because a turn moves the output. The flash shows which belt. Move that belt, or delete it and draw it again after the turn.
+</Fix>
+
+<Fix id="refusal.RotateBlocked">
+Turned, the machine would cover a cell that holds another machine or a label. Clear the space first by moving or deleting what is there, or move the machine somewhere with room to turn.
+</Fix>
+
+<Fix id="refusal.GrowCoversBelt">
+Pressing + Add output grows the machine by one row (one column if it is turned), and a belt runs through that row, often the machine's own fault belt. Move that belt, or delete it and draw it again, then add the output. When this would happen, the panel shows a note beside + Add output before you press it.
+</Fix>
+
+<Fix id="refusal.GrowBlocked">
+Pressing + Add output grows the machine by one row (one column if it is turned), and that row holds another machine or a label. Clear the space first by moving or deleting what is there, or move the machine somewhere with room to grow.
+</Fix>
+
+<Fix id="refusal.ResizeCovers">
+The label's new size would cover a cell that holds a machine, a belt or another label. Pick a smaller size, or move the label or the thing in its way, then resize it again.
+</Fix>
+
+## Ports, docks and wires
+
+<Fix id="refusal.IncompatiblePorts">
+A wire runs from one machine's output to another machine's input, and this one didn't: it started on an input, ended on an output, joined a machine to itself, or named a port the machine doesn't have. With the Wire tool, press on the output of the first machine and release on the input of the second, for example from a Route to an HTTP Handler.
+</Fix>
+
+<Fix id="refusal.PortOccupied">
+That output already has a belt or a wire, and an output connects to one thing at a time. Removing an output that still has a connection is refused the same way. Select the machine, press Disconnect beside that output in its Ports section, then connect it again or remove it. To feed two places from one output, end its belt at a Tee, which copies each item to every output.
+</Fix>
+
+<Fix id="refusal.InvalidDock">
+A belt starts on the cell right outside a machine's output and ends on the cell right outside another machine's input, and this belt didn't: it ran from an input, into an output, or its end wasn't on the cell the port faces. Draw the belt from the cell next to the output and finish it on the cell next to the input. It may turn on either of those cells.
+</Fix>
+
+<Fix id="refusal.MediumMismatch">
+Belts dock onto belt ports and wires onto wire ports, and this edit put a belt on a wire port or a wire on a belt port. Use the Belt tool for a belt port and the Wire tool for a wire port. A Route reaches an HTTP Handler by a wire; the other machines connect by belts.
+</Fix>
+
+<Fix id="refusal.NoSuchPort">
+The edit named an output the machine doesn't have: a Router rule or the Router's Default sends items to an output that is gone, or something asked to remove an output past the last one. Open the Router's panel and set Send to on each rule, and the Default, to one of its outputs. A rule that points at a gone output shows Missing output.
+</Fix>
+
+<Fix id="refusal.LabelDoesNotConnect">
+Something tried to connect a belt or a wire to a label, or to add an output to one. The app's own tools can't do this, since a label has no ports, so the command came some other way. Connect the belt or wire to a machine instead. A label is a note on the board and takes no part in the flow.
+</Fix>
+
+<Fix id="refusal.BeltOnlyPort">
+You pressed the Wire tool on a port that takes belts. Connect that port with a belt: draw one with the Belt tool, or drag the output dot onto the start of a belt. If a belt is already docked there, that belt is the port's connection.
+</Fix>
+
+<Fix id="refusal.DockNotSent">
+A belt you drew landed, but the connection at one of its ends was never made: the board changed before the app could send it, the answer to the drawing was lost, or the app couldn't tell which belt it had drawn. Look at the belt's ends. If the machine it should reach is still there, delete the belt and draw it again, or drag that machine's output dot onto the belt's start.
+</Fix>
+
+## Routes and paths
+
+<Fix id="refusal.RouteEmpty">
+The belt you drew held no cells. With the Belt tool, press on the cell where the belt starts and drag along the cells it should cover before you let go.
+</Fix>
+
+<Fix id="refusal.RouteNonAdjacent">
+Two cells next to each other in the drawn path don't share a side: the path jumped over a cell or stepped across a corner. Draw it again one cell at a time, turning at corners rather than cutting across them.
+</Fix>
+
+<Fix id="refusal.RouteSelfCrossing">
+The path you drew crosses itself or runs back over its own cells. Draw it again so it visits each cell once.
+</Fix>
+
+<Fix id="refusal.DuplicatePath">
+Another Route on the board already answers at that path. Pick a path no other Route uses. The Route's panel names the Route that has the path, so you can change that one instead.
+</Fix>
+
+<Fix id="refusal.InvalidPath">
+The Route's path breaks one of three rules: it starts with exactly one `/` and has something after it, it is at most <Fact id="limit.max_endpoint_path_bytes" /> long, and it uses only letters, digits, `-`, `.`, `_`, `~` and `/`. Change the path to fit them, for example `/orders/new`. Spaces, `?` and `%` aren't allowed, so the app never decodes a path before it compares it.
+</Fix>
+
+## Undo and redo
+
+<Fix id="refusal.NothingToUndo">
+You pressed Undo with every edit already taken back, for example right after the board opened. There's nothing to change, because the board is already at the first step it remembers.
+</Fix>
+
+<Fix id="refusal.NothingToRedo">
+You pressed Redo with no undone edit to put back. Making a new edit after an Undo also clears the steps you could redo. There's nothing to change, because the board is already at its newest step.
+</Fix>
+
+<Fix id="refusal.UndoSpaceTaken">
+The step you tried to undo would put a deleted machine or belt back on cells something else holds now. Undo takes steps back in order, so only a hand-edited or damaged board file reaches this. That step and every step before it can't be undone. Keep working from the board as it is, or open a saved copy from before the change.
+</Fix>
+
+<Fix id="refusal.UndoDoesNotFit">
+The board's undo history no longer matches the board: the step names something that isn't there or can't be put back. A hand-edited or damaged board file, or one saved by a different build, causes this. Keep working from the board as it is, or open a saved copy from before the change.
+</Fix>
+
+## Settings and labels
+
+<Fix id="refusal.UnknownOption">
+The edit chose an option the app doesn't have: an output role, a port type or a label colour. No control in the app sends one, so the command came some other way. Make the change from the machine's or the label's panel, which offers only options the app has.
+</Fix>
+
+<Fix id="refusal.OverLimit">
+A setting went past a limit the app sets. A Router holds at most <Fact id="limit.max_routes" />, and each rule's Match text is at most <Fact id="limit.max_route_expect_bytes" />. A label's text is at most <Fact id="limit.max_label_bytes" />, and a label can be up to <Fact id="limit.label_max_w" /> and <Fact id="limit.label_max_h" />. Bring the setting back inside its limit: fewer rules, shorter Match text, shorter label text or a smaller label.
+</Fix>
+
+<Fix id="refusal.WrongKind">
+The edit doesn't apply to the thing it named: a turn aimed at a label, which never turns, or label settings aimed at a machine. No control in the app sends either, so the command came some other way or named something that changed. Select the machine or label again and make the change from its own panel.
+</Fix>
+
+## The app
+
+<Fix id="refusal.Malformed">
+The app's window sent the engine a message the engine couldn't read: one too large, an empty one, or bytes that aren't a command. Try the edit again. If it keeps happening, restart the app and report what you did on the [issue tracker](https://github.com/westpoint-io/fabrico/issues).
+</Fix>
+
+<Fix id="refusal.UnknownNode">
+The machine, belt or label you picked was gone by the time the edit reached the engine, for example because an Undo removed it. Look at the board as it is now, pick the thing again if it is still there, and repeat the edit.
+</Fix>
+
+<Fix id="refusal.BoardChanged">
+You made the edit on the board as it was several changes ago, after an Undo, a Redo or a load, and the engine no longer keeps enough history to tell what you meant, so it refused rather than guess. Make the edit again on the board as it is now.
+</Fix>

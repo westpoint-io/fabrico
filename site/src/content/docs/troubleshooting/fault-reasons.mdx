@@ -1,0 +1,55 @@
+---
+title: Fault reasons
+description: What each fault reason on an item means, what causes it, and how to fix the machine or the code behind it.
+sidebar:
+  order: 2
+---
+
+import Fact from '../../../components/Fact.astro';
+import Fix from '../../../components/Fix.astro';
+
+When a machine can't handle an item, it sends a fault out of its fault output and shows as faulted on the board. Every fault carries one of the reasons on this page. Each entry says what makes a machine give that reason, then what to change in the board or in the Factory code so it stops.
+
+## Routing
+
+<Fix id="fault.NoMatch">
+A Router compared the item with each of its rules, none of them matched, and its Default is set to None (fault). Add a rule that matches the item with + Add rule, or set Default to one of the Router's outputs so items no rule matches go there. To keep the faulted items instead, draw a belt from the Router's fault output.
+</Fix>
+
+<Fix id="fault.BranchBusy">
+One of a Tee's outputs leads to a belt or machine that couldn't take another item, so the copy for that output left on the Tee's fault output instead. The Tee's other outputs still got their copies. Find what is slow on that output's path and give it room: a faster Belt pace, a longer belt, or a machine further on that keeps up. A belt from the Tee's fault output collects the copies it couldn't deliver.
+</Fix>
+
+<Fix id="fault.OutputRefused">
+A machine sent an item and the next belt or machine refused it, so the item came back as a fault. The engine checks that every output has room before a machine runs, so a board in this version of the app shouldn't produce this reason. The engine keeps it as a backstop. If an item does carry it, report it with the board file on the [issue tracker](https://github.com/westpoint-io/fabrico/issues). The item rides inside the fault, so a belt from the machine's fault output keeps it.
+</Fix>
+
+## Factory code
+
+<Fix id="fault.FactoryError">
+The Factory's code failed on that item: it threw an error, used something the sandbox withholds (such as `Date`, `fetch` or `Math.random`), was handed bytes that aren't text, or ran past its memory limit of <Fact id="limit.factory_memory" /> or its stack limit, which is <Fact id="limit.factory_stack_desktop" /> in the desktop app. A failed run sends nothing. The engine throws away every item it emitted, and the Factory's state stays as it was. The error message rides in the fault, so draw a belt from the Factory's fault output to read it, then fix the code. Use `ctx.random` where the code needs a random number. A run that emits more than <Fact id="limit.factory_emits_per_port" bare /> times on one output gets this reason once for each emit past that, and the rest of the run stands.
+</Fix>
+
+<Fix id="fault.FactoryTimeout">
+The Factory's code used up its budget of <Fact id="limit.factory_gas_budget" />, usually in a loop that never ends or one that does too much work for one item. The budget counts steps of the code, not time, so the same item stops at the same point on every run. Give the loop an end, or do less work for each item. As with <Fact id="fault.FactoryError" />, the failed run sends nothing and the Factory's state stays as it was.
+</Fix>
+
+## Outbound calls
+
+<Fix id="fault.CommandFailure">
+A request the Sink sent came back with a status outside 200 to 299, or never got an answer: the address didn't resolve, the connection was refused, or the request took too long. Check the Sink's URL and method, and check that the service answers them, for example with curl from the same computer. The fault doesn't carry the item or the response, so the Sink's panel and the service's own logs are where to look.
+</Fix>
+
+<Fix id="fault.CommandTimeout">
+The Sink's request was still waiting for an answer when its deadline passed. Point the Sink at a service that answers sooner, or find out why the service is slow. The request may still have reached the service, so make the service safe to receive the same request twice: each request carries an `Idempotency-Key` header the service can check.
+</Fix>
+
+## Routes and Handlers
+
+<Fix id="fault.NoEntryWire">
+A request reached a Route that has no wire leading out of it, so there was nowhere to send it. With the Wire tool, press on the Route and release on an HTTP Handler. Drawing that wire also clears the Route's faults with this reason.
+</Fix>
+
+<Fix id="fault.WireOverflow">
+Too many requests were in flight on one wire at once, more than <Fact id="limit.wire_inflight_cap" />, or a request passed through more than <Fact id="limit.wire_budget" />, which usually means the wires form a loop. If requests arrive faster than the HTTP Handler answers them, send fewer or make the Handler answer sooner. If the wires form a loop, delete one wire to break it.
+</Fix>
