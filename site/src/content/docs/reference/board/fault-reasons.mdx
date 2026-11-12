@@ -1,0 +1,25 @@
+---
+title: Fault reasons
+description: Each reason a machine can fault an item with, what makes the machine give it and where the fault goes, with a running example where one can be shown.
+sidebar:
+  order: 4
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+When a machine can't handle an item, it sends a fault instead of a normal output and shows as faulted on that tick. Each fault carries one reason, the machine that raised it and, for most reasons, the item or the error message behind it. This page lists each reason, what makes a machine give it, and where the fault goes.
+
+A fault leaves by the machine's Fault port. That port is reserved and sits apart from the numbered outputs, so a fault never travels with normal items. Dock a belt on it and lead the belt to a Debug Sink to keep each fault where you can read it. With nothing docked there, the fault goes no further. A Route and a Tee have no Fault port on the grid. They still fault and show as faulted, and the sections below say what happens to their faults.
+
+Each example below faults on purpose, and a line under it names the reason.
+
+## `NoMatch`
+
+A Router gives this reason when an item matches none of its routes and its default output is set to none. The item leaves by the Router's Fault port, and the fault carries the item's bytes.
+
+In the example below, the first webhook's body matches the first route and leaves by the top output. The second body matches neither route, so the Router faults it, and a belt carries the fault from the Fault port to a Sink.
+
+<Board name="docs-faults-no-match" faultsAbout="NoMatch" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-no-match)

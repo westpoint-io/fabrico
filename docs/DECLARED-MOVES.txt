@@ -147,9 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# Five new lines, written by the generator, for the Merge, Sink, Route, HTTP Handler and Label
-# boards (examples/boards/docs/machines-<slug>.board.ron). The twelve older lines are unchanged.
-examples/boards/hashes.manifest 8ddc4bf07255650d2dab3f9905c9104465232c64a922aa11a38587c633f3e127
+# One new line, written by the generator, for the board that faults on purpose with NoMatch
+# (examples/boards/docs/faults-no-match.board.ron). The seventeen older lines are unchanged.
+examples/boards/hashes.manifest 5b078c2282ef2c2f2a4abb90d3680e6562b6e08440fb4683314d4b80131601cf
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the
