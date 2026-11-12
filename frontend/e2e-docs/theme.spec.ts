@@ -1,9 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { docsUrl } from './support/site.ts';
+import { docsUrl, sitemapPages } from './support/site.ts';
 
 // The site's look comes from the app's locked skin. The build writes the app's --fab-* tokens into
 // the page, and the site's theme maps Starlight's colours onto them, so the content ground, the
 // header, the left sidebar and the body text each show a token's colour.
+//
+// On every published page, the text inside .sl-markdown-content keeps to the site's four sizes
+// (12, 16, 18 and 24 px) and two weights (400 and 700), and code inside an h2 or h3 keeps its case.
+// The pages come from the sitemap, so a new page joins the check with no change here.
 
 /** A custom property declared on :root, resolved to a computed colour through a probe element. */
 async function tokenColour(page: Page, token: string): Promise<string> {
@@ -153,3 +157,45 @@ test.describe('with a light colour scheme requested', () => {
     expect(state.pickers, 'starlight-theme-select elements').toBe(0);
   });
 });
+
+/** The site's type scale: four sizes and two weights. */
+const TYPE_SIZES = ['12px', '16px', '18px', '24px'];
+const TYPE_WEIGHTS = ['400', '700'];
+
+for (const url of await sitemapPages()) {
+  const where = new URL(url).pathname;
+  test(`${where} keeps to four type sizes and two weights, and heading code keeps its case`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(url);
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    const found = await page.evaluate(() => {
+      const content = document.querySelector('.sl-markdown-content');
+      if (content === null) return null;
+      const texts: { tag: string; text: string; size: string; weight: string }[] = [];
+      for (const el of [content, ...content.querySelectorAll('*')]) {
+        const own = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '');
+        if (!own) continue;
+        const style = getComputedStyle(el);
+        texts.push({ tag: el.tagName.toLowerCase(), text: (el.textContent ?? '').trim().slice(0, 40), size: style.fontSize, weight: style.fontWeight });
+      }
+      const headingCode = [...content.querySelectorAll(':is(h2, h3) code')].map((el) => ({
+        text: (el.textContent ?? '').trim().slice(0, 40),
+        transform: getComputedStyle(el).textTransform,
+      }));
+      return { texts, headingCode };
+    });
+    expect(found, `${where} has a .sl-markdown-content block`).not.toBeNull();
+    if (found === null) return;
+    const sizes = [...new Set(found.texts.map((t) => t.size))].sort();
+    const weights = [...new Set(found.texts.map((t) => t.weight))].sort();
+    console.log(`TYPE_SCALE page=${where} sizes=${sizes.join(',')} weights=${weights.join(',')} headingCode=${found.headingCode.length}`);
+    const offSize = found.texts.filter((t) => !TYPE_SIZES.includes(t.size)).map((t) => `<${t.tag}> "${t.text}" at ${t.size}`);
+    const offWeight = found.texts.filter((t) => !TYPE_WEIGHTS.includes(t.weight)).map((t) => `<${t.tag}> "${t.text}" at ${t.weight}`);
+    expect(offSize, `${where}: text outside the sizes ${TYPE_SIZES.join(', ')}`).toEqual([]);
+    expect(offWeight, `${where}: text outside the weights ${TYPE_WEIGHTS.join(', ')}`).toEqual([]);
+    const cased = found.headingCode.filter((c) => c.transform !== 'none').map((c) => `"${c.text}" has text-transform ${c.transform}`);
+    expect(cased, `${where}: code in an h2 or h3 keeps its case`).toEqual([]);
+  });
+}
