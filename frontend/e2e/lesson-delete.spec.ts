@@ -14,6 +14,7 @@ import {
   SOURCE_ID,
   SOURCE_TIMER,
   SOURCE_WEBHOOK,
+  beltOverDoorstep,
   boot,
   buildLine,
   centreOf,
@@ -23,6 +24,7 @@ import {
   deletesSent,
   expectAt,
   expectCaptureComplete,
+  lineToBeltDraw,
   pressRing,
   readProbe,
   reminted,
@@ -406,6 +408,19 @@ test.describe('lesson 3 on the mock host', () => {
     await deleteSink(page, h, line);
     await undoBoth(page, h, host, line);
     await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
+  });
+
+  test("a line drawn over the Sink input's doorstep and turned away at draw-belt gets the undo card, not the carry-on", async ({ page }) => {
+    const host = configByNode();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h, LESSON);
+    const { source, sink, nodes, tick } = await lineToBeltDraw(page, h, host);
+    await expectAt(page, STEP.drawBelt, STAGE.beltDraw, 'the Belt tool armed on the draw');
+    // Along the row onto the In's doorstep and one cell down: Tail on the Source's Out, Head free.
+    const over = beltOverDoorstep(STRAY_BELT_ID, source, sink);
+    h.inject(buildPacket({ full: false, tick: tick + 1, generation: 1, swapFloor: FLOOR, nodes, belts: [over], canUndo: true }));
+    await expectAt(page, STEP.drawBelt, stageOf(STEP.drawBelt, 'belt-undo'), "the card must not offer to carry on a line whose own tile holds the Sink's doorstep");
+    await expect(page.locator(CARD)).toContainText(wordsOf(STEP.drawBelt, 'belt-undo'));
   });
 
   test('a capture still waiting for config answers when the first Undo lands keeps its belt, and only the second Undo finishes the lesson', async ({ page }) => {

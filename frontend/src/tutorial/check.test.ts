@@ -361,6 +361,23 @@ describe('lineStuck', () => {
     expect(arriving([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id)])])).toBe(false);
   });
 
+  // Drawn along the row over the Sink input's doorstep at (7,2) and turned one cell down. The app turns the
+  // join down with "That space is taken", because the line's own tile holds the cell the join needs.
+  const overTheDoorstep = (): BoardBelt[] => [piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [7, 3]), [tail(SOURCE_NODE.id)])];
+
+  it("holds for a line over the input's doorstep and turned away, with nothing on the way", () => {
+    expect(stuck(overTheDoorstep()), "the line's own tile holds the doorstep, so a press can't carry it on").toBe(true);
+  });
+
+  it("holds for a line over the input's doorstep and turned away while edits are on the way, because that tile isn't the end", () => {
+    expect(arriving(overTheDoorstep()), 'no dock can come for a doorstep tile in the middle of the line').toBe(true);
+  });
+
+  it('is false for a good draw in two pieces whose only doorstep tile is its end, while its dock is on the way', () => {
+    const first = piece(FIRST, tiles([3, 2], [4, 2]), [tail(SOURCE_NODE.id), head(SECOND)]);
+    expect(arriving([first, piece(SECOND, tiles([5, 2], [6, 2], [7, 2]), [tail(FIRST)])])).toBe(false);
+  });
+
   it('holds for that belt once no dock is on the way, which is where one Undo leaves a finished belt', () => {
     expect(stuck([piece(FIRST, tiles([3, 2], [4, 2], [5, 2], [6, 2], [7, 2]), [tail(SOURCE_NODE.id)])])).toBe(true);
   });

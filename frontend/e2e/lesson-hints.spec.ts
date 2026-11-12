@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
 import { nubAnchor } from '../shared/geometry';
 import { doorstepCell, dropHitRadiusWorld } from '../src/protocol/ports';
-import { CELL, buildPacket, type InjectBelt, type InjectNode } from './support/wire';
-import { OUTSET, SOURCE_ID, boot, configuredHost, placeBoth, readProbe, ringAt, startLesson, toBeltDraw, zoomInto } from './support/lessonMock';
+import { CELL, buildPacket, cameraOf, type InjectBelt, type InjectNode } from './support/wire';
+import { OUTSET, SOURCE_ID, beltOverDoorstep, boot, configuredHost, expectAt, placeBoth, readProbe, ringAt, startLesson, toBeltDraw, zoomInto, zoomOut } from './support/lessonMock';
 
 // lesson-hints.spec.ts - a port ring is the size of the spot the gesture accepts, by port role (HINT-02).
 //
@@ -139,6 +139,24 @@ test.describe('disc', () => {
       )
       .toBe('a disc on the In');
     await expect(page.locator('[data-fab-hint] > div'), 'the disc carries the round paint').toHaveClass(/\bfab-hint--port\b/);
+  });
+
+  test("a line drawn over the Sink input's doorstep and turned away gets the undo card, not the carry-on", async ({ page }) => {
+    const host = configuredHost();
+    const h = await boot(page, host.opts);
+    await startLesson(page, h);
+    // An empty mock board boots at the zoom limit, where the Sink's spot lands west of the Source and no
+    // straight line reaches its input. Zoomed out, as lessons.spec.ts does it, the Sink lands east.
+    await page.mouse.move(640, 300);
+    for (let i = 0; i < 12 && (await cameraOf(page)).scale > 1; i++) await zoomOut(page);
+    const { source, sink, tick } = await placeBoth(page, h);
+    expect(sink.cell_x, 'the Sink is east of the Source, so the line runs along one row').toBeGreaterThan(source.cell_x);
+    await toBeltDraw(page, host);
+    await ringAt(page, 'belt-draw');
+    // Along the row onto the In's doorstep and one cell down: Tail on the Source's Out, Head free.
+    const over = beltOverDoorstep(BELT_ID, source, sink);
+    h.inject(buildPacket({ full: false, tick: tick + 1, generation: 1, swapFloor: 1, nodes: [source, sink], belts: [over] }));
+    await expectAt(page, 'draw-belt', 'belt-undo', "the card must not offer to carry on a line whose own tile holds the Sink's doorstep");
   });
 
   test('only a disc carries the round paint class', async ({ page }) => {

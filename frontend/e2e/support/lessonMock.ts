@@ -396,6 +396,19 @@ export function beltFromPort(id: number, from: InjectNode, outIndex: number, to:
 }
 
 /**
+ * The belt a drag leaves when it runs along the row from `from`'s Out doorstep onto `to`'s In doorstep
+ * and then turns one cell down: Tail docked at `from`, Head free. The app refuses the join into `to`
+ * ("That space is taken"), because the line's own tile holds the cell the join needs.
+ */
+export function beltOverDoorstep(id: number, from: InjectNode, to: InjectNode): InjectBelt {
+  const straight = beltBetween(id, from, to);
+  const [lx, ly] = straight.tiles[straight.tiles.length - 1]!;
+  const turned: [number, number] = [lx, ly + 1];
+  if (covers(to, ...turned)) throw new Error(`beltOverDoorstep's turned tile (${turned[0]},${turned[1]}) lands on the machine`);
+  return { id, tiles: [...straight.tiles, turned], docks: (straight.docks ?? []).filter((d) => d.end === 'Tail') };
+}
+
+/**
  * The same board under new handles, as an Undo keyframe sends it: every machine and belt gets its old
  * handle plus `shift`, and each dock follows the machine it names. Cells, ports and tiles stay put.
  */
@@ -678,6 +691,30 @@ export async function buildLine(
   zoom: readonly [number, number] = [1.4, 1.6],
   opts: { extraSource?: boolean } = {},
 ): Promise<LineBoard> {
+  const { source, sink, extra, nodes, tick } = await lineToBeltDraw(page, h, host, visit, zoom, opts);
+  const belt = beltBetween(LINE_BELT_ID, source, sink);
+  const board = { nodes, belts: [] as InjectBelt[], tick };
+  await visitCarryOn(page, h, board, belt, visit);
+  await dragThroughRings(page, h);
+
+  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, nodes, belts: [belt], canUndo: true }));
+  await expectAt(page, 'delete-belt', 'tool-down', 'the joined belt finished draw-belt, and the Belt tool is still armed');
+  return { source, sink, belt, extra, tick: board.tick, generation: 1 };
+}
+
+/**
+ * Lesson 3's steps 1 and 2 and the Belt row, as `buildLine` plays them, stopping at belt-draw with the
+ * Belt tool armed. Returns the machines, every node on the board (the second Source too, with
+ * `extraSource`) and the tick of the last packet.
+ */
+export async function lineToBeltDraw(
+  page: Page,
+  h: Harness,
+  host: ReturnType<typeof configByNode>,
+  visit?: Visit,
+  zoom: readonly [number, number] = [1.4, 1.6],
+  opts: { extraSource?: boolean } = {},
+): Promise<{ source: InjectNode; sink: InjectNode; extra: InjectNode | null; nodes: InjectNode[]; tick: number }> {
   await ringAt(page, 'source-tool');
   // New keeps the camera, and the mock's first board fits one machine at the closest zoom. At that zoom
   // six cells east of the Source is past the free area, so the Sink's spot would land west, where no
@@ -709,14 +746,7 @@ export async function buildLine(
   await stopAt(page, 'belt-tool', visit);
   await pressRing(page, await ringAt(page, 'belt-tool'));
   await stopAt(page, 'belt-draw', visit);
-  const belt = beltBetween(LINE_BELT_ID, source, sink);
-  const board = { nodes: machines(source, sink), belts: [] as InjectBelt[], tick: 7 };
-  await visitCarryOn(page, h, board, belt, visit);
-  await dragThroughRings(page, h);
-
-  h.inject(buildPacket({ full: false, tick: ++board.tick, generation: 1, swapFloor: 1, nodes: machines(source, sink), belts: [belt], canUndo: true }));
-  await expectAt(page, 'delete-belt', 'tool-down', 'the joined belt finished draw-belt, and the Belt tool is still armed');
-  return { source, sink, belt, extra, tick: board.tick, generation: 1 };
+  return { source, sink, extra, nodes: machines(source, sink), tick: 7 };
 }
 
 /** Wait until the capture lesson 3's restored check compares with holds both machines' configs. */

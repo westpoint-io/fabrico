@@ -156,6 +156,20 @@ function lastPiece(board: Pick<BoardFacts, 'belts'>, a: number): BoardBelt | und
   return belt;
 }
 
+/** Every piece of the line leaving `a`, Tail first, following Head docks through belts as `lastPiece` does. Empty with no belt leaving it. */
+function piecesOf(board: Pick<BoardFacts, 'belts'>, a: number): BoardBelt[] {
+  const pieces: BoardBelt[] = [];
+  const seen = new Set<number>();
+  let belt = board.belts.find((b) => b.docks.some((d) => d.end === 'Tail' && d.node === a));
+  while (belt !== undefined && !seen.has(belt.id)) {
+    seen.add(belt.id);
+    pieces.push(belt);
+    const head = belt.docks.find((d) => d.end === 'Head')?.node;
+    belt = head === undefined ? undefined : board.belts.find((other) => other.id === head);
+  }
+  return pieces;
+}
+
 type Cell = { cell_x: number; cell_y: number };
 
 /** Is this tile on the doorstep of one of the machine's ports in this role? */
@@ -174,11 +188,15 @@ function onDoorstep(board: Pick<BoardFacts, 'nodes'>, node: number, role: number
  * machine, in a single tile (no direction, so no Head a press can find), or against a cell that's taken.
  * A belt with no docks in the way of the drag counts too.
  *
+ * A line with a tile on `b`'s input doorstep is stuck too, unless that tile is its end. The tile takes the
+ * cell the join needs, so the app turns a press there down ("That space is taken"), and the line has to
+ * come off.
+ *
  * The app sends a draw's docks after the host has minted the belt, so a good draw passes through several
  * of these shapes, and Undo stops on the same ones for as long as the user leaves them. The shape can't
- * tell them apart, so `editsInFlight` does. While it's true, a tile on `b`'s input doorstep is about to
- * dock there, a belt into `b` starting where its Tail would dock is about to join up, and a belt with no
- * docks is about to get them. Once it's false, no dock is coming and each of them is stuck.
+ * tell them apart, so `editsInFlight` does. While it's true, a line's end tile on `b`'s input doorstep is
+ * about to dock there, a belt into `b` starting where its Tail would dock is about to join up, and a belt
+ * with no docks is about to get them. Once it's false, no dock is coming and each of them is stuck.
  */
 export function lineStuck(
   board: Pick<BoardFacts, 'belts' | 'nodes'>,
@@ -204,6 +222,10 @@ export function lineStuck(
   if (last === undefined) return false;
   if (last.docks.some((d) => d.end === 'Head')) return true;
   const end = last.tiles[last.tiles.length - 1];
+  // A tile of the line on b's input doorstep holds the cell the join needs, unless it's the end tile with
+  // its dock on the way.
+  const onTheDoorstep = (tile: Cell): boolean => onDoorstep(board, b, PORT_ROLE.IN, tile) && !(editsInFlight && tile === end);
+  if (piecesOf(line, a).some((piece) => piece.tiles.some(onTheDoorstep))) return true;
   if (editsInFlight && end !== undefined && onDoorstep(board, b, PORT_ROLE.IN, end)) return false;
   return door === null || cellBlocked(board, door);
 }

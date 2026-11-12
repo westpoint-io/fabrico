@@ -404,6 +404,82 @@ test('a belt brought down onto the top of the Sink gets the undo card, because n
   errors.assertNone('during the belt onto the Sink');
 });
 
+test("a line drawn over the Sink's doorstep and turned away gets the undo card, and Undo then a redraw finishes the lesson", async ({ page }) => {
+  const errors = watchPageErrors(page);
+  const { rings, sourceId, sink } = await armedForTheBelt(page);
+  const handOn = async (x: number, y: number): Promise<{ x: number; y: number }> => {
+    const at = await screenCellCentre(page, x, y);
+    return { x: at.x + 3, y: at.y - 2 };
+  };
+  // The Sink's input faces west, so its doorstep is the cell west of it. Along the row from the output's
+  // doorstep onto that cell, then one cell down, and let go. The join into the Sink would need the
+  // doorstep, and the line's own tile holds it.
+  const doorstep: readonly [number, number] = [sink[0] - 1, sink[1]];
+  await dragAlongByHand(page, [
+    pointInRect(rings.hint, { x: 3, y: -2 }),
+    await handOn(doorstep[0], doorstep[1]),
+    await handOn(doorstep[0], doorstep[1] + 1),
+  ]);
+  // The host mints the belt, the page sees it and sends its Tail dock, and the dock comes back.
+  await expect
+    .poll(async () => (await readScene(page)).belts.map((b) => b.docks.length).join(','), {
+      message: 'the drawn belt reached the board with its Tail dock',
+      timeout: frameBudgetMs(STAGE_FRAMES + DOCKS_SENT_FRAMES) + tickBudgetMs(TWO_RISES_TICKS),
+    })
+    .toBe('1');
+  const scene = await readScene(page);
+  console.log(`MEASURE doorstep-drawn belts=${JSON.stringify(scene.belts.map((b) => ({ tiles: b.tiles.map((t) => [t.cell_x, t.cell_y]), docks: b.docks })))}`);
+  expect(scene.belts, 'one belt').toHaveLength(1);
+  const tiles = scene.belts[0]!.tiles.map((t) => [t.cell_x, t.cell_y]);
+  expect(tiles.slice(-2), "the belt runs over the Sink's doorstep and turns down").toEqual([
+    [doorstep[0], doorstep[1]],
+    [doorstep[0], doorstep[1] + 1],
+  ]);
+  expect(scene.belts[0]!.docks.find((d) => d.end === 'Tail')?.node, 'docked to the Source').toBe(sourceId);
+  expect(scene.belts[0]!.docks.find((d) => d.end === 'Head'), 'and to nothing at its end').toBeUndefined();
+
+  // The card leaves the plain drag a frame or two after the belt lands. Read where it settles first, so a
+  // card that offers to carry the line on fails here by name.
+  await expect
+    .poll(async () => (await readProbe(page)).stageId, {
+      message: 'the card left the plain drag',
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .not.toBe('belt-draw');
+  await waitTwoTickRises(page);
+  expect((await readProbe(page)).stageId, "the card must not offer to carry on a line whose own tile holds the Sink's doorstep").toBe('belt-undo');
+  await expectUndoCard(page, 'after the line over the doorstep');
+
+  // One press at a time, read against the card. A press after the line has gone would take back the
+  // Sink's placement, so this stops as soon as the card leaves the undo stage.
+  const MAX_PRESSES = 4;
+  let presses = 0;
+  let stage = 'belt-undo';
+  while (stage === 'belt-undo' && presses < MAX_PRESSES) {
+    const before = (await readScene(page)).belts.map((b) => `${b.id}:${b.docks.length}`).join(',');
+    await pressShortcut(page, 'undo');
+    presses += 1;
+    await expect
+      .poll(async () => (await readScene(page)).belts.map((b) => `${b.id}:${b.docks.length}`).join(','), {
+        message: `press ${presses} changed the board`,
+        timeout: frameBudgetMs(STAGE_FRAMES),
+      })
+      .not.toBe(before);
+    await waitTwoTickRises(page);
+    stage = (await readProbe(page)).stageId ?? 'none';
+    console.log(`MEASURE doorstep-undo press=${presses} stage=${stage} belts=${(await readScene(page)).belts.length}`);
+  }
+  console.log(`MEASURE doorstep-undo presses=${presses} last_stage=${stage}`);
+  expect(stage, `the card left the undo stage within ${MAX_PRESSES} presses`).toBe('belt-draw');
+  expect((await readScene(page)).belts, 'the line is gone from the board').toHaveLength(0);
+  expect((await readScene(page)).nodes, 'and both machines are still there').toHaveLength(2);
+
+  await continueLesson(page, LESSON, { from: 'draw-belt', undone: true });
+  expect((await readProbe(page)).card, 'the lesson finished').toBe('finished');
+  await expectRenderLoopAlive(page, 'after the line over the doorstep');
+  errors.assertNone('during the line over the doorstep');
+});
+
 /** The lesson has moved past the belt step on this line. */
 async function expectPastTheBelt(page: Page, what: string): Promise<void> {
   await expect
