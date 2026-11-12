@@ -147,10 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# Three new lines, written by the generator, for the boards that show ports, docking and turning,
-# and undo and redo (examples/boards/docs/rules-<slug>.board.ron). The twenty-six older lines are
-# unchanged.
-examples/boards/hashes.manifest 83ab1386952632b931e7fbe5f8513850fee05a2960627f03fc4a884991e7d759
+# One new line, written by the generator, for the board that uses the Factory JavaScript API
+# (examples/boards/docs/code-factory-api.board.ron). The twenty-nine older lines are unchanged.
+examples/boards/hashes.manifest daed6acb3fc87bb0638bf0c2f9e7fefee91be8abdc515abb548b0d85c7a73fb1
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

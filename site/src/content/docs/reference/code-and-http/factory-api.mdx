@@ -1,0 +1,173 @@
+---
+title: Factory JavaScript API
+description: The function a Factory or an HTTP Handler runs, the ctx object it gets, the Math members it may use, and the limits on one run.
+sidebar:
+  order: 1
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+A Factory runs one JavaScript function on each item that reaches it, and an HTTP Handler runs one on each request. The function gets the item and a second object, called ctx, which is how the code sends items out, keeps values between items and draws random numbers. This page lists everything the function can reach and the limits on one run.
+
+In the example below, a Factory reads the order in each of four items, counts the orders it has seen in `ctx.state`, picks a lane from 1 to 3 with `ctx.randomInt`, and sends a new item to a Sink. The code panel shows the function.
+
+<Board name="docs-code-factory-api" />
+
+The code is a module that exports one function. It runs once for each item, and its return value is ignored: only the calls it makes on `ctx` have an effect.
+
+```js wrap
+export default function (input, ctx) {
+  // runs once for each item
+}
+```
+
+| Member of `ctx` | What it does |
+|---|---|
+| <Fact id="factory.ctx.emit" /> | Sends a value out of an output as a new item. |
+| <Fact id="factory.ctx.state" /> | Keeps values from one run to the next. |
+| <Fact id="factory.ctx.command" /> | Records a command. In an HTTP Handler, this is the reply. |
+| <Fact id="factory.ctx.random" /> | Draws a number from 0 up to 1. |
+| <Fact id="factory.ctx.randomInt" /> | Draws a whole number in a range. |
+
+## `input`
+
+```js wrap
+export default function (input, ctx) {
+  const order = input.order;
+}
+```
+
+In a Factory, `input` is the item, parsed from JSON. Items from a webhook carry the request body as sent, so a body of `{"order":"A"}` gives `input.order` the value `"A"`. An item that isn't valid JSON makes the run fault with <Fact id="fault.FactoryError" />.
+
+In an HTTP Handler, `input` is the request: an object with `method`, `path`, `query`, `headers` and `body`. The [HTTP Handler](../../machines/http-handler/) page says what each field holds.
+
+## `ctx.emit`
+
+```js wrap
+ctx.emit(port, value)
+```
+
+Each call sends one new item out of an output. The item holds `value` written as JSON text, so `NaN` and `Infinity` arrive as `null`. A Factory has one output, numbered 0. An emit on an output with no belt docked goes nowhere.
+
+| Argument | Type | What it does |
+|---|---|---|
+| `port` | number | Picks the output. 0 is the first. |
+| `value` | any JSON value | Becomes the new item. |
+
+One run can emit up to <Fact id="limit.factory_emits_per_port" bare /> times on each output. The first item leaves at once, and the rest wait in the Factory and leave one a tick; while any wait, the Factory takes no new item. Each emit past the cap isn't sent and becomes a <Fact id="fault.FactoryError" /> fault of its own, and the rest of the run stands.
+
+## `ctx.state`
+
+```js wrap
+ctx.state.seen = (ctx.state.seen || 0) + 1;
+```
+
+`ctx.state` starts as an empty object, `{}`. After each run, the Factory saves it as JSON and hands it to the next run, so it is how the code remembers anything from one item to the next. You can change its fields or replace it, as in `ctx.state = { seen: 1 }`. In the example, `seen` counts 1, 2, 3 and 4 over the four orders.
+
+`ctx.state` is the only value that carries over. The Factory builds the code again from scratch for each run, so a variable at the top of the module, a field added to `Math` or to a built-in object, starts fresh on every item. Writing a global, such as `globalThis.seen = 1`, throws, so the run faults with <Fact id="fault.FactoryError" /> and you see the mistake at once.
+
+When the code throws, runs out of budget or reaches a limit, the run faults and sends nothing: the Factory drops every emit and every command from that run, and `ctx.state` keeps the value it had before the run started. Emits past the cap on one output are the one exception: they fault one by one, and the rest of the run still counts.
+
+## `ctx.command`
+
+```js wrap
+ctx.command(effect, deadline)
+```
+
+| Argument | Type | What it does |
+|---|---|---|
+| `effect` | any JSON value | What the command asks for. |
+| `deadline` | number | Ticks from now, added to the current tick to give the command's deadline. |
+
+In an ordinary Factory, a command makes no HTTP call and nothing comes back: the engine records it and does nothing with it. To send a request to another service, end the line with an HTTP Sink.
+
+In an HTTP Handler that is answering a request, `effect` is the reply, an object with `status`, `headers` and `body`. The [HTTP Handler](../../machines/http-handler/) page shows it, and the examples there pass 0 as the deadline.
+
+## `ctx.random`
+
+```js wrap
+const r = ctx.random(); // 0 <= r < 1
+```
+
+`ctx.random()` takes no arguments and returns a number from 0 up to, but not including, 1. Each machine draws from its own random stream, started from the board's seed, and the stream's position is saved with the rest of the state. The same board with the same inputs therefore draws the same numbers on every replay.
+
+## `ctx.randomInt`
+
+```js wrap
+const lane = ctx.randomInt(lo, hi); // lo <= lane < hi
+```
+
+| Argument | Type | What it does |
+|---|---|---|
+| `lo` | number | The smallest value it can return. Rounded down first. |
+| `hi` | number | One more than the largest value it can return. Rounded down first. |
+
+When `hi` isn't above `lo`, it returns `lo`. It draws from the same stream as `ctx.random()`. The result comes from a remainder, so in a very large range some values come up slightly more often than others. In the example, `ctx.randomInt(1, 4)` picks lanes 3, 3, 2 and 2 for orders A to D, on every replay.
+
+## Withheld globals
+
+The function runs in a sandbox that leaves out anything that reads the clock, reaches the network or the computer, or could give a different answer on another computer. Code that uses one of these names throws, and the run faults with <Fact id="fault.FactoryError" />.
+
+| Name | Why it is left out |
+|---|---|
+| `Date` | Reads the clock. |
+| `fetch` | Reaches the network. |
+| `setTimeout`, `setInterval` | Run code later, by the clock. |
+| `process`, `require` | Reach the computer and its files. |
+| `Math.random` | Isn't seeded from the board. Use `ctx.random()`. |
+| `Math.sin`, `Math.cos`, `Math.tan`, `Math.asin`, `Math.acos`, `Math.atan`, `Math.atan2` | Angles. Their last digits can differ between computers. |
+| `Math.sinh`, `Math.cosh`, `Math.tanh`, `Math.asinh`, `Math.acosh`, `Math.atanh` | Hyperbolic functions. Same reason. |
+| `Math.exp`, `Math.expm1`, `Math.log`, `Math.log1p`, `Math.log2`, `Math.log10` | Exponents and logarithms. Same reason. |
+| `Math.pow`, `Math.cbrt`, `Math.hypot` | Powers and roots. Same reason. |
+
+## `Math`
+
+`Math` keeps only the members that give the same bits on every computer: whole-number and comparison operations, the square root, which is rounded exactly, and the constants.
+
+| `Math` member | What it gives |
+|---|---|
+| <Fact id="factory.math.floor" /> | Rounds down. |
+| <Fact id="factory.math.ceil" /> | Rounds up. |
+| <Fact id="factory.math.round" /> | Rounds to the nearest whole number. |
+| <Fact id="factory.math.trunc" /> | Drops the fraction. |
+| <Fact id="factory.math.abs" /> | The value without its sign. |
+| <Fact id="factory.math.sign" /> | 1, -1 or 0, by the value's sign. |
+| <Fact id="factory.math.min" /> | The smallest of its arguments. |
+| <Fact id="factory.math.max" /> | The largest of its arguments. |
+| <Fact id="factory.math.sqrt" /> | The square root. |
+| <Fact id="factory.math.fround" /> | The nearest 32-bit float. |
+| <Fact id="factory.math.clz32" /> | Leading zero bits in a 32-bit whole number. |
+| <Fact id="factory.math.imul" /> | 32-bit whole-number multiplication. |
+
+| `Math` constant | What it holds |
+|---|---|
+| <Fact id="factory.math.PI" /> | Pi. |
+| <Fact id="factory.math.E" /> | The base of natural logarithms. |
+| <Fact id="factory.math.LN2" /> | The natural logarithm of 2. |
+| <Fact id="factory.math.LN10" /> | The natural logarithm of 10. |
+| <Fact id="factory.math.LOG2E" /> | The base-2 logarithm of E. |
+| <Fact id="factory.math.LOG10E" /> | The base-10 logarithm of E. |
+| <Fact id="factory.math.SQRT2" /> | The square root of 2. |
+| <Fact id="factory.math.SQRT1_2" /> | The square root of one half. |
+
+## Limits
+
+Each run has a budget of work, memory and stack. The work budget counts steps of the code, not time, so the same item stops at the same point on every run.
+
+| Limit | Value |
+|---|---|
+| Work for one run | <Fact id="limit.factory_gas_budget" /> |
+| Memory | <Fact id="limit.factory_memory" /> |
+| Stack, in the desktop app | <Fact id="limit.factory_stack_desktop" /> |
+
+Code that uses up its work budget stops with a <Fact id="fault.FactoryTimeout" /> fault. Code that runs out of memory and doesn't catch the failed allocation, or recurses past the stack limit, faults with <Fact id="fault.FactoryError" />. The troubleshooting entries for [FactoryTimeout](../../../troubleshooting/fault-reasons/#fault-factory-timeout) and [FactoryError](../../../troubleshooting/fault-reasons/#fault-factory-error) say how to fix each one.
+
+Boards on this site run in a browser, where the stack limit is 128 KiB, so deep recursion can fault at a different depth here than in the desktop app. Every limit, with the rest of the engine's, is on the [Limits](../../board/limits/) page.
+
+## Related pages
+
+- [Factory](../../machines/factory/): runs your JavaScript on each item and sends out what the code emits.
+- [HTTP Handler](../../machines/http-handler/): runs your JavaScript on each request and sends back a reply.
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Reference](../../): the list of machine pages and the other reference pages.

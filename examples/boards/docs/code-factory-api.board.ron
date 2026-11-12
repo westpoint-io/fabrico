@@ -1,0 +1,56 @@
+// A docs board for the Factory JavaScript API. One Source gets four webhooks, and its belt carries
+// each order into a Factory. The code reads the order number from `input`, counts the orders it has
+// seen in `ctx.state`, draws a lane number from 1 to 3 with `ctx.randomInt`, and sends a new item
+// with `ctx.emit`. A belt carries each new item to a Debug Sink. The board's seed fixes the draws,
+// so every replay picks the same lanes. The code never throws, so the Factory's Fault port, on its
+// bottom middle cell facing south, stays undocked. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sink 2, then the belts 3 and 4.
+// The 10 commands and the history seal end the boot on tick 11.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1, Fault=2; SINK In=0. In the code, ctx.emit(0, ...) sends on
+// the Factory's first output, catalog port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Factory JavaScript API",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY, 3x3
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),   // 3: source -> factory
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),  // 4: factory -> sink
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// count orders, pick a lane
+export default function (input, ctx) {
+  const seen =
+    (ctx.state.seen || 0) + 1;
+  ctx.state.seen = seen;
+  ctx.emit(0, {
+    order: input.order,
+    seen: seen,
+    lane: ctx.randomInt(1, 4),
+  });
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":"A"}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"order":"B"}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"order":"C"}"#)),
+        At(tick: 220, input: Webhook(source: 0, body: r#"{"order":"D"}"#)),
+    ],
+    captions: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 320,
+)
