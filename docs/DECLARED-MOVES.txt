@@ -147,10 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# Seven new lines, written by the generator, for the boards that fault on purpose with
-# FactoryError, FactoryTimeout, CommandFailure, CommandTimeout, NoEntryWire, WireOverflow and
-# BranchBusy (examples/boards/docs/faults-<slug>.board.ron). The eighteen older lines are unchanged.
-examples/boards/hashes.manifest 6cdee9efbe6db533749acd6e8430f5bd20d3c4fab9b123fadfb01d263b4a270e
+# One new line, written by the generator, for the board that shows each machine state
+# (examples/boards/docs/rules-machine-states.board.ron). The twenty-five older lines are unchanged.
+examples/boards/hashes.manifest b1cf6f490be272a3bbdbd5e10484d5c2b151f6da1fde0b661e591aa26a105719
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

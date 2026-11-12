@@ -1,0 +1,69 @@
+// A docs board that shows each state a machine can be in. Two lines run side by side. On the top
+// line a Source gets two webhooks and a Router sorts them. The first body matches the Router's one
+// route and reaches the Sink. The second matches nothing, and the Router has no default output, so
+// it faults the item with NoMatch. Nothing is docked on that Router's Fault port, so the fault goes
+// no further. On the bottom line a scripted edit turns a Source onto a timer on tick 60, and it puts
+// an item on its belt every 4 ticks. That Router sends everything out one output, onto a belt set
+// to its slowest pace, which takes one item every 20 ticks. Items wait at the Router faster than
+// the slow belt takes them, so the Router backs up. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b6-> ROUTER 2 -b7--------> SINK 4
+//   row 7:   SOURCE 1 -b8-> ROUTER 3 -b9 (slow)-> SINK 5
+//
+// Handles mint in command order: the Sources 0 and 1, the Routers 2 and 3, the Sinks 4 and 5, then
+// the belts 6 to 9. The 21 commands and the history seal end the boot on tick 22.
+//
+// machine_kind u8 legend: SOURCE=0, ROUTER=5, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; ROUTER In=0, Out=1 (middle); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Machine states",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 0, cell_x: 1, cell_y: 7),        // 1: SOURCE
+        Place(kind: 5, cell_x: 6, cell_y: 1),        // 2: ROUTER, 2x3
+        Place(kind: 5, cell_x: 6, cell_y: 6),        // 3: ROUTER, 2x3
+        Place(kind: 7, cell_x: 9, cell_y: 2),        // 4: SINK, Debug by default
+        Place(kind: 7, cell_x: 9, cell_y: 7),        // 5: SINK
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2)]),                // 6
+        DrawBelt(cells: [(8, 2)]),                                        // 7
+        DrawBelt(cells: [(2, 7), (3, 7), (4, 7), (5, 7)]),                // 8
+        DrawBelt(cells: [(8, 7)]),                                        // 9
+        Dock(belt: 6, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 2, port: 1),
+        Dock(belt: 7, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 8, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 8, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 3, port: 1),
+        Dock(belt: 9, endpoint: Head, node: 5, port: 0),
+        Configure(node: 2, config: Router(routes: [
+            // {"to":"a"  -> emit 0, the middle output
+            ((offset: 0, expect: [123, 34, 116, 111, 34, 58, 34, 97, 34]), 0),
+        ], default: None)),
+        Configure(node: 3, config: Router(routes: [], default: Some(0))),
+        Configure(node: 9, config: Belt(ticks_per_slot: 20)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"to":"a","order":1}"#)),
+        At(tick: 60, input: Edit(Configure(node: 1, config: Source(trigger: Timer(interval_ticks: 4))))),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"to":"c","order":2}"#)),
+    ],
+    captions: [
+        // Measured natively: every machine reads idle until tick 41. The top Router steps on 71
+        // and faults on 191. The bottom Router reads backed up on 180 and from then on for 3 ticks
+        // in every 4, stepping on the fourth, as the slow belt takes one item every 20 ticks.
+        Caption(tick: 30, highlight: 2, text: "Nothing has arrived yet, so every machine is idle."),
+        Caption(tick: 71, highlight: 2, text: "The top Router is working on this tick. The body matches its route, so it sends the item out its middle output."),
+        Caption(tick: 191, highlight: 2, text: "The top Router is faulted on this tick. This body matches no route and the Router has no default output, so it faults the item with NoMatch."),
+        Caption(tick: 197, highlight: 3, text: "The bottom Router is backed up. An item arrives every 4 ticks, the slow belt takes one every 20, and the rest wait inside the Router."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)

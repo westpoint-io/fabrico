@@ -1,0 +1,48 @@
+---
+title: Machine states
+description: The four states a machine can be in on each tick, how the board draws each one, and which state the engine picks when two apply.
+sidebar:
+  order: 3
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+On every tick, each machine is in one of four states: idle, working, faulted or backed up. The app draws the state on the machine itself, so you can see which machines are busy, which one just failed an item and where items are piling up. This page says what each state means and which one the engine picks when more than one could apply.
+
+In the example below, the top line gets two webhooks. The first matches the Router's route and goes through. The second matches nothing, so the Router faults it. On the bottom line, a Source on a timer sends items to a Router faster than the slow belt after it can carry them away, so that Router backs up.
+
+<Board name="docs-rules-machine-states" faultsAbout="NoMatch" />
+
+## The four states
+
+| State | How the board shows it | What it means |
+|---|---|---|
+| <Fact id="state.IDLE" /> | Light grey outline | Nothing to do |
+| <Fact id="state.WORKING" /> | Green outline | Ran on this tick |
+| <Fact id="state.FAULTED" /> | Red outline | Sent a fault |
+| <Fact id="state.BACKED_UP" /> | Dark grey outline | Can't keep up |
+
+A machine is working on a tick when it ran: it took an item, a request or a timer tick and handled it. It is faulted on a tick when it sent a fault, and it stays faulted while it holds a fault that no belt has carried away yet. The [Fault reasons](../fault-reasons/) page lists why a machine faults.
+
+A machine is backed up in two cases. Either its inbox is full and it turns away items from its belt, or it didn't run on this tick because its output can't take another item while it still holds work to send. A Source is backed up when its own queue of waiting webhooks is full. The outline for backed up is darker than the idle one.
+
+A jam can spread back along a line. Once a backed-up machine stops taking items, the belt before it fills up, and the machine before that belt waits too. To find the cause, follow the line to the backed-up machine furthest along it, which is usually the one before the slowest belt or machine.
+
+## When two states apply
+
+On a tick where more than one state fits a machine, the engine picks the first one in this order:
+
+1. Faulted, if the machine sent a fault on this tick or still holds one.
+2. Backed up, if its inbox is full and it is turning items away.
+3. Working, if it ran on this tick.
+4. Backed up, if it didn't run and waits behind an output that can't take another item.
+5. Idle, in every other case.
+
+Faulted comes first, so a machine that faults while its inbox is full shows faulted. A full inbox comes before working because a full machine can be woken on a tick and then held back by its output, and showing it as working would hide the jam. Waiting comes after working, so on a tick where a jammed machine runs at all, it shows working. In the example above, the bottom Router runs and shows working on one tick in every four.
+
+## Related pages
+
+- [Fault reasons](../fault-reasons/): every reason a machine can fault an item with.
+- [Sink](../../machines/sink/): the machine at the end of a line.
+- [Factory](../../machines/factory/): the machine that runs your code, and faults when the code fails.
