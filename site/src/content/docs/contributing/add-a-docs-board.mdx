@@ -1,0 +1,69 @@
+---
+title: Add a docs board
+description: How to write a running board for a docs page, pin its end state, declare the new hash list, embed it with Board and pass the docs suite.
+sidebar:
+  order: 5
+---
+
+import Fact from '../../../components/Fact.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+A docs board is a board file that a page embeds and plays in the reader's browser. The repository pins the end state of every board file, so adding one also changes a file the determinism gate covers. The steps below go from the file to a page that passes the docs suite.
+
+<Steps>
+
+1. Write the file directly in `examples/boards/docs/`, named `<group>-<slug>.board.ron`, for example `machines-router.board.ron` or `faults-no-match.board.ron`. Its id is the path after `examples/boards/` without the extension, with each `/` turned into `-`, so that file is `docs-machines-router`. Keep it in that one folder: the docs suite turns an id back into a path by assuming everything after the first `-` is the file name, so a file one folder down can't be found yet.
+
+   Copy the shape of [arrival-order.board.ron](https://github.com/westpoint-io/fabrico/blob/main/examples/boards/docs/arrival-order.board.ron): `format: 2`, a `title`, a `seed`, the `commands` that build it, a `script` of inputs by tick, `captions`, and an `end_tick`. Start with a comment that says what the board shows, draws the layout in text, lists the handle each command mints in order, and gives a legend for the kind numbers and port indexes. The embed can carry that text, so write it for readers.
+
+   Keep `end_tick` at 600 or less. The docs suite plays every board on the site to its end tick at <Fact id="embed.ticks_per_second" />, waiting up to a minute for each, and short boards keep its run in CI short. Make no network call: script every outbound answer in the `executor` block, as [script-outcomes.board.ron](https://github.com/westpoint-io/fabrico/blob/main/examples/boards/docs/script-outcomes.board.ron) does.
+
+2. Run the limit lint.
+
+   ```bash
+   cargo test -p fabrico-engine --test board_lint
+   ```
+
+   It runs every board file a second time at half the Factory memory limit and a quarter of the stack limit. It fails when a hash differs between the two runs, or when a Factory faults with a limit's message, because a board that comes near a limit can end differently in the browser and on the desktop.
+
+3. Pin its end state. The hash list is written by a generator that only runs when you ask for it.
+
+   ```bash
+   cargo test -p fabrico-engine --test board_manifest -- --ignored regenerate_board_manifest
+   ```
+
+   It rewrites `examples/boards/hashes.manifest` with the end tick and end state hash of every board file. Don't edit that file by hand. Without the new line, `cargo test -p fabrico-engine --test board_manifest` fails naming the board.
+
+4. Declare the new hash list. `examples/boards/hashes.manifest` is covered by [the determinism gate](../determinism-gate/), and `docs/DECLARED-MOVES.txt` holds one line for it under `[fixtures]`. Replace that line's digest with the new one, and replace the comment above it with one that names the board you added.
+
+   ```bash
+   sha256sum examples/boards/hashes.manifest
+   DECLARED_MOVES_BASE=public-base bash scripts/check-core-declared.sh
+   ```
+
+   The second command prints a line starting `OK:` when the digest matches.
+
+5. Embed it on the page.
+
+   ```mdx
+   import Board from '../../../components/Board.astro';
+
+   <Board name="docs-machines-router" />
+   ```
+
+   The site build fails when no board file has that id. A board that faults on purpose names each fault reason it shows, separated by spaces, for example `<Board name="docs-faults-no-match" faultsAbout="NoMatch" />`. Each name has to be a fault reason the code defines, or the build fails, and a line under the board tells the reader the faults are intended. The [Fault reasons](../../reference/board/fault-reasons/) page shows several, and the [Router](../../reference/machines/router/) page shows a board with none.
+
+6. Build the site and run the docs suite.
+
+   ```bash
+   bash scripts/build-site.sh
+   bash scripts/check-docs.sh
+   ```
+
+   The suite plays the board in Chromium and fails if it doesn't reach the end tick in the hash list, if its end hash differs, if it faults with no `faultsAbout`, or if it has `faultsAbout` and never faults.
+
+</Steps>
+
+## Test pages
+
+A page that exists only for the docs suite to test against gets a name starting with `_`, for example `_fixture-tall-page.mdx`. The published build skips those files. `npm run build:fixtures` in `site/` builds them into `site/dist-fixtures/`, and `scripts/check-docs.sh` serves that folder on a second port for the specs that need it. A test page never reaches the published site.

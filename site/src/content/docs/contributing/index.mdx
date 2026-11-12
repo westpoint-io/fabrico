@@ -1,6 +1,14 @@
 ---
 title: Contributing
-description: How to build Fabrico from source, run its checks, and change these docs.
+description: How Fabrico's code is laid out, the checks that guard it, and how to add a machine kind or a docs board.
+sidebar:
+  order: 0
 ---
 
-This section will cover building Fabrico from source, running its checks and editing these docs. Its pages aren't written yet.
+These pages are for people changing Fabrico itself. Start with the crate layout, then read about the determinism gate before you change anything under crates/.
+
+- [Crate layout](crate-layout/): what each crate and top-level folder holds.
+- [The determinism gate](determinism-gate/): the check that a change to the core or its recorded runs was declared first.
+- [The golden corpus](golden-corpus/): the recorded runs that prove the core behaves the same on every computer.
+- [Add a machine kind](add-a-machine-kind/): every file a new kind touches, and the check that catches each missed step.
+- [Add a docs board](add-a-docs-board/): writing, pinning and embedding a running board for a page.

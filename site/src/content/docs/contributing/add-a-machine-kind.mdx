@@ -1,0 +1,91 @@
+---
+title: Add a machine kind
+description: The files a new machine kind touches, from its kind number in the protocol to its reference page, and the check that fails when a step is missed.
+sidebar:
+  order: 4
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+A machine kind runs through every layer of Fabrico: the protocol gives it a number, the core and the command layer give it a shape, the app gives it a name and a drawing, and these docs give it a page. The steps below follow the files the Label kind touched, the most recent kind added. Each step ends with the check that fails if you skip it, so a missed step shows up as a red check rather than a machine that half works.
+
+<Steps>
+
+1. Give the kind a number. Add a `pub const` to `pub mod machine_kind` in [crates/fabrico-protocol/src/lib.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-protocol/src/lib.rs), at the next free number after the last one, and add a row to the table in the comment above it. Numbers are never reused or reordered, because they are stored in saved projects and recorded runs. Add the same constant to the copy in `mod machine_kind` in `crates/fabrico-core/src/tick.rs` and to `machine_kind` in `frontend/src/protocol/kinds.ts`.
+
+   ```rust
+   // N is one past the highest number in the module
+   pub const YOUR_KIND: u8 = N;
+   ```
+
+   The docs suite's reference check reads this module from disk, so from here on it fails until step 8 is done.
+
+2. Give the core something to run. If the kind behaves like no existing machine, add a variant at the end of `Node` in `crates/fabrico-core/src/state.rs`, a constructor beside `add_label`, its size in `base_footprint`, and an arm in `fold_place` in `crates/fabrico-core/src/tick.rs` that builds it from the new number. A variant added at the end leaves the bytes of existing snapshots alone. A kind that reuses an existing machine adds no variant: an HTTP Handler is a Factory whose first port takes a wire.
+
+   Three matches turn a `Node` back into a kind number, and none has a catch-all arm, so a new variant stops the build until each one names it: `kind_byte` in `crates/fabrico-command/src/grid_view.rs`, `machine_kind_of` in `crates/fabrico-engine/src/render_packet.rs`, and the one in `crates/fabrico-engine/src/gesture.rs`.
+
+   ```bash
+   cargo build --workspace
+   ```
+
+   `fabrico-core`, `fabrico-protocol` and `fabrico-engine` are covered by [the determinism gate](../determinism-gate/), so list each file you changed under `[source]` in `docs/DECLARED-MOVES.txt`. Label also added a recording to [the golden corpus](../golden-corpus/) that replays a board holding one.
+
+3. Give it ports and a size. Add an arm to `port_catalog` and the number to `kind_has_catalog_arm` in [crates/fabrico-command/src/command.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/src/command.rs). The arm returns the footprint and the port list. A kind with no ports returns an empty list, as Label does. Then add the same row to `MACHINE_CATALOG` in `frontend/src/protocol/decode.ts`, which the placement preview reads.
+
+   ```bash
+   cargo test -p fabrico-command --test ts_catalog_mirror
+   ```
+
+   That test compares the two tables and fails naming any kind with a Rust arm and no frontend row, or a row that differs port by port.
+
+4. Give it settings, if it has any. Add a variant to `MachineConfig` in `crates/fabrico-protocol/src/lib.rs` and in `crates/fabrico-core/src/edit.rs`, check it in the `Configure` arm in `crates/fabrico-command/src/command.rs` and apply it in `fold_configure` in `crates/fabrico-core/src/tick.rs`, and give it a panel in `frontend/src/chrome/`, as `LabelConfigBody.tsx` does for Label.
+
+   ```bash
+   cargo run -q --locked -p fabrico-host --example docs_facts
+   ```
+
+   The facts export in [crates/fabrico-host/examples/docs_facts.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-host/examples/docs_facts.rs) matches every `MachineConfig` variant with no catch-all arm, so it stops compiling until you add a sample to `config_samples` and the machine to `config_of`.
+
+5. List it in the facts export. Add the machine's name and kind number to `MACHINES` in the same file, and raise the array's length by one.
+
+   ```bash
+   cargo run -q --locked -p fabrico-host --example docs_facts
+   ```
+
+   The export tries every number from 0 to 255 and exits 1 naming any kind that has a port catalog arm and no row in `MACHINES`.
+
+6. Name it and draw it in the app. Add the name the app shows to `KIND_NAMES` in [frontend/shared/kindNames.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/shared/kindNames.ts) and the kind to `KIND_LEGEND_ORDER` below it. Add a palette entry to `ENTRIES` in `frontend/src/chrome/Palette.tsx`, and a drawing to `SUBJECT_OF` and `GEN_KEY_OF` in `frontend/src/render/layers/machines.ts`.
+
+   ```bash
+   cd frontend && npx vitest run
+   ```
+
+   `kindNames.test.ts` pins how many kinds have a name, and `machineVector.test.ts` fails for a kind with a catalog row and no drawing, which would otherwise be invisible on the grid.
+
+7. Regenerate the facts these pages quote.
+
+   ```bash
+   cd site && npm run facts
+   ```
+
+   It fails naming the machine if `KIND_NAMES` has no entry for it. Commit the new `site/src/generated/facts.json`: CI's docs job runs the same command and fails when the committed file differs.
+
+8. Write its reference page. Add `site/src/content/docs/reference/machines/<slug>.mdx` with `<MachineFacts kind={N} />`, where N is the kind number, and a board that shows the machine at work, saved as `examples/boards/docs/machines-<slug>.board.ron` and embedded as `<Board name="docs-machines-<slug>" />`. [Add a docs board](../add-a-docs-board/) covers the board itself. Add the slug to `SLUGS` in `frontend/e2e-docs/reference.spec.ts`, the page to `site/coverage-manifest.json`, and a row to the Reference index. The [Label page](../../reference/machines/label/) is a short example.
+
+   ```bash
+   bash scripts/build-site.sh && bash scripts/check-docs.sh
+   ```
+
+   The reference check fails naming the kind until one built page holds its facts table and a board named exactly `docs-machines-<slug>`.
+
+9. Run the whole set.
+
+   ```bash
+   cargo test --workspace --no-fail-fast
+   cargo clippy --all-targets --all-features -- -D warnings
+   DECLARED_MOVES_BASE=public-base bash scripts/check-core-declared.sh
+   ```
+
+   Then run `npx tsc --noEmit` and `CI=1 npm run test:e2e` from `frontend/`.
+
+</Steps>

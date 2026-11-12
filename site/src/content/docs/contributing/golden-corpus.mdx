@@ -1,0 +1,67 @@
+---
+title: The golden corpus
+description: What the recorded runs under crates/fabrico-core/tests/golden hold, the CI jobs that replay and regenerate them, and what a failure means.
+sidebar:
+  order: 3
+---
+
+The golden corpus is a set of recorded runs of Fabrico's core. Each recording stores a starting state, the edits and events fed into it, and the state hash after every tick. Replaying a recording has to give the same hashes on every computer and every operating system, and that is how the repository checks that a change to the core left its behaviour alone.
+
+## What a recording holds
+
+Each recording is a folder under [crates/fabrico-core/tests/golden](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-core/tests/golden), named with a number and a short description, such as `0001-source-belt-collector`. It holds five files:
+
+| File | What it holds |
+|---|---|
+| `genesis.snapshot` | the core's state before the first tick |
+| <span class="fab-nowrap">`edit-log.postcard`</span> | the edits applied during the run, such as a machine placed or deleted |
+| `log.postcard` | the events fed in, such as a webhook arriving |
+| `hashes.txt` | one state hash per tick, which the replay has to match |
+| `meta.toml` | notes for people: the generator, the seed and the tick count. The replay never reads it |
+
+The folder's [README.md](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-core/tests/golden/README.md) describes the format and lists the schema versions the recordings were made with.
+
+## The checks that use it
+
+Three checks read the corpus, and each answers a different question.
+
+- Does it still replay? [cert_cross_platform.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-core/tests/cert_cross_platform.rs) builds every recording into the test binary, replays it from its starting state and compares each tick's hash with `hashes.txt`. It runs as part of `cargo test --workspace`, so CI's "determinism gate" job replays the corpus on Linux, macOS and Windows on every push to main, and on Linux for a pull request. [corpus_registration.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-core/tests/corpus_registration.rs) fails when a folder exists that the replay doesn't list.
+- Would today's code record the same bytes? CI's `golden-corpus` job runs [scripts/measure-golden-corpus.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/measure-golden-corpus.sh). It re-records every run with its generator in `crates/fabrico-core/tests/regen.rs`, inside a private copy of the repository, and compares the result with the committed files byte for byte. It does the same for `examples/boards/hashes.manifest`. A replay alone can't catch this: an input to a generator can move, for example a machine's port list in `fabrico-command`, while the old recordings go on replaying green.
+- Did the files change without a declaration? [The determinism gate](../determinism-gate/) fails on any recording that differs from `public-base` and isn't declared.
+
+The `wasm-player` job also replays the recordings in the WebAssembly build with [scripts/check-wasm-corpus.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-wasm-corpus.sh), and compares each tick with the desktop build.
+
+## Running it locally
+
+```bash
+# Replay every recording
+cargo test -p fabrico-core --test cert_cross_platform
+
+# Check that every folder is listed in the replay
+cargo test -p fabrico-core --test corpus_registration
+
+# Re-record everything in a private copy and compare
+bash scripts/measure-golden-corpus.sh
+```
+
+The measurement builds the generators from scratch in its own cargo target each time, so it takes several minutes. It never writes to your checkout.
+
+## What a failure means
+
+A replay failure means today's core gives a different hash at some tick of a recording. Either the change has a bug or it changes behaviour on purpose. Never edit `hashes.txt` by hand.
+
+`measure-golden-corpus.sh` exits 1 when a regenerated file differs from the committed one and names each file. Something a generator reads has moved, and the recording wasn't made again. It exits 2 when it couldn't measure, for example because the number of recordings no longer matches `EXPECTED_GOLDEN_FIXTURES` in the script. Exit 2 is a failure too.
+
+When the behaviour change is deliberate, re-record each affected run, review the diff, and declare the new digests in `docs/DECLARED-MOVES.txt`:
+
+```bash
+bash scripts/regen-golden.sh bless 0001-source-belt-collector
+```
+
+## Adding a recording
+
+1. Write a generator named after the recording's id with each `-` written as `_`, such as `gen_0001_source_belt_collector`, in `crates/fabrico-core/tests/regen.rs`, and mark it `#[ignore]` like the others so `cargo test` never runs it.
+2. Run `bash scripts/regen-golden.sh new <id>`. It refuses to overwrite a folder that already exists.
+3. Add the recording to the `CORPUS` list in `cert_cross_platform.rs`.
+4. Raise `EXPECTED_GOLDEN_FIXTURES` in `scripts/measure-golden-corpus.sh` by one.
+5. Declare the new folder under `[fixtures]` and the two edited test files under `[source]` in `docs/DECLARED-MOVES.txt`, because both sit under `fabrico-core`.
