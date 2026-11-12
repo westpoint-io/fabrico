@@ -528,3 +528,19 @@ footer a[href*='/edit/main/'] {
   font-size: 0.75rem;
   line-height: 1.4;
 }
+
+/*
+ * The GitHub link, in the header and in the mobile menu: a 44 px target round its 16 px glyph. The
+ * mobile menu sits inside #starlight__sidebar, whose link rule would hold it to 32 px, so the id is
+ * named here too.
+ */
+.social-icons a,
+#starlight__sidebar .social-icons a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--fab-min-target);
+  min-height: var(--fab-min-target);
+  padding: 0;
+  margin: 0;
+}

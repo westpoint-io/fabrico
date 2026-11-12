@@ -272,3 +272,20 @@ for (const width of [768, 1440] as const) {
     expect(toc, `the 404 page's table of contents at ${width} px`).toEqual({ mobile: 0, right: 0 });
   });
 }
+
+test('the GitHub link is at least 44 by 44 in the header and in the open mobile menu', async ({ page }) => {
+  const box = (selector: string): Promise<{ width: number; height: number }> =>
+    page.locator(selector).evaluate((a) => {
+      const r = a.getBoundingClientRect();
+      return { width: r.width, height: r.height };
+    });
+  await open(page, docsUrl('get-started/'), 1280);
+  const header = await box('.right-group .social-icons a');
+  expect(header.width, 'the header GitHub link width').toBeGreaterThanOrEqual(44);
+  expect(header.height, 'the header GitHub link height').toBeGreaterThanOrEqual(44);
+  await open(page, docsUrl('get-started/'), 375);
+  await page.locator('.sl-menu-button').click();
+  const menu = await box('.mobile-preferences .social-icons a');
+  expect(menu.width, 'the mobile menu GitHub link width').toBeGreaterThanOrEqual(44);
+  expect(menu.height, 'the mobile menu GitHub link height').toBeGreaterThanOrEqual(44);
+});
