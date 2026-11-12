@@ -544,3 +544,9 @@ footer a[href*='/edit/main/'] {
   padding: 0;
   margin: 0;
 }
+
+/* A search sub-result (a heading inside a page) reads 12 px regular under its 16 px bold page result. */
+#starlight__search .pagefind-ui__result-nested .pagefind-ui__result-link {
+  font-size: 0.75rem;
+  font-weight: 400;
+}
