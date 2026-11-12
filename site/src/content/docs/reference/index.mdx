@@ -5,7 +5,7 @@ description: A page for each machine kind and each engine rule, with ports, conf
 
 import Fact from '../../../components/Fact.astro';
 
-Look up a machine, an engine rule, the Factory API, the HTTP contract, a command, a shortcut or a message the app shows. Each page has a running board beside the facts.
+Look up a machine, an engine rule, the Factory API, the HTTP contract, a command, a shortcut or a message the app shows. Most pages have a running board beside the facts.
 
 Numbers on these pages come from the source code when the site is built. For example, the boards on these pages play at <Fact id="embed.ticks_per_second" />, and <Fact id="shortcut.playPause" /> starts or pauses a board in the app.
 
@@ -39,3 +39,7 @@ Numbers on these pages come from the source code when the site is built. For exa
 - [Handler requests and replies](code-and-http/handler-requests-and-replies/): the request an HTTP Handler's code gets, the reply it sends and the status a caller gets when it fails.
 - [Webhook ingress](code-and-http/webhook-ingress/): the URL a webhook uses, what the app answers, the size limit, repeat deliveries and the order in one tick.
 - [HTTP Sink requests](code-and-http/http-sink-requests/): what an HTTP Sink sends, its idempotency key, and how long it waits for an answer.
+
+## Commands and files
+
+- [Refusal messages](files/refusal-messages/): every message the app shows when it refuses an edit, with a link to its fix.

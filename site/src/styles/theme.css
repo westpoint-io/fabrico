@@ -286,6 +286,11 @@ mobile-starlight-toc a[aria-current='true'] {
   font-variant-numeric: tabular-nums;
 }
 
+/* A short link that reads badly broken over lines, such as each How to fix on the Refusal messages page. */
+.sl-markdown-content .fab-nowrap {
+  white-space: nowrap;
+}
+
 /*
  * Wide content. A code block or table wider than the column scrolls inside its own box, never the
  * page. Starlight already makes a table a block that scrolls; these rules keep both boxes inside the
