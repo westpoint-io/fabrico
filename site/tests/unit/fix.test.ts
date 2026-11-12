@@ -93,6 +93,7 @@ test('fix text with only tags and white space counts as empty', () => {
   assert.equal(isEmptyFixText(''), true);
   assert.equal(isEmptyFixText('  \n '), true);
   assert.equal(isEmptyFixText('<p> </p>\n'), true);
+  assert.equal(isEmptyFixText(undefined), true);
   assert.equal(isEmptyFixText('<p>Draw it in two parts.</p>'), false);
 });
 

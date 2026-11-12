@@ -20,7 +20,8 @@ interface Props {
 const { id, symptom } = Astro.props;
 const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
 const target = fixTarget({ id, symptom }, page, facts as unknown as FactsFile);
-const body = await Astro.slots.render('default');
+// An entry with no children has no default slot at all, and render() then gives undefined.
+const body = Astro.slots.has('default') ? await Astro.slots.render('default') : '';
 if (isEmptyFixText(body)) {
   throw new Error(emptyFixMessage(page, target.kind === 'fact' ? target.id : target.text));
 }

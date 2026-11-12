@@ -163,9 +163,12 @@ export function fixTarget(props: { id?: string; symptom?: string }, page: string
   return { kind: 'symptom', text: symptom, anchor: symptomAnchor(symptom) };
 }
 
-/** Is a <Fix>'s rendered text empty: nothing left once the tags and the white space are gone? */
-export function isEmptyFixText(html: string): boolean {
-  return html.replace(/<[^>]*>/g, '').trim() === '';
+/**
+ * Is a <Fix>'s rendered text empty: nothing left once the tags and the white space are gone? An
+ * entry with no children renders no slot, which arrives here as undefined and counts as empty.
+ */
+export function isEmptyFixText(html: string | undefined): boolean {
+  return (html ?? '').replace(/<[^>]*>/g, '').trim() === '';
 }
 
 /** The line an author reads when a <Fix> has no fix text. `label` is the entry's id or symptom. */
