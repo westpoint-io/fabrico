@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { LESSONS } from '../src/tutorial/lessons/index';
 import { noteTokens, type LessonNote } from '../src/tutorial/machine';
-import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, phrase, type PhraseSegment } from '../src/tutorial/phrase';
+import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, phrase, splitAtBlock, type PhraseSegment } from '../src/tutorial/phrase';
 import type { PhraseToken } from '../src/tutorial/types';
 import { buildPacket, type InjectBelt } from './support/wire';
 import {
@@ -30,7 +30,10 @@ import {
 //
 // The list comes from LESSONS, so a new stage, coaching line or closing is measured with no edit here:
 // every stage instruction must set 3 lines or fewer, every coaching line and lesson note 2 lines or
-// fewer in the note slot, and every closing 4 lines or fewer on the finished card.
+// fewer in the note slot, and every closing 4 lines or fewer on the finished card. A stage holding the
+// request line's block token is two paragraphs on the card, cut by `splitAtBlock`: the part before it is
+// the instruction, measured as one, and the part after it is the line under the request line, held to 2
+// lines. Both set in the card's text column with the same style. The request line itself has its own check.
 
 const SIZES = [
   { width: 1280, height: 720 },
@@ -39,6 +42,8 @@ const SIZES = [
 
 const INSTRUCTION_LINES = 3;
 const NOTE_LINES = 2;
+/** The line under the request line, in the same column as the instruction. */
+const AFTER_LINES = 2;
 const CLOSING_LINES = 4;
 
 /** Two-digit step numbers, the widest a lesson note prints. */
@@ -65,7 +70,19 @@ const resolve = (where: string, tokens: readonly PhraseToken[]): Text => ({ wher
 
 function instructions(): Text[] {
   return LESSONS.flatMap((lesson) =>
-    lesson.steps.flatMap((step) => step.stages.map((stage) => resolve(`${lesson.id} ${step.id}/${stage.id}`, stage.text))),
+    lesson.steps.flatMap((step) => step.stages.map((stage) => resolve(`${lesson.id} ${step.id}/${stage.id}`, splitAtBlock(stage.text).before))),
+  );
+}
+
+/** The line under the request line, for each stage that has one. */
+function afters(): Text[] {
+  return LESSONS.flatMap((lesson) =>
+    lesson.steps.flatMap((step) =>
+      step.stages.flatMap((stage) => {
+        const { after } = splitAtBlock(stage.text);
+        return after.length === 0 ? [] : [resolve(`${lesson.id} ${step.id}/${stage.id} after`, after)];
+      }),
+    ),
   );
 }
 
@@ -181,6 +198,11 @@ test.describe('every lesson text fits the step card column', () => {
           `lesson 4's ${stage} stage is measured`,
         ).toBe(true);
       }
+      const afterList = afters();
+      expect(afterList.map((t) => t.where), 'the line under the request line is measured').toContain('answer-a-web-request answer/send-request after');
+      const measuredAfters = await measure(page, `${CARD} [data-fab-step-text]`, afterList);
+      expect(measuredAfters).toHaveLength(afterList.length);
+      check(size, measuredAfters, AFTER_LINES, 'line after the request line');
       await expect(card.locator('[data-fab-step-text]'), "the card's own words are back").toHaveText(textBefore ?? '');
 
       // A refusal opens the note slot, so its paragraph is on the card to set the notes into.

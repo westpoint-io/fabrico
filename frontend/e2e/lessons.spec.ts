@@ -6,7 +6,7 @@ import { LESSONS } from '../src/tutorial/lessons/index';
 import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { noteTokens } from '../src/tutorial/machine';
-import { REAL_TABLES, phrasePlain } from '../src/tutorial/phrase';
+import { REAL_TABLES, phrasePlain, splitAtBlock } from '../src/tutorial/phrase';
 import { nubAnchor } from '../shared/geometry';
 import { doorstepCell, dropHitRadiusWorld } from '../src/protocol/ports';
 import {
@@ -114,8 +114,9 @@ const LONGEST_NOTE = (['skippedOne', 'skippedMany', 'wentBack', 'alreadyRunning'
     }),
   )
   .reduce((a, b) => (b.length > a.length ? b : a));
+// The instruction is the part before the request line's block token; the line after it is measured on its own.
 const LONGEST_INSTRUCTION = LESSONS.flatMap((lesson) => lesson.steps.flatMap((step) => step.stages))
-  .map((stage) => phrasePlain(stage.text))
+  .map((stage) => phrasePlain(splitAtBlock(stage.text).before))
   .reduce((a, b) => (b.length > a.length ? b : a));
 
 /** The card's box, with the lines each paragraph takes. */

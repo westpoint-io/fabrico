@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boundMachineHandles, evaluateCheck, nodeKey } from './check.ts';
+import { ANSWER_A_WEB_REQUEST } from './lessons/answerAWebRequest.ts';
 import { LESSONS } from './lessons/index.ts';
 import { TWO_OUTPUTS } from './lessons/twoOutputs.ts';
 import { YOUR_FIRST_LINE } from './lessons/yourFirstLine.ts';
@@ -14,7 +15,7 @@ import {
   type RowView,
   type TutorialState,
 } from './machine.ts';
-import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain, stageTextFindings } from './phrase.ts';
+import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain, splitAtBlock, stageTextFindings } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 import type { FabricoWire } from '../render/sceneState.ts';
@@ -2284,5 +2285,128 @@ describe('urlNotRead', () => {
     const sent = reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, [LESSON_WITH_WAIT]);
     const s = reduce(sent, { type: 'frame', board: board(), chrome: chrome() }, [LESSON_WITH_WAIT]);
     expect(currentStage(s, board(), chrome({ routeUrl: { node: 60, generation: 1, url: URL } }), [LESSON_WITH_WAIT])?.id).toBe('waiting');
+  });
+});
+
+// LESSON 5 on the real lesson data. A Route at (8,8) and the HTTP Handler 3 by 3 at (12,7), with the forward
+// wire from the Route's Out to the Handler's In and the return wire back, shaped as `sceneSnapshot` returns them.
+describe('answer a web request', () => {
+  const L5 = 'answer-a-web-request';
+  const ROUTE_AT: BoardNode = { id: 1, kind: common.ROUTE_KIND, cells: [[8, 8]], ports: [] };
+  const HANDLER_AT: BoardNode = { id: 2, kind: common.HANDLER_KIND, cells: square(12, 7), ports: [] };
+  const MACHINES = [ROUTE_AT, HANDLER_AT];
+  const URL = 'http://127.0.0.1:54321/endpoint/route-1';
+  const cable = (id: number, from: number, to: number, replyPulsesSeen = 0): FabricoWire => ({
+    id,
+    from: { node: from, port: 1 },
+    to: { node: to, port: 0 },
+    tiles: 3,
+    path: [9, 10, 11].map((cell_x) => ({ cell_x, cell_y: 8 })),
+    pulses: [],
+    replyPulsesSeen,
+  });
+  const wired = (replies = 0): FabricoWire[] => [cable(3, 1, 2), cable(4, 2, 1, replies)];
+  /** The lesson at step 4, answer, with the return wire's count 0 when the step began. */
+  const atAnswer = (): TutorialState => {
+    let s = frame(reduce(IDLE, { type: 'newSent', lessonId: L5, floorAtSend: FLOOR }, LESSONS), {});
+    s = frame(s, { nodes: [ROUTE_AT] });
+    s = frame(s, { nodes: MACHINES });
+    return frame(s, { nodes: MACHINES, wires: wired() });
+  };
+  const stageAt = (s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts>): string | undefined => currentStage(s, board(b), chrome(c), LESSONS)?.id;
+
+  it('has four steps in teaching order, each opening with its paused stage, inside the card budgets', () => {
+    const l5 = LESSONS.find((l) => l.id === L5);
+    expect(l5).toBe(ANSWER_A_WEB_REQUEST);
+    expect(l5?.title).toBe('Answer a web request');
+    const stages = (id: string): string[] => l5?.steps.find((st) => st.id === id)?.stages.map((stage) => stage.id) ?? [];
+    expect(l5?.steps.map((st) => st.id)).toEqual(['place-route', 'place-handler', 'wire', 'answer']);
+    expect(stages('place-route')).toEqual(['board-paused', 'route-tool', 'route-floor']);
+    expect(stages('place-handler')).toEqual(['board-paused', 'handler-tool', 'handler-floor']);
+    expect(stages('wire')).toEqual(['board-paused', 'wire-tool', 'wire-draw']);
+    expect(stages('answer')).toEqual(['request-paused', 'tool-down', 'select-route', 'url-pending', 'send-request']);
+    expect(auditLessonWords(l5 === undefined ? [] : [l5])).toEqual([]);
+    for (const st of l5?.steps ?? []) {
+      for (const stage of st.stages) {
+        // The instruction before the block token on its 141-character budget, the line after it on 94.
+        expect(stageTextFindings(`${st.id} ${stage.id}`, stage.text)).toEqual([]);
+        const { before, after } = splitAtBlock(stage.text);
+        expect(phrasePlain(before).length, `${st.id} ${stage.id} before`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        expect(phrasePlain(after).length, `${st.id} ${stage.id} after`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        for (const line of Object.values(stage.coach ?? {})) {
+          expect(phrasePlain(line).length, `${st.id} ${stage.id} coach`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        }
+      }
+    }
+    expect(l5?.refused).toEqual({ atStep: 'wire', atStage: 'wire-draw', press: { on: 'port', of: 'handler', role: 'fault' }, tag: 'BeltOnlyPort' });
+    expect(phrasePlain(l5?.closing ?? [])).toBe("A Route answers web requests at its URL, and the HTTP Handler's code writes the reply that goes back along the wire.");
+  });
+
+  it('runs the send stage as the instruction, the request line, then the line about overloaded', () => {
+    const send = ANSWER_A_WEB_REQUEST.steps[3]?.stages.find((stage) => stage.id === 'send-request');
+    const { before, block, after } = splitAtBlock(send?.text ?? []);
+    expect(phrasePlain(before)).toBe('Press Copy on the POST URL row. In a terminal beside the board, type this line, pasting the URL after POST, and press Enter:');
+    expect(block).toEqual({ requestLine: 'route' });
+    expect(phrasePlain(after)).toBe('If curl printed overloaded, the board was paused. Press Play and run it again.');
+    expect(send?.gesture).toEqual({ do: 'request' });
+    expect(send?.hint).toEqual({ on: 'panel', target: { kind: 'copyUrlButton' } });
+  });
+
+  it('finishes the first three steps on a Route, an HTTP Handler and both legs of the wire', () => {
+    let s = frame(reduce(IDLE, { type: 'newSent', lessonId: L5, floorAtSend: FLOOR }, LESSONS), {});
+    expect([s.lessonId, s.stepIndex]).toEqual([L5, 0]);
+    s = frame(s, { nodes: [ROUTE_AT] });
+    expect([s.stepIndex, s.bindings.route?.id]).toEqual([1, 1]);
+    s = frame(s, { nodes: MACHINES });
+    expect([s.stepIndex, s.bindings.handler?.id]).toEqual([2, 2]);
+    s = frame(s, { nodes: MACHINES, wires: [cable(3, 1, 2)] });
+    expect(s.stepIndex, 'one leg is not the wire').toBe(2);
+    s = frame(s, { nodes: MACHINES, wires: wired() });
+    expect(s.stepIndex).toBe(3);
+  });
+
+  it('shows the wire stages by whether the Wire tool is armed', () => {
+    let s = frame(reduce(IDLE, { type: 'newSent', lessonId: L5, floorAtSend: FLOOR }, LESSONS), {});
+    s = frame(frame(s, { nodes: [ROUTE_AT] }), { nodes: MACHINES });
+    expect(stageAt(s, { nodes: MACHINES }, {})).toBe('wire-tool');
+    expect(stageAt(s, { nodes: MACHINES }, { armed: { kind: 'machine', machineKind: common.HANDLER_KIND } })).toBe('wire-tool');
+    expect(stageAt(s, { nodes: MACHINES }, { armed: { kind: 'wire' } })).toBe('wire-draw');
+    expect(stageAt(s, { nodes: MACHINES }, { armed: { kind: 'wire' }, playing: false })).toBe('board-paused');
+  });
+
+  it('runs step 4 through request-paused, tool-down, select-route, url-pending and send-request', () => {
+    const s = atAnswer();
+    const at = (c: Partial<ChromeFacts>): string | undefined => stageAt(s, { nodes: MACHINES, wires: wired() }, c);
+    expect(at({ playing: false })).toBe('request-paused');
+    expect(at({ armed: { kind: 'wire' } })).toBe('tool-down');
+    expect(at({})).toBe('select-route');
+    expect(at({ selectedNode: ROUTE_AT.id })).toBe('url-pending');
+    expect(at({ selectedNode: ROUTE_AT.id, routeUrl: { node: ROUTE_AT.id, generation: 1, url: URL } })).toBe('send-request');
+    const toolDown = ANSWER_A_WEB_REQUEST.steps[3]?.stages.find((stage) => stage.id === 'tool-down');
+    expect(phrasePlain(toolDown?.coach?.PortOccupied ?? [])).toBe('The Route and HTTP Handler are already wired. Press Esc to put the Wire tool down.');
+  });
+
+  it('with the Route deselected after the URL was read, shows select-route, and a reply still finishes the lesson', () => {
+    let s = atAnswer();
+    const read = { routeUrl: { node: ROUTE_AT.id, generation: 1, url: URL } };
+    s = frame(s, { nodes: MACHINES, wires: wired(), tick: 11 }, { selectedNode: ROUTE_AT.id, ...read });
+    expect(currentStage(s, board({ nodes: MACHINES, wires: wired(), tick: 11 }), chrome({ selectedNode: ROUTE_AT.id, ...read }), LESSONS)?.id).toBe('send-request');
+    s = frame(s, { nodes: MACHINES, wires: wired(), tick: 12 }, read);
+    expect([s.card, s.stepIndex]).toEqual(['running', 3]);
+    expect(stageAt(s, { nodes: MACHINES, wires: wired(), tick: 12 }, read), 'the deselected Route').toBe('select-route');
+    s = frame(s, { nodes: MACHINES, wires: wired(1), tick: 13 }, read);
+    expect(s.card, 'a reply along the return wire finishes it, the Route selected or not').toBe('finished');
+  });
+
+  it('with the Route selected, waits at url-pending until its URL is read at this generation', () => {
+    const s = atAnswer();
+    const selected = { selectedNode: ROUTE_AT.id };
+    expect(stageAt(s, { nodes: MACHINES, wires: wired() }, selected), 'no URL read').toBe('url-pending');
+    expect(stageAt(s, { nodes: MACHINES, wires: wired() }, { ...selected, routeUrl: { node: 9, generation: 1, url: URL } }), 'a URL for another handle').toBe('url-pending');
+    expect(
+      stageAt(s, { nodes: MACHINES, wires: wired(), generation: 2 }, { ...selected, routeUrl: { node: ROUTE_AT.id, generation: 1, url: URL } }),
+      'a URL from the previous generation',
+    ).toBe('url-pending');
+    expect(stageAt(s, { nodes: MACHINES, wires: wired() }, { ...selected, routeUrl: { node: ROUTE_AT.id, generation: 1, url: URL } })).toBe('send-request');
   });
 });
