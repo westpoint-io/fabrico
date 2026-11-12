@@ -519,3 +519,12 @@ site-search .dialog-frame {
   background-color: var(--fab-substrate);
   box-shadow: none;
 }
+
+/* The Edit page link: 12 px on a row at least 32 px tall, like the sidebar links. */
+footer a[href*='/edit/main/'] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}

@@ -227,3 +227,13 @@ test('at 375 px the menu button keeps its dark ground and a 1 px border, and cen
     expect(Math.abs(m.left - 14), `the glyph's offset from the button left is 14 px (it is ${m.left}), menu ${state}`).toBeLessThanOrEqual(1);
   }
 });
+
+test('the Edit page link is 12 px text on a row at least 32 px tall', async ({ page }) => {
+  await open(page, docsUrl('get-started/'), 1280);
+  const edit = await page.locator('a[href*="/edit/main/"]').evaluate((a) => ({
+    size: getComputedStyle(a).fontSize,
+    height: a.getBoundingClientRect().height,
+  }));
+  expect(edit.size, 'the Edit page link font size').toBe('12px');
+  expect(edit.height, 'the Edit page link height').toBeGreaterThanOrEqual(32);
+});
