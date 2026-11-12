@@ -11,8 +11,19 @@ export type LessonId = 'your-first-line' | 'delete-and-undo' | 'a-factory-with-t
 /**
  * What a step can bind. `belt`, `beltIn`, `beltOut` and `beltOut2` are belts, each found by the two
  * machines `BELT_ENDS` in `check.ts` names for it; the rest are machines, each found by its `nodeKey`.
+ * No step binds a wire: a wire is found by the two machines it joins (`wireFrom` in `check.ts`).
  */
-export type BindingName = 'source' | 'sink' | 'belt' | 'factory' | 'sink2' | 'beltIn' | 'beltOut' | 'beltOut2';
+export type BindingName =
+  | 'source'
+  | 'sink'
+  | 'belt'
+  | 'factory'
+  | 'sink2'
+  | 'beltIn'
+  | 'beltOut'
+  | 'beltOut2'
+  | 'route'
+  | 'handler';
 
 export interface BoardNode {
   id: number;
@@ -33,6 +44,18 @@ export interface BoardBelt {
   docks: ReadonlyArray<{ end: string; node: number; port: number }>;
 }
 
+/**
+ * An electrical wire, from one machine's port to another's. One Wire drag between a Route and an HTTP
+ * Handler lays two of these, the request leg and the return leg. `replyPulsesSeen` counts the packets in
+ * which this wire carried a reply since the last keyframe, so it starts again from nothing after an Undo.
+ */
+export interface BoardWire {
+  id: number;
+  from: { node: number; port: number };
+  to: { node: number; port: number };
+  replyPulsesSeen: number;
+}
+
 /** What a frame knows about the board. `FabricoScene` satisfies this structurally. */
 export interface BoardFacts {
   tick: number;
@@ -40,6 +63,7 @@ export interface BoardFacts {
   swapFloor: number;
   nodes: readonly BoardNode[];
   belts: readonly BoardBelt[];
+  wires: readonly BoardWire[];
 }
 
 export type ArmedFact =
@@ -103,7 +127,14 @@ export type Check =
   /** The bound machine holds at least `outs` ports with role Out. */
   | { is: 'portAdded'; of: BindingName; outs: number }
   /** Each Sink's lowest occupied slot rose at least once since the step began, each read on its own. */
-  | { is: 'itemsArriveAtBoth'; at: readonly [BindingName, BindingName] };
+  | { is: 'itemsArriveAtBoth'; at: readonly [BindingName, BindingName] }
+  /** A wire from `a` to `b` and a wire from `b` to `a` are both on the board, found by their machines. */
+  | { is: 'wireJoins'; a: BindingName; b: BindingName }
+  /**
+   * The wire from `from` to `to`, found by its machines, has carried more replies than when the step
+   * began, read within one board generation.
+   */
+  | { is: 'replyPulseRose'; from: BindingName; to: BindingName };
 
 export type StageWhen =
   | { is: 'always' }

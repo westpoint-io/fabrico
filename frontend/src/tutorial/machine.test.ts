@@ -17,6 +17,7 @@ import {
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
+import type { FabricoWire } from '../render/sceneState.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -35,7 +36,7 @@ function chrome(over: Partial<ChromeFacts> = {}): ChromeFacts {
 }
 
 function board(over: Partial<BoardFacts> = {}): BoardFacts {
-  return { tick: 10, generation: 1, swapFloor: FLOOR + 1, nodes: [], belts: [], ...over };
+  return { tick: 10, generation: 1, swapFloor: FLOOR + 1, nodes: [], belts: [], wires: [], ...over };
 }
 
 function frame(s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts> = {}): TutorialState {
@@ -2043,5 +2044,96 @@ describe('floorSpot for lesson 4', () => {
     const [x] = floorSpot({ spot: 'centredSource', view: narrow, board: board() });
     expect(x * CELL_PX).toBeGreaterThanOrEqual(200 + CELL_PX - CELL_PX / 2);
     expect(x * CELL_PX).toBeLessThanOrEqual(200 + CELL_PX + CELL_PX / 2);
+  });
+});
+
+// Lesson 5's wire steps, run through the reducer on frames shaped as the layer builds them. The wires are
+// typed as `sceneSnapshot` returns them, so a frame here carries exactly the fields the layer hands over.
+describe('a wire step and a reply step', () => {
+  const ROUTE = 9;
+  const HANDLER = 10;
+  /** A hand-made lesson: a Route, an HTTP Handler, the wire between them, and a reply along it. */
+  const WIRE_LESSON: Lesson = {
+    id: 'delete-and-undo',
+    title: 'hand-made wires',
+    steps: [
+      { id: 'route', stages: [], done: { is: 'nodeAppeared', kind: ROUTE, bind: 'route' } },
+      { id: 'handler', stages: [], done: { is: 'nodeAppeared', kind: HANDLER, bind: 'handler' } },
+      { id: 'wire', stages: [], done: { is: 'wireJoins', a: 'route', b: 'handler' } },
+      { id: 'request', stages: [], done: { is: 'replyPulseRose', from: 'handler', to: 'route' } },
+    ],
+    closing: [],
+    refused: { atStep: 'wire', atStage: 'none', press: { on: 'machine', of: 'handler' }, tag: 'BeltOnlyPort' },
+  };
+  const route = (id: number): BoardNode => ({ id, kind: ROUTE, cells: [[8, 8]], ports: [] });
+  const handler = (id: number): BoardNode => ({ id, kind: HANDLER, cells: square(12, 7), ports: [] });
+  const cable = (id: number, from: number, to: number, replyPulsesSeen = 0): FabricoWire => ({
+    id,
+    from: { node: from, port: 1 },
+    to: { node: to, port: 0 },
+    tiles: 3,
+    path: [9, 10, 11].map((cell_x) => ({ cell_x, cell_y: 8 })),
+    pulses: [],
+    replyPulsesSeen,
+  });
+  const run = (s: TutorialState, b: Partial<BoardFacts>): TutorialState => reduce(s, { type: 'frame', board: board(b), chrome: chrome() }, [WIRE_LESSON]);
+  const begun = (): TutorialState => run(reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, [WIRE_LESSON]), {});
+  const BOTH_MACHINES = [route(1), handler(2)];
+  /** The lesson at its reply step, with the return wire at `replies` when that step began. */
+  const atReplyStep = (replies: number): TutorialState => {
+    let s = begun();
+    s = run(s, { nodes: [route(1)] });
+    s = run(s, { nodes: BOTH_MACHINES });
+    return run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2), cable(4, 2, 1, replies)] });
+  };
+
+  it('finishes all four steps in order: the Route, the Handler, both legs of the wire, then a reply', () => {
+    let s = begun();
+    expect(s.stepIndex).toBe(0);
+    s = run(s, { nodes: [route(1)] });
+    expect([s.stepIndex, s.bindings.route?.id]).toEqual([1, 1]);
+    s = run(s, { nodes: BOTH_MACHINES });
+    expect([s.stepIndex, s.bindings.handler?.id]).toEqual([2, 2]);
+    s = run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2)] });
+    expect(s.stepIndex, 'one leg is not the wire').toBe(2);
+    s = run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2), cable(4, 2, 1)] });
+    expect(s.stepIndex, 'both legs finish the wire step').toBe(3);
+    expect(s.card).toBe('running');
+    s = run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2), cable(4, 2, 1)], tick: 11 });
+    expect(s.card, 'no reply yet').toBe('running');
+    s = run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2), cable(4, 2, 1, 1)], tick: 12 });
+    expect(s.card, 'a reply along the return wire finishes the lesson').toBe('finished');
+  });
+
+  it('the reply step compares with the count when it began, so replies seen before it do not finish it', () => {
+    let s = atReplyStep(2);
+    expect(s.stepIndex).toBe(3);
+    s = run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2), cable(4, 2, 1, 2)], tick: 11 });
+    expect(s.card).toBe('running');
+    s = run(s, { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2), cable(4, 2, 1, 3)], tick: 12 });
+    expect(s.card).toBe('finished');
+  });
+
+  it('a rise on the forward wire alone leaves the reply step where it is', () => {
+    const s = run(atReplyStep(0), { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2, 5), cable(4, 2, 1)], tick: 11 });
+    expect([s.card, s.stepIndex]).toEqual(['running', 3]);
+  });
+
+  it('a request after an Undo still finishes the reply step, against a count read again from the new generation', () => {
+    let s = atReplyStep(2);
+    // The Undo keyframe re-mints every handle, the wires' too, and the scene's reply counts start again.
+    const again = [route(11), handler(12)];
+    s = run(s, { nodes: again, wires: [cable(13, 11, 12), cable(14, 12, 11)], generation: 2, tick: 11 });
+    expect([s.card, s.stepIndex], 'still waiting for a reply').toEqual(['running', 3]);
+    expect([s.bindings.route?.id, s.bindings.handler?.id], 'both machines found again').toEqual([11, 12]);
+    s = run(s, { nodes: again, wires: [cable(13, 11, 12), cable(14, 12, 11)], generation: 2, tick: 12 });
+    expect(s.card).toBe('running');
+    s = run(s, { nodes: again, wires: [cable(13, 11, 12), cable(14, 12, 11, 1)], generation: 2, tick: 13 });
+    expect(s.card, 'one reply on the rebound return wire').toBe('finished');
+  });
+
+  it('a wire leg taken away sends the lesson back to the wire step', () => {
+    const s = run(atReplyStep(0), { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2)], tick: 11 });
+    expect(s.stepIndex).toBe(2);
   });
 });

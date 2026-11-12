@@ -23,6 +23,7 @@ import {
   outputsOf,
   slotRoseNow,
   watchedNames,
+  wireFrom,
   type ShapeCapture,
 } from './check';
 import type { Progress } from './progress';
@@ -82,6 +83,12 @@ export interface StepBaseline {
    * when the step began, or the first answer after, if none had come then. Null until it's known.
    */
   factorySource: string | null;
+  /**
+   * At a reply step, the replies the watched wire had carried, read when the step began (0 for a wire not
+   * there yet) and read again at each new generation, because a keyframe clears the scene's counts. Null
+   * at any other step.
+   */
+  replies: number | null;
 }
 
 export type Card = 'none' | 'starting' | 'running' | 'swapped' | 'finished';
@@ -427,6 +434,15 @@ function appliedSourceOf(of: BindingName | null, board: BoardFacts, chrome: Chro
   return answer?.config?.kind === 'Factory' ? answer.config.source : null;
 }
 
+/** At a reply step, the replies the wire it watches has carried so far, 0 with no such wire yet. Null at any other step. */
+function repliesFor(check: Check | undefined, board: BoardFacts, bindings: TutorialState['bindings']): number | null {
+  if (check?.is !== 'replyPulseRose') return null;
+  const from = bindings[check.from];
+  const to = bindings[check.to];
+  if (from === undefined || to === undefined) return null;
+  return wireFrom(board, from.id, to.id)?.replyPulsesSeen ?? 0;
+}
+
 function baselineFor(
   step: Step | undefined,
   knownKeys: readonly string[],
@@ -442,6 +458,7 @@ function baselineFor(
     rose: [],
     generation: board.generation,
     factorySource: appliedSourceOf(codeWatch(step), board, chrome, bindings),
+    replies: repliesFor(step?.done, board, bindings),
   };
 }
 
@@ -557,7 +574,7 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
   return { ...next, note };
 }
 
-/** Does an earlier step's result still stand? Only a structural step can stop standing: 5 and 6 are latched. */
+/** Does an earlier step's result still stand? Only a structural step can stop standing; a rise, once seen, is latched. */
 function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: ChromeFacts): boolean {
   switch (check.is) {
     case 'nodeAppeared': {
@@ -574,10 +591,16 @@ function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: 
       const b = s.bindings[check.b];
       return a !== undefined && b !== undefined && beltJoining(board, a.id, b.id) !== undefined;
     }
+    case 'wireJoins': {
+      const a = s.bindings[check.a];
+      const b = s.bindings[check.b];
+      return a !== undefined && b !== undefined && wireFrom(board, a.id, b.id) !== undefined && wireFrom(board, b.id, a.id) !== undefined;
+    }
     case 'tickRose':
     case 'itemArrived':
     case 'itemsArriveAtBoth':
     case 'restored':
+    case 'replyPulseRose':
       return true;
     case 'portAdded':
       return outputsOf(board, s.bindings[check.of]) >= check.outs;
@@ -688,8 +711,9 @@ function rebound(s: TutorialState, board: BoardFacts): TutorialState {
 /**
  * The step's own reads, after its check has run. At a watch step: latch each watched Sink whose slot rose
  * this frame, then take this frame's slots. Across a keyframe the slots are forgotten and read again, with
- * no rise counted, and the latches stand. At a code step: take the Factory's applied source from the first
- * answer, if none had come when the step began.
+ * no rise counted, and the latches stand. At a reply step: across a keyframe, which clears the scene's
+ * reply counts, read the wire's count again, so a request after an Undo still counts. At a code step: take
+ * the Factory's applied source from the first answer, if none had come when the step began.
  */
 function withWatchRead(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lessons: readonly Lesson[]): TutorialState {
   const step = lessons.find((l) => l.id === s.lessonId)?.steps[s.stepIndex];
@@ -704,6 +728,10 @@ function withWatchRead(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     if (risen.length > 0 || !sameGeneration || !sameSlots(lowestSlots, held.lowestSlots)) {
       baseline = { ...baseline, lowestSlots, rose: [...held.rose, ...risen], generation: board.generation };
     }
+  }
+  if (step.done.is === 'replyPulseRose' && (board.generation !== baseline.generation || baseline.replies === null)) {
+    const replies = repliesFor(step.done, board, s.bindings);
+    if (replies !== baseline.replies || board.generation !== baseline.generation) baseline = { ...baseline, replies, generation: board.generation };
   }
   if (baseline.factorySource === null) {
     const source = appliedSourceOf(codeWatch(step), board, chrome, s.bindings);

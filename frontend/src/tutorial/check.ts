@@ -7,7 +7,7 @@
 import { PORT_ROLE, beltEndPort, doorstepCell, unitDelta } from '../protocol/ports';
 import type { BoundNode, StepBaseline, TutorialState } from './machine';
 import { beltTilesIn, boardShape, sameShape, type BoardShape } from './shape';
-import type { BindingName, BoardBelt, BoardFacts, BoardNode, Check, ChromeFacts } from './types';
+import type { BindingName, BoardBelt, BoardFacts, BoardNode, BoardWire, Check, ChromeFacts } from './types';
 
 /**
  * A node's identity on the board: its kind and the minimum of its cells. Undo re-mints handles, so
@@ -31,7 +31,18 @@ export const BELT_ENDS: Readonly<Partial<Record<BindingName, readonly [BindingNa
 };
 
 /** Every binding name, so a loop over the bindings can't leave a new one out: the type below fails to compile if it does. */
-export const BINDING_NAMES = ['source', 'sink', 'belt', 'factory', 'sink2', 'beltIn', 'beltOut', 'beltOut2'] as const satisfies readonly BindingName[];
+export const BINDING_NAMES = [
+  'source',
+  'sink',
+  'belt',
+  'factory',
+  'sink2',
+  'beltIn',
+  'beltOut',
+  'beltOut2',
+  'route',
+  'handler',
+] as const satisfies readonly BindingName[];
 type UnlistedBinding = Exclude<BindingName, (typeof BINDING_NAMES)[number]>;
 /** True only while `BINDING_NAMES` lists every member of `BindingName`. */
 export const BINDING_NAMES_COMPLETE: [UnlistedBinding] extends [never] ? true : false = true;
@@ -103,6 +114,14 @@ export function beltJoining(board: Pick<BoardFacts, 'belts'>, a: number, b: numb
     if (next !== undefined) queue.push(next);
   }
   return undefined;
+}
+
+/**
+ * The wire from the machine `a` to the machine `b`, found by the handles of the two machines and never by
+ * the wire's own id, which an Undo re-mints. The direction counts: the wire from `b` to `a` is the other leg.
+ */
+export function wireFrom(board: Pick<BoardFacts, 'wires'>, a: number, b: number): BoardWire | undefined {
+  return board.wires.find((w) => w.from.node === a && w.to.node === b);
 }
 
 /** No belt to leave out. */
@@ -438,5 +457,20 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       return capture !== null && capture.since === check.since && sameShape(boardShape(board, chrome.appliedConfigs, boundMachineKeys(bindings)), capture.shape)
         ? DONE
         : NOT_DONE;
+    // One drag lays both legs, whichever way it went, so both have to be there.
+    case 'wireJoins': {
+      const a = bindings[check.a];
+      const b = bindings[check.b];
+      if (a === undefined || b === undefined) return NOT_DONE;
+      return wireFrom(board, a.id, b.id) !== undefined && wireFrom(board, b.id, a.id) !== undefined ? DONE : NOT_DONE;
+    }
+    // A keyframe clears the scene's reply counts, so a count is only compared within the generation it was read at.
+    case 'replyPulseRose': {
+      const from = bindings[check.from];
+      const to = bindings[check.to];
+      if (from === undefined || to === undefined || baseline.replies === null || board.generation !== baseline.generation) return NOT_DONE;
+      const seen = wireFrom(board, from.id, to.id)?.replyPulsesSeen;
+      return seen !== undefined && seen > baseline.replies ? DONE : NOT_DONE;
+    }
   }
 }

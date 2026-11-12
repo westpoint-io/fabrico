@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, outputFacing, type CheckContext } from './check.ts';
+import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, outputFacing, wireFrom, type CheckContext } from './check.ts';
 import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
-import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts } from './types.ts';
+import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, BoardWire, ChromeFacts } from './types.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -37,8 +37,8 @@ function ctx(over: {
   capture?: CheckContext['capture'];
 }): CheckContext {
   return {
-    board: { tick: 10, generation: 1, swapFloor: 1, nodes: [], belts: [], ...over.board },
-    baseline: { knownKeys: [], tick: 10, playing: true, lowestSlots: {}, rose: [], generation: 1, factorySource: null, ...over.baseline },
+    board: { tick: 10, generation: 1, swapFloor: 1, nodes: [], belts: [], wires: [], ...over.board },
+    baseline: { knownKeys: [], tick: 10, playing: true, lowestSlots: {}, rose: [], generation: 1, factorySource: null, replies: null, ...over.baseline },
     chrome: {
       armed: null,
       selectedNode: null,
@@ -228,6 +228,7 @@ describe('lineDoorstep', () => {
     swapFloor: 1,
     nodes,
     belts,
+    wires: [],
   });
 
   it('is the cell past the Head of a piece that stops short', () => {
@@ -744,5 +745,111 @@ describe('the line helpers leave bound belts out', () => {
 
   it('only belt bindings count as bound belts', () => {
     expect([...boundBeltIds({ source: { nodeKey: '0@0,0', id: 1 }, beltIn: { nodeKey: 'belt:a', id: 7 }, beltOut2: { nodeKey: 'belt:b', id: 8 } })].sort()).toEqual([7, 8]);
+  });
+});
+
+// Lesson 5's wire steps. One Wire drag between a Route and an HTTP Handler lays two cables, the request
+// leg from the Route to the Handler and the return leg back. Undo re-mints every handle, wires included,
+// so both checks find a wire by the two machines it joins and never by its own id.
+describe('the wire checks', () => {
+  const ROUTE = 9;
+  const HANDLER = 10;
+  const THE_ROUTE = node(30, ROUTE, 8, 8);
+  const THE_HANDLER: BoardNode = { id: 31, kind: HANDLER, cells: [0, 1, 2].flatMap((dy) => [0, 1, 2].map((dx) => [12 + dx, 7 + dy])), ports: [] };
+  const STRANGER = node(32, ROUTE, 2, 2);
+  const WIRED: TutorialState['bindings'] = {
+    route: { nodeKey: nodeKey(THE_ROUTE), id: THE_ROUTE.id },
+    handler: { nodeKey: nodeKey(THE_HANDLER), id: THE_HANDLER.id },
+  };
+  const wire = (id: number, from: number, to: number, replyPulsesSeen = 0): BoardWire => ({
+    id,
+    from: { node: from, port: 1 },
+    to: { node: to, port: 0 },
+    replyPulsesSeen,
+  });
+  const FORWARD = wire(40, THE_ROUTE.id, THE_HANDLER.id);
+  const RETURN = wire(41, THE_HANDLER.id, THE_ROUTE.id);
+  const NODES = [THE_ROUTE, THE_HANDLER, STRANGER];
+
+  describe('wireFrom', () => {
+    it('finds the wire by the machine at each end, and the direction counts', () => {
+      const board = { wires: [RETURN, FORWARD] };
+      expect(wireFrom(board, THE_ROUTE.id, THE_HANDLER.id)).toBe(FORWARD);
+      expect(wireFrom(board, THE_HANDLER.id, THE_ROUTE.id)).toBe(RETURN);
+      expect(wireFrom({ wires: [FORWARD] }, THE_HANDLER.id, THE_ROUTE.id)).toBeUndefined();
+    });
+  });
+
+  describe('wireJoins', () => {
+    const check = { is: 'wireJoins', a: 'route', b: 'handler' } as const;
+    const joined = (wires: readonly BoardWire[]): boolean =>
+      evaluateCheck(check, ctx({ board: { nodes: NODES, wires }, bindings: WIRED })).done;
+
+    it('is done with both legs, and binds nothing', () => {
+      expect(evaluateCheck(check, ctx({ board: { nodes: NODES, wires: [FORWARD, RETURN] }, bindings: WIRED }))).toEqual({ done: true, bound: null });
+    });
+
+    it('is done when the drag went the other way, so the return leg has the lower id', () => {
+      expect(joined([wire(40, THE_HANDLER.id, THE_ROUTE.id), wire(41, THE_ROUTE.id, THE_HANDLER.id)])).toBe(true);
+    });
+
+    it('is not done with the forward leg only', () => {
+      expect(joined([FORWARD])).toBe(false);
+    });
+
+    it('is not done with the return leg only', () => {
+      expect(joined([RETURN])).toBe(false);
+    });
+
+    it('finishes on the same legs under other wire ids, as after an Undo re-mints them', () => {
+      expect(joined([wire(70, THE_ROUTE.id, THE_HANDLER.id), wire(71, THE_HANDLER.id, THE_ROUTE.id)])).toBe(true);
+    });
+
+    it('is not done when one leg joins the Handler to some other machine', () => {
+      expect(joined([FORWARD, wire(41, THE_HANDLER.id, STRANGER.id)])).toBe(false);
+    });
+
+    it('is not done with the Route unbound', () => {
+      const noRoute = { handler: WIRED.handler! };
+      expect(evaluateCheck(check, ctx({ board: { nodes: NODES, wires: [FORWARD, RETURN] }, bindings: noRoute })).done).toBe(false);
+    });
+  });
+
+  describe('replyPulseRose', () => {
+    const check = { is: 'replyPulseRose', from: 'handler', to: 'route' } as const;
+    const rose = (wires: readonly BoardWire[], over: { generation?: number; replies?: number | null } = {}): boolean =>
+      evaluateCheck(
+        check,
+        ctx({
+          board: { nodes: NODES, wires, generation: over.generation ?? 1 },
+          baseline: { generation: 1, replies: over.replies === undefined ? 2 : over.replies },
+          bindings: WIRED,
+        }),
+      ).done;
+
+    it('is done when the return wire counts more replies than when the step began', () => {
+      expect(rose([wire(40, THE_ROUTE.id, THE_HANDLER.id), wire(41, THE_HANDLER.id, THE_ROUTE.id, 3)])).toBe(true);
+    });
+
+    it('is not done at the count the step began with', () => {
+      expect(rose([wire(40, THE_ROUTE.id, THE_HANDLER.id), wire(41, THE_HANDLER.id, THE_ROUTE.id, 2)])).toBe(false);
+    });
+
+    it('is not done when only the forward wire, Route to Handler, counts more', () => {
+      expect(rose([wire(40, THE_ROUTE.id, THE_HANDLER.id, 9), wire(41, THE_HANDLER.id, THE_ROUTE.id, 2)])).toBe(false);
+    });
+
+    it('is not done when a wire between two other machines counts more', () => {
+      const elsewhere = wire(50, STRANGER.id, 33, 9);
+      expect(rose([wire(40, THE_ROUTE.id, THE_HANDLER.id), wire(41, THE_HANDLER.id, THE_ROUTE.id, 2), elsewhere])).toBe(false);
+    });
+
+    it('is not done on a frame from another generation, whose counts start again from nothing', () => {
+      expect(rose([wire(41, THE_HANDLER.id, THE_ROUTE.id, 3)], { generation: 2 })).toBe(false);
+    });
+
+    it('is not done with no count read when the step began', () => {
+      expect(rose([wire(41, THE_HANDLER.id, THE_ROUTE.id, 3)], { replies: null })).toBe(false);
+    });
   });
 });
