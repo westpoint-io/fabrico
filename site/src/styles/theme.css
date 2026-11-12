@@ -624,3 +624,62 @@ footer a[href*='/edit/main/'] {
   line-height: 1.4;
   color: var(--fab-ink);
 }
+
+/*
+ * The file tree on the Crate layout page (Starlight's FileTree). It reads like a code block: a
+ * substrate well with a 1 px edge-lit border, 16 px padding and square corners. Text, comments and
+ * glyphs are ink at 12 px Martian Mono with a 1.7 line height, so the tree adds no fifth type size.
+ * Its rails are 1 px panel fill, and the rail beside an open folder lights to ink while the pointer
+ * is on the folder's name. Pages don't use the tree's highlight, which would draw an ink ground.
+ */
+starlight-file-tree {
+  font-family: var(--site-font);
+  font-size: 0.75rem;
+  line-height: 1.7;
+  color: var(--fab-ink);
+  background-color: var(--fab-substrate);
+  border: 1px solid var(--fab-edge-lit);
+  padding: var(--fab-space-md);
+}
+/*
+ * Each row is at least 24 px tall, the WCAG 2.2 minimum for a target, because every folder name is
+ * a button that opens and closes the folder. At 12 px and 1.7 a row is 20.4 px, so folder names
+ * and file rows each get 2 px above and below, and the 2 px gap Starlight puts between rows goes.
+ */
+starlight-file-tree {
+  --y-space: 0;
+}
+starlight-file-tree .directory > details > summary,
+starlight-file-tree .file {
+  padding-block: 0.125rem;
+}
+starlight-file-tree svg,
+starlight-file-tree .tree-icon {
+  fill: currentColor;
+}
+starlight-file-tree ul {
+  border-inline-start-color: var(--fab-panel-fill);
+}
+starlight-file-tree .directory > details > summary:hover ~ ul {
+  border-inline-start-color: var(--fab-ink);
+}
+starlight-file-tree .directory > details > summary,
+starlight-file-tree .directory > details > summary:hover {
+  color: var(--fab-ink);
+}
+
+/*
+ * The number beside each step (Starlight's Steps): a 28 px square of panel fill with the number in
+ * ink, 12 px Martian Mono at 700. Starlight sizes it from the line height (27.2 px) at weight 600.
+ */
+.sl-steps {
+  --bullet-size: 1.75rem;
+}
+.sl-steps > li::before {
+  font-family: var(--site-font);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--fab-ink);
+  background-color: var(--fab-panel-fill);
+  box-shadow: none;
+}

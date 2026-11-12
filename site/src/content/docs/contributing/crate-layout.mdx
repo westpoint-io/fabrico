@@ -1,0 +1,62 @@
+---
+title: Crate layout
+description: How the Fabrico repository is laid out, from the Rust crates and the app's frontend to this docs site, the example boards and the check scripts.
+sidebar:
+  order: 1
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+The repository splits into four parts. The Rust crates under `crates/` hold the engine and the desktop app built around it. The `frontend/` folder holds the screen the app draws in its web view, and the board element these pages embed. The `site/` folder holds these docs, and `examples/boards/` holds the board files that the app and these pages both run.
+
+<FileTree>
+- Cargo.toml the workspace, which lists every crate below
+- crates/
+  - fabrico-core/ the deterministic core: the grid, belts, machines, the tick loop and snapshots
+  - fabrico-protocol/ the shapes that cross between the engine and the screen: render packets, commands and machine kind numbers
+  - fabrico-command/ checks each command against the grid and turns it into the edit record the core applies
+  - fabrico-engine/ loads a board, runs it tick by tick and builds render packets, with no I/O
+  - fabrico-scenario/ the Rust test harness that builds and drives scenarios, and the one state hash
+  - fabrico-qjs-alloc/ the memory-limited allocator that Factory code runs in
+  - fabrico-host/ every side effect: the sim thread, webhooks, Routes, outbound calls and project files
+  - fabrico-app/ the desktop app, a Tauri shell around the host
+  - fabrico-player/ the engine built as WebAssembly, which runs the boards on these pages
+  - fabrico-wasm-corpus/ replays the test fixtures in the WebAssembly build; it never ships
+- frontend/
+  - src/ the app's screen: panels, the renderer, gestures, the packet decoder and the embedded board element
+  - shared/ plain value tables that the app and the live tests both read, such as machine names
+  - scripts/ build helpers, including the half of the facts export that reads the frontend
+  - e2e/ the browser suite against a mocked engine
+  - e2e-live/ the browser suite against the real engine
+  - e2e-docs/ the docs suite, which runs against the built site
+- site/
+  - src/content/docs/ these pages, one MDX file each
+  - src/components/ Board, Fact, Fix and MachineFacts
+  - scripts/ the facts merge and the two page lints
+  - tests/unit/ the site's unit tests
+  - coverage-manifest.json the pages each section has to have
+- examples/
+  - boards/ the board files the app and these pages run
+    - docs/ the boards these pages embed, one file each
+    - hashes.manifest the end tick and end state hash of every board file
+- scripts/ the checks CI runs, such as check-core-declared.sh and check-docs.sh
+- docs/
+  - DECLARED-MOVES.txt the declared changes to files the determinism check covers
+  - brand/ the icon and wordmark files
+</FileTree>
+
+## The deterministic core
+
+[fabrico-core](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-core) holds the state and the tick loop, and [clippy.toml](https://github.com/westpoint-io/fabrico/blob/main/clippy.toml) bans floats, hash maps, the wall clock and file or network I/O inside it, so a build that uses one fails. [fabrico-engine](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-engine) and [fabrico-player](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-player) carry the same ban. [fabrico-protocol](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-protocol/src/lib.rs) defines the machine kind numbers and every command, and [fabrico-command](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/src/command.rs) checks a command before the core applies it, which is where the app's refusals come from. [fabrico-scenario](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-scenario) holds the Rust test harness and the one function that hashes the core's state, and [fabrico-qjs-alloc](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-qjs-alloc/src/lib.rs) is a separate crate because an allocator needs `unsafe`, which `fabrico-core` forbids. The [Commands](../../reference/files/commands/) and [Machine states](../../reference/board/machine-states/) pages describe what these crates do from the outside.
+
+## The host and the app
+
+[fabrico-host](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-host) is the only crate that talks to the outside world. It runs the engine on its own thread, takes webhooks and Route requests on a local port, makes the outbound calls a Sink asks for and reads and writes project files. [fabrico-app](https://github.com/westpoint-io/fabrico/tree/main/crates/fabrico-app) wraps it in the desktop window. The [Webhook ingress](../../reference/code-and-http/webhook-ingress/), [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/) and [Project files](../../reference/files/project-files/) pages cover that side.
+
+## The browser player
+
+[fabrico-player](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-player/src/lib.rs) is the engine compiled to WebAssembly. Each board on these pages runs in it, and it computes the same state hash as the desktop build. [fabrico-wasm-corpus](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-wasm-corpus/src/lib.rs) is a test harness kept out of the player: it replays the test fixtures in WebAssembly so CI can compare each tick with the desktop build.
+
+## The frontend
+
+The app's screen is TypeScript under [frontend/src](https://github.com/westpoint-io/fabrico/tree/main/frontend/src). It decodes the render packets the host sends, draws them and turns gestures into commands. The board element these pages embed lives in [frontend/src/embed](https://github.com/westpoint-io/fabrico/tree/main/frontend/src/embed), and the names the app shows for each machine kind live in [frontend/shared/kindNames.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/shared/kindNames.ts). The [Keyboard shortcuts](../../reference/files/keyboard-shortcuts/) page lists the keys the frontend handles.
