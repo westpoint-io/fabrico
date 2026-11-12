@@ -1449,11 +1449,17 @@ async function walkRequest(page: Page, lesson: Lesson, stepIndex: number, label:
   const line = page.locator('[data-fab-step-card] [data-fab-request-line]');
   await expect(line, `${label}: the card shows a request line`).toHaveCount(1);
   const card = ((await line.textContent()) ?? '').trim();
+  // The word is the one a user on this browser's system types. The walk's browser carries Playwright's
+  // Desktop Chrome user agent, which names Windows, where PowerShell aliases `curl` to another command,
+  // so the card says `curl.exe` there. The walk makes that call itself rather than asking the app's rule.
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  const word = /\bWindows NT\b/.test(userAgent) ? 'curl.exe' : 'curl';
   const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false });
   const status = resp.status();
   const body = await resp.text();
   console.log(`REQUEST ${lesson.id} url=${url} status=${status} body=${body} card=${card}`);
-  expect(card, `${label}: the card's request line is curl -X POST and the panel's URL`).toBe(`curl -X POST ${url}`);
+  console.log(`REQUEST-WORD ${lesson.id} word=${word} userAgent=${userAgent}`);
+  expect(card, `${label}: the card's request line is ${word} -X POST and the panel's URL`).toBe(`${word} -X POST ${url}`);
   expect(status, `${label}: the Route answered the request`).toBe(200);
   expect(body, `${label}: with the HTTP Handler's preset reply`).toBe(HANDLER_PRESET_BODY);
   await expect
