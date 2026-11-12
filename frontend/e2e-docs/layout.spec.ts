@@ -261,3 +261,14 @@ test('both sidebars reach the bottom of a 1440 x 900 window on a page three scre
   expect(Math.abs((m.right ?? 0) - m.innerHeight), `the right sidebar bottom (${m.right}) against the window bottom (${m.innerHeight})`).toBeLessThanOrEqual(1);
   expect(m.hitInLeft, 'the point 4 px above the window bottom at x 150 is inside the left sidebar').toBe(true);
 });
+
+for (const width of [768, 1440] as const) {
+  test(`the 404 page shows no table of contents at ${width} px`, async ({ page }) => {
+    await open(page, docsUrl('404.html'), width);
+    const toc = await page.evaluate(() => ({
+      mobile: document.querySelectorAll('mobile-starlight-toc').length,
+      right: document.querySelectorAll('.right-sidebar-panel').length,
+    }));
+    expect(toc, `the 404 page's table of contents at ${width} px`).toEqual({ mobile: 0, right: 0 });
+  });
+}
