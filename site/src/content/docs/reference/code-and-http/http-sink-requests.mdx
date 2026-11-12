@@ -21,17 +21,17 @@ An HTTP Sink in the app sends a real request to its target. Boards on this site 
 
 ## The request
 
-A Sink sends one request for each item, to the URL in its config, with the method you pick.
+A Sink sends one request for each item, to the URL in its config, with the method you pick. The table gives each method as the Sink's inspector labels it and as a board file writes it.
 
-| Method | Sends the item as the body |
-|---|---|
-| <Fact id="http.method.Post" /> | Yes |
-| <Fact id="http.method.Put" /> | Yes |
-| <Fact id="http.method.Patch" /> | Yes |
-| <Fact id="http.method.Get" /> | No |
-| <Fact id="http.method.Delete" /> | No |
+| In the inspector | In a board file | Sends the item as the body |
+|---|---|---|
+| <Fact id="http.method.Post.label" /> | <Fact id="http.method.Post" /> | Yes |
+| <Fact id="http.method.Put.label" /> | <Fact id="http.method.Put" /> | Yes |
+| <Fact id="http.method.Patch.label" /> | <Fact id="http.method.Patch" /> | Yes |
+| <Fact id="http.method.Get.label" /> | <Fact id="http.method.Get" /> | No |
+| <Fact id="http.method.Delete.label" /> | <Fact id="http.method.Delete" /> | No |
 
-A new HTTP Sink uses <Fact id="http.method.Post" />. The body is the item's bytes, exactly as they arrived, and the Sink adds no `content-type` header. A request with <Fact id="http.method.Get" /> or <Fact id="http.method.Delete" /> goes without a body, because enough servers refuse or mishandle one there.
+A new HTTP Sink uses <Fact id="http.method.Post.label" />. The body is the item's bytes, exactly as they arrived, and the Sink adds no `content-type` header. A request with <Fact id="http.method.Get.label" /> or <Fact id="http.method.Delete.label" /> goes without a body, because enough servers refuse or mishandle one there.
 
 ## The idempotency key
 

@@ -20,11 +20,15 @@
 // It also prints KIND_NAMES from shared/kindNames.ts, the name the app shows for each machine kind,
 // as `appNames` (kind number to name). This half doesn't know the Rust code names, so site/scripts/
 // facts.ts joins appNames with the Rust half's machines[] and writes machine.<CodeName>.name.
+// In the same way it prints HTTP_METHODS from src/chrome/SinkConfigBody.tsx, the labels on the
+// Sink inspector's method buttons in wire-byte order, as `httpMethodLabels`; facts.ts joins them
+// by position with the Rust half's `httpMethods` and writes http.method.<CodeName>.label.
 //
 // shortcuts.ts has no imports, so plain Node loads it as it is. The other modules are TypeScript
 // that plain Node can't strip (a .tsx file, for one), so they load through Vite's module runner.
 //
-// OUTPUT: one JSON object on stdout, `{ "facts": { "<id>": { ... } }, "appNames": { "<kind>": "<name>" } }`.
+// OUTPUT: one JSON object on stdout,
+// `{ "facts": { "<id>": { ... } }, "appNames": { "<kind>": "<name>" }, "httpMethodLabels": [ "<label>", ... ] }`.
 // Source paths are repo-relative and carry no line numbers.
 //
 // EXIT CODES
@@ -55,6 +59,7 @@ async function load<T>(rel: string): Promise<T> {
 type Controller = typeof import('../src/embed/controller.ts');
 type Refusals = typeof import('../src/chrome/RefusalMessage.tsx');
 type KindNames = typeof import('../shared/kindNames.ts');
+type SinkBody = typeof import('../src/chrome/SinkConfigBody.tsx');
 
 type Fact = Record<string, unknown>;
 
@@ -69,6 +74,17 @@ async function appNames(): Promise<Record<string, string>> {
   }
   if (Object.keys(out).length === 0) throw new Error('KIND_NAMES loaded with no entries');
   return out;
+}
+
+/** HTTP_METHODS, the Sink inspector's method labels, indexed by the method's wire byte. */
+async function httpMethodLabels(): Promise<string[]> {
+  const { HTTP_METHODS } = await load<SinkBody>('src/chrome/SinkConfigBody.tsx');
+  const labels: unknown[] = [...HTTP_METHODS];
+  if (labels.length === 0) throw new Error('HTTP_METHODS loaded with no entries');
+  labels.forEach((label, i) => {
+    if (typeof label !== 'string' || label === '') throw new Error(`HTTP_METHODS[${i}] isn't a non-empty string`);
+  });
+  return labels as string[];
 }
 
 async function collect(): Promise<Record<string, Fact>> {
@@ -125,7 +141,8 @@ async function collect(): Promise<Record<string, Fact>> {
 
 try {
   const facts = await collect();
-  process.stdout.write(`${JSON.stringify({ facts, appNames: await appNames() }, null, 2)}\n`);
+  const out = { facts, appNames: await appNames(), httpMethodLabels: await httpMethodLabels() };
+  process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 } catch (err) {
   console.error(`export-docs-facts: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);

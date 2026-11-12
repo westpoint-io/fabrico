@@ -410,11 +410,23 @@
       "symbol": "HttpMethod",
       "value": "Delete"
     },
+    "http.method.Delete.label": {
+      "kind": "text",
+      "source": "frontend/src/chrome/SinkConfigBody.tsx",
+      "symbol": "HTTP_METHODS",
+      "value": "DELETE"
+    },
     "http.method.Get": {
       "kind": "code",
       "source": "crates/fabrico-core/src/state.rs",
       "symbol": "HttpMethod",
       "value": "Get"
+    },
+    "http.method.Get.label": {
+      "kind": "text",
+      "source": "frontend/src/chrome/SinkConfigBody.tsx",
+      "symbol": "HTTP_METHODS",
+      "value": "GET"
     },
     "http.method.Patch": {
       "kind": "code",
@@ -422,17 +434,35 @@
       "symbol": "HttpMethod",
       "value": "Patch"
     },
+    "http.method.Patch.label": {
+      "kind": "text",
+      "source": "frontend/src/chrome/SinkConfigBody.tsx",
+      "symbol": "HTTP_METHODS",
+      "value": "PATCH"
+    },
     "http.method.Post": {
       "kind": "code",
       "source": "crates/fabrico-core/src/state.rs",
       "symbol": "HttpMethod",
       "value": "Post"
     },
+    "http.method.Post.label": {
+      "kind": "text",
+      "source": "frontend/src/chrome/SinkConfigBody.tsx",
+      "symbol": "HTTP_METHODS",
+      "value": "POST"
+    },
     "http.method.Put": {
       "kind": "code",
       "source": "crates/fabrico-core/src/state.rs",
       "symbol": "HttpMethod",
       "value": "Put"
+    },
+    "http.method.Put.label": {
+      "kind": "text",
+      "source": "frontend/src/chrome/SinkConfigBody.tsx",
+      "symbol": "HTTP_METHODS",
+      "value": "PUT"
     },
     "limit.belt_pace_max": {
       "also": [

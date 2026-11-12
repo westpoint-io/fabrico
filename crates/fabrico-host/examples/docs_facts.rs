@@ -34,8 +34,10 @@
 //!   fewer machines.
 //!
 //! # Output
-//! One JSON object on stdout: `{ "facts": { "<id>": { ... } }, "machines": [ ... ] }`. Every map
-//! is a `BTreeMap`, so the bytes are the same on every run at one revision. Source paths are
+//! One JSON object on stdout: `{ "facts": { "<id>": { ... } }, "machines": [ ... ],
+//! "httpMethods": [ ... ] }`. `httpMethods` lists the HTTP method names in wire-byte order, for
+//! `site/scripts/facts.ts` to join with the app's method labels; it doesn't reach facts.json as it
+//! is. Every map is a `BTreeMap`, so the bytes are the same on every run at one revision. Source paths are
 //! repo-relative and carry no line numbers, so an unrelated edit to a source file doesn't change
 //! the output.
 //!
@@ -715,6 +717,37 @@ fn method_name(method: HttpMethod) -> &'static str {
     }
 }
 
+/// The HTTP method names in the order of their byte on the wire: element `b` is the method whose
+/// postcard encoding is the one byte `b`. The app's Sink inspector labels its method buttons from
+/// a list in that same order (`HTTP_METHODS` in `frontend/src/chrome/SinkConfigBody.tsx`), so
+/// `site/scripts/facts.ts` joins the two by position into `http.method.<Name>.label` facts.
+fn method_order() -> Result<Vec<&'static str>, String> {
+    let methods = method_samples();
+    let mut order: Vec<Option<&'static str>> = vec![None; methods.len()];
+    for method in methods {
+        let name = method_name(method);
+        let bytes = postcard::to_allocvec(&method)
+            .map_err(|err| format!("HttpMethod::{name} didn't encode: {err}"))?;
+        let byte = match bytes.as_slice() {
+            [byte] => usize::from(*byte),
+            other => return Err(format!("HttpMethod::{name} encoded as {other:?}, not one byte")),
+        };
+        match order.get_mut(byte) {
+            Some(slot @ None) => *slot = Some(name),
+            Some(Some(first)) => {
+                return Err(format!("HttpMethod::{first} and HttpMethod::{name} share the byte {byte}"));
+            }
+            None => {
+                return Err(format!(
+                    "HttpMethod::{name} encodes as byte {byte}, past the {} methods method_samples lists",
+                    order.len()
+                ));
+            }
+        }
+    }
+    Ok(order.into_iter().flatten().collect())
+}
+
 /// A Sink target's name. Every field is named with no `..`, so a new field is a compile error.
 fn sink_target_name(target: &SinkTemplate) -> &'static str {
     match target {
@@ -1012,11 +1045,12 @@ fn collect() -> Result<(Facts, Vec<Value>), String> {
 }
 
 fn main() -> ExitCode {
-    match collect() {
-        Ok((facts, machines)) => {
+    match collect().and_then(|(facts, machines)| Ok((facts, machines, method_order()?))) {
+        Ok((facts, machines, methods)) => {
             let mut out = BTreeMap::new();
             out.insert("facts", Value::Object(facts.into_iter().collect()));
             out.insert("machines", Value::Array(machines));
+            out.insert("httpMethods", json!(methods));
             match serde_json::to_string_pretty(&out) {
                 Ok(text) => {
                     println!("{text}");

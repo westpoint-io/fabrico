@@ -8,7 +8,10 @@
 //     messages, keyboard shortcuts and the docs board's play rate from the frontend's modules, and
 //     prints the app's machine names (KIND_NAMES) as `appNames`.
 // It merges the two, joins appNames with machines[] by kind into machine.<CodeName>.name facts
-// (machine.Endpoint.name reads "Route"), sorts every object's keys, and writes the file with
+// (machine.Endpoint.name reads "Route"), joins the TypeScript half's httpMethodLabels with the Rust
+// half's httpMethods by position (both are in wire-byte order) into http.method.<CodeName>.label
+// facts (http.method.Post.label reads "POST", the label on the Sink inspector's button), sorts
+// every object's keys, and writes the file with
 // two-space indent and a trailing newline, so running it twice at one revision writes the same
 // bytes.
 //
@@ -22,8 +25,8 @@
 // EXIT CODES
 //   0  the file was written.
 //   1  a half failed (its stderr is printed), printed something that isn't the expected JSON,
-//      both halves define the same fact id, an app name's kind has no machine, or a machine with a
-//      port catalog has no app name.
+//      both halves define the same fact id, an app name's kind has no machine, a machine with a
+//      port catalog has no app name, or the HTTP method labels and names differ in count.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -39,7 +42,17 @@ const OUT_REL = 'site/src/generated/facts.json';
 const SCHEMA = 1;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-type Half = { facts: Record<string, Json>; machines: Json[]; appNames: Record<string, string> };
+type Half = {
+  facts: Record<string, Json>;
+  machines: Json[];
+  appNames: Record<string, string>;
+  httpMethods: string[];
+  httpMethodLabels: string[];
+};
+
+function isStrings(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
 
 function fail(message: string): never {
   console.error(`facts: ${message}`);
@@ -61,7 +74,13 @@ function runHalf(name: string, command: string, args: string[]): Half {
     fail(`${name} printed something that isn't JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) fail(`${name} printed JSON that isn't an object`);
-  const { facts, machines, appNames } = parsed as { facts?: unknown; machines?: unknown; appNames?: unknown };
+  const { facts, machines, appNames, httpMethods, httpMethodLabels } = parsed as {
+    facts?: unknown;
+    machines?: unknown;
+    appNames?: unknown;
+    httpMethods?: unknown;
+    httpMethodLabels?: unknown;
+  };
   if (typeof facts !== 'object' || facts === null || Array.isArray(facts)) fail(`${name} printed no "facts" object`);
   if (machines !== undefined && !Array.isArray(machines)) fail(`${name} printed a "machines" value that isn't an array`);
   if (
@@ -70,10 +89,16 @@ function runHalf(name: string, command: string, args: string[]): Half {
   ) {
     fail(`${name} printed an "appNames" value that isn't an object of strings`);
   }
+  if (httpMethods !== undefined && !isStrings(httpMethods)) fail(`${name} printed an "httpMethods" value that isn't an array of strings`);
+  if (httpMethodLabels !== undefined && !isStrings(httpMethodLabels)) {
+    fail(`${name} printed an "httpMethodLabels" value that isn't an array of strings`);
+  }
   return {
     facts: facts as Record<string, Json>,
     machines: (machines ?? []) as Json[],
     appNames: (appNames ?? {}) as Record<string, string>,
+    httpMethods: httpMethods ?? [],
+    httpMethodLabels: httpMethodLabels ?? [],
   };
 }
 
@@ -119,6 +144,24 @@ for (const machine of machines) {
     fail(`machine ${machine.name} (kind ${machine.kind}) has a port catalog and no name in KIND_NAMES (frontend/shared/kindNames.ts)`);
   }
 }
+
+// The label on the Sink inspector's button for each HTTP method, keyed by the Rust code name. Both
+// lists are in wire-byte order, so position joins them.
+if (ts.httpMethods.length > 0) fail('the TypeScript half printed httpMethods; only the Rust half writes them');
+if (rust.httpMethodLabels.length > 0) fail('the Rust half printed httpMethodLabels; only the TypeScript half writes them');
+if (rust.httpMethods.length === 0) fail('the Rust half printed no httpMethods');
+if (rust.httpMethods.length !== ts.httpMethodLabels.length) {
+  fail(
+    `the Rust half names ${rust.httpMethods.length} HTTP methods (${rust.httpMethods.join(', ')}) and HTTP_METHODS in ` +
+      `frontend/src/chrome/SinkConfigBody.tsx has ${ts.httpMethodLabels.length} labels (${ts.httpMethodLabels.join(', ')}); ` +
+      'give every method byte a label',
+  );
+}
+rust.httpMethods.forEach((method, byte) => {
+  const id = `http.method.${method}.label`;
+  if (id in facts) fail(`the fact "${id}" is written twice`);
+  facts[id] = { kind: 'text', value: ts.httpMethodLabels[byte], source: 'frontend/src/chrome/SinkConfigBody.tsx', symbol: 'HTTP_METHODS' };
+});
 
 const merged = sortKeys({ schema: SCHEMA, facts, machines: rust.machines });
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
