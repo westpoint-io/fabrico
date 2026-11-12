@@ -1,0 +1,56 @@
+// A docs board that faults on purpose with BranchBusy. A Source on a timer puts an item on its
+// belt every 4 ticks, and the belt carries each item to a Tee. The Tee's top output has a belt at
+// the usual pace, which keeps up. Its bottom output has a belt set to its slowest pace, which takes
+// one item every 20 ticks, so copies wait at its start. Once 16 copies wait there, the bottom belt
+// can't take another: the top output still gets its copy, and the bottom copy leaves the Tee as a
+// BranchBusy fault. A Tee has no Fault port, so the fault goes no further, and the Tee shows as
+// faulted on that tick. On tick 160 a scripted edit turns the Source back to webhooks, so it makes
+// no more items, and the faults stop once the items already on its belt reach the Tee. The slow
+// belt is still carrying copies when the run ends. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b4-> TEE 1 Out (top)    -b5-------> SINK 2
+//   row 3:                  TEE 1 Out (bottom) -+
+//   row 4:                                      +-b6 (slow) -> SINK 3
+//
+// Handles mint in command order: the Source 0, the Tee 1, the Sinks 2 and 3, then the belts 4 to
+// 6. The 15 commands and the history seal end the boot on tick 16.
+//
+// machine_kind u8 legend: SOURCE=0, TEE=3, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; TEE In=0, Out=1 (top), Out=2 (bottom); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "A Tee with one slow output",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 3, cell_x: 5, cell_y: 2),        // 1: TEE, 2x2
+        Place(kind: 7, cell_x: 10, cell_y: 2),       // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 10, cell_y: 4),       // 3: SINK
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),                          // 4
+        DrawBelt(cells: [(7, 2), (8, 2), (9, 2)]),                          // 5
+        DrawBelt(cells: [(7, 3), (8, 3), (8, 4), (9, 4)]),                  // 6
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+        Configure(node: 6, config: Belt(ticks_per_slot: 20)),
+        Configure(node: 0, config: Source(trigger: Timer(interval_ticks: 4))),
+    ],
+    script: [
+        At(tick: 160, input: Edit(Configure(node: 0, config: Source(trigger: Webhook)))),
+    ],
+    captions: [
+        Caption(tick: 62, highlight: 1, text: "The Tee sends each item out both outputs. The top belt keeps up, and copies start to wait at the start of the slow bottom belt."),
+        Caption(tick: 127, highlight: 1, text: "Sixteen copies wait for the slow belt, so it can't take this one. The top output still got its copy, and the bottom copy left the Tee as a BranchBusy fault."),
+        Caption(tick: 162, highlight: 0, text: "A scripted edit turned the Source back to webhooks on tick 160, so it makes no more items. The faults stop once the items already on its belt reach the Tee."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 240,
+)

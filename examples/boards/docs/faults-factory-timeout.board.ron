@@ -1,0 +1,67 @@
+// A docs board that faults on purpose with FactoryTimeout. One Source gets two webhooks, and its
+// belt carries each item to a Factory whose code adds up the numbers below the item's n field. The
+// first item asks for n of 10, which the code finishes well inside its budget, so the Factory
+// emits the total to the Sink on the right. The second asks for n of 100000000. The loop uses up
+// the Factory's per-item budget, the engine stops the code, the Factory emits nothing for that
+// item, and the item leaves by the Fault port as a FactoryTimeout fault. A belt from the Fault port
+// carries the fault to a Debug Sink. The run makes no outbound call.
+//
+// The budget counts steps of the code, not time, so the loop stops at the same point on every run.
+// The loop holds two numbers and allocates nothing, so it stays far from the memory and stack
+// limits.
+//
+//   row 2:   SOURCE 0 -b4-> FACTORY 1 -b5-> SINK 2
+//   row 3:                  (Fault, bottom middle)
+//   row 4:                       |
+//   row 5:                       +-b6---------> SINK 3   (the faults)
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sinks 2 and 3, then the belts 4
+// to 6. The 14 commands and the history seal end the boot on tick 15.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1, Fault=2 (its bottom middle cell, facing south); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "A Factory that runs too long",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY, 3x3
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 11, cell_y: 5),       // 3: SINK, gets the faults
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),                          // 4
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),                         // 5
+        DrawBelt(cells: [(6, 4), (6, 5), (7, 5), (8, 5), (9, 5), (10, 5)]), // 6
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// add up the numbers below n
+export default function (input, ctx) {
+  const n = input.n;
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    total += i;
+  }
+  ctx.emit(0, { total });
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"n":10}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"n":100000000}"#)),
+    ],
+    captions: [
+        Caption(tick: 63, highlight: 1, text: "This item asks for n of 10. The loop finishes inside the budget, and the total goes on to the Sink."),
+        Caption(tick: 123, highlight: 1, text: "This item asks for n of 100000000. The loop used up the Factory's budget, so the engine stopped the code and the item left by the Fault port as a FactoryTimeout fault."),
+        Caption(tick: 169, highlight: 3, text: "The fault reached the Sink at the end of the fault belt. Its message says the code was interrupted."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 220,
+)

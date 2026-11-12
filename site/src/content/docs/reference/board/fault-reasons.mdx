@@ -12,7 +12,7 @@ When a machine can't handle an item, it sends a fault instead of a normal output
 
 A fault leaves by the machine's Fault port. That port is reserved and sits apart from the numbered outputs, so a fault never travels with normal items. Dock a belt on it and lead the belt to a Debug Sink to keep each fault where you can read it. With nothing docked there, the fault goes no further. A Route and a Tee have no Fault port on the grid. They still fault and show as faulted, and the sections below say what happens to their faults.
 
-Each example below faults on purpose, and a line under it names the reason.
+Eight of the nine reasons have an example below. Each example faults on purpose, and a line under it names the reason.
 
 ## `NoMatch`
 
@@ -23,3 +23,83 @@ In the example below, the first webhook's body matches the first route and leave
 <Board name="docs-faults-no-match" faultsAbout="NoMatch" />
 
 [How to fix](../../../troubleshooting/fault-reasons/#fault-no-match)
+
+## `BranchBusy`
+
+A Tee gives this reason when one of its outputs leads to a belt that can't take another item, because <Fact id="limit.mechanical_inbox_cap" bare /> items already wait at the start of that belt. The Tee's other outputs still get their copies on that step. The copy for the busy output becomes the fault, and the fault carries the copy. A Tee has no Fault port on the grid, so the fault goes no further, but the Tee shows as faulted on that tick.
+
+In the example below, a Source on a timer sends items to a Tee. The top output's belt keeps up. The bottom output's belt runs at the slowest pace, <Fact id="limit.belt_pace_max" />, so copies pile up at its start until it can't take more, and from then on the Tee faults the bottom copy of most items. A scripted edit stops the timer partway through, and the faults stop soon after.
+
+<Board name="docs-faults-branch-busy" faultsAbout="BranchBusy" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-branch-busy)
+
+## `OutputRefused`
+
+This reason is for an item that a machine had already sent when the next belt or machine refused it. Before a machine runs, the engine checks that each of its outputs has room, and it holds the machine back when one doesn't. That check stops this reason from happening in this version of the app, so this page has no example of it. The engine keeps the reason as a backstop: if the check ever let an item through that the next machine refused, the item would leave by the sending machine's Fault port inside the fault instead of disappearing.
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-output-refused)
+
+## `FactoryError`
+
+A Factory gives this reason when its code fails on an item. The code may have thrown an error, used a name the sandbox withholds such as `Date` or `fetch`, been given bytes that aren't valid JSON, or run into its memory or stack limit. A failed run sends nothing: the engine drops whatever the code emitted, and the Factory's state stays as it was. A run that emits more than <Fact id="limit.factory_emits_per_port" bare /> times on one output also gets this reason, once for each emit past that, and the rest of that run stands. The fault leaves by the Factory's Fault port and carries the error message.
+
+In the example below, the code throws when an item has no amount field. The first item has one and reaches the Sink on the right. The second doesn't, so the Factory faults, and the fault reaches a Sink by the belt from the Fault port, with the message from the code inside.
+
+<Board name="docs-faults-factory-error" faultsAbout="FactoryError" />
+
+### Memory and stack limits
+
+A Factory's code runs with a memory limit of <Fact id="limit.factory_memory" /> and, in the desktop app, a stack limit of <Fact id="limit.factory_stack_desktop" />. Code that runs into either limit faults with `FactoryError`, and the error message names the limit. This page has no example of a limit fault, and it can't have one. The point where code first hits a limit differs between the desktop app and the browser that plays these examples, so a run that hits one wouldn't end the same way in both. Every example on this site has to pass a check that plays it again at half the memory limit and a quarter of the stack limit, and that check fails an example that faults on a limit.
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-factory-error)
+
+## `FactoryTimeout`
+
+A Factory gives this reason when its code uses up its budget of <Fact id="limit.factory_gas_budget" /> on an item, which most often means a loop that never ends or one that does too much work. The budget counts steps of the code, not time, so the code stops at the same point on every run and on every computer. As with `FactoryError`, the failed run sends nothing and the Factory's state stays as it was. The fault leaves by the Factory's Fault port and carries the error message.
+
+In the example below, the code adds up the numbers below the item's n field. The first item asks for 10, and the total reaches the Sink on the right. The second asks for 100,000,000. The loop runs out of budget, and the fault reaches a Sink by the belt from the Fault port.
+
+<Board name="docs-faults-factory-timeout" faultsAbout="FactoryTimeout" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-factory-timeout)
+
+## `CommandFailure`
+
+An HTTP Sink gives this reason when the request it sent comes back as a failure: a status outside 200 to 299, an address that doesn't resolve, a refused connection or another transport error. The fault leaves by the Sink's Fault port. It carries no item and no response body.
+
+In the example below, the Sink posts the item to an address, and the script that stands in for the service answers with an error. Examples on this site make no network calls, because a script answers each request.
+
+<Board name="docs-faults-command-failure" faultsAbout="CommandFailure" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-command-failure)
+
+## `CommandTimeout`
+
+An HTTP Sink gives this reason when its request is still waiting for an answer at its deadline, 600 ticks after the Sink sent it. The deadline is a tick count, so the fault comes on the same tick on every run. The fault leaves by the Sink's Fault port and carries no item.
+
+In the example below, the scripted service never answers, so the Sink faults 600 ticks after it sends the request. That makes this example longer than the others.
+
+<Board name="docs-faults-command-timeout" faultsAbout="CommandTimeout" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-command-timeout)
+
+## `NoEntryWire`
+
+A Route gives this reason when a request reaches it and no wire leads out of it, so the request has nowhere to go. A Route has no Fault port, so the fault stays on the Route. Drawing a wire from the Route to an HTTP Handler clears the Route's faults with this reason. The fault carries nothing, so the request itself isn't kept.
+
+In the example below, a Route and an HTTP Handler sit side by side with no wire between them. One request reaches the Route, the Route faults, and the Handler never gets the request.
+
+<Board name="docs-faults-no-entry-wire" faultsAbout="NoEntryWire" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-no-entry-wire)
+
+## `WireOverflow`
+
+A Route gives this reason when a request arrives and the wire leading out of it already holds <Fact id="limit.wire_inflight_cap" />. The request isn't sent, and the fault stays on the Route, which has no Fault port. A wire also gives this reason when a request has passed from wire to wire more than <Fact id="limit.wire_budget" bare /> times, which usually means the wires form a loop. In both cases the fault leaves the request out.
+
+In the example below, one more request than the wire can hold reaches the Route on the same tick. The wire takes the others, and the Handler answers each one. The last request finds the wire full, so the Route faults.
+
+<Board name="docs-faults-wire-overflow" faultsAbout="WireOverflow" />
+
+[How to fix](../../../troubleshooting/fault-reasons/#fault-wire-overflow)

@@ -1,0 +1,52 @@
+// A docs board that faults on purpose with CommandTimeout. One Source gets one webhook, and its
+// belt carries the item to an HTTP Sink that posts it to https://example.com/slow. The executor
+// block below stands in for that service and never answers, so the call is still waiting when its
+// deadline passes, and the Sink sends a CommandTimeout fault out of its Fault port. A belt from
+// the Fault port carries the fault to a Debug Sink. No request leaves the computer.
+//
+// A Sink's call has a deadline 600 ticks after it is sent, so this run is longer than the other
+// boards: it ends on tick 700, after the deadline.
+//
+//   row 2:   SOURCE 0 -b3-> SINK 1 (HTTP, posts to https://example.com/slow)
+//   row 3:                  (Fault, facing south)
+//   row 4:                    +-b4------> SINK 2   (the faults)
+//
+// Handles mint in command order: the Source 0, the Sinks 1 and 2, then the belts 3 and 4. The 10
+// commands and the history seal end the boot on tick 11.
+//
+// machine_kind u8 legend: SOURCE=0, SINK=7. Dock `port` is the catalog port index: SOURCE Out=0;
+// SINK In=0, Fault=1 (on the Sink's one cell, facing south).
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "An HTTP Sink whose call gets no answer",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 7, cell_x: 5, cell_y: 2),        // 1: SINK, set to HTTP below
+        Place(kind: 7, cell_x: 10, cell_y: 4),       // 2: SINK, Debug by default, gets the faults
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),                          // 3
+        DrawBelt(cells: [(5, 3), (5, 4), (6, 4), (7, 4), (8, 4), (9, 4)]),  // 4
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 1, config: Sink(target: Http(url: "https://example.com/slow", method: Post))),
+    ],
+    script: [
+        At(tick: 20, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+    ],
+    captions: [
+        Caption(tick: 43, highlight: 1, text: "The HTTP Sink sent the item as a POST to https://example.com/slow. The scripted service will never answer."),
+        Caption(tick: 643, highlight: 1, text: "The call's deadline passed 600 ticks after the Sink sent it, so the Sink sent a CommandTimeout fault out of its Fault port."),
+        Caption(tick: 689, highlight: 2, text: "The fault reached the Debug Sink. It carries no item."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/slow", outcome: Timeout),
+    ]),
+    view: View(fit: Board),
+    end_tick: 700,
+)

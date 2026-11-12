@@ -147,9 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board that faults on purpose with NoMatch
-# (examples/boards/docs/faults-no-match.board.ron). The seventeen older lines are unchanged.
-examples/boards/hashes.manifest 5b078c2282ef2c2f2a4abb90d3680e6562b6e08440fb4683314d4b80131601cf
+# Seven new lines, written by the generator, for the boards that fault on purpose with
+# FactoryError, FactoryTimeout, CommandFailure, CommandTimeout, NoEntryWire, WireOverflow and
+# BranchBusy (examples/boards/docs/faults-<slug>.board.ron). The eighteen older lines are unchanged.
+examples/boards/hashes.manifest 6cdee9efbe6db533749acd6e8430f5bd20d3c4fab9b123fadfb01d263b4a270e
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

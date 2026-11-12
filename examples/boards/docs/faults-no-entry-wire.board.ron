@@ -1,0 +1,55 @@
+// A docs board that faults on purpose with NoEntryWire. A Route and an HTTP Handler sit side by
+// side with no wire between them. One scripted request reaches the Route, which has nowhere to
+// send it, so the Route faults with NoEntryWire and shows as faulted. A Route has no Fault port,
+// so the fault rests on the Route itself. The Handler never gets the request. The run makes no
+// outbound call.
+//
+//   row 1:                    +-----------+
+//   row 2:   ROUTE 0          | In  HTTP  |    no wire: the Route has nowhere to send a request
+//   row 3:                    | HANDLER 1 |
+//   rows 4-5:                   Fault -b3---> SINK 2
+//
+// The Handler's Fault port, on its bottom middle cell facing south, has a belt to a Debug Sink,
+// the usual place for a Handler's faults. No request reaches the Handler, so that belt stays
+// empty.
+//
+// Handles mint in command order: the Route 0, the Handler 1, the Sink 2, then the belt 3. The 8
+// commands and the history seal end the boot on tick 9.
+//
+// machine_kind u8 legend: ROUTE=9, HTTP HANDLER=10, SINK=7. Dock ports are catalog indexes:
+// HTTP Handler In=0, Out=1, Fault=2; SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "A Route with no wire",
+    seed: 97,
+    commands: [
+        Place(kind: 9, cell_x: 2, cell_y: 2),        // 0: ROUTE
+        Place(kind: 10, cell_x: 6, cell_y: 1),       // 1: HTTP HANDLER, 3x3
+        Place(kind: 7, cell_x: 10, cell_y: 5),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(7, 4), (7, 5), (8, 5), (9, 5)]),                // 3
+        Dock(belt: 3, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 3, endpoint: Head, node: 2, port: 0),
+        Configure(node: 0, config: Endpoint(path: "/orders")),
+        Configure(node: 1, config: Factory(source: r#"// reply to each request
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: {},
+    body: "order received",
+  }, 0);
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Request(route: 0, method: "POST", path: "/endpoint/orders", body: r#"{"order":1}"#)),
+    ],
+    captions: [
+        Caption(tick: 41, highlight: 0, text: "A request reached the Route, and no wire leads out of it. The Route faulted with NoEntryWire, and the Handler never gets the request."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 200,
+)
