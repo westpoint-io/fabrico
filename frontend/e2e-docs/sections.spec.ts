@@ -59,3 +59,16 @@ test('a page with no h2 lists only Overview in its table of contents', async ({ 
   );
   expect(entries, 'the Concepts page table of contents').toEqual(['Overview']);
 });
+
+test('the Overview links Next to Get started, and Get started links Previous to the Overview', async ({ page }) => {
+  const pagination = (rel: 'next' | 'prev') =>
+    page.locator(`.pagination-links a[rel="${rel}"]`).evaluateAll((links) =>
+      links.map((a) => ({ href: a.getAttribute('href'), text: (a.textContent ?? '').replace(/\s+/g, ' ').trim() })),
+    );
+  await page.goto(docsUrl(''));
+  expect((await pagination('next')).map((l) => l.href), "the Overview's Next link").toEqual(['/fabrico/get-started/']);
+  await page.goto(docsUrl('get-started/'));
+  const prev = await pagination('prev');
+  expect(prev.map((l) => l.href), "Get started's Previous link").toEqual(['/fabrico/']);
+  expect(prev[0]?.text ?? '', "Get started's Previous link text").toContain('Overview');
+});
