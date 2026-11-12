@@ -1301,16 +1301,16 @@ jobs:
   # on the exact string `false`, so a failed classifier, whose output is empty, runs it.
   #
   # TIME LIMIT. The first GitHub run of this job took 5 min 51 s on a cold cargo cache (the facts
-  # step compiled fabrico-host for 74 s and the site build took 2 min 10 s). 20 minutes is a first
-  # estimate for the larger suite that the reference pages and their boards bring: no CI run has
-  # measured it yet. After the first measured run the limit becomes 1.7 times that run, rounded up
-  # to the next whole minute.
+  # step compiled fabrico-host for 74 s and the site build took 2 min 10 s). With the reference,
+  # troubleshooting and contributing pages and their 29 boards, run 43275257033 on fdc0196 took
+  # 9 min 18 s: the site build 2 min 19 s and the docs suite 5 min 29 s (359 tests). The limit is
+  # 1.7 times that run, 15.8 minutes, rounded up to 16. Measure again when the suite grows a lot.
   docs:
     name: the docs site builds and passes its checks
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 16
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
       CC_wasm32_unknown_unknown: clang
