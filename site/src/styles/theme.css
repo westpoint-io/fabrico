@@ -499,3 +499,23 @@ site-search .dialog-frame {
     transition: none;
   }
 }
+
+/*
+ * The mobile menu button: a 44 px square on the substrate with a lit 1 px edge, its 16 px glyph
+ * centred, the same ground when the menu is open, and the edge lit to ink on hover or when open.
+ */
+.sl-menu-button {
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--fab-edge-lit);
+  background-color: var(--fab-substrate);
+  color: var(--fab-ink);
+  box-shadow: none;
+}
+.sl-menu-button:hover,
+.sl-menu-button:has(~ :popover-open) {
+  border-color: var(--fab-ink);
+  background-color: var(--fab-substrate);
+  box-shadow: none;
+}

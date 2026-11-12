@@ -206,3 +206,24 @@ test('code tokens take the skin colours: keywords blue, strings green, numbers a
   expect(found.string, 'the string').toEqual([expected.string]);
   expect(found.number, 'the number 1200').toEqual([expected.number]);
 });
+
+test('at 375 px the menu button keeps its dark ground and a 1 px border, and centres its glyph, closed and open', async ({ page }) => {
+  await open(page, docsUrl('get-started/'), 375);
+  const measure = (): Promise<{ ground: string; border: string; top: number; left: number }> =>
+    page.evaluate(() => {
+      const button = document.querySelector('.sl-menu-button') as HTMLElement;
+      const glyph = [...button.querySelectorAll('svg')].find((svg) => getComputedStyle(svg).display !== 'none') as SVGElement;
+      const b = button.getBoundingClientRect();
+      const g = glyph.getBoundingClientRect();
+      const style = getComputedStyle(button);
+      return { ground: style.backgroundColor, border: style.borderTopWidth, top: g.top - b.top, left: g.left - b.left };
+    });
+  for (const state of ['closed', 'open'] as const) {
+    if (state === 'open') await page.locator('.sl-menu-button').click();
+    const m = await measure();
+    expect(m.ground, `the menu button ground, menu ${state}`).toBe('rgb(27, 31, 39)');
+    expect(m.border, `the menu button top border, menu ${state}`).toBe('1px');
+    expect(Math.abs(m.top - 14), `the glyph's offset from the button top is 14 px (it is ${m.top}), menu ${state}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(m.left - 14), `the glyph's offset from the button left is 14 px (it is ${m.left}), menu ${state}`).toBeLessThanOrEqual(1);
+  }
+});
