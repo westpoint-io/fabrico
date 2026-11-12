@@ -1,0 +1,65 @@
+// A docs board for the Wire. A Route and an HTTP Handler sit side by side, and one DrawWire joins
+// them. That one command draws two cables: the request cable from the Route to the Handler, and
+// the reply cable back. Two scripted requests reach the Route, each crosses the request cable to
+// the Handler, and the Handler's reply crosses the reply cable back to the Route. The run makes
+// no outbound call.
+//
+//   row 1:                    +-----------+
+//   row 2:   ROUTE 0 Out ===> | In  HTTP  |    cable 4 carries the request,
+//            ROUTE 0     <=== | HANDLER 1 |    cable 5 carries the reply
+//   row 3:                    +-----------+
+//   rows 4-5:                   Fault -b3---> SINK 2
+//
+// A wire takes no grid cells and has no ports of its own: it joins a Route's Out to a Handler's
+// In, and the board draws it as a line between the two. The Handler's Fault port, on its bottom
+// middle cell facing south, has a belt to a Debug Sink, where a request whose code failed would
+// go. The code never fails here, so that belt stays empty. The Handler's Out port stays undocked.
+//
+// Handles mint in command order: the Route 0, the Handler 1, the Sink 2, the belt 3, then the two
+// cables 4 (request) and 5 (reply), which the one DrawWire mints. The 9 commands and the history
+// seal end the boot on tick 10.
+//
+// machine_kind u8 legend: ROUTE=9, HTTP HANDLER=10, SINK=7. DrawWire and Dock ports are catalog
+// indexes: Route In=0, Out=1; HTTP Handler In=0, Out=1, Fault=2; SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Wire",
+    seed: 98,
+    commands: [
+        Place(kind: 9, cell_x: 2, cell_y: 2),        // 0: ROUTE
+        Place(kind: 10, cell_x: 6, cell_y: 1),       // 1: HTTP HANDLER, 3x3
+        Place(kind: 7, cell_x: 10, cell_y: 5),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(7, 4), (7, 5), (8, 5), (9, 5)]),                // 3
+        Dock(belt: 3, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 3, endpoint: Head, node: 2, port: 0),
+        Configure(node: 0, config: Endpoint(path: "/hello")),
+        Configure(node: 1, config: Factory(source: r#"// reply to each request
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: {},
+    body: "got " + input.body,
+  }, 0);
+}"#)),
+        // One command mints both cables: 4 the request, then 5 the reply.
+        DrawWire(from_node: 0, from_port: 1, to_node: 1, to_port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Request(route: 0, method: "POST", path: "/endpoint/hello", body: r#"{"order":1}"#)),
+        At(tick: 140, input: Request(route: 0, method: "POST", path: "/endpoint/hello", body: r#"{"order":2}"#)),
+    ],
+    captions: [
+        // Measured: each hop takes one tick. The request is on cable 4 after tick 41, the Handler
+        // runs on tick 42 and puts its reply on cable 5, and the Route takes the reply on tick 43.
+        Caption(tick: 41, highlight: 0, text: "The Route got a request and put it on the request cable. It reaches the Handler next tick."),
+        Caption(tick: 42, highlight: 1, text: "The Handler ran its code on the request, and its reply is on the reply cable back to the Route."),
+        Caption(tick: 143, highlight: 0, text: "The second request made the same trip. The Route has its reply, and both cables are empty again."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 240,
+)

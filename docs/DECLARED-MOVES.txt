@@ -147,9 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# Five new lines, written by the generator, for the Source, Belt, Factory, Tee and Balancer boards
-# (examples/boards/docs/machines-<slug>.board.ron). The six older lines are unchanged.
-examples/boards/hashes.manifest 86f31286c91bdf062b53bd6ed2b8306b4e15a597bcc2915791212146860ea016
+# One new line, written by the generator, for the Wire board
+# (examples/boards/docs/machines-wire.board.ron). The eleven older lines are unchanged.
+examples/boards/hashes.manifest ba9414d435a63560103acfdbf4a88925f48002024ddba6467e347b3589f78d5d
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

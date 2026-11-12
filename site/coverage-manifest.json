@@ -3,7 +3,7 @@
   "sections": [
     { "name": "Get started", "folder": "get-started", "pages": ["get-started/index.mdx"] },
     { "name": "Concepts", "folder": "concepts", "pages": ["concepts/index.mdx"] },
-    { "name": "Reference", "folder": "reference", "pages": ["reference/index.mdx", "reference/machines/router.mdx", "reference/machines/source.mdx", "reference/machines/belt.mdx", "reference/machines/factory.mdx", "reference/machines/tee.mdx", "reference/machines/balancer.mdx"] },
+    { "name": "Reference", "folder": "reference", "pages": ["reference/index.mdx", "reference/machines/router.mdx", "reference/machines/source.mdx", "reference/machines/belt.mdx", "reference/machines/factory.mdx", "reference/machines/tee.mdx", "reference/machines/balancer.mdx", "reference/machines/wire.mdx"] },
     { "name": "Patterns", "folder": "patterns", "pages": ["patterns/index.mdx"] },
     { "name": "Troubleshooting", "folder": "troubleshooting", "pages": ["troubleshooting/index.mdx", "troubleshooting/common-problems.mdx", "troubleshooting/fault-reasons.mdx", "troubleshooting/refusals.mdx"] },
     { "name": "Contributing", "folder": "contributing", "pages": ["contributing/index.mdx"] }

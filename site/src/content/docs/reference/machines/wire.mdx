@@ -1,0 +1,40 @@
+---
+title: Wire
+description: A Wire joins a Route to an HTTP Handler and carries each request one way and its reply the other. Its facts and limits come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A wire joins a Route to an HTTP Handler. It carries each request the Route gets over to the Handler, and carries the Handler's reply back to the Route. You don't place a wire from the palette. With the Wire tool, press on the Route and release on the Handler, and that one gesture draws two cables: one for requests and one for replies.
+
+On the board below, two requests reach a Route a hundred ticks apart, and each one crosses the request cable to the Handler and comes back as a reply on the reply cable.
+
+<Board name="docs-machines-wire" />
+
+## Facts
+
+<MachineFacts kind={8} />
+
+## What a wire carries
+
+A wire runs from a Route's output to an HTTP Handler's input, and it carries only requests and replies. Items on belts never travel on a wire, and a wire never docks on a belt port. The command that draws one is <Fact id="command.DrawWire" />, and it lays the request cable and the reply cable together, so a Route always has a way to get its reply back.
+
+Each hop along a cable takes one tick. On the board, a request that reaches the Route on one tick is at the Handler on the next, and the reply is back at the Route the tick after that.
+
+## Limits
+
+A wire holds at most <Fact id="limit.wire_inflight_cap" /> at once. Wires can also be chained, so that a request travels on from one wire into the next, and a request can make at most <Fact id="limit.wire_budget" /> from wire to wire. The first hop, from the Route onto its own wire, doesn't count. A Route with one Handler that answers each request stays far inside both limits.
+
+## Past a limit
+
+When a wire is full, or a request has been passed along too many times, the request goes no further and becomes a <Fact id="fault.WireOverflow" /> fault. Most often this means requests arrive faster than the Handler answers them, or the wires form a loop that sends a request round and round. The troubleshooting entry for [a WireOverflow fault](../../../troubleshooting/fault-reasons/#fault-wire-overflow) says how to fix both.
+
+A Route with no wire leading out of it has nowhere to send a request, and the request becomes a <Fact id="fault.NoEntryWire" /> fault. The entry for [a NoEntryWire fault](../../../troubleshooting/fault-reasons/#fault-no-entry-wire) covers that case.
+
+## Related pages
+
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Refused edits](../../../troubleshooting/refusals/#refusal-incompatible-ports): what to do when the app refuses to draw a wire.
+- [Reference](../../): the list of machine pages and the other reference pages.
