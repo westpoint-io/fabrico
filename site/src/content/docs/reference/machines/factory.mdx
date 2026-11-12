@@ -1,0 +1,36 @@
+---
+title: Factory
+description: The Factory machine runs your JavaScript on each item and sends out what the code emits. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Factory runs a short JavaScript function on each item that reaches it. The function reads the item, can keep a little state between items, and sends out whatever it emits. It is the machine you use when a job needs real logic.
+
+On the board below, a Factory adds a field to each of three items and sends it on to a Sink; the code is shown beside the board.
+
+<Board name="docs-machines-factory" />
+
+## Facts
+
+<MachineFacts kind={2} />
+
+## The code
+
+The <Fact id="config.Factory.source" /> field holds the code. It exports one function, `export default function (input, ctx)`, which runs once for each item. `input` is the item parsed from JSON. `ctx.emit(0, value)` sends `value` out the Factory's output, and `ctx.state` keeps values from one item to the next. A Factory you place starts with code that sends each item on unchanged.
+
+Each emit becomes one item. The code can emit nothing, one item, or several, up to <Fact id="limit.factory_emits_per_port" bare /> on each output for one run, and each emit past that on one output becomes a <Fact id="fault.FactoryError" /> fault.
+
+## Limits and faults
+
+The code runs with a budget of <Fact id="limit.factory_gas_budget" />. The budget counts steps of the code, not time, so the same item stops at the same point on every run. Code that uses it up stops with a <Fact id="fault.FactoryTimeout" /> fault. Code that throws, or reads something the Factory withholds, stops with a <Fact id="fault.FactoryError" /> fault. In both cases that run emits nothing, `ctx.state` keeps the value it had before, and the item leaves by the Fault port, where a belt can carry it to a Sink.
+
+The troubleshooting entries for [FactoryError](../../../troubleshooting/fault-reasons/#fault-factory-error), [FactoryTimeout](../../../troubleshooting/fault-reasons/#fault-factory-timeout) and [a Factory that emits nothing](../../../troubleshooting/common-problems/#symptom-a-factory-emits-nothing) say how to fix each one.
+
+## Related pages
+
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Router](../router/): sends each item out one output, picked by matching the start of the item.
+- [Reference](../../): the list of machine pages and the other reference pages.

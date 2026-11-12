@@ -1,0 +1,52 @@
+// A docs board for the Tee. One Source gets three webhooks, and its belt carries each item into a
+// Tee, which sends a copy of the item out each of its two outputs. Each output has its own belt
+// into a Debug Sink, so both Sinks get every item. The webhooks are 60 ticks apart, so each output
+// belt has room for its copy and the Tee never finds a branch busy. The run makes no outbound call.
+//
+//   row 0:                                +-b5-> SINK 2
+//   row 1:   SOURCE 0 -b4-> TEE 1 In, Out -+
+//   row 2:                         Out -+
+//   row 3:                                +-b6-> SINK 3
+//
+// Each output belt turns one row out, so the two Sinks sit apart and their names don't overlap.
+//
+// Handles mint in command order: the Source 0, the Tee 1, the Sinks 2 and 3, then the belts 4, 5
+// and 6. The 13 commands and the history seal end the boot on tick 14.
+//
+// machine_kind u8 legend: SOURCE=0, TEE=3, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; TEE In=0, Out=1 (top row), Out=2 (bottom row); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Tee",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 1),        // 0: SOURCE
+        Place(kind: 3, cell_x: 6, cell_y: 1),        // 1: TEE, 2x2
+        Place(kind: 7, cell_x: 11, cell_y: 0),       // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 11, cell_y: 3),       // 3: SINK
+        DrawBelt(cells: [(2, 1), (3, 1), (4, 1), (5, 1)]),                // 4
+        DrawBelt(cells: [(8, 1), (9, 1), (9, 0), (10, 0)]),               // 5
+        DrawBelt(cells: [(8, 2), (9, 2), (9, 3), (10, 3)]),               // 6
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"order":2}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"order":3}"#)),
+    ],
+    captions: [
+        Caption(tick: 71, highlight: 1, text: "One item went into the Tee, and one copy leaves by each output."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)

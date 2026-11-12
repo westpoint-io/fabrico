@@ -1,0 +1,30 @@
+---
+title: Tee
+description: The Tee machine sends a copy of each item out both of its outputs. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Tee copies each item that reaches it and sends one copy out each of its outputs. Use it when two parts of a board need the same item, such as a line that handles orders and a second line that keeps a record of them.
+
+On the board below, three items go into a Tee and both Sinks get a copy of each one.
+
+<Board name="docs-machines-tee" />
+
+## Facts
+
+<MachineFacts kind={3} />
+
+## When an output is busy
+
+The Tee sends both copies on the same tick. If one output's belt has no room for its copy, that copy becomes a <Fact id="fault.BranchBusy" /> fault instead, and the Tee shows as faulted on that tick; the other output still gets its copy. The Tee waits only when every docked output is busy. The board above spaces its items so each belt always has room.
+
+An output with nothing docked gets no copy, and the Tee carries on. The troubleshooting entry for [a BranchBusy fault](../../../troubleshooting/fault-reasons/#fault-branch-busy) says how to give a slow output room.
+
+## Related pages
+
+- [Balancer](../balancer/): sends each item out one output, taking the outputs in turn.
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Reference](../../): the list of machine pages and the other reference pages.

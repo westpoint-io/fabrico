@@ -1,0 +1,53 @@
+// A docs board for the Belt. Two Sources each get a webhook on the same ticks, and each has its own
+// belt into a Debug Sink. The top belt turns twice on its way and keeps the pace a new belt starts
+// with. The bottom belt is straight and shorter, but it is set three times slower, so its item
+// reaches its Sink well after the top one. The run makes no outbound call.
+//
+//   row 1:   SOURCE 0 -b4-+
+//   row 2:                |
+//   row 3:                +---b4---> SINK 2
+//   row 5:   SOURCE 1 -b5 (slow)---> SINK 3
+//
+// A caption can't highlight a belt, so the captions highlight the Source or the Sink beside it.
+//
+// Handles mint in command order: the Sources 0 and 1, the Sinks 2 and 3, then the belts 4 and 5.
+// The 11 commands and the history seal end the boot on tick 12.
+//
+// machine_kind u8 legend: SOURCE=0, SINK=7. Dock `port` is the catalog port index: SOURCE Out=0;
+// SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Belt",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 1),        // 0: SOURCE
+        Place(kind: 0, cell_x: 1, cell_y: 5),        // 1: SOURCE
+        Place(kind: 7, cell_x: 7, cell_y: 3),        // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 7, cell_y: 5),        // 3: SINK
+        DrawBelt(cells: [(2, 1), (3, 1), (4, 1), (4, 2), (4, 3), (5, 3), (6, 3)]), // 4: two turns
+        DrawBelt(cells: [(2, 5), (3, 5), (4, 5), (5, 5), (6, 5)]),        // 5: straight, slowed below
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Head, node: 3, port: 0),
+        Configure(node: 5, config: Belt(ticks_per_slot: 6)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"belt":"top","round":1}"#)),
+        At(tick: 40, input: Webhook(source: 1, body: r#"{"belt":"bottom","round":1}"#)),
+        At(tick: 200, input: Webhook(source: 0, body: r#"{"belt":"top","round":2}"#)),
+        At(tick: 200, input: Webhook(source: 1, body: r#"{"belt":"bottom","round":2}"#)),
+    ],
+    captions: [
+        Caption(tick: 41, highlight: 1, text: "Both Sources put an item on their belts on this tick."),
+        Caption(tick: 95, highlight: 2, text: "The top item reaches its Sink first, though its belt is longer and turns twice."),
+        Caption(tick: 151, highlight: 3, text: "The bottom belt is three times slower, so its item arrives only now."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 360,
+)

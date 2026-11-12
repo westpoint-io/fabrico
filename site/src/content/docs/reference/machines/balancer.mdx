@@ -1,0 +1,31 @@
+---
+title: Balancer
+description: The Balancer machine sends each item out one of its outputs, taking the outputs in turn. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Balancer shares items out between its outputs. Each item goes out exactly one output, and the Balancer takes the outputs in turn, so the lines behind it get an even share of the items.
+
+On the board below, four items go into a Balancer; the first and third leave by the top output, and the second and fourth by the bottom one.
+
+<Board name="docs-machines-balancer" />
+
+## Facts
+
+<MachineFacts kind={4} />
+
+## Inputs and outputs in turn
+
+A Balancer has two inputs. It takes one item at a time, from each input in turn, so a belt on either input keeps moving. The board above uses only the first input.
+
+The item goes to the output whose turn it is, and the turn then moves to the next output. The Balancer doesn't skip an output that is full: it waits until that output has room, and shows as backed up while it waits. The entry for [a machine that shows backed up](../../../troubleshooting/common-problems/#symptom-a-machine-shows-backed-up) says how to find the slow part of the line.
+
+A Tee differs here: it sends a copy of each item out every output instead of one item to one output.
+
+## Related pages
+
+- [Tee](../tee/): sends a copy of each item out both of its outputs.
+- [Common problems](../../../troubleshooting/common-problems/): fixes for things you might see on a board.
+- [Reference](../../): the list of machine pages and the other reference pages.

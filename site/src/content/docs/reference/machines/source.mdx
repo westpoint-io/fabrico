@@ -1,0 +1,34 @@
+---
+title: Source
+description: The Source machine puts a new item on the board for each webhook it gets or on a timer. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Source is where items come from. It makes a new item each time a webhook reaches it, or on a fixed timer if you set one, and sends the item out its one output onto a belt.
+
+On the board below, the top Source makes an item from each of three webhooks and the bottom Source makes one on its timer with no webhook at all.
+
+<Board name="docs-machines-source" />
+
+## Facts
+
+<MachineFacts kind={0} />
+
+## The two triggers
+
+The <Fact id="config.Source.trigger" /> field says what makes the Source fire. A Source you place starts with the <Fact id="trigger.Webhook" /> trigger: each webhook it receives becomes one item, and the item's bytes are the request body as sent. The <Fact id="trigger.Timer" /> trigger fires on its own, once every <Fact id="trigger.Timer.interval_ticks" /> ticks, so a board can run with no outside input.
+
+Webhooks reach the app on your own machine only. If a call gets connection refused, the troubleshooting entry for [a refused webhook call](../../../troubleshooting/common-problems/#symptom-a-webhook-call-gets-connection-refused) says why.
+
+## When the belt is full
+
+A Source holds items it can't send yet in a backlog of up to <Fact id="limit.source_pending_cap" />. While its belt is full the backlog grows, and once the backlog is full the Source turns new webhooks away without making an item and shows as backed up. The entry for [a machine that shows backed up](../../../troubleshooting/common-problems/#symptom-a-machine-shows-backed-up) says how to find what is holding the line.
+
+## Related pages
+
+- [Router](../router/): sends each item out one output, picked by matching the start of the item.
+- [Common problems](../../../troubleshooting/common-problems/): fixes for things you might see on a board.
+- [Reference](../../): the list of machine pages and the other reference pages.

@@ -1,0 +1,37 @@
+---
+title: Belt
+description: The Belt machine carries items from one machine to the next, one slot at a time at a pace you set. Its size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Belt carries items from the machine at its tail to the machine at its head. You draw it across the grid cell by cell, turns included, and items move along it in the order they got on.
+
+On the board below, two Sources send an item at the same moment; the top belt is longer and turns twice, the bottom belt is shorter but set three times slower, so the top item arrives first.
+
+<Board name="docs-machines-belt" />
+
+## Facts
+
+<MachineFacts kind={1} />
+
+## How a belt connects
+
+A belt has no ports of its own, which is why its table shows none. It connects through its two ends instead: you dock its tail to a machine's output port and its head to a machine's input port. Each end docks once, and a belt can be up to <Fact id="limit.max_belt_tiles" /> long. The size in the table is one tile; a belt you draw covers one cell for each tile.
+
+An item that reaches a head with nothing docked stays at the end of the belt, and the items behind it queue up. The entry for [items that stop at the end of a belt](../../../troubleshooting/common-problems/#symptom-items-stop-at-the-end-of-a-belt) covers it. When the app refuses a belt you draw or dock, the [Refused edits](../../../troubleshooting/refusals/) page has the fix for each message.
+
+## Pace
+
+Each tile has <Fact id="limit.slots_per_tile" bare /> slots, and an item moves forward one slot at a time. The <Fact id="config.Belt.ticks_per_slot" /> field sets how many ticks an item waits before each step, so a larger number is a slower belt. The pace runs from <Fact id="limit.belt_pace_min" /> to <Fact id="limit.belt_pace_max" />, and a belt you draw starts at <Fact id="limit.default_ticks_per_slot" />.
+
+A belt's length and pace together set how long an item takes to cross it and how many items it can hold at once. A long belt is also a buffer: it holds items while the machine at its head is busy.
+
+## Related pages
+
+- [Source](../source/): puts a new item on the board for each webhook it gets or on a timer.
+- [Common problems](../../../troubleshooting/common-problems/): fixes for things you might see on a board.
+- [Refused edits](../../../troubleshooting/refusals/): each message the app shows when it refuses an edit, and its fix.
+- [Reference](../../): the list of machine pages and the other reference pages.

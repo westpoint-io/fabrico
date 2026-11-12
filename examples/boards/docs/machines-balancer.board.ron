@@ -1,0 +1,55 @@
+// A docs board for the Balancer. One Source gets four webhooks, and its belt carries each item into
+// the Balancer's first input. The Balancer sends the items out its two outputs in turn: the first
+// item out the top output, the second out the bottom one, and so on. Each output has its own belt
+// into a Debug Sink, so each Sink gets two of the four items. The Balancer's second input stays
+// undocked. The run makes no outbound call.
+//
+//   row 0:                                                   +-b5-> SINK 2
+//   row 1:   SOURCE 0 -b4-> BALANCER 1 In 0, Out (top)    -+
+//   row 2:                              In 1, Out (bottom) -+
+//   row 3:                                                   +-b6-> SINK 3
+//
+// Each output belt turns one row out, so the two Sinks sit apart and their names don't overlap.
+//
+// Handles mint in command order: the Source 0, the Balancer 1, the Sinks 2 and 3, then the belts
+// 4, 5 and 6. The 13 commands and the history seal end the boot on tick 14.
+//
+// machine_kind u8 legend: SOURCE=0, BALANCER=4, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; BALANCER In=0, In=1, Out=2 (top row), Out=3 (bottom row); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Balancer",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 1),        // 0: SOURCE
+        Place(kind: 4, cell_x: 6, cell_y: 1),        // 1: BALANCER, 2x2
+        Place(kind: 7, cell_x: 11, cell_y: 0),       // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 11, cell_y: 3),       // 3: SINK
+        DrawBelt(cells: [(2, 1), (3, 1), (4, 1), (5, 1)]),                // 4
+        DrawBelt(cells: [(8, 1), (9, 1), (9, 0), (10, 0)]),               // 5
+        DrawBelt(cells: [(8, 2), (9, 2), (9, 3), (10, 3)]),               // 6
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":2}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":3}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"order":4}"#)),
+    ],
+    captions: [
+        Caption(tick: 71, highlight: 1, text: "The first item leaves the Balancer by its top output."),
+        Caption(tick: 111, highlight: 1, text: "The next item leaves by the bottom output. The Balancer takes the outputs in turn."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)
