@@ -18,7 +18,9 @@
 // NOT SEEN: a global reached through an alias or a bracket (`const w = window`, `globalThis['fetch']`),
 // a browser API or HTML sink these lists don't name, a forbidden word inside a string, which reads as a
 // finding, and a write made by a helper in some other folder that wraps its own bridge, because the
-// scan reads only what these folders name. The parity walk counts sends on the paths it walks, under
+// scan reads only what these folders name. The copy path is the exception: `THROUGH_HOST_MODULE` names
+// the clipboard helper and the POST URL row, so importing either is a finding. Any other wrapping helper
+// stays unseen until it is named there too. The parity walk counts sends on the paths it walks, under
 // Vite. The first case below is the tripwire for the scan reading nothing, and the mutation cases are
 // what stop it being a check that can't fail.
 
@@ -90,8 +92,14 @@ const HTML_SINKS: ReadonlyArray<readonly [string, RegExp]> = [
 
 /** Each can send any command to the host, so only `HOST_READER` may name one. */
 const HOST_BRIDGES = /\b(?:tauriInvoke|devWsInvoke)\b/;
-/** A module whose exports reach the host: the transport, and the inspector's bridge and its commit. */
-const THROUGH_HOST_MODULE = /(?:^|\/)(?:transport(?:\/|$)|ConfigPanel(?:\.tsx?)?$)/;
+/**
+ * A module whose exports reach the host: the transport, and the inspector's bridge and its commit. Also
+ * the copy path: `clipboardCopy` writes through the Tauri clipboard plugin in the desktop app, and the
+ * POST URL row (`WebhookUrlRow`) calls it from its Copy button, so a tutorial import of either is a host
+ * write the card could make without the user pressing anything.
+ */
+const THROUGH_HOST_MODULE =
+  /(?:^|\/)(?:transport(?:\/|$)|ConfigPanel(?:\.tsx?)?$|clipboardCopy(?:\.tsx?)?$|WebhookUrlRow(?:\.tsx?)?$)/;
 
 const CAMERA_CALL = /\.camera\s*(?:\?\.)?\(\s*\)/;
 /** The camera's one write. A tutorial file holding it elsewhere could move the view behind a lesson's back. */
@@ -336,6 +344,23 @@ describe('the tutorial stays a reader of the app', () => {
         for (const file of [layerFile(source), pureFile(source)]) {
           expect(auditTutorialSources([file]).join('\n'), `${file.path}: ${path}`).toContain(`imports ${path}, and only ${HOST_READER} reaches the host`);
         }
+      }
+    });
+
+    it('an import of the clipboard helper in a pure file', () => {
+      // A pure file importing from chrome/ also breaks the UI-folder rule; this case is about the host
+      // rule, so it counts host findings only.
+      for (const path of ['../chrome/clipboardCopy', '../chrome/clipboardCopy.ts']) {
+        const found = auditTutorialSources([pureFile(`import { runCopy } from '${path}';\n`)]);
+        const host = found.filter((f) => f.includes('reaches the host'));
+        expect(host, path).toEqual([`src/tutorial/fixture.ts:1: imports ${path}, and only ${HOST_READER} reaches the host`]);
+      }
+    });
+
+    it('an import of the POST URL row in the layer', () => {
+      for (const path of ['../WebhookUrlRow', '../WebhookUrlRow.tsx']) {
+        const found = auditTutorialSources([layerFile(`import { WebhookUrlRow } from '${path}';\n`)]);
+        expect(found, path).toEqual([`src/chrome/tutorial/TutorialLayer.tsx:1: imports ${path}, and only ${HOST_READER} reaches the host`]);
       }
     });
 
