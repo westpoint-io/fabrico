@@ -1,0 +1,35 @@
+---
+title: Merge
+description: The Merge machine takes items from two belts and sends them all out one output. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Merge joins two lines into one. It takes items from the belts docked on its two inputs and sends each one out its single output, unchanged. Use it when two Sources, or two separate lines, should end at the same machine.
+
+On the board below, two Sources feed one Merge: the first two items arrive on their own, one from each input, and the last two arrive together, so the Merge takes them one after the other.
+
+<Board name="docs-machines-merge" />
+
+## Facts
+
+<MachineFacts kind={6} />
+
+## How a Merge takes items
+
+A Merge takes one item on each tick it runs. When only one input holds an item, it takes that one. When both inputs hold an item, it takes one of them on this tick and the other on the next, and it starts its look at a different input each time, so a busy input can't hold the other one up. A Merge has no settings.
+
+The order a Merge takes items in follows from when they reach it, so a run gives the same order every time. On the board, the two items that arrive together leave in the same order on every run, one tick apart.
+
+## When the output is full
+
+A Merge sends an item out only when the belt on its output has room for it. While that belt is full, the items wait on the input belts, and those belts back up toward their Sources. The entry for [a machine that shows backed up](../../../troubleshooting/common-problems/#symptom-a-machine-shows-backed-up) says how to find where a line is held.
+
+## Related pages
+
+- [Balancer](../balancer/): sends each item out one of its outputs, taking the outputs in turn.
+- [Belt](../belt/): carries items from one machine to the next at a pace you set.
+- [Tee](../tee/): sends a copy of each item out both of its outputs.
+- [Reference](../../): the list of machine pages and the other reference pages.

@@ -1,0 +1,40 @@
+---
+title: HTTP Handler
+description: The HTTP Handler machine runs your JavaScript on each request a Route sends it and replies. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+An HTTP Handler answers the requests a Route takes in. It sits at the other end of the Route's wire, runs a short JavaScript function on each request, and sends back a reply with a status, headers and a body. The Route then answers the caller with that reply.
+
+On the board below, a Handler greets the name in the first request's body with a 200 reply, and answers the second request, which has no name, with a 400; the code panel shows the function it runs.
+
+<Board name="docs-machines-http-handler" />
+
+## Facts
+
+<MachineFacts kind={10} />
+
+## The request
+
+The <Fact id="config.Factory.source" /> field holds the code, which exports one function, `export default function (input, ctx)`, like a Factory's. For a Handler, `input` is the request: an object with `method`, `path`, `query`, `headers` and `body`. The body arrives as text, so code that expects JSON parses it with `JSON.parse(input.body)`, as the code in this example does.
+
+## The reply
+
+The code answers with `ctx.command(reply, 0)`, where `reply` is an object with three fields: `status`, a number such as 200 or 400; `headers`, an object of header names and values; and `body`, the reply's text. The headers and the body can be left out. In this example, the reply to each request is back at the Route two ticks after the request arrived.
+
+The app checks the reply before it sends it. A reply it can't read, such as one with a status that isn't a valid HTTP status, reaches the caller as a 502. A request that gets no reply within <Fact id="limit.endpoint_deadline_ticks" /> gets a timeout answer instead.
+
+## Limits and faults
+
+The code runs under the same limits as a Factory's. Code that throws stops with a <Fact id="fault.FactoryError" /> fault, and code that runs past its budget stops with a <Fact id="fault.FactoryTimeout" /> fault. Either way that run sends no reply, and the request leaves by the Handler's Fault port. In this example, the Fault port has a belt to a Sink, ready to collect such requests; the code never throws, so the belt stays empty. The troubleshooting entries for [FactoryError](../../../troubleshooting/fault-reasons/#fault-factory-error) and [FactoryTimeout](../../../troubleshooting/fault-reasons/#fault-factory-timeout) say how to fix each one.
+
+## Related pages
+
+- [Route](../route/): takes HTTP requests at a path you choose and sends each one down its wire.
+- [Wire](../wire/): joins a Route to an HTTP Handler and carries each request one way and its reply the other.
+- [Factory](../factory/): runs your JavaScript on each item and sends out what the code emits.
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Reference](../../): the list of machine pages and the other reference pages.

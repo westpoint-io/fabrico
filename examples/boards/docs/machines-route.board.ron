@@ -1,0 +1,79 @@
+// A docs board for the Route. Two Routes, each with its own path, are each wired to an HTTP
+// Handler. Scripted requests reach both Routes, and each request crosses its Route's wire to that
+// Route's own Handler, which answers it. The run makes no outbound call.
+//
+//   row 2:     ROUTE 0, path /orders  ===> HTTP HANDLER 2
+//   rows 4-5:                                 Fault -b6---> SINK 4
+//   row 8:     ROUTE 1, path /refunds ===> HTTP HANDLER 3
+//   rows 10-11:                               Fault -b7---> SINK 5
+//
+// Each Handler's Fault port, on its bottom middle cell facing south, has a belt to a Debug Sink,
+// where a request whose code throws would go. Neither Handler throws, so both belts stay empty.
+//
+// In the app, the request's path picks the Route: a POST to /endpoint/orders reaches the Route
+// whose path is /orders. A board has no server, so each scripted request names its Route by
+// handle and carries the path the app would have read.
+//
+// Each DrawWire mints two cables, request first. Handles mint in command order: the Routes 0 and
+// 1, the Handlers 2 and 3, the Sinks 4 and 5, the belts 6 and 7, then the cables 8 and 9 (Route
+// 0) and 10 and 11 (Route 1). The 18 commands and the history seal end the boot on tick 19.
+//
+// machine_kind u8 legend: ROUTE=9, HTTP HANDLER=10, SINK=7. DrawWire and Dock ports are catalog
+// indexes: Route In=0, Out=1; HTTP Handler In=0, Out=1, Fault=2; SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Route",
+    seed: 97,
+    commands: [
+        Place(kind: 9, cell_x: 2, cell_y: 2),        // 0: ROUTE
+        Place(kind: 9, cell_x: 2, cell_y: 8),        // 1: ROUTE
+        Place(kind: 10, cell_x: 6, cell_y: 1),       // 2: HTTP HANDLER, 3x3
+        Place(kind: 10, cell_x: 6, cell_y: 7),       // 3: HTTP HANDLER, 3x3
+        Place(kind: 7, cell_x: 10, cell_y: 5),       // 4: SINK, Debug by default
+        Place(kind: 7, cell_x: 10, cell_y: 11),      // 5: SINK
+        DrawBelt(cells: [(7, 4), (7, 5), (8, 5), (9, 5)]),                // 6
+        DrawBelt(cells: [(7, 10), (7, 11), (8, 11), (9, 11)]),            // 7
+        Dock(belt: 6, endpoint: Tail, node: 2, port: 2),
+        Dock(belt: 6, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 3, port: 2),
+        Dock(belt: 7, endpoint: Head, node: 5, port: 0),
+        Configure(node: 0, config: Endpoint(path: "/orders")),
+        Configure(node: 1, config: Endpoint(path: "/refunds")),
+        Configure(node: 2, config: Factory(source: r#"// answer requests to /orders
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: {},
+    body: "order received",
+  }, 0);
+}"#)),
+        Configure(node: 3, config: Factory(source: r#"// answer requests to /refunds
+export default function (input, ctx) {
+  ctx.command({
+    status: 200,
+    headers: {},
+    body: "refund received",
+  }, 0);
+}"#)),
+        DrawWire(from_node: 0, from_port: 1, to_node: 2, to_port: 0),
+        DrawWire(from_node: 1, from_port: 1, to_node: 3, to_port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Request(route: 0, method: "POST", path: "/endpoint/orders", body: r#"{"order":1}"#)),
+        At(tick: 100, input: Request(route: 1, method: "POST", path: "/endpoint/refunds", body: r#"{"order":1}"#)),
+        At(tick: 160, input: Request(route: 0, method: "POST", path: "/endpoint/orders", body: r#"{"order":2}"#)),
+    ],
+    captions: [
+        // Measured: each request is on its Route's request cable after tick 41 and 101, and its
+        // Handler runs on the next tick.
+        Caption(tick: 41, highlight: 0, text: "A request to /endpoint/orders reached the top Route, and it's on the wire to that Route's Handler."),
+        Caption(tick: 101, highlight: 1, text: "A request to /endpoint/refunds reached the bottom Route, which sends it to its own Handler."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 240,
+)

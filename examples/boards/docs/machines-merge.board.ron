@@ -1,0 +1,58 @@
+// A docs board for the Merge. Two Sources each feed a belt into one Merge, and the Merge sends
+// every item out its one output to a Debug Sink. The first two webhooks reach the Merge on
+// different ticks, one from each Source, and the last two reach it together, so the reader sees
+// the Merge take the two inputs in turn. The run makes no outbound call.
+//
+//   row 3:   SOURCE 0 -b4----> MERGE 2 In 0, Out -b6-> SINK 3
+//   row 4:              +-b5-> MERGE 2 In 1
+//   row 5:   SOURCE 1 --+
+//
+// The bottom belt turns up one row into the Merge, so the two Sources sit a row apart and their
+// names don't overlap.
+//
+// Handles mint in command order: the Sources 0 and 1, the Merge 2, the Sink 3, then the belts 4
+// to 6. The 13 commands and the history seal end the boot on tick 14.
+//
+// machine_kind u8 legend: SOURCE=0, MERGE=6, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; MERGE In=0, In=1, Out=2; SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Merge",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 3),        // 0: SOURCE
+        Place(kind: 0, cell_x: 1, cell_y: 5),        // 1: SOURCE
+        Place(kind: 6, cell_x: 6, cell_y: 3),        // 2: MERGE, 2x2
+        Place(kind: 7, cell_x: 11, cell_y: 3),       // 3: SINK, Debug by default
+        DrawBelt(cells: [(2, 3), (3, 3), (4, 3), (5, 3)]),                // 4
+        DrawBelt(cells: [(2, 5), (3, 5), (4, 5), (4, 4), (5, 4)]),        // 5
+        DrawBelt(cells: [(8, 3), (9, 3), (10, 3)]),                       // 6
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 1),
+        Dock(belt: 6, endpoint: Tail, node: 2, port: 2),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"from":"top","order":1}"#)),
+        At(tick: 90, input: Webhook(source: 1, body: r#"{"from":"bottom","order":2}"#)),
+        // The bottom belt is one tile longer, so its webhook goes out first to reach the Merge on
+        // the same tick as the top one.
+        At(tick: 142, input: Webhook(source: 1, body: r#"{"from":"bottom","order":3}"#)),
+        At(tick: 150, input: Webhook(source: 0, body: r#"{"from":"top","order":4}"#)),
+    ],
+    captions: [
+        // Measured: the Merge steps on 71, 129, 181 and 182, and the Sink receives on 93, 151, 203 and 205.
+        Caption(tick: 71, highlight: 2, text: "The item from the top Source reached the Merge, and the Merge sent it out its one output."),
+        Caption(tick: 129, highlight: 2, text: "This item came in on the bottom input. The Merge sends it out the same output."),
+        Caption(tick: 181, highlight: 2, text: "Both inputs hold an item now. The Merge takes the top one on this tick and the bottom one on the next."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)

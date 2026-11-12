@@ -14,7 +14,12 @@ Numbers on these pages come from the source code when the site is built. For exa
 - [Balancer](machines/balancer/): sends each item out one of its outputs, taking the outputs in turn.
 - [Belt](machines/belt/): carries items from one machine to the next at a pace you set.
 - [Factory](machines/factory/): runs your JavaScript on each item and sends out what the code emits.
+- [HTTP Handler](machines/http-handler/): runs your JavaScript on each request and sends back a reply.
+- [Label](machines/label/): a note on the board with text, a colour and a size, and no ports.
+- [Merge](machines/merge/): takes items from two belts and sends them all out one output.
+- [Route](machines/route/): takes HTTP requests at a path you choose and sends each one down its wire.
 - [Router](machines/router/): sends each item out one output, picked by matching the start of the item.
+- [Sink](machines/sink/): ends a line and sends each item out as an HTTP request, or records it.
 - [Source](machines/source/): puts a new item on the board for each webhook it gets or on a timer.
 - [Tee](machines/tee/): sends a copy of each item out both of its outputs.
 - [Wire](machines/wire/): joins a Route to an HTTP Handler and carries each request one way and its reply the other.

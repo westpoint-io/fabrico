@@ -1,0 +1,39 @@
+---
+title: Label
+description: The Label is a note you put on the board. It has text, a colour and a size, and no ports. Its size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Label is a note on the board. You give it some text, a colour and a size, and it sits on the grid to say what the machines around it are for. It has no ports and takes no part in the flow: items never reach it and it never runs.
+
+On the board below, a Label sits above a short line from a Source to a Sink, and the items on the line pass under it without touching it.
+
+<Board name="docs-machines-label" />
+
+## Facts
+
+<MachineFacts kind={11} />
+
+## Text, colour and size
+
+Four fields set up a Label, and its panel in the app edits all four in one step, so one Undo puts them all back.
+
+- <Fact id="config.Label.text" /> is the note itself, up to <Fact id="limit.max_label_bytes" />.
+- <Fact id="config.Label.colour" /> picks the Label's colour from the list in its panel.
+- <Fact id="config.Label.w" /> and <Fact id="config.Label.h" /> set its size in cells, up to <Fact id="limit.label_max_w" /> and <Fact id="limit.label_max_h" />. The Label in this example is set larger than the size it's placed at.
+
+The troubleshooting entry for [a setting past a limit](../../../troubleshooting/refusals/#refusal-over-limit) says what to do when the app refuses a longer text or a larger size.
+
+## On the grid
+
+A Label covers the cells its size gives it, the same as a machine, so a machine, a belt or another Label can't go on those cells. When the app refuses a resize because something is in the way, the entry for [a resize that would cover something](../../../troubleshooting/refusals/#refusal-resize-covers) says how to make room. A Label never turns, and a belt or a wire can't connect to one; the entry for [a Label that doesn't connect](../../../troubleshooting/refusals/#refusal-label-does-not-connect) covers that refusal.
+
+## Related pages
+
+- [Source](../source/): puts a new item on the board for each webhook it gets or on a timer.
+- [Sink](../sink/): ends a line and sends each item out as an HTTP request, or records it.
+- [Refused edits](../../../troubleshooting/refusals/): what to do when the app refuses an edit.
+- [Reference](../../): the list of machine pages and the other reference pages.

@@ -1,0 +1,43 @@
+---
+title: Sink
+description: The Sink machine ends a line and sends each item out as an HTTP request, or records it. Its ports, size and config fields come from the source code.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Sink is where a line ends and something happens in the outside world. It takes each item that reaches it and acts on it: either it sends the item as the body of an HTTP request to an address you choose, or it records the item and sends nothing. A Sink has no output, so nothing leaves it on a belt.
+
+On the board below, the top Sink sends each item as a request to a web address and gets a reply 20 ticks later, and the bottom Sink records the item it gets.
+
+<Board name="docs-machines-sink" />
+
+## Facts
+
+<MachineFacts kind={7} />
+
+## Targets
+
+The <Fact id="config.Sink.target" /> field picks what the Sink does with each item. It has two settings.
+
+- <Fact id="sink.target.Debug" /> records each item and sends nothing. A Sink you place from the palette starts here, which makes it a safe end for a line you're still building.
+- <Fact id="sink.target.Http" /> sends each item as the body of a request to the URL you set, with the method you pick: <Fact id="http.method.Post" />, <Fact id="http.method.Put" />, <Fact id="http.method.Patch" />, <Fact id="http.method.Delete" /> or <Fact id="http.method.Get" />. A new HTTP Sink uses <Fact id="http.method.Post" />.
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+## Replies, failures and the deadline
+
+A Sink takes one item each time it runs and sends one request for it. The other machines keep running while the request is out, and the reply comes back on a later tick. In this example, both requests to the top Sink get their reply 20 ticks after they leave.
+
+A request that comes back with a status outside 200 to 299, or gets no answer within 30 seconds, becomes a <Fact id="fault.CommandFailure" /> fault. A request still waiting when its deadline passes, 600 ticks after it left, becomes a <Fact id="fault.CommandTimeout" /> fault. Either way the Sink shows as faulted. Dock a belt on its Fault port to carry those faults to another Sink where you can read them. The troubleshooting entries for [CommandFailure](../../../troubleshooting/fault-reasons/#fault-command-failure) and [CommandTimeout](../../../troubleshooting/fault-reasons/#fault-command-timeout) say how to fix each one.
+
+## Related pages
+
+- [Source](../source/): puts a new item on the board for each webhook it gets or on a timer.
+- [Factory](../factory/): runs your JavaScript on each item and sends out what the code emits.
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Reference](../../): the list of machine pages and the other reference pages.

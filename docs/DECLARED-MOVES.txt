@@ -147,9 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the Wire board
-# (examples/boards/docs/machines-wire.board.ron). The eleven older lines are unchanged.
-examples/boards/hashes.manifest ba9414d435a63560103acfdbf4a88925f48002024ddba6467e347b3589f78d5d
+# Five new lines, written by the generator, for the Merge, Sink, Route, HTTP Handler and Label
+# boards (examples/boards/docs/machines-<slug>.board.ron). The twelve older lines are unchanged.
+examples/boards/hashes.manifest 8ddc4bf07255650d2dab3f9905c9104465232c64a922aa11a38587c633f3e127
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

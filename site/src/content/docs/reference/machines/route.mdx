@@ -1,0 +1,42 @@
+---
+title: Route
+description: The Route machine takes HTTP requests at a path you choose and sends each one down its wire to an HTTP Handler. Its facts come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Route lets the outside world call your board. You give it a path, and the app answers HTTP requests at that path on the computer it runs on. The Route sends each request down its wire to an HTTP Handler, waits for the Handler's reply, and sends that reply back to the caller.
+
+On the board below, two Routes have different paths, and each request reaches the Handler wired to the Route it was sent to.
+
+<Board name="docs-machines-route" />
+
+## Facts
+
+<MachineFacts kind={9} />
+
+## The path
+
+The path field, listed under Config fields above, holds the path, for example `/orders`. The app answers a POST to `/endpoint` followed by the path, so a Route with the path `/orders` takes requests sent to `/endpoint/orders` on the app's local port. Two Routes can't share a path.
+
+A path starts with one `/`, is at most <Fact id="limit.max_endpoint_path_bytes" /> long, and uses only letters, digits, `-`, `.`, `_`, `~` and `/`. The app refuses a path that breaks these rules or that another Route already has; the entries for [an invalid path](../../../troubleshooting/refusals/#refusal-invalid-path) and [a duplicate path](../../../troubleshooting/refusals/#refusal-duplicate-path) say what to change.
+
+The examples on this site have no server, so their requests come from a script that names the Route directly. The path each scripted request carries is the one the app would have read.
+
+## The reply
+
+The Route turns each request into an item holding its method, path, query, headers and body, and sends it down its wire. The HTTP Handler at the other end runs its code and sends back a reply with a status, headers and a body, and the Route answers the caller with it. A request that gets no reply within <Fact id="limit.endpoint_deadline_ticks" /> gets a timeout answer instead. In this example, each reply is back at its Route two ticks after the request arrived.
+
+## A Route with no wire
+
+A Route needs a wire to an HTTP Handler before it can answer anything. A request that reaches a Route with no wire becomes a <Fact id="fault.NoEntryWire" /> fault, and the Route shows as faulted. The troubleshooting entry for [a NoEntryWire fault](../../../troubleshooting/fault-reasons/#fault-no-entry-wire) says how to fix it.
+
+## Related pages
+
+- [HTTP Handler](../http-handler/): runs your JavaScript on each request and sends back a reply.
+- [Wire](../wire/): joins a Route to an HTTP Handler and carries each request one way and its reply the other.
+- [Router](../router/): sends each item out one output, picked by matching the start of the item.
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Reference](../../): the list of machine pages and the other reference pages.

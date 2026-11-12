@@ -1,0 +1,42 @@
+// A docs board for the Label. A Label with its own text, colour and size sits above a short line,
+// a Source feeding a belt into a Debug Sink. The Label has no ports and joins nothing: items pass
+// along the line below it and never touch it. The run makes no outbound call.
+//
+//   rows 1-2: LABEL 2, 6 cells wide and 2 tall, Lilac
+//   row 4:    SOURCE 0 -b3-> SINK 1
+//
+// Handles mint in command order: the Source 0, the Sink 1, the Label 2, then the belt 3. The 7
+// commands and the history seal end the boot on tick 8.
+//
+// machine_kind u8 legend: SOURCE=0, SINK=7, LABEL=11. Dock `port` is the catalog port index:
+// SOURCE Out=0; SINK In=0. A Label's colour is a byte: 0 Sand, 1 Stone, 2 Moss, 3 Lilac, 4 Rose,
+// 5 Clay.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Label",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 4),        // 0: SOURCE
+        Place(kind: 7, cell_x: 6, cell_y: 4),        // 1: SINK, Debug by default
+        Place(kind: 11, cell_x: 1, cell_y: 1),       // 2: LABEL, 4x1 when placed
+        DrawBelt(cells: [(2, 4), (3, 4), (4, 4), (5, 4)]),                // 3
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Configure(node: 2, config: Label(text: "Orders come in here", colour: 3, w: 6, h: 2)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":2}"#)),
+    ],
+    captions: [
+        // Measured: the Source makes items on 41 and 121, and the Sink records them on 71 and 151.
+        Caption(tick: 41, highlight: 2, text: "The Source made an item, and it travels to the Sink below this Label. The Label has no ports, so nothing reaches it."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 200,
+)
