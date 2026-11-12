@@ -550,3 +550,29 @@ footer a[href*='/edit/main/'] {
   font-size: 0.75rem;
   font-weight: 400;
 }
+
+/*
+ * A troubleshooting entry (<Fix>): a 1 px panel-fill rule 32 px below the content before it and
+ * 24 px above its h3, the fix text 16 px under the heading. An entry right after an h2 drops the
+ * rule and its padding, so the h2 isn't followed by a line. The entry a link opened gets the
+ * aside's 3 px ink rail, with no accent and no ground.
+ */
+.sl-markdown-content .fab-fix {
+  margin-top: var(--fab-space-xl);
+  padding-top: var(--fab-space-lg);
+  border-top: 1px solid var(--fab-panel-fill);
+}
+.sl-markdown-content .fab-fix > h3 {
+  margin: 0;
+}
+.sl-markdown-content .fab-fix > h3 + * {
+  margin-top: var(--fab-space-md);
+}
+.sl-markdown-content :is(h2, .sl-heading-wrapper.level-h2) + .fab-fix {
+  border-top: 0;
+  padding-top: 0;
+}
+.sl-markdown-content .fab-fix:has(:target) {
+  border-inline-start: 3px solid var(--fab-ink);
+  padding-inline-start: var(--fab-space-md);
+}

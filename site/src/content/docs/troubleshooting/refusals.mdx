@@ -1,0 +1,45 @@
+---
+title: Refused edits
+description: Each message the app shows when it refuses an edit, what it means, and the change that gets the edit accepted.
+sidebar:
+  order: 3
+---
+
+import Fact from '../../../components/Fact.astro';
+import Fix from '../../../components/Fix.astro';
+
+When the app refuses an edit, the board stays as it was and one sentence says why. This page lists every one of those sentences. Each heading is the message, word for word, as the app shows it. Under it, the first sentence says what caused the refusal and the rest says what to change so the edit goes through.
+
+## Belts
+
+<Fix id="refusal.BeltNotPlaceable">
+Something tried to place a belt the way a machine is placed, and a belt can only be drawn. Pick the Belt tool and draw from the cell next to a machine's output, or drag a machine's output dot onto the start of a belt.
+</Fix>
+
+<Fix id="refusal.BeltTooLong">
+The belt you drew covers more than <Fact id="limit.max_belt_tiles" />. Draw it as two belts and join them: with the Belt tool, press just past the first belt's end and draw on.
+</Fix>
+
+<Fix id="refusal.ZeroBeltInterval">
+The belt's Pace (px/sec) field held 0, a negative number, nothing, or something that isn't a number, and the app reads each of those as a stopped belt. Type a pace above zero, or press one of the Belt pace buttons.
+</Fix>
+
+<Fix id="refusal.PaceOutOfRange">
+The pace you typed is faster than the Fastest end of the Belt pace scale or slower than the Slowest end. The engine takes a belt interval from <Fact id="limit.belt_pace_min" /> up to <Fact id="limit.belt_pace_max" />, and the two ends of the scale are those limits in px/sec. Type a pace between the two ends, which the panel prints beside the buttons, or press one of the buttons.
+</Fix>
+
+<Fix id="refusal.InvalidBeltJoin">
+A join runs from the end of one belt to the start of another, and this one didn't: it went end to end or start to start, landed on a belt one tile long, or landed on a tile in the middle of the same belt. Drag the first belt's end onto the first tile of the second belt. You can also press just past a belt's end with the Belt tool and draw on, which makes the join as you draw.
+</Fix>
+
+<Fix id="refusal.BeltJoinTurnsBack">
+The two belts lie side by side running in opposite directions, so joining one's end to the other's start would send items straight back the way they came. Redraw the second belt so it leaves the join straight ahead or to one side, then join them.
+</Fix>
+
+<Fix id="refusal.BeltEndsApart">
+The end you dropped isn't on the cell right next to the other belt's start: it is two or more cells away, or touches only at a corner. Drag the end, or draw the belt one cell longer, until the two tiles share a side, then join them.
+</Fix>
+
+<Fix id="refusal.BeltEndTaken">
+One of the two belt ends is already joined to something, and a belt end feeds one thing only. Use a belt end that isn't joined yet, or draw a new belt. To send the same items two ways, end the belt at a Tee, which copies each item to every output, or at a Router, which picks one output per item.
+</Fix>

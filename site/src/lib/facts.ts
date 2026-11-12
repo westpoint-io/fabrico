@@ -99,3 +99,79 @@ export function keyGroups(label: string): string[][] {
 export function groupsText(groups: readonly (readonly string[])[]): string {
   return groups.map((group) => group.join('+')).join(' or ');
 }
+
+/**
+ * The anchor id of a fault.* or refusal.* troubleshooting entry: the prefix, a hyphen, then the
+ * name with a hyphen before each capital that follows a lower-case letter or digit, all
+ * lower-cased. refusal.BeltTooLong gives refusal-belt-too-long. Capitals in a row get no hyphen
+ * between them (refusal.HTTPError gives refusal-httperror). frontend/e2e-docs/troubleshooting.spec.ts
+ * computes the same id on its own, so a change here fails that check.
+ */
+export function fixAnchor(id: string): string {
+  const dot = id.indexOf('.');
+  const prefix = id.slice(0, dot);
+  const name = id.slice(dot + 1).replace(/([a-z0-9])([A-Z])/g, '$1-$2');
+  return `${prefix}-${name}`.toLowerCase();
+}
+
+/**
+ * The anchor id of a hand-written troubleshooting entry: "symptom-", then the text lower-cased,
+ * with each run of characters other than a-z and 0-9 turned into one hyphen and the hyphens at
+ * either end trimmed. "Items stop at the end of a belt" gives symptom-items-stop-at-the-end-of-a-belt.
+ */
+export function symptomAnchor(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `symptom-${slug}`;
+}
+
+/** What one <Fix> entry is about: a fact from facts.json, or a symptom written on the page. */
+export type FixTarget =
+  | { kind: 'fact'; id: string; anchor: string }
+  | { kind: 'symptom'; text: string; anchor: string };
+
+/** The fact id prefixes a <Fix id> takes. */
+const FIX_PREFIXES = ['fault.', 'refusal.'] as const;
+
+/**
+ * Check a <Fix>'s props and say what the entry is about, or throw the line an author reads in the
+ * build log. Exactly one of `id` and `symptom` is given (a symptom of only white space counts as
+ * not given, since it would make an empty heading). An id must start with fault. or refusal., and
+ * then must be in facts.json, which resolveFact checks with its own [Fact] line.
+ */
+export function fixTarget(props: { id?: string; symptom?: string }, page: string, facts: FactsFile): FixTarget {
+  const hasId = props.id !== undefined;
+  const symptom = props.symptom?.trim() ?? '';
+  const hasSymptom = symptom !== '';
+  if (hasId === hasSymptom) {
+    const which = hasId ? 'both id and symptom' : 'neither id nor symptom';
+    throw new Error(`[Fix] ${page} has a <Fix> with ${which}. Give it one of them.`);
+  }
+  if (props.id !== undefined) {
+    const id = props.id;
+    if (!FIX_PREFIXES.some((prefix) => id.startsWith(prefix) && id.length > prefix.length)) {
+      throw new Error(
+        `[Fix] ${page} gives <Fix> the id "${id}". A fix entry takes a fault.* or refusal.* fact id, ` +
+          'or symptom="..." for a hand-written entry.',
+      );
+    }
+    resolveFact(id, page, facts);
+    return { kind: 'fact', id, anchor: fixAnchor(id) };
+  }
+  return { kind: 'symptom', text: symptom, anchor: symptomAnchor(symptom) };
+}
+
+/** Is a <Fix>'s rendered text empty: nothing left once the tags and the white space are gone? */
+export function isEmptyFixText(html: string): boolean {
+  return html.replace(/<[^>]*>/g, '').trim() === '';
+}
+
+/** The line an author reads when a <Fix> has no fix text. `label` is the entry's id or symptom. */
+export function emptyFixMessage(page: string, label: string): string {
+  return (
+    `[Fix] ${page} has a <Fix> for "${label}" with no fix text. ` +
+    'Write what causes it and how to fix it between <Fix> and </Fix>.'
+  );
+}

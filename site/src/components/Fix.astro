@@ -1,0 +1,39 @@
+---
+// One troubleshooting entry: <Fix id="refusal.BeltTooLong">what causes it and how to fix it</Fix>,
+// or <Fix symptom="Items stop at the end of a belt">...</Fix> for an entry written by hand.
+//
+// An id entry's heading is the message or reason name from src/generated/facts.json, in the same
+// markup <Fact> writes, so the page changes when the code does. The h3 carries the anchor id
+// (refusal-belt-too-long, symptom-items-stop-at-the-end-of-a-belt) so a link, and a search
+// sub-result, lands on the heading. data-fix holds the fact id on the section, and the docs suite
+// counts those against facts.json; a symptom entry carries data-symptom instead, so it isn't
+// counted. A bad prop or an empty entry fails the build with a line naming the page.
+import facts from '../generated/facts.json';
+import Fact from './Fact.astro';
+import { emptyFixMessage, fixTarget, isEmptyFixText, type FactsFile } from '../lib/facts.ts';
+
+interface Props {
+  id?: string;
+  symptom?: string;
+}
+
+const { id, symptom } = Astro.props;
+const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
+const target = fixTarget({ id, symptom }, page, facts as unknown as FactsFile);
+const body = await Astro.slots.render('default');
+if (isEmptyFixText(body)) {
+  throw new Error(emptyFixMessage(page, target.kind === 'fact' ? target.id : target.text));
+}
+---
+
+{target.kind === 'fact' ? (
+  <section class="fab-fix" data-fix={target.id}>
+    <h3 id={target.anchor}><Fact id={target.id} /></h3>
+    <Fragment set:html={body} />
+  </section>
+) : (
+  <section class="fab-fix" data-symptom={target.text}>
+    <h3 id={target.anchor}>{target.text}</h3>
+    <Fragment set:html={body} />
+  </section>
+)}
