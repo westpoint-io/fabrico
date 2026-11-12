@@ -13,6 +13,11 @@ import { expect, test } from '@playwright/test';
 // with Router's board. The machine states get the same count guard against `pub mod state_tag`,
 // because the facts exporter lists them by hand and no match can catch a fifth.
 //
+// The enums the exporter turns into facts get a guard too. Its `match`es make a new variant a
+// compile error, but the facts come from hand lists of samples beside them, which the compiler
+// can't check. So each enum's variant names are parsed from its source file and compared with the
+// facts under its prefix, and a variant missing from the facts fails here, naming it.
+//
 // facts.json and the built pages are read from disk at run time, never imported: a docs-only change
 // doesn't run the frontend's type check, so the suite must not depend on site/ files at compile time.
 
@@ -72,6 +77,114 @@ function moduleConsts(name: string): Const[] {
   if (end < 0) throw new Error(`${PROTOCOL}: "${opener}" never closes`);
   const body = text.slice(start + opener.length, end);
   return [...body.matchAll(/pub const ([A-Z_]+): u8 = (\d+);/g)].map((m) => ({ name: m[1], value: Number(m[2]) }));
+}
+
+/** An enum the facts exporter writes one fact per variant for, and the prefix of those facts. */
+interface ExportedEnum {
+  file: string;
+  name: string;
+  prefix: string;
+}
+
+/**
+ * The enums `crates/fabrico-host/examples/docs_facts.rs` exports, each from the file it imports it
+ * from. A fact id is the prefix and the variant name, with no further dot.
+ */
+const EXPORTED_ENUMS: ExportedEnum[] = [
+  { file: 'crates/fabrico-core/src/fault.rs', name: 'FaultReason', prefix: 'fault.' },
+  { file: 'crates/fabrico-core/src/edit.rs', name: 'MachineConfig', prefix: 'config.' },
+  { file: 'crates/fabrico-core/src/edit.rs', name: 'SourceTrigger', prefix: 'trigger.' },
+  { file: 'crates/fabrico-protocol/src/lib.rs', name: 'GridCommand', prefix: 'command.' },
+  { file: 'crates/fabrico-core/src/state.rs', name: 'Role', prefix: 'port.role.' },
+  { file: 'crates/fabrico-core/src/state.rs', name: 'Medium', prefix: 'port.medium.' },
+  { file: 'crates/fabrico-core/src/state.rs', name: 'Side', prefix: 'port.side.' },
+  { file: 'crates/fabrico-core/src/state.rs', name: 'HttpMethod', prefix: 'http.method.' },
+  { file: 'crates/fabrico-core/src/state.rs', name: 'SinkTemplate', prefix: 'sink.target.' },
+];
+
+/**
+ * Rust source with its comments and attributes turned to spaces and its string literals emptied, so
+ * a brace or a comma inside any of them can't be read as code. Byte offsets stay the same.
+ */
+function codeOnly(text: string): string {
+  const out = text.split('');
+  const blank = (from: number, to: number): void => {
+    for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
+  };
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith('//', i)) {
+      const end = text.indexOf('\n', i);
+      const stop = end < 0 ? text.length : end;
+      blank(i, stop);
+      i = stop;
+    } else if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      blank(i, stop);
+      i = stop;
+    } else if (/^r#*"/.test(text.slice(i, i + 12)) && !/[\w]/.test(text[i - 1] ?? ' ')) {
+      // A raw string, r"..." or r#"..."#, which may hold quotes and needs no escapes.
+      const hashes = /^r(#*)"/.exec(text.slice(i, i + 12))?.[1] ?? '';
+      const open = i + 2 + hashes.length;
+      const end = text.indexOf(`"${hashes}`, open);
+      const stop = end < 0 ? text.length : end;
+      blank(open, stop);
+      i = stop + 1 + hashes.length;
+    } else if (/^'(?:\\.|[^\\'\n])'/.test(text.slice(i, i + 4))) {
+      // A char literal such as '"' or '{'.
+      const len = /^'(?:\\.|[^\\'\n])'/.exec(text.slice(i, i + 4))?.[0].length ?? 1;
+      blank(i + 1, i + len - 1);
+      i += len;
+    } else if (text[i] === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      blank(i + 1, j);
+      i = j + 1;
+    } else {
+      i += 1;
+    }
+  }
+  // Attributes, such as #[default] or #[ts(type = "number")], after strings are emptied.
+  const code = out.join('');
+  return code.replace(/#!?\[[^\]]*\]/g, (m) => m.replace(/[^\n]/g, ' '));
+}
+
+/** The variant names of `pub enum <name> {` in a Rust file, in declaration order. */
+function enumVariants(file: string, name: string): string[] {
+  const abs = path.join(REPO, file);
+  const code = codeOnly(fs.readFileSync(abs, 'utf8'));
+  const opener = new RegExp(`\\bpub enum ${name}\\s*\\{`).exec(code);
+  if (opener === null) throw new Error(`${file} has no "pub enum ${name} {"`);
+  const start = opener.index + opener[0].length;
+  // Keep only what sits at the enum's own depth: a variant's fields in { } or ( ) are dropped.
+  let depth = 0;
+  let top = '';
+  for (let i = start; i < code.length; i++) {
+    const c = code[i];
+    if (c === '{' || c === '(') {
+      depth += 1;
+    } else if (c === '}' || c === ')') {
+      if (depth === 0) return parseVariants(top, file, name);
+      depth -= 1;
+    } else if (depth === 0) {
+      top += c;
+    }
+  }
+  throw new Error(`${file}: "pub enum ${name} {" never closes`);
+}
+
+function parseVariants(top: string, file: string, name: string): string[] {
+  const variants: string[] = [];
+  for (const part of top.split(',')) {
+    const trimmed = part.trim();
+    if (trimmed === '') continue;
+    // A unit variant may carry a discriminant: `N = 0`.
+    const m = /^([A-Z][A-Za-z0-9_]*)(?:\s*=\s*[-\w]+)?$/.exec(trimmed);
+    if (m === null) throw new Error(`${file}: can't read "${trimmed}" in pub enum ${name} as a variant`);
+    variants.push(m[1]);
+  }
+  return variants;
 }
 
 /**
@@ -137,6 +250,29 @@ test('the machine states in facts.json match the state_tag module', () => {
     ids.map((id) => id.slice('state.'.length)).sort(),
     'the state.* facts against the consts in pub mod state_tag (a new const needs a fact in crates/fabrico-host/examples/docs_facts.rs)',
   ).toEqual(states.map((s) => s.name).sort());
+});
+
+test('every variant of each exported enum has its fact in facts.json', () => {
+  const ids = Object.keys(readFacts().facts);
+  const problems: string[] = [];
+  for (const { file, name, prefix } of EXPORTED_ENUMS) {
+    const variants = enumVariants(file, name);
+    if (variants.length === 0) {
+      problems.push(`${name}: no variants parsed from ${file}`);
+      continue;
+    }
+    const facts = ids.filter((id) => id.startsWith(prefix) && !id.slice(prefix.length).includes('.')).map((id) => id.slice(prefix.length));
+    for (const v of variants) {
+      if (!facts.includes(v)) problems.push(`${name}::${v} (${file}) has no ${prefix}${v} fact`);
+    }
+    for (const f of facts) {
+      if (!variants.includes(f)) problems.push(`the fact ${prefix}${f} names no variant of ${name} in ${file}`);
+    }
+  }
+  expect(
+    problems,
+    'enum variants against facts.json: add a missing variant to its samples list in crates/fabrico-host/examples/docs_facts.rs and run npm run facts in site/',
+  ).toEqual([]);
 });
 
 test('every machine kind has one reference page whose board is about that machine', () => {

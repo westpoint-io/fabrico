@@ -18,7 +18,10 @@
 //! - A renamed or removed constant: the `use` lines stop compiling.
 //! - A new `FaultReason`, `MachineConfig`, `SourceTrigger`, `GridCommand`, `Role`, `Medium`,
 //!   `Side`, `HttpMethod` or `SinkTemplate` variant: the `match`es below have no `_` arm, so they
-//!   stop compiling until the variant is exported.
+//!   stop compiling until the variant has an arm. That alone doesn't export it, because the facts
+//!   come from the `*_samples()` lists beside each `match`, and the compiler can't check a list
+//!   against its enum. `frontend/e2e-docs/reference.spec.ts` closes that gap: it parses each of
+//!   these enums from its source file and fails, naming the variant, when a variant has no fact.
 //! - A new field on a `MachineConfig`, `GridCommand` or `SinkTemplate` variant: the samples are
 //!   struct literals and the `match` names every field with no `..`, so both stop compiling.
 //! - A fifth machine state: `state_tag` is a module of consts, which no match can cover, so
@@ -457,7 +460,8 @@ fn fault_name(reason: &FaultReason) -> &'static str {
     }
 }
 
-/// One of each fault reason. A new variant fails [`fault_name`]'s compile; add it here too.
+/// One of each fault reason. A new variant fails [`fault_name`]'s compile; add it here too, or
+/// `reference.spec.ts` fails naming it.
 fn fault_samples() -> Vec<FaultReason> {
     vec![
         FaultReason::NoMatch,
@@ -602,7 +606,7 @@ fn command_name(command: &GridCommand) -> &'static str {
 }
 
 /// One of each grid command, as struct literals. A new variant fails [`command_name`]'s compile;
-/// add it here too.
+/// add it here too, or `reference.spec.ts` fails naming it.
 fn command_samples() -> Vec<GridCommand> {
     vec![
         GridCommand::Place {
@@ -653,7 +657,8 @@ fn command_samples() -> Vec<GridCommand> {
 }
 
 /// Each port role, side and medium, by the family's fact prefix and the variant. No `_` arms: a
-/// new variant is a compile error in the matching function below.
+/// new variant is a compile error in the matching function below, and a variant left out of its
+/// samples list fails `reference.spec.ts`.
 fn role_samples() -> Vec<Role> {
     vec![Role::In, Role::Out, Role::Fault]
 }
