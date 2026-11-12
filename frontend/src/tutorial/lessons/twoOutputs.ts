@@ -10,6 +10,7 @@
 import {
   BOARD_PAUSED,
   FACTORY_KIND,
+  PLACE_BY_TOP_LEFT,
   PLACE_ON_THE_FLOOR,
   SET_TIMER_STAGES,
   SINK_KIND,
@@ -77,7 +78,7 @@ export const TWO_OUTPUTS: Lesson = {
           when: { is: 'toolArmed', machineKind: FACTORY_KIND },
           hint: { on: 'floor', spot: 'factory' },
           gesture: { do: 'pressHint' },
-          text: ['Click the floor to place it. The ring marks a free cell for its top left corner, but any free spot works.'],
+          text: [PLACE_BY_TOP_LEFT],
         },
       ],
       done: { is: 'nodeAppeared', kind: FACTORY_KIND, bind: 'factory' },

@@ -20,6 +20,7 @@ import { useLayoutEffect, useRef, useState, type JSX, type ReactNode } from 'rea
 import { machine_kind } from '../protocol/kinds';
 import { MEDIUM_MECHANICAL } from '../protocol/ports';
 import { KIND_NAMES } from './kindNames';
+import { WIRE_TOOL_LABEL } from './controlLabels';
 import { SIM_STOPPED_COPY } from './SimStoppedCard';
 import { LabelIcon, MachineGlyphIcon, WireIcon } from './icons';
 import { ICON_LG_PX } from '../render/synth/chrome/iconSizes';
@@ -620,7 +621,7 @@ export function Palette({
                 wire is: a link, not a machine box. */}
             <WireIcon color="currentColor" px={PALETTE_GLYPH_PX} />
           </span>
-          <span style={{ whiteSpace: 'nowrap' }}>Wire</span>
+          <span style={{ whiteSpace: 'nowrap' }}>{WIRE_TOOL_LABEL}</span>
         </button>
         {/* Phase 76 (SHAPE-10, UI-SPEC 1.1): a SECOND hairline separator, and below it the
             Label row in a group of its own. Every row above the first separator places a

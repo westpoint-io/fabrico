@@ -200,6 +200,10 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
       return armed?.kind === 'belt';
     case 'beltNotArmed':
       return armed?.kind !== 'belt';
+    case 'wireArmed':
+      return armed?.kind === 'wire';
+    case 'wireNotArmed':
+      return armed?.kind !== 'wire';
     case 'lineStopsShort': {
       const from = bindings[when.from];
       return armed?.kind === 'belt' && from !== undefined && lineDoorstep(board, from.id, boundBeltIds(bindings)) !== null;
@@ -261,6 +265,8 @@ const FOOTPRINT: Readonly<Record<FloorSpot, readonly [number, number]>> = {
   factory: [3, 3],
   firstOutputSink: [1, 1],
   freeOutputSink: [1, 1],
+  centredRoute: [1, 1],
+  handler: [3, 3],
 };
 /** Lesson 4's line, across: the Source, three cells of belt, the Factory, three more, and the Sinks. */
 const LINE_CELLS = 11;
@@ -270,6 +276,19 @@ const LINE_CELLS = 11;
  * top rises, by 98 px at 1024x768, so a line at 50% could end under it.
  */
 const LINE_ROW_DOWN = 0.4;
+/**
+ * How far down the free area the Route's row sits. Higher than lesson 4's line, because the card at the
+ * request step is the tallest any lesson shows, and the cables between the Route and the HTTP Handler
+ * need a band five rows tall clear of it.
+ */
+const ROUTE_ROW_DOWN = 0.35;
+/**
+ * The Route and Handler line, across: one cell for the return cable into the Route's input, the Route,
+ * three empty cells, the three-cell Handler, and one cell for the return cable out of the Handler's output.
+ */
+const ROUTE_SPAN_CELLS = 9;
+/** From the Route to the Handler's left edge: three empty cells between the Route's output and the Handler's input. */
+const HANDLER_OFFSET_CELLS = 4;
 /** From the Source to the Factory's left edge. */
 const FACTORY_OFFSET_CELLS = 4;
 /** From the Factory's output cell to the Sink in front of it, leaving three cells of belt. */
@@ -324,7 +343,9 @@ function sinkCellFor(port: BoardNode['ports'][number]): readonly [number, number
  * centred across the free area (one cell inside its left edge when 11 cells don't fit) and 40% down, the Factory's
  * top left 4 cells east of the Source and one row up, so its input is on the Source's row, and each Sink
  * 4 cells out from the Factory's output along the side that output faces, on its row. That's east at
- * turn 0, and the same rule turned for a turned Factory.
+ * turn 0, and the same rule turned for a turned Factory. Lesson 5's Route sits 35% down, one cell inside
+ * a centred 9-cell span (one cell inside the free area when 9 cells don't fit), and the HTTP Handler's top
+ * left 4 cells east of the Route and one row up, so its input faces the Route's output across 3 empty cells.
  *
  * Every spot moves down a row at a time past anything already there, with every cell of its machine's
  * footprint tested, so the ring marks a place the host will take and is never another machine's.
@@ -368,6 +389,20 @@ export function floorSpot(args: {
       let x = Math.round((px - camera.x) / size);
       if (x * size + camera.x < freeArea.left) x += 1;
       return free(x, Math.floor((freeArea.top + LINE_ROW_DOWN * (freeArea.bottom - freeArea.top) - camera.y) / size));
+    }
+    case 'centredRoute': {
+      const width = freeArea.right - freeArea.left;
+      const span = ROUTE_SPAN_CELLS * size;
+      const px = span <= width ? freeArea.left + (width - span) / 2 : freeArea.left;
+      let x = Math.round((px - camera.x) / size);
+      if (x * size + camera.x < freeArea.left) x += 1;
+      // The Route sits one cell in from the span's west end, leaving that cell for the return cable.
+      return free(x + 1, Math.floor((freeArea.top + ROUTE_ROW_DOWN * (freeArea.bottom - freeArea.top) - camera.y) / size));
+    }
+    case 'handler': {
+      // The Handler's input is at its local (0, 1), so one row up puts it on the Route's row.
+      const route = keyCell(args.bindings?.route?.nodeKey);
+      return route === null ? fortyPercent() : free(route[0] + HANDLER_OFFSET_CELLS, route[1] - 1);
     }
     case 'factory':
       return source === null ? fortyPercent() : free(source[0] + FACTORY_OFFSET_CELLS, source[1] - 1);

@@ -144,6 +144,10 @@ export type StageWhen =
   | { is: 'anyToolArmed' }
   | { is: 'beltNotArmed' }
   | { is: 'beltArmed' }
+  /** The Wire tool is armed. */
+  | { is: 'wireArmed' }
+  /** The Wire tool isn't armed: nothing is, or another tool is. */
+  | { is: 'wireNotArmed' }
   /** The Belt tool is armed, and the line leaving this machine stops short with an end a press can carry on from. */
   | { is: 'lineStopsShort'; from: BindingName }
   /** The Belt tool is armed, and a belt on the way from one machine to the other can only be undone, until it's gone. */
@@ -186,16 +190,32 @@ export type PanelTarget =
   /** The inspector's add-output button, found by its label. */
   | { kind: 'addOutputButton' }
   /** The line of the Factory's code editor whose text holds `holds`, or the whole editor with no such line. */
-  | { kind: 'codeLine'; holds: string };
+  | { kind: 'codeLine'; holds: string }
+  /** The palette's Wire tool, found by its label. */
+  | { kind: 'wireTool' }
+  /**
+   * The Copy button on the inspector's POST URL row, found through the row's label, so the ring stays put
+   * while the button reads Copied or Copy failed.
+   */
+  | { kind: 'copyUrlButton' };
 
 export type PortRoleName = 'out' | 'in';
 
 /**
- * Where a floor ring goes, worked out by `floorSpot`. `source` and `sink` are lesson 1's rule. The rest
+ * Where a floor ring goes, worked out by `floorSpot`. `source` and `sink` are lesson 1's rule. The next four
  * build lesson 4's line: a Source placed so the whole line is centred in the free area, a Factory beside
- * it, and a Sink in front of each of the Factory's outputs.
+ * it, and a Sink in front of each of the Factory's outputs. `centredRoute` and `handler` place a Route and
+ * an HTTP Handler with the Handler's input facing the Route's output across three empty cells.
  */
-export type FloorSpot = 'source' | 'sink' | 'centredSource' | 'factory' | 'firstOutputSink' | 'freeOutputSink';
+export type FloorSpot =
+  | 'source'
+  | 'sink'
+  | 'centredSource'
+  | 'factory'
+  | 'firstOutputSink'
+  | 'freeOutputSink'
+  | 'centredRoute'
+  | 'handler';
 
 export type HintAnchor =
   | { on: 'panel'; target: PanelTarget }

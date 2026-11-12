@@ -14,6 +14,10 @@ export const SINK_KIND = 7;
 export const BELT_KIND = 1;
 /** The `machine_kind` byte that `KIND_NAMES` calls Factory. */
 export const FACTORY_KIND = 2;
+/** The `machine_kind` byte that `KIND_NAMES` calls Route: a 1x1 machine that answers web requests at its URL. */
+export const ROUTE_KIND = 9;
+/** The `machine_kind` byte that `KIND_NAMES` calls HTTP Handler: a 3x3 machine whose code writes the reply. */
+export const HANDLER_KIND = 10;
 
 /**
  * First in nearly every step: a paused board holds an edit in the host's queue and moves no item, so
@@ -29,6 +33,12 @@ export const BOARD_PAUSED: Stage = {
 
 /** The floor stage's sentence, for any machine. */
 export const PLACE_ON_THE_FLOOR = 'Click the floor to place it. The ring marks a free spot, but any free spot works.';
+
+/**
+ * The floor stage's sentence for a machine bigger than one cell, which is placed by its top left corner,
+ * so the ring marks that corner and not the whole machine.
+ */
+export const PLACE_BY_TOP_LEFT = 'Click the floor to place it. The ring marks a free cell for its top left corner, but any free spot works.';
 
 /**
  * Before a press on something already on the board: machine tools stay armed after a place, so a press

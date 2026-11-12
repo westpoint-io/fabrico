@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CELL, nubAnchor } from '../../../shared/geometry';
 import { stripComments } from '../../gates/walkSpecSource';
-import { doorstepCell, dropHitRadiusWorld } from '../../protocol/ports';
+import { doorstepCell, dropHitRadiusWorld, wireNubHitRadiusWorld } from '../../protocol/ports';
+import * as hint from './HintPointer';
 import { doorstepSquareBox, dropDiscBox } from './HintPointer';
 
 const FRONTEND = fileURLToPath(new URL('../../../', import.meta.url));
@@ -80,5 +81,77 @@ describe('both readers name dropHitRadiusWorld', () => {
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, src.indexOf('\n}\n', start));
     expect(body).toMatch(/dropHitRadiusWorld\(cam\.scale\)/);
+  });
+});
+
+// A wire press, move and release all hit-test at `wireNubHitRadiusWorld`, wider than the belt drop
+// radius, so a ring on an electrical port is a disc at that radius on both ends of the drag.
+describe('wireDiscBox: the ring on an electrical port', () => {
+  const ROUTE_OUT = { cell_x: 8, cell_y: 8, side: 1 };
+  const expected: Record<number, { d: number; r: number }> = { 0.5: { d: 48, r: 22 }, 1: { d: 48, r: 22 }, 2: { d: 92, r: 44 } };
+  for (const scale of SCALES) {
+    it(`at scale ${scale} is a ${expected[scale].d} px border box on the dot, with hit radius ${expected[scale].r}`, () => {
+      const cam = camAt(scale);
+      const anchor = nubAnchor(ROUTE_OUT.cell_x, ROUTE_OUT.cell_y, ROUTE_OUT.side);
+      const box = hint.wireDiscBox(anchor, cam);
+      const cx = anchor.x * scale + cam.x;
+      const cy = anchor.y * scale + cam.y;
+      expect(Math.abs(box.hitRadiusPx - expected[scale].r)).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.hitRadiusPx - wireNubHitRadiusWorld(scale) * scale)).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.width - expected[scale].d)).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.height - expected[scale].d)).toBeLessThanOrEqual(TOL);
+      // 4 px wider than the hit circle's diameter: the 2 px border draws outside it on each side.
+      expect(Math.abs(box.width - (2 * box.hitRadiusPx + 4))).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.x + box.width / 2 - cx)).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.y + box.height / 2 - cy)).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.hitCentre.x - cx)).toBeLessThanOrEqual(TOL);
+      expect(Math.abs(box.hitCentre.y - cy)).toBeLessThanOrEqual(TOL);
+    });
+  }
+});
+
+describe('portRingBox: the ring follows the port medium, then its role', () => {
+  const ELECTRICAL = 1;
+  const MECHANICAL = 0;
+  const port = (role: number, medium: number, side: number) => ({ cell_x: 8, cell_y: 8, side, role, medium });
+  for (const scale of SCALES) {
+    it(`at scale ${scale} an electrical Out and In get the wire disc, a belt In the drop disc and a belt Out the doorstep square`, () => {
+      const cam = camAt(scale);
+      const wireR = wireNubHitRadiusWorld(scale) * scale;
+      const dropR = dropHitRadiusWorld(scale) * scale;
+      const electricalOut = hint.portRingBox(port(1, ELECTRICAL, 1), cam);
+      const electricalIn = hint.portRingBox(port(0, ELECTRICAL, 3), cam);
+      const beltIn = hint.portRingBox(port(0, MECHANICAL, 3), cam);
+      const beltOut = hint.portRingBox(port(1, MECHANICAL, 1), cam);
+      expect(Math.abs((electricalOut.hitRadiusPx ?? -1) - wireR), 'electrical Out').toBeLessThanOrEqual(TOL);
+      expect(Math.abs((electricalIn.hitRadiusPx ?? -1) - wireR), 'electrical In').toBeLessThanOrEqual(TOL);
+      expect(Math.abs((beltIn.hitRadiusPx ?? -1) - dropR), 'belt In keeps the drop disc').toBeLessThanOrEqual(TOL);
+      expect(beltOut.hitRadiusPx, 'belt Out keeps the square').toBeUndefined();
+      expect(beltOut).toMatchObject(doorstepSquareBox(port(1, MECHANICAL, 1), cam));
+      const anchor = nubAnchor(8, 8, 1);
+      expect(Math.abs(electricalOut.x + electricalOut.width / 2 - (anchor.x * scale + cam.x)), 'centred on the Out dot').toBeLessThanOrEqual(TOL);
+    });
+  }
+});
+
+describe('the wire press and the wire disc both name wireNubHitRadiusWorld', () => {
+  const read = (path: string) => stripComments(readFileSync(`${FRONTEND}${path}`, 'utf8'));
+
+  it("gestures.ts's wire press hit-tests at wireNubHitRadiusWorld(camScale()) before it ranks an electrical Out", () => {
+    const src = read('src/input/gestures.ts');
+    const ranker = src.indexOf('(h) => h.port.role === ROLE_OUT && mediumsCompatible(h.port.medium, MEDIUM_ELECTRICAL)');
+    expect(ranker).toBeGreaterThan(-1);
+    const before = src.slice(Math.max(0, ranker - 600), ranker);
+    expect(before).toMatch(/nubsInRadius\(\s*cam\.screenToWorld\(p\.x, p\.y\),\s*wireNubHitRadiusWorld\(camScale\(\)\),?\s*\)/);
+  });
+
+  it('HintPointer.tsx imports wireNubHitRadiusWorld and draws the wire disc from it', () => {
+    const src = read('src/chrome/tutorial/HintPointer.tsx');
+    expect(src).toMatch(/import \{[^}]*\bwireNubHitRadiusWorld\b[^}]*\} from '\.\.\/\.\.\/protocol\/ports'/);
+    const start = src.indexOf('export function wireDiscBox(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    expect(body).toMatch(/wireNubHitRadiusWorld\(cam\.scale\)/);
+    expect(body).not.toMatch(/dropHitRadiusWorld/);
   });
 });

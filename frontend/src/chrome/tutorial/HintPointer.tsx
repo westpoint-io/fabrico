@@ -18,11 +18,14 @@
 // A DRAG HAS TWO RINGS, and one paint call writes both with that attribute. If either target resolves
 // to nothing, both hide and the attribute goes, so a drag stage never shows half its rings.
 //
-// A PORT RING IS THE SIZE OF THE SPOT THE GESTURE ACCEPTS, and its shape follows the port's role. An
-// In port is where a drag ends, so its ring is a disc whose inner edge is the belt release's hit
-// circle (`dropHitRadiusWorld`, the radius `headInAt` passes). An Out port is where a drag starts,
-// and the press check accepts its whole doorstep cell, so its ring is a square around that cell.
-// A disc's moving element carries `data-fab-hit-r`, the hit radius in CSS px as painted this frame.
+// A PORT RING IS THE SIZE OF THE SPOT THE GESTURE ACCEPTS, and its shape follows the port's medium, then
+// its role. On a belt port, an In is where a drag ends, so its ring is a disc whose inner edge is the
+// belt release's hit circle (`dropHitRadiusWorld`, the radius `headInAt` passes), and an Out is where a
+// drag starts and the press check accepts its whole doorstep cell, so its ring is a square around that
+// cell. On an electrical port, the Wire tool's press, move and release all hit-test a circle of
+// `wireNubHitRadiusWorld` round the dot, so both ends of a wire drag get a disc of that radius. A disc's
+// moving element carries `data-fab-hit-r`, the hit radius in CSS px as painted this frame, and the
+// layer's probe reads a ring carrying it as a disc.
 
 import { useLayoutEffect, useRef, type JSX, type MutableRefObject, type RefObject } from 'react';
 import { CELL } from '../../../shared/geometry';
@@ -30,7 +33,8 @@ import { KIND_NAMES } from '../../../shared/kindNames';
 import type { PortView } from '../../protocol/decode';
 import { cellsOfFootprint, effectiveBox } from '../../protocol/footprint';
 import { machine_kind } from '../../protocol/kinds';
-import { doorstepCell, dropHitRadiusWorld, nubAnchor } from '../../protocol/ports';
+import { MEDIUM_ELECTRICAL, doorstepCell, dropHitRadiusWorld, nubAnchor, wireNubHitRadiusWorld } from '../../protocol/ports';
+import { ROUTE_URL_LABEL, WIRE_TOOL_LABEL } from '../controlLabels';
 import { FACTORY_EDITOR_LABELS } from '../FactoryConfigBody';
 import { ADD_OUTPUT_LABEL } from '../PortsSection';
 import type { SceneHandle } from '../../render/pixiApp';
@@ -85,16 +89,39 @@ interface RingBox extends Box {
   hitRadiusPx?: number;
 }
 
-/**
- * The ring where a drag ends, on an In port's dot at `anchor` (world px): a disc whose inner edge is
- * the belt release's hit circle. Its border box is `2r + 4` across, so the 2 px border draws outside.
- */
-export function dropDiscBox(anchor: { x: number; y: number }, cam: Cam): DiscBox {
-  const r = dropHitRadiusWorld(cam.scale) * cam.scale;
+/** A disc of hit radius `r` CSS px on the dot at `anchor` (world px). Its border box is `2r + 4` across, so the 2 px border draws outside. */
+function discBox(anchor: { x: number; y: number }, cam: Cam, r: number): DiscBox {
   const d = 2 * r + 2 * BORDER_PX;
   const cx = anchor.x * cam.scale + cam.x;
   const cy = anchor.y * cam.scale + cam.y;
   return { x: cx - d / 2, y: cy - d / 2, width: d, height: d, hitRadiusPx: r, hitCentre: { x: cx, y: cy } };
+}
+
+/**
+ * The ring where a belt drag ends, on an In port's dot at `anchor` (world px): a disc whose inner edge is
+ * the belt release's hit circle.
+ */
+export function dropDiscBox(anchor: { x: number; y: number }, cam: Cam): DiscBox {
+  return discBox(anchor, cam, dropHitRadiusWorld(cam.scale) * cam.scale);
+}
+
+/**
+ * The ring on an electrical port's dot at `anchor` (world px), at either end of a wire drag: a disc whose
+ * inner edge is the circle the Wire tool's press and release hit-test.
+ */
+export function wireDiscBox(anchor: { x: number; y: number }, cam: Cam): DiscBox {
+  return discBox(anchor, cam, wireNubHitRadiusWorld(cam.scale) * cam.scale);
+}
+
+/**
+ * A port's ring through the camera, chosen by the port's medium and then its role: a wire disc on any
+ * electrical port, a drop disc on a belt In, a doorstep square on a belt Out. Only a disc has a hit radius.
+ */
+export function portRingBox(port: Pick<PortView, 'cell_x' | 'cell_y' | 'side' | 'role' | 'medium'>, cam: Cam): Box & { hitRadiusPx?: number } {
+  if (port.medium !== MEDIUM_ELECTRICAL && port.role === PORT_ROLE.out) return doorstepSquareBox(port, cam);
+  const anchor = nubAnchor(port.cell_x, port.cell_y, port.side);
+  const disc = port.medium === MEDIUM_ELECTRICAL ? wireDiscBox(anchor, cam) : dropDiscBox(anchor, cam);
+  return { x: disc.x, y: disc.y, width: disc.width, height: disc.height, hitRadiusPx: disc.hitRadiusPx };
 }
 
 /**
@@ -120,6 +147,16 @@ function buttonReading(root: Element | null, word: string): HTMLElement | null {
 
 /** The open inspector, found by its heading. */
 const INSPECTOR = 'aside[aria-labelledby="fab-config-heading"]';
+
+/**
+ * The one button in the open inspector's row whose label reads `label`, or null with no such row or more
+ * than one button in it. Found through the label, so it stays found while the button's own word changes.
+ */
+function rowButton(label: string): HTMLElement | null {
+  const named = [...document.querySelectorAll<HTMLLabelElement>(`${INSPECTOR} label`)].find((l) => l.textContent?.trim() === label);
+  const buttons = named?.parentElement?.querySelectorAll<HTMLElement>('button');
+  return buttons?.length === 1 ? (buttons[0] ?? null) : null;
+}
 
 /**
  * The Factory's code editor in the open inspector: the box the label reading
@@ -170,6 +207,11 @@ function panelControl(target: PanelTarget): HTMLElement | null {
       return buttonReading(document.querySelector(INSPECTOR), ADD_OUTPUT_LABEL);
     case 'codeLine':
       return codeLine(target.holds);
+    case 'wireTool':
+      return buttonReading(document.querySelector('[data-fab-left-dock]'), WIRE_TOOL_LABEL);
+    // The button reads Copy, Copied or Copy failed, so it's found through the row's label.
+    case 'copyUrlButton':
+      return rowButton(ROUTE_URL_LABEL);
   }
 }
 
@@ -208,8 +250,8 @@ function boundNode(nodes: SceneNodes | undefined, bound: BoundNode | undefined) 
 }
 
 /**
- * A bound machine's port ring through the camera: a disc on an In port's dot, a square on an Out port's
- * doorstep. The port is the first with the role in the machine's port order, or with `pick: 'free'` the
+ * A bound machine's port ring through the camera, by `portRingBox`: a wire disc on an electrical port, a
+ * drop disc on a belt In's dot, a square on a belt Out's doorstep. The port is the first with the role in the machine's port order, or with `pick: 'free'` the
  * first that no belt dock names. With `pick: 'facing'` it's the Out the bound `to` machine sits on the
  * line of, by the same `outputFacing` rule the second Sink's floor spot reads, else the first Out. Read
  * each frame, so the ring follows the user if they took the other output first, and hides once every
@@ -236,18 +278,16 @@ function portBox(
         ? facing
         : node.ports.find((p) => p.role === PORT_ROLE[role]);
   if (port === undefined) return null;
-  if (role === 'out') return { ...doorstepSquareBox(port, cam), zIndex: BOARD_TARGET_Z };
-  const disc = dropDiscBox(nubAnchor(port.cell_x, port.cell_y, port.side), cam);
-  return { x: disc.x, y: disc.y, width: disc.width, height: disc.height, zIndex: BOARD_TARGET_Z, hitRadiusPx: disc.hitRadiusPx };
+  return { ...portRingBox(port, cam), zIndex: BOARD_TARGET_Z };
 }
 
 /**
- * The paint class for a ring: the disc's for a port ring on an In port, the square's for anything else, and
+ * The paint class for a ring: the disc's for a ring with a hit radius, the square's for anything else, and
  * the shallower pulse for a ring on a panel, where the blue has less contrast to spare.
  */
-function paintClass(on: HintAnchor['on'] | null, role: PortRoleName | null): string {
+function paintClass(on: HintAnchor['on'] | null, disc: boolean): string {
   if (on === 'panel') return 'fab-hint fab-hint--panel';
-  return role === 'in' ? 'fab-hint fab-hint--port' : 'fab-hint';
+  return disc ? 'fab-hint fab-hint--port' : 'fab-hint';
 }
 
 /**
@@ -423,8 +463,8 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
       writeRing(ring, box);
       if (toBox === null) ringTo.style.visibility = 'hidden';
       else writeRing(ringTo, toBox);
-      if (paintElRef.current !== null) paintElRef.current.className = paintClass(hint?.on ?? null, hint?.on === 'port' ? hint.role : null);
-      if (paintToElRef.current !== null) paintToElRef.current.className = paintClass(to === undefined ? null : 'port', to?.role ?? null);
+      if (paintElRef.current !== null) paintElRef.current.className = paintClass(hint?.on ?? null, box.hitRadiusPx !== undefined);
+      if (paintToElRef.current !== null) paintToElRef.current.className = paintClass(to === undefined ? null : 'port', toBox?.hitRadiusPx !== undefined);
       ring.setAttribute('data-fab-hint-stage', target.stageKey);
     };
     project();
@@ -450,7 +490,7 @@ export function HintPointer({ handleRef, targetRef, paintRef }: HintPointerProps
         {/* The paint, apart from the moving element, so a later pulse never touches the transform. */}
         <div ref={paintElRef} className="fab-hint" />
       </div>
-      {/* Where a drag ends. Its paint follows the far port's role, the same rule as the main ring. */}
+      {/* Where a drag ends. Its paint follows the far port's ring, the same rule as the main ring. */}
       <div
         ref={ringToRef}
         data-fab-hint-to=""

@@ -18,6 +18,8 @@ import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, p
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 import type { FabricoWire } from '../render/sceneState.ts';
+import { KIND_NAMES } from '../../shared/kindNames.ts';
+import * as common from './commonStages.ts';
 
 const SOURCE = 0;
 const SINK = 7;
@@ -2135,5 +2137,103 @@ describe('a wire step and a reply step', () => {
   it('a wire leg taken away sends the lesson back to the wire step', () => {
     const s = run(atReplyStep(0), { nodes: BOTH_MACHINES, wires: [cable(3, 1, 2)], tick: 11 });
     expect(s.stepIndex).toBe(2);
+  });
+});
+
+describe('the Wire tool stages', () => {
+  /** A hand-made lesson whose one step shows the first stage that holds, to read each condition on its own. */
+  const lessonWith = (...stages: Lesson['steps'][number]['stages']): Lesson => ({
+    id: 'delete-and-undo',
+    title: 'hand-made stages',
+    steps: [{ id: 'only', stages, done: { is: 'tickRose' } }],
+    closing: [],
+    refused: { atStep: 'only', atStage: 'none', press: { on: 'machine', of: 'source' }, tag: 'FootprintCollision' },
+  });
+  const stage = (id: string, when: Lesson['steps'][number]['stages'][number]['when']): Lesson['steps'][number]['stages'][number] => ({
+    id,
+    when,
+    hint: null,
+    gesture: { do: 'none' },
+    text: [id],
+  });
+  const FALLBACK = stage('fallback', { is: 'always' });
+  const shownWith = (lesson: Lesson, armed: ChromeFacts['armed']): string | undefined => {
+    const s = reduce(reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, [lesson]), { type: 'frame', board: board(), chrome: chrome() }, [lesson]);
+    return currentStage(s, board(), chrome({ armed }), [lesson])?.id;
+  };
+  const ARMINGS: ReadonlyArray<readonly [string, ChromeFacts['armed']]> = [
+    ['nothing', null],
+    ['the Belt tool', { kind: 'belt' }],
+    ['the Route tool', { kind: 'machine', machineKind: 9 }],
+    ['the Wire tool', { kind: 'wire' }],
+  ];
+
+  it('wireArmed holds only while the Wire tool is armed, and wireNotArmed is its opposite', () => {
+    const armedFirst = lessonWith(stage('wire-on', { is: 'wireArmed' }), FALLBACK);
+    const notArmedFirst = lessonWith(stage('wire-off', { is: 'wireNotArmed' }), FALLBACK);
+    const read = ARMINGS.map(([name, armed]) => [name, shownWith(armedFirst, armed), shownWith(notArmedFirst, armed)]);
+    expect(read).toEqual([
+      ['nothing', 'fallback', 'wire-off'],
+      ['the Belt tool', 'fallback', 'wire-off'],
+      ['the Route tool', 'fallback', 'wire-off'],
+      ['the Wire tool', 'wire-on', 'fallback'],
+    ]);
+  });
+
+  it('the shared tool-down stage counts the armed Wire tool as a tool', () => {
+    expect(shownWith(lessonWith(common.TOOL_DOWN, FALLBACK), { kind: 'wire' })).toBe('tool-down');
+    expect(shownWith(lessonWith(common.TOOL_DOWN, FALLBACK), null)).toBe('fallback');
+  });
+});
+
+describe('floorSpot for a Route and an HTTP Handler', () => {
+  // UI-SPEC "Floor spots": the free area at 1024x768 while the floor stage's two-line card shows.
+  const VIEW_1024: ChromeFacts['view'] = { camera: { x: 0, y: 0, scale: 1 }, freeArea: { left: 198, right: 610, top: 116, bottom: 589 } };
+  const CELL_PX = 32;
+  const routeAt = (x: number, y: number): BoardNode => ({ id: 60, kind: 9, cells: [[x, y]], ports: [] });
+  const boundRoute = (r: BoardNode): TutorialState['bindings'] => ({ route: { nodeKey: nodeKey(r), id: r.id } });
+
+  it('puts the Route 35% down the free area, one cell inside a centred 9-cell span', () => {
+    const [x, y] = floorSpot({ spot: 'centredRoute', view: VIEW_1024, board: board() });
+    // The span is centred: 198 + (412 - 288) / 2 = 260 px, and the Route is one cell in from it.
+    expect(x).toBe(Math.round(260 / CELL_PX) + 1);
+    expect(y, 'the cell under the 35% point').toBe(Math.floor((116 + 0.35 * (589 - 116)) / CELL_PX));
+    expect([x, y]).toEqual([9, 8]);
+  });
+
+  it('moves the Route down a row at a time past a machine on its row', () => {
+    const blockers = [node(70, SINK, 9, 8), node(71, SINK, 9, 9)];
+    expect(floorSpot({ spot: 'centredRoute', view: VIEW_1024, board: board({ nodes: blockers }) })).toEqual([9, 10]);
+  });
+
+  it("puts the Handler 4 cells east of the Route and one row up, its In on the Route's row past 3 empty cells", () => {
+    const r = routeAt(8, 8);
+    const [hx, hy] = floorSpot({ spot: 'handler', view: VIEW_1024, board: board({ nodes: [r] }), bindings: boundRoute(r) });
+    expect([hx, hy]).toEqual([12, 7]);
+    // The Handler's In is at local (0, 1), so it faces the Route's Out across cells 9, 10 and 11.
+    expect(hy + 1, "the In on the Route's row").toBe(8);
+    expect(hx - 8 - 1, 'empty cells between the Route and the Handler').toBe(3);
+  });
+
+  it('moves the Handler down until all nine cells are free, testing its whole footprint', () => {
+    const r = routeAt(8, 8);
+    const corner = node(72, SINK, 14, 9);
+    const spot = floorSpot({ spot: 'handler', view: VIEW_1024, board: board({ nodes: [r, corner] }), bindings: boundRoute(r) });
+    expect(spot).toEqual([12, 10]);
+    expect(square(spot[0], spot[1]).some(([x, y]) => x === 14 && y === 9)).toBe(false);
+  });
+});
+
+describe('the shared top-left floor sentence and the Route and Handler kinds', () => {
+  it("lesson 4's Factory floor stage reads as it did before the sentence moved", () => {
+    const stage = TWO_OUTPUTS.steps.find((s) => s.id === 'place-factory')?.stages.find((x) => x.id === 'factory-floor');
+    expect(phrasePlain(stage?.text ?? [], REAL_TABLES)).toBe(
+      'Click the floor to place it. The ring marks a free cell for its top left corner, but any free spot works.',
+    );
+    expect(stage?.text).toEqual([common.PLACE_BY_TOP_LEFT]);
+  });
+
+  it('ROUTE_KIND and HANDLER_KIND name the Route and the HTTP Handler in KIND_NAMES', () => {
+    expect([KIND_NAMES[common.ROUTE_KIND], KIND_NAMES[common.HANDLER_KIND]]).toEqual(['Route', 'HTTP Handler']);
   });
 });

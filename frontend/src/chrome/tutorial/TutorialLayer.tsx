@@ -15,7 +15,7 @@ import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, ty
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
-import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, PortRoleName, Stage } from '../../tutorial/types';
+import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
 import { frameTarget, offScreenFlag } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CONFIG_NOT_APPLIED_MARKER } from '../configCopy';
@@ -69,17 +69,16 @@ interface FrameFacts {
   chrome: ChromeFacts;
 }
 
-/** A ring's shape, by the rule HintPointer paints with: a disc on an In port, a square on anything else. */
-function shapeOf(role: PortRoleName | null): HintRect['shape'] {
-  return role === 'in' ? 'circle' : 'square';
-}
-
-/** A ring element's rect, and for a disc the hit circle it was painted around. */
-function rectOf(el: HTMLElement, shape: HintRect['shape']): HintRect {
+/**
+ * A ring element's rect, and for a disc the hit circle it was painted around. HintPointer writes
+ * `data-fab-hit-r` on a disc and only on a disc (a belt In's drop disc, or either end of a wire drag), so
+ * the attribute is what makes a ring a circle here.
+ */
+function rectOf(el: HTMLElement): HintRect {
   const r = el.getBoundingClientRect();
-  const rect: HintRect = { x: r.x, y: r.y, width: r.width, height: r.height, shape };
   const hitR = el.getAttribute('data-fab-hit-r');
-  if (shape === 'circle' && hitR !== null) {
+  const rect: HintRect = { x: r.x, y: r.y, width: r.width, height: r.height, shape: hitR === null ? 'square' : 'circle' };
+  if (hitR !== null) {
     rect.hitCentre = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     rect.hitRadiusPx = Number(hitR);
   }
@@ -91,18 +90,18 @@ function rectOf(el: HTMLElement, shape: HintRect['shape']): HintRect {
  * frame after the state, and until then its rect belongs to the old stage, so a rect in a probe read
  * always belongs to the stage named in that same read.
  */
-function ringRectFor(key: string, shape: HintRect['shape']): HintRect | null {
+function ringRectFor(key: string): HintRect | null {
   const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
   if (ring === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
-  return rectOf(ring, shape);
+  return rectOf(ring);
 }
 
 /** The drag's far ring, under the same comparison: the ring records the stage both were written for. */
-function ringToRectFor(key: string, shape: HintRect['shape']): HintRect | null {
+function ringToRectFor(key: string): HintRect | null {
   const ring = document.querySelector<HTMLElement>('[data-fab-hint]');
   const to = document.querySelector<HTMLElement>('[data-fab-hint-to]');
   if (ring === null || to === null || ring.getAttribute('data-fab-hint-stage') !== key) return null;
-  return rectOf(to, shape);
+  return rectOf(to);
 }
 
 /**
@@ -162,11 +161,8 @@ function probeOf(s: TutorialState, facts: FrameFacts | null, refusal: RefusalRec
     stepCount: lesson?.steps.length ?? 0,
     stepId: lesson?.steps[s.stepIndex]?.id ?? null,
     stageId: stage?.id ?? null,
-    hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id), shapeOf(stage.hint?.on === 'port' ? stage.hint.role : null)),
-    hintTo:
-      stage?.hint?.on === 'port' && stage.hint.to !== undefined
-        ? ringToRectFor(stageKey(s.stepIndex, stage.id), shapeOf(stage.hint.to.role))
-        : null,
+    hint: stage === null ? null : ringRectFor(stageKey(s.stepIndex, stage.id)),
+    hintTo: stage?.hint?.on === 'port' && stage.hint.to !== undefined ? ringToRectFor(stageKey(s.stepIndex, stage.id)) : null,
     bound,
     noteKind: slot?.kind ?? '',
     noteText: slot === null || slot.hidden ? '' : phrasePlain(slot.tokens),

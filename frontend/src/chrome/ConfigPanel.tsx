@@ -59,6 +59,7 @@ import {
   type FactoryEditorHandle,
 } from './FactoryConfigBody.tsx';
 import { WebhookUrlRow } from './WebhookUrlRow.tsx';
+import { ROUTE_URL_LABEL } from './controlLabels.ts';
 import {
   RouteConfigBody,
   routePathDispatchable,
@@ -1082,7 +1083,7 @@ export function ConfigPanelView({
           <WebhookUrlRow
             node={node}
             invoke={invoke}
-            label="POST URL"
+            label={ROUTE_URL_LABEL}
             /* 72-13: RE-FETCH WHEN THE COMMITTED PATH MOVES. Without this the row is
                keyed on the node alone, so an Apply that changed the path left the OLD
                URL on screen - with a Copy button beside it - until the panel was closed
