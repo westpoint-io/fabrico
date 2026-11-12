@@ -141,7 +141,7 @@ export const TWO_OUTPUTS: Lesson = {
           when: { is: 'toolArmed', machineKind: SINK_KIND },
           hint: { on: 'floor', spot: 'freeOutputSink' },
           gesture: { do: 'pressHint' },
-          text: ['Place a second ', { kind: SINK_KIND }, ' in the ring, for the second output.'],
+          text: ['Place a second ', { kind: SINK_KIND }, ' in the ring, for the other output.'],
           coach: {
             FootprintCollision: [
               'The ',

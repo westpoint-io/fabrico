@@ -1007,6 +1007,8 @@ export interface FactoryBuildOptions {
   secondFirst?: boolean;
   /** The first Sink this many columns east of its ring's cell, off its ring (review WR-03). */
   firstEast?: number;
+  /** The first Sink in its ring's column on the row below the Factory's box, on neither output's line. */
+  firstOffBothLines?: boolean;
   /** Stop after this many belts. */
   beltsDrawn?: 0 | 1 | 2 | 3;
   /** Called at press-add-output, before the press. */
@@ -1023,7 +1025,9 @@ export async function buildBoard(page: Page, h: Harness, host: ConfigHost, opts:
   const placed = await sourceOnTimer(page, h, host, visit);
   const { factory, tick: t2 } = await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick, opts.atAddOutput, visit);
   const secondRow = doorstepCell(portOf(factory, FACTORY_OUT2))[1];
-  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2, opts.secondFirst === true ? secondRow : undefined, visit, opts.firstEast);
+  const belowRow = factory.cell_y + (factory.h ?? 1) + 1;
+  const firstRow = opts.secondFirst === true ? secondRow : opts.firstOffBothLines === true ? belowRow : undefined;
+  const { sink, sink2, tick: t3 } = await twoSinks(page, h, host, [placed.source, factory], t2, firstRow, visit, opts.firstEast);
   const board: FactoryBoard = { source: placed.source, factory, sink, sink2, belts: [], tick: t3 };
   const nodes = [board.source, factory, sink, sink2];
   const outs = opts.secondFirst === true ? [FACTORY_OUT2, FACTORY_OUT] : [FACTORY_OUT, FACTORY_OUT2];

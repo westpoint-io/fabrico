@@ -19,6 +19,7 @@ import {
   SOURCE_TIMER,
   boot,
   buildBoard,
+  cellOfRing,
   centreOf,
   dragThroughRings,
   expectAt,
@@ -483,12 +484,44 @@ async function stopFrames(page: Page): Promise<FrameRead[]> {
   });
 }
 
+/**
+ * A visit that reads the card's words and the ring's cell each time the card shows second-sink-floor.
+ * The second Sink's words must hold wherever its ring sits, so a case reads both together.
+ */
+function secondSinkReads(page: Page): { visit: (stageId: string) => Promise<void>; reads: { text: string; cell: readonly [number, number] }[] } {
+  const reads: { text: string; cell: readonly [number, number] }[] = [];
+  const visit = async (stageId: string): Promise<void> => {
+    if (stageId !== STAGE.secondSinkFloor) return;
+    const ring = await ringAt(page, stageId);
+    reads.push({ text: (await page.locator(CARD).innerText()).replace(/\s+/g, ' '), cell: cellOfRing(ring, await cameraOf(page)) });
+  };
+  return { visit, reads };
+}
+
+/** The second Sink's words, read through the lesson's own tables. */
+const SECOND_SINK_WORDS = 'Place a second Sink in the ring, for the other output.';
+
 // Review WR-06, the mirror of WR-03. The first Sink on the second output's line, on its ring cell or one
 // past it. Step 8's ring must mark the second output, and the second Sink's ring must face the first, so
 // the belt a user draws by following step 8's rings runs along its own row and leaves the first output's
 // straight run free for step 9.
 test.describe("lesson 4 with the first Sink on the second output's line (review WR-06)", () => {
   test.use({ viewport: { width: 1280, height: 720 } });
+
+  test("while the second Sink's ring faces the first output, the card says the other output and never the second", async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const { visit, reads } = secondSinkReads(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 0, secondFirst: true, visit });
+    const firstRow = doorstepCell(portOf(board.factory, FACTORY_OUT))[1];
+    expect(board.sink.cell_y, "the first Sink is on the second output's row").toBe(doorstepCell(portOf(board.factory, FACTORY_OUT2))[1]);
+    expect(reads.length, 'the card showed second-sink-floor').toBeGreaterThan(0);
+    for (const read of reads) {
+      console.log(`MEASURE second-sink-words wr06 ring=${JSON.stringify(read.cell)} first_row=${firstRow} text=${JSON.stringify(read.text)}`);
+      expect(read.cell[1], "the second Sink's ring faces the first output").toBe(firstRow);
+      expect(read.text, 'the card names no output the first Sink took').not.toContain('second output');
+      expect(read.text).toContain(SECOND_SINK_WORDS);
+    }
+  });
 
   const cases: [string, { firstEast?: number }][] = [
     ["on the second output's ring cell", {}],
@@ -724,5 +757,24 @@ test.describe('a lesson started from ? on first launch (104-VERIFICATION finding
     const placed = await sourceOnTimer(page, h, host, visit);
     await factoryWithTwoOutputs(page, h, host, placed.source, placed.tick, undefined, visit);
     await expect(page.getByRole('heading', { name: WELCOME }), 'the welcome card never came back').toHaveCount(0);
+  });
+});
+
+// The first Sink on neither output's line: the second Sink's stage reads the same words.
+test.describe('lesson 4 with the first Sink on neither output line', () => {
+  test.use({ viewport: { width: 1280, height: 720 } });
+
+  test('the second Sink is for the other output there too', async ({ page }) => {
+    const { h, host } = await startFactoryLesson(page);
+    const { visit, reads } = secondSinkReads(page);
+    const board = await buildBoard(page, h, host, { beltsDrawn: 0, firstOffBothLines: true, visit });
+    const rows = [FACTORY_OUT, FACTORY_OUT2].map((port) => doorstepCell(portOf(board.factory, port))[1]);
+    expect(rows, "the first Sink is on neither output's row").not.toContain(board.sink.cell_y);
+    expect(reads.length, 'the card showed second-sink-floor').toBeGreaterThan(0);
+    for (const read of reads) {
+      console.log(`MEASURE second-sink-words neither ring=${JSON.stringify(read.cell)} out_rows=${JSON.stringify(rows)} text=${JSON.stringify(read.text)}`);
+      expect(read.text, 'the card names no output the first Sink took').not.toContain('second output');
+      expect(read.text).toContain(SECOND_SINK_WORDS);
+    }
   });
 });

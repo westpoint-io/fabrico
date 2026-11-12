@@ -1802,6 +1802,14 @@ describe('lesson 4: A Factory with two outputs', () => {
     );
   });
 
+  it("names no particular output for the second Sink, because the first Sink may have taken either", () => {
+    const stage = TWO_OUTPUTS.steps.find((st) => st.id === 'place-second-sink')?.stages.find((g) => g.id === 'second-sink-floor');
+    if (stage === undefined) throw new Error('lesson 4 has no second-sink-floor stage');
+    const text = phrasePlain(stage.text, REAL_TABLES);
+    expect(text).toBe('Place a second Sink in the ring, for the other output.');
+    expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+  });
+
   it('walks to the watch step one step a frame, with + Add output before any Sink or belt', () => {
     const s = atL4(9);
     expect(s.card).toBe('running');
