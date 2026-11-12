@@ -9,7 +9,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/TutorialLayer';
 import type { MachineConfig } from '../../src/protocol/decode';
-import { doorstepCell } from '../../src/protocol/ports';
+import { doorstepCell, nubAnchor } from '../../src/protocol/ports';
 import { GESTURE_REFUSAL_KIND } from '../../src/transport/transport';
 import { YOUR_FIRST_LINE } from '../../src/tutorial/lessons/yourFirstLine';
 import { TWO_OUTPUTS } from '../../src/tutorial/lessons/twoOutputs';
@@ -1291,4 +1291,23 @@ export interface RequestBoard {
 export async function expectedCurlWord(page: Page): Promise<string> {
   const ua = await page.evaluate(() => navigator.userAgent);
   return ua.includes('Windows') ? 'curl.exe' : 'curl';
+}
+
+/**
+ * The window point of a port's dot, read off the scene's own port for that handle and index and put
+ * through `nubAnchor` and the camera, the same anchor the Wire tool's press hit-tests around.
+ */
+export async function nubCentre(page: Page, node: number, index: number): Promise<{ x: number; y: number }> {
+  const port = await page.evaluate(
+    ([id, at]) => {
+      const hook = (window as unknown as { __fabrico: { scene(): { nodes: { id: number; ports: { index: number; cell_x: number; cell_y: number; side: number }[] }[] } } }).__fabrico;
+      const p = hook.scene().nodes.find((n) => n.id === id)?.ports.find((q) => q.index === at);
+      return p === undefined ? null : { cell_x: p.cell_x, cell_y: p.cell_y, side: p.side };
+    },
+    [node, index] as const,
+  );
+  if (port === null) throw new Error(`the scene holds no port ${index} on machine ${node}`);
+  const cam = await cameraOf(page);
+  const anchor = nubAnchor(port.cell_x, port.cell_y, port.side);
+  return { x: anchor.x * cam.scale + cam.x, y: anchor.y * cam.scale + cam.y };
 }
