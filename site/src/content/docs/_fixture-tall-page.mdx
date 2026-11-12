@@ -1,0 +1,107 @@
+---
+title: A tall page to check both sidebars reach the window bottom
+description: A test page for the docs suite, at least three screens tall, that lists every limit, shortcut and refusal fact.
+---
+
+import Fact from '../../components/Fact.astro';
+
+This page tests the frame on a long page. It lists every limit, keyboard shortcut and refusal message the site generates from the code, so it scrolls through at least three screens, and the docs suite checks that both sidebars still reach the bottom of the window once the page is scrolled to its end.
+
+## Limits
+
+| Fact | Value |
+|---|---|
+| `limit.belt_pace_max` | <Fact id="limit.belt_pace_max" /> |
+| `limit.belt_pace_min` | <Fact id="limit.belt_pace_min" /> |
+| `limit.default_arity` | <Fact id="limit.default_arity" /> |
+| `limit.default_ticks_per_slot` | <Fact id="limit.default_ticks_per_slot" /> |
+| `limit.endpoint_deadline_ticks` | <Fact id="limit.endpoint_deadline_ticks" /> |
+| `limit.endpoint_ingress_capacity` | <Fact id="limit.endpoint_ingress_capacity" /> |
+| `limit.factory_emits_per_port` | <Fact id="limit.factory_emits_per_port" /> |
+| `limit.factory_gas_budget` | <Fact id="limit.factory_gas_budget" /> |
+| `limit.factory_memory` | <Fact id="limit.factory_memory" /> |
+| `limit.factory_stack_desktop` | <Fact id="limit.factory_stack_desktop" /> |
+| `limit.fault_queue_cap` | <Fact id="limit.fault_queue_cap" /> |
+| `limit.grid_max` | <Fact id="limit.grid_max" /> |
+| `limit.grid_min` | <Fact id="limit.grid_min" /> |
+| `limit.label_max_h` | <Fact id="limit.label_max_h" /> |
+| `limit.label_max_w` | <Fact id="limit.label_max_w" /> |
+| `limit.max_belt_tiles` | <Fact id="limit.max_belt_tiles" /> |
+| `limit.max_config_bytes` | <Fact id="limit.max_config_bytes" /> |
+| `limit.max_endpoint_path_bytes` | <Fact id="limit.max_endpoint_path_bytes" /> |
+| `limit.max_footprint_dim` | <Fact id="limit.max_footprint_dim" /> |
+| `limit.max_label_bytes` | <Fact id="limit.max_label_bytes" /> |
+| `limit.max_project_bytes` | <Fact id="limit.max_project_bytes" /> |
+| `limit.max_route_expect_bytes` | <Fact id="limit.max_route_expect_bytes" /> |
+| `limit.max_routes` | <Fact id="limit.max_routes" /> |
+| `limit.mechanical_inbox_cap` | <Fact id="limit.mechanical_inbox_cap" /> |
+| `limit.router_out_arity` | <Fact id="limit.router_out_arity" /> |
+| `limit.slots_per_tile` | <Fact id="limit.slots_per_tile" /> |
+| `limit.source_pending_cap` | <Fact id="limit.source_pending_cap" /> |
+| `limit.wire_budget` | <Fact id="limit.wire_budget" /> |
+| `limit.wire_inflight_cap` | <Fact id="limit.wire_inflight_cap" /> |
+
+## Keyboard shortcuts
+
+| Fact | Value |
+|---|---|
+| `shortcut.delete` | <Fact id="shortcut.delete" /> |
+| `shortcut.escape` | <Fact id="shortcut.escape" /> |
+| `shortcut.fit` | <Fact id="shortcut.fit" /> |
+| `shortcut.names` | <Fact id="shortcut.names" /> |
+| `shortcut.newBoard` | <Fact id="shortcut.newBoard" /> |
+| `shortcut.open` | <Fact id="shortcut.open" /> |
+| `shortcut.playPause` | <Fact id="shortcut.playPause" /> |
+| `shortcut.redo` | <Fact id="shortcut.redo" /> |
+| `shortcut.redoY` | <Fact id="shortcut.redoY" /> |
+| `shortcut.rotate` | <Fact id="shortcut.rotate" /> |
+| `shortcut.rotateBack` | <Fact id="shortcut.rotateBack" /> |
+| `shortcut.save` | <Fact id="shortcut.save" /> |
+| `shortcut.saveAs` | <Fact id="shortcut.saveAs" /> |
+| `shortcut.step` | <Fact id="shortcut.step" /> |
+| `shortcut.undo` | <Fact id="shortcut.undo" /> |
+
+## Refusal messages
+
+| Fact | Value |
+|---|---|
+| `refusal.BeltEndTaken` | <Fact id="refusal.BeltEndTaken" /> |
+| `refusal.BeltEndsApart` | <Fact id="refusal.BeltEndsApart" /> |
+| `refusal.BeltJoinTurnsBack` | <Fact id="refusal.BeltJoinTurnsBack" /> |
+| `refusal.BeltNotPlaceable` | <Fact id="refusal.BeltNotPlaceable" /> |
+| `refusal.BeltOnlyPort` | <Fact id="refusal.BeltOnlyPort" /> |
+| `refusal.BeltTooLong` | <Fact id="refusal.BeltTooLong" /> |
+| `refusal.BoardChanged` | <Fact id="refusal.BoardChanged" /> |
+| `refusal.DockNotSent` | <Fact id="refusal.DockNotSent" /> |
+| `refusal.DuplicatePath` | <Fact id="refusal.DuplicatePath" /> |
+| `refusal.FootprintCollision` | <Fact id="refusal.FootprintCollision" /> |
+| `refusal.GrowBlocked` | <Fact id="refusal.GrowBlocked" /> |
+| `refusal.GrowCoversBelt` | <Fact id="refusal.GrowCoversBelt" /> |
+| `refusal.IncompatiblePorts` | <Fact id="refusal.IncompatiblePorts" /> |
+| `refusal.InvalidBeltJoin` | <Fact id="refusal.InvalidBeltJoin" /> |
+| `refusal.InvalidDock` | <Fact id="refusal.InvalidDock" /> |
+| `refusal.InvalidPath` | <Fact id="refusal.InvalidPath" /> |
+| `refusal.LabelDoesNotConnect` | <Fact id="refusal.LabelDoesNotConnect" /> |
+| `refusal.MachineTooBig` | <Fact id="refusal.MachineTooBig" /> |
+| `refusal.Malformed` | <Fact id="refusal.Malformed" /> |
+| `refusal.MediumMismatch` | <Fact id="refusal.MediumMismatch" /> |
+| `refusal.NoSuchPort` | <Fact id="refusal.NoSuchPort" /> |
+| `refusal.NothingToRedo` | <Fact id="refusal.NothingToRedo" /> |
+| `refusal.NothingToUndo` | <Fact id="refusal.NothingToUndo" /> |
+| `refusal.OutOfBounds` | <Fact id="refusal.OutOfBounds" /> |
+| `refusal.OverLimit` | <Fact id="refusal.OverLimit" /> |
+| `refusal.PaceOutOfRange` | <Fact id="refusal.PaceOutOfRange" /> |
+| `refusal.PortOccupied` | <Fact id="refusal.PortOccupied" /> |
+| `refusal.ResizeCovers` | <Fact id="refusal.ResizeCovers" /> |
+| `refusal.RotateBlocked` | <Fact id="refusal.RotateBlocked" /> |
+| `refusal.RotateCoversBelt` | <Fact id="refusal.RotateCoversBelt" /> |
+| `refusal.RouteEmpty` | <Fact id="refusal.RouteEmpty" /> |
+| `refusal.RouteNonAdjacent` | <Fact id="refusal.RouteNonAdjacent" /> |
+| `refusal.RouteSelfCrossing` | <Fact id="refusal.RouteSelfCrossing" /> |
+| `refusal.UndoDoesNotFit` | <Fact id="refusal.UndoDoesNotFit" /> |
+| `refusal.UndoSpaceTaken` | <Fact id="refusal.UndoSpaceTaken" /> |
+| `refusal.UnknownKind` | <Fact id="refusal.UnknownKind" /> |
+| `refusal.UnknownNode` | <Fact id="refusal.UnknownNode" /> |
+| `refusal.UnknownOption` | <Fact id="refusal.UnknownOption" /> |
+| `refusal.WrongKind` | <Fact id="refusal.WrongKind" /> |
+| `refusal.ZeroBeltInterval` | <Fact id="refusal.ZeroBeltInterval" /> |

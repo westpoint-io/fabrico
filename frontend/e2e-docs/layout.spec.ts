@@ -237,3 +237,27 @@ test('the Edit page link is 12 px text on a row at least 32 px tall', async ({ p
   expect(edit.size, 'the Edit page link font size').toBe('12px');
   expect(edit.height, 'the Edit page link height').toBeGreaterThanOrEqual(32);
 });
+
+test('both sidebars reach the bottom of a 1440 x 900 window on a page three screens tall, scrolled to the end', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await page.goto(await fixturePage('_fixture-tall-page'));
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  const m = await page.evaluate(() => {
+    const bottom = (selector: string): number | null => document.querySelector(selector)?.getBoundingClientRect().bottom ?? null;
+    const hit = document.elementFromPoint(150, window.innerHeight - 4);
+    return {
+      pageHeight: document.documentElement.scrollHeight,
+      innerHeight: window.innerHeight,
+      left: bottom('.sidebar-pane'),
+      right: bottom('.right-sidebar'),
+      hitInLeft: hit?.closest('.sidebar-pane') != null,
+    };
+  });
+  expect(m.pageHeight, 'the tall test page is at least three window heights').toBeGreaterThanOrEqual(3 * HEIGHT);
+  expect(Math.abs((m.left ?? 0) - m.innerHeight), `the left sidebar bottom (${m.left}) against the window bottom (${m.innerHeight})`).toBeLessThanOrEqual(1);
+  expect(Math.abs((m.right ?? 0) - m.innerHeight), `the right sidebar bottom (${m.right}) against the window bottom (${m.innerHeight})`).toBeLessThanOrEqual(1);
+  expect(m.hitInLeft, 'the point 4 px above the window bottom at x 150 is inside the left sidebar').toBe(true);
+});
