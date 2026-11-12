@@ -15,6 +15,8 @@ import {
   auditLessonWords,
   phrase,
   phrasePlain,
+  splitAtBlock,
+  stageTextFindings,
   type WordTables,
 } from './phrase.ts';
 import type { Lesson, PhraseToken, Stage } from './types.ts';
@@ -210,14 +212,12 @@ describe('the step text budget, counted on the resolved plain string', () => {
     expect(MAX_NOTE_CHARS).toBe(94);
   });
 
-  it('holds every stage inside the instruction budget, in printable ASCII', () => {
+  it('holds every stage inside its budgets, split at the request line token, in printable ASCII', () => {
     expect(stages.length, 'NON-VACUITY: the lessons hold stages to measure').toBeGreaterThanOrEqual(6);
-    for (const stage of stages) {
-      const plain = phrasePlain(stage.text);
-      expect(plain.length, `${stage.id}: "${plain}" has words`).toBeGreaterThan(0);
-      expect(plain.length, `${stage.id}: "${plain}"`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
-      expect(plain, `${stage.id} is printable ASCII`).toMatch(PRINTABLE_ASCII);
-    }
+    const findings = LESSONS.flatMap((lesson) =>
+      lesson.steps.flatMap((step) => step.stages.flatMap((stage) => stageTextFindings(`${lesson.id} ${step.id} ${stage.id}`, stage.text))),
+    );
+    expect(findings).toEqual([]);
   });
 
   it('holds the closing sentence inside the instruction budget, in printable ASCII', () => {
@@ -289,5 +289,68 @@ describe('a code fragment in lesson words', () => {
       steps: [{ ...YOUR_FIRST_LINE.steps[0]!, stages: [{ ...stageOf('place-source', 'source-tool'), text: ['Place a Source and type ', { code: 'x' }, '.'] }] }],
     };
     expect(auditLessonWords([lesson]).join('\n')).toContain('"Source" is typed as text');
+  });
+});
+
+describe('the request line block token', () => {
+  const LINE: PhraseToken[] = ['Type this line in a terminal:', { requestLine: 'route' }, 'Then press ', { key: 'playPause' }, '.'];
+
+  it('splits a text holding it into the part before, the token and the part after', () => {
+    const { before, block, after } = splitAtBlock(LINE);
+    expect(before).toEqual(['Type this line in a terminal:']);
+    expect(block).toEqual({ requestLine: 'route' });
+    expect(after).toEqual(['Then press ', { key: 'playPause' }, '.']);
+  });
+
+  it('gives block null and the whole text as before when there is no token', () => {
+    const text: PhraseToken[] = ['Press ', { key: 'playPause' }, '.'];
+    const split = splitAtBlock(text);
+    expect(split.block).toBeNull();
+    expect(split.before).toEqual(text);
+    expect(split.after).toEqual([]);
+  });
+
+  it('refuses a text holding two of them', () => {
+    expect(() => splitAtBlock(['a', { requestLine: 'route' }, 'b', { requestLine: 'route' }])).toThrow(/two requestLine/);
+  });
+
+  it('makes phrasePlain throw by name on the unsplit text, so an audit that forgets to split fails', () => {
+    expect(() => phrasePlain(LINE)).toThrow(/requestLine block token/);
+    expect(() => phrase(LINE)).toThrow(/splitAtBlock/);
+  });
+
+  it('is not a table word, so auditLessonWords reads it as a marker', () => {
+    expect(auditLessonWords([lessonWith(LINE)])).toEqual([]);
+  });
+});
+
+describe('stageTextFindings: the audit every stage text goes through', () => {
+  const words = (n: number): string => 'a'.repeat(n);
+
+  it('passes a stage at both budgets exactly', () => {
+    expect(stageTextFindings('edge', [words(MAX_INSTRUCTION_CHARS), { requestLine: 'route' }, words(MAX_NOTE_CHARS)])).toEqual([]);
+  });
+
+  it('fails a hand-made stage whose part before the token is 142 characters', () => {
+    const findings = stageTextFindings('long before', [words(MAX_INSTRUCTION_CHARS + 1), { requestLine: 'route' }, 'Then press Enter.']);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatch(/long before: the instruction is 142 characters/);
+  });
+
+  it('fails a hand-made stage whose part after the token is 95 characters', () => {
+    const findings = stageTextFindings('long after', ['Type this line:', { requestLine: 'route' }, words(MAX_NOTE_CHARS + 1)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatch(/long after: the line after the request line is 95 characters/);
+  });
+
+  it('holds a text without the token to the instruction budget alone', () => {
+    expect(stageTextFindings('plain', [words(MAX_INSTRUCTION_CHARS)])).toEqual([]);
+    expect(stageTextFindings('plain', [words(MAX_INSTRUCTION_CHARS + 1)])).toHaveLength(1);
+  });
+
+  it('fails an empty instruction and a non-ASCII character on either side', () => {
+    expect(stageTextFindings('empty', [])).toEqual(['empty: the instruction has no words']);
+    expect(stageTextFindings('accent', ['caf\u00e9', { requestLine: 'route' }, 'ok'])).toHaveLength(1);
+    expect(stageTextFindings('accent', ['ok', { requestLine: 'route' }, 'caf\u00e9'])).toHaveLength(1);
   });
 });

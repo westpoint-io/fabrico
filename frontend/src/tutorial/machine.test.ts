@@ -14,7 +14,7 @@ import {
   type RowView,
   type TutorialState,
 } from './machine.ts';
-import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain } from './phrase.ts';
+import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain, stageTextFindings } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
 import type { FabricoWire } from '../render/sceneState.ts';
@@ -112,8 +112,7 @@ describe('the lesson data', () => {
   it('keeps every instruction inside the card', () => {
     for (const step of LESSONS[0]?.steps ?? []) {
       for (const stage of step.stages) {
-        const text = phrasePlain(stage.text);
-        expect(text.length, `${step.id} ${stage.id}: ${text}`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        expect(stageTextFindings(`${step.id} ${stage.id}`, stage.text)).toEqual([]);
       }
     }
   });
@@ -1288,8 +1287,7 @@ describe('lesson 3: Delete and Undo', () => {
     expect(auditLessonWords(du === undefined ? [] : [du])).toEqual([]);
     for (const s of du?.steps ?? []) {
       for (const stage of s.stages) {
-        const text = phrasePlain(stage.text);
-        expect(text.length, `${s.id} ${stage.id}: ${text}`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        expect(stageTextFindings(`${s.id} ${stage.id}`, stage.text)).toEqual([]);
         for (const line of Object.values(stage.coach ?? {})) {
           expect(phrasePlain(line).length, `${s.id} ${stage.id} coach`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
         }
@@ -1793,8 +1791,7 @@ describe('lesson 4: A Factory with two outputs', () => {
     expect(auditLessonWords([TWO_OUTPUTS])).toEqual([]);
     for (const s of TWO_OUTPUTS.steps) {
       for (const stage of s.stages) {
-        const text = phrasePlain(stage.text);
-        expect(text.length, `${s.id} ${stage.id}: ${text}`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        expect(stageTextFindings(`${s.id} ${stage.id}`, stage.text)).toEqual([]);
         for (const line of Object.values(stage.coach ?? {})) {
           expect(phrasePlain(line).length, `${s.id} ${stage.id} coach`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
         }
@@ -2235,5 +2232,56 @@ describe('the shared top-left floor sentence and the Route and Handler kinds', (
 
   it('ROUTE_KIND and HANDLER_KIND name the Route and the HTTP Handler in KIND_NAMES', () => {
     expect([KIND_NAMES[common.ROUTE_KIND], KIND_NAMES[common.HANDLER_KIND]]).toEqual(['Route', 'HTTP Handler']);
+  });
+});
+
+describe('urlNotRead', () => {
+  const ROUTE_NODE: BoardNode = { id: 60, kind: 9, cells: [[3, 3]], ports: [] };
+  const URL = 'http://127.0.0.1:54321/endpoint/route-60';
+  const LESSON_WITH_WAIT: Lesson = {
+    id: 'delete-and-undo',
+    title: 'hand-made URL wait',
+    steps: [
+      {
+        id: 'send',
+        stages: [
+          { id: 'waiting', when: { is: 'urlNotRead', of: 'route' }, hint: null, gesture: { do: 'none' }, text: ['Waiting for the POST URL.'] },
+          { id: 'send-request', when: { is: 'always' }, hint: null, gesture: { do: 'none' }, text: ['Run the line.'] },
+        ],
+        done: { is: 'tickRose' },
+      },
+    ],
+    closing: [],
+    refused: { atStep: 'send', atStage: 'none', press: { on: 'machine', of: 'source' }, tag: 'FootprintCollision' },
+  };
+  /** The stage the step shows on a board at `generation`, with the Route bound as handle 60 and this URL read. */
+  const shownAt = (routeUrl: ChromeFacts['routeUrl'], generation = 1): string | undefined => {
+    const sent = reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, [LESSON_WITH_WAIT]);
+    const started = reduce(sent, { type: 'frame', board: board(), chrome: chrome() }, [LESSON_WITH_WAIT]);
+    const s = { ...started, bindings: { route: { nodeKey: nodeKey(ROUTE_NODE), id: ROUTE_NODE.id } } };
+    return currentStage(s, board({ nodes: [ROUTE_NODE], generation }), chrome({ routeUrl }), [LESSON_WITH_WAIT])?.id;
+  };
+
+  it('holds while no URL has been read', () => {
+    expect(shownAt(null)).toBe('waiting');
+  });
+
+  it('holds while the URL read names another handle', () => {
+    expect(shownAt({ node: 61, generation: 1, url: URL })).toBe('waiting');
+  });
+
+  it('holds while the URL read is from the previous generation, before an Undo keyframe', () => {
+    expect(shownAt({ node: ROUTE_NODE.id, generation: 1, url: URL }, 2)).toBe('waiting');
+  });
+
+  it("stops holding once the bound Route's URL is read at this generation", () => {
+    expect(shownAt({ node: ROUTE_NODE.id, generation: 1, url: URL })).toBe('send-request');
+    expect(shownAt({ node: ROUTE_NODE.id, generation: 2, url: URL }, 2)).toBe('send-request');
+  });
+
+  it('holds while no Route is bound, whatever was read', () => {
+    const sent = reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, [LESSON_WITH_WAIT]);
+    const s = reduce(sent, { type: 'frame', board: board(), chrome: chrome() }, [LESSON_WITH_WAIT]);
+    expect(currentStage(s, board(), chrome({ routeUrl: { node: 60, generation: 1, url: URL } }), [LESSON_WITH_WAIT])?.id).toBe('waiting');
   });
 });

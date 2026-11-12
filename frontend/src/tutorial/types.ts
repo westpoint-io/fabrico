@@ -182,7 +182,12 @@ export type StageWhen =
    */
   | { is: 'codeUnchanged'; of: BindingName }
   /** The inspector shows its not-applied marker. */
-  | { is: 'codeNotApplied' };
+  | { is: 'codeNotApplied' }
+  /**
+   * No URL has been read off the bound Route's POST URL row at this board generation: `routeUrl` is null,
+   * names another handle, or was read before an Undo keyframe re-minted the handles.
+   */
+  | { is: 'urlNotRead'; of: BindingName };
 
 /** A chrome control a ring can mark. Each resolves by the control's own name or state, so a renamed control fails the walk. */
 export type PanelTarget =

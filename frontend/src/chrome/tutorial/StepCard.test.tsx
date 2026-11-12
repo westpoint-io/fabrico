@@ -494,4 +494,40 @@ describe('StepCard request line', () => {
     expect(at('data-fab-step-text')).toBeLessThan(at('data-fab-request-line'));
     expect(at('data-fab-request-line')).toBeLessThan(at('data-fab-step-after'));
   });
+
+  it('sets the line as a text child in a code element inside its box, so markup in it stays text', () => {
+    const odd = 'http://127.0.0.1:54321/endpoint/<b>x</b>';
+    const tree = elements(StepCard({ view: WITH_LINE, ...NOOPS, request: { word: 'curl', url: odd } }));
+    const line = tree.find((el) => el.props['data-fab-request-line'] !== undefined);
+    expect(textOf(line)).toBe(`curl -X POST ${odd}`);
+    const inner = elements(line!.props.children);
+    expect(inner.map((el) => el.type), 'one code element, no b element').toEqual(['code']);
+    expect(inner[0]?.props.children).toBe(`curl -X POST ${odd}`);
+    expect(tree.some((el) => el.type === 'b')).toBe(false);
+    expect(styleOf(line!)).toMatchObject({
+      background: 'var(--fab-substrate)',
+      border: '1px solid var(--fab-edge-lit)',
+      padding: 'var(--fab-space-sm)',
+      fontWeight: 400,
+      whiteSpace: 'pre-wrap',
+      overflowWrap: 'anywhere',
+      pointerEvents: 'none',
+    });
+  });
+
+  it('renders no request line row for a stage holding the token while no URL is held', () => {
+    for (const request of [null, undefined]) {
+      const tree = elements(StepCard({ view: WITH_LINE, ...NOOPS, ...(request === undefined ? {} : { request }) }));
+      expect(tree.filter((el) => el.props['data-fab-request-line'] !== undefined), String(request)).toEqual([]);
+      expect(textOf(tree.find((el) => el.props['data-fab-step-text'] !== undefined))).toBe('Type this line in a terminal:');
+      expect(textOf(tree.find((el) => el.props['data-fab-step-after'] !== undefined))).toBe('Then press Enter.');
+    }
+  });
+
+  it('renders a stage without the token as it always did, whatever request the layer holds', () => {
+    const tree = elements(StepCard({ view: RUNNING, ...NOOPS, request: { word: 'curl', url: URL } }));
+    expect(tree.filter((el) => el.props['data-fab-request-line'] !== undefined)).toEqual([]);
+    expect(tree.filter((el) => el.props['data-fab-step-after'] !== undefined)).toEqual([]);
+    expect(textOf(tree.find((el) => el.props['data-fab-step-text'] !== undefined))).toBe('A Source makes items.');
+  });
 });

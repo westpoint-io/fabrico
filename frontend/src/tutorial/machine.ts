@@ -240,6 +240,11 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
     }
     case 'codeNotApplied':
       return chrome.codeNotApplied;
+    case 'urlNotRead': {
+      const route = bindings[when.of];
+      const read = chrome.routeUrl;
+      return route === undefined || read === null || read.node !== route.id || read.generation !== board.generation;
+    }
   }
 }
 

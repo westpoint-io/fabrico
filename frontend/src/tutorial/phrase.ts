@@ -90,6 +90,33 @@ export function phrasePlain(tokens: readonly PhraseToken[], tables: WordTables =
     .join('');
 }
 
+/** The card's character budgets assume one 8 px advance per character, which holds for printable ASCII only. */
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
+
+/**
+ * One finding for each way a stage's text breaks the card's budgets, split at the request line token: the
+ * part before is the instruction, held to `MAX_INSTRUCTION_CHARS` and to having words; the part after is
+ * the line under the request line, held to `MAX_NOTE_CHARS`. Both must be printable ASCII. A text with no
+ * token is all instruction.
+ */
+export function stageTextFindings(where: string, tokens: readonly PhraseToken[], tables: WordTables = REAL_TABLES): string[] {
+  const { before, block, after } = splitAtBlock(tokens);
+  const findings: string[] = [];
+  const instruction = phrasePlain(before, tables);
+  if (instruction.length === 0) findings.push(`${where}: the instruction has no words`);
+  if (instruction.length > MAX_INSTRUCTION_CHARS) {
+    findings.push(`${where}: the instruction is ${instruction.length} characters, over ${MAX_INSTRUCTION_CHARS}: "${instruction}"`);
+  }
+  if (!PRINTABLE_ASCII.test(instruction)) findings.push(`${where}: the instruction isn't printable ASCII: "${instruction}"`);
+  if (block === null) return findings;
+  const line = phrasePlain(after, tables);
+  if (line.length > MAX_NOTE_CHARS) {
+    findings.push(`${where}: the line after the request line is ${line.length} characters, over ${MAX_NOTE_CHARS}: "${line}"`);
+  }
+  if (!PRINTABLE_ASCII.test(line)) findings.push(`${where}: the line after the request line isn't printable ASCII: "${line}"`);
+  return findings;
+}
+
 /** Stands in for a table token or a code fragment in the audit: not a letter, a digit or a space. */
 const TOKEN_MARKER = '\u0001';
 const LETTER_OR_DIGIT = /[A-Za-z0-9]/;
