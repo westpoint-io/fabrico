@@ -26,6 +26,24 @@ const preloadFont = (file) => ({
 /** One sidebar group listing every page in a folder under src/content/docs/. */
 const group = (label, directory) => ({ label, items: [{ autogenerate: { directory } }] });
 
+/**
+ * A sidebar group that links to its folder's index page, then lists subgroups, each
+ * `[label, folder]` under src/content/docs/. The subgroups start closed, and Starlight opens the one
+ * holding the current page. Starlight 0.42 has no `{ label, autogenerate }` group shape (removed in
+ * 0.39), so each subgroup wraps its autogenerate in `items`.
+ */
+const nestedGroup = (label, directory, subgroups) => ({
+  label,
+  items: [
+    { slug: directory },
+    ...subgroups.map(([sublabel, subdirectory]) => ({
+      label: sublabel,
+      collapsed: true,
+      items: [{ autogenerate: { directory: subdirectory } }],
+    })),
+  ],
+});
+
 /** A `<meta>` head entry. */
 const meta = (key, name, content) => ({ tag: 'meta', attrs: { [key]: name, content } });
 
@@ -74,11 +92,17 @@ export default defineConfig({
         preloadFont('MartianMono.woff2'),
         preloadFont('Sono.woff2'),
       ],
-      // Six groups in a fixed order, each listing its folder's pages. Groups start expanded.
+      // Six groups in a fixed order, each listing its folder's pages. Groups start expanded. Reference
+      // links to its index page and then holds four subgroups that start closed.
       sidebar: [
         group('Get started', 'get-started'),
         group('Concepts', 'concepts'),
-        group('Reference', 'reference'),
+        nestedGroup('Reference', 'reference', [
+          ['Machines', 'reference/machines'],
+          ['Board and engine', 'reference/board'],
+          ['Code and HTTP', 'reference/code-and-http'],
+          ['Commands and files', 'reference/files'],
+        ]),
         group('Patterns', 'patterns'),
         group('Troubleshooting', 'troubleshooting'),
         group('Contributing', 'contributing'),

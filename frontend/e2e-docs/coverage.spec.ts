@@ -39,12 +39,33 @@ function manifestSections(): Section[] {
   });
 }
 
-/** The sidebar's groups as astro.config.mjs states them, `group('<label>', '<folder>')`, in order. */
+/**
+ * The text inside the brackets of `sidebar: [ ... ]` in astro.config.mjs, found by bracket depth, so
+ * a nested list inside a group can't end it early.
+ */
+function sidebarBlock(config: string): string {
+  const start = /sidebar:\s*\[/.exec(config);
+  if (start === null) throw new Error(`${CONFIG} has no sidebar list`);
+  const open = start.index + start[0].length - 1;
+  let depth = 0;
+  for (let i = open; i < config.length; i++) {
+    if (config[i] === '[') depth += 1;
+    else if (config[i] === ']') {
+      depth -= 1;
+      if (depth === 0) return config.slice(open + 1, i);
+    }
+  }
+  throw new Error(`${CONFIG}: the sidebar list never closes`);
+}
+
+/**
+ * The sidebar's top-level groups as astro.config.mjs states them, `group('<label>', '<folder>')` or
+ * `nestedGroup('<label>', '<folder>', [...])`, in order. The subgroups inside a nestedGroup are
+ * `['<label>', '<folder>']` pairs, not calls, so they aren't counted.
+ */
 function sidebarGroups(): { name: string; folder: string }[] {
-  const config = fs.readFileSync(CONFIG, 'utf8');
-  const block = /sidebar:\s*\[([\s\S]*?)\]/.exec(config);
-  if (block === null) throw new Error(`${CONFIG} has no sidebar list`);
-  const groups = [...block[1].matchAll(/group\('([^']+)',\s*'([^']+)'\)/g)].map((m) => ({ name: m[1], folder: m[2] }));
+  const block = sidebarBlock(fs.readFileSync(CONFIG, 'utf8'));
+  const groups = [...block.matchAll(/\b(?:nestedGroup|group)\('([^']+)',\s*'([^']+)'/g)].map((m) => ({ name: m[1], folder: m[2] }));
   if (groups.length !== 6) throw new Error(`read ${groups.length} sidebar groups from ${CONFIG}, not 6`);
   return groups;
 }
@@ -77,7 +98,7 @@ test('a page path maps to the file Astro builds, and a path Astro would rename i
   expect(distFileFor('index.mdx'), 'the root page').toBe('index.html');
   expect(distFileFor('get-started/index.mdx'), 'a section index').toBe('get-started/index.html');
   expect(distFileFor('concepts/belts.md'), 'a page in a section').toBe('concepts/belts/index.html');
-  expect(distFileFor('reference/_fixture-long-title.mdx'), 'a test page').toBe('reference/_fixture-long-title/index.html');
+  expect(distFileFor('reference/files/_fixture-long-title.mdx'), 'a test page').toBe('reference/files/_fixture-long-title/index.html');
   // Astro publishes these at reference/machine-ports/ and concepts/belts/, so a check that looked
   // for the file under the written name would report a built page as missing.
   expect(() => distFileFor('reference/Machine Ports.mdx'), 'a part with capitals and a space').toThrow(

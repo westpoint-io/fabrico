@@ -4,7 +4,8 @@ import { docsUrl, fixturePage, fixturePages, sitemapPages } from './support/site
 // The page frame at the widths readers use. No page scrolls sideways at 360, 768, 1280 or 1440 px;
 // the demo board fills the content column; a 60-character title wraps in the h1 and in the sidebar;
 // a code line and a table wider than the column each scroll inside their own focusable box; the
-// left sidebar scrolls on its own with every group open; and code tokens take the skin's colours.
+// left sidebar scrolls on its own; its six groups start open and the four Reference subgroups start
+// closed, except the one holding the current page; and code tokens take the skin's colours.
 //
 // The published pages come from the site's sitemap and the test pages from the fixture build's
 // sitemap, so nothing here guesses a page address.
@@ -129,7 +130,23 @@ test('a wide code block and a wide table scroll in their own focusable box', asy
   expect(page_.scrollWidth, 'the page width with both wide boxes on it').toBeLessThanOrEqual(page_.innerWidth);
 });
 
-test('the left sidebar scrolls on its own under the header, with every group open', async ({ page }) => {
+/** The Reference group's four subgroups, in sidebar order. */
+const SUBGROUPS = ['Machines', 'Board and engine', 'Code and HTTP', 'Commands and files'];
+
+/** The sidebar's top-level groups and the subgroups inside Reference, with whether each is open. */
+async function sidebarGroups(page: Page): Promise<{ top: { label: string; open: boolean }[]; sub: { label: string; open: boolean }[] }> {
+  return page.evaluate(() => {
+    const label = (d: Element): string => d.querySelector(':scope > summary .group-label')?.textContent?.trim() ?? '';
+    const tops = [...document.querySelectorAll('#starlight__sidebar ul.top-level > li > details')];
+    const reference = tops.find((d) => label(d) === 'Reference');
+    return {
+      top: tops.map((d) => ({ label: label(d), open: (d as HTMLDetailsElement).open })),
+      sub: [...(reference?.querySelectorAll(':scope > ul details') ?? [])].map((d) => ({ label: label(d), open: (d as HTMLDetailsElement).open })),
+    };
+  });
+}
+
+test('the left sidebar scrolls on its own under the header', async ({ page }) => {
   await open(page, longTitle, 1280);
   const sidebar = await page.evaluate(() => {
     const pane = document.querySelector('.sidebar-pane') as HTMLElement;
@@ -140,15 +157,28 @@ test('the left sidebar scrolls on its own under the header, with every group ope
       position: style.position,
       top: pane.getBoundingClientRect().top,
       headerBottom: header.getBoundingClientRect().bottom,
-      groups: document.querySelectorAll('#starlight__sidebar details').length,
-      closed: document.querySelectorAll('#starlight__sidebar details:not([open])').length,
     };
   });
   expect(['auto', 'scroll'], 'the sidebar overflow-y').toContain(sidebar.overflowY);
   expect(sidebar.position, 'the sidebar position').toBe('fixed');
   expect(sidebar.top, 'the sidebar top against the header bottom').toBeGreaterThanOrEqual(sidebar.headerBottom - 1);
-  expect(sidebar.groups, 'sidebar groups').toBe(6);
-  expect(sidebar.closed, 'sidebar groups rendered closed').toBe(0);
+});
+
+test('the six sidebar groups start open and the four Reference subgroups start closed', async ({ page }) => {
+  await open(page, docsUrl(''), 1280);
+  const { top, sub } = await sidebarGroups(page);
+  expect(top.length, 'top-level sidebar groups').toBe(6);
+  expect(top.filter((g) => !g.open).map((g) => g.label), 'top-level groups rendered closed').toEqual([]);
+  expect(sub, 'the Reference subgroups on the root page, in order, all closed').toEqual(SUBGROUPS.map((label) => ({ label, open: false })));
+});
+
+test('on a page inside a Reference subgroup, that subgroup is open and the other three are closed', async ({ page }) => {
+  await open(page, longTitle, 1280);
+  const { top, sub } = await sidebarGroups(page);
+  expect(top.filter((g) => !g.open).map((g) => g.label), 'top-level groups rendered closed').toEqual([]);
+  expect(sub, 'the Reference subgroups on the long-title page, which lives in reference/files/').toEqual(
+    SUBGROUPS.map((label) => ({ label, open: label === 'Commands and files' })),
+  );
 });
 
 test('code tokens take the skin colours: keywords blue, strings green, numbers amber', async ({ page }) => {

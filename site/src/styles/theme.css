@@ -174,6 +174,25 @@ starlight-tabs [role='tab'][aria-selected='true'],
 #starlight__sidebar .top-level > li + li {
   margin-top: var(--fab-space-md);
 }
+/*
+ * A subgroup inside a group (the four under Reference): its label in Martian Mono 700 12 px in
+ * sentence case, so it reads as a step down from the Sono caps group heading, on a row at least
+ * 32 px tall.
+ */
+#starlight__sidebar ul ul summary {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  padding-inline: var(--fab-space-sm);
+}
+#starlight__sidebar ul ul summary .large {
+  font-family: var(--site-font);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fab-ink);
+}
 /* Sidebar and table-of-contents links: 12 px rows at least 32 px tall. */
 #starlight__sidebar a,
 .right-sidebar-panel a,
@@ -222,6 +241,19 @@ mobile-starlight-toc a[aria-current='true'] {
 /* Inline code: panel fill ground, the surrounding size, 4 px each side. */
 .sl-markdown-content code:not(:where(.not-content *, pre *)) {
   margin-block: 0;
+  padding: 0 var(--fab-space-xs);
+}
+/*
+ * Code in an h2 or h3 keeps its case, so an API or reason name reads as the reader would type it
+ * (ctx.emit, not CTX.EMIT): Martian Mono 700 at the heading's size, on the inline code ground.
+ */
+.sl-markdown-content :is(h2, h3) code {
+  font-family: var(--site-font);
+  font-size: inherit;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  background-color: var(--fab-panel-fill);
   padding: 0 var(--fab-space-xs);
 }
 

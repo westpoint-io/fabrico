@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { docsUrl } from './support/site.ts';
+import { docsUrl, fixturesUrl } from './support/site.ts';
 
 // Keyboard focus on the Get started page, at 1280 px. The first Tab from the top lands on Skip to
 // content, and Enter on it moves the keyboard into the main content. Tabbing on reaches a sidebar
 // link, the search button and a pagination link, each drawn with the site's 2 px focus outline in the
 // accent colour, and reaches the demo board's Play button inside the board's shadow root.
+//
+// On the fixture build's Reference index, Tab reaches the closed "Commands and files" subgroup
+// summary with the same outline, Enter opens it, and the next Tab reaches the link inside it.
 
 const URL_PATH = 'get-started/';
 /** Tab presses allowed before a part counts as unreachable. The page has about 30 tab stops. */
@@ -111,4 +114,45 @@ test('Tab reaches a sidebar link, the search button, a pagination link and the b
     expect(stop!.outline, `${kind} ${stop!.label}: its outline`).toEqual({ style: 'solid', width: '2px', colour });
   }
   expect(firstOf.get('play'), `the board's Play button within ${MAX_TABS} presses; stops seen:\n${seen.join('\n')}`).toBeDefined();
+});
+
+test('Tab reaches a closed Reference subgroup with the focus outline, Enter opens it, and the next Tab reaches its link', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(fixturesUrl('reference/'));
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  const focus = (): Promise<{ summary: string | null; open: boolean | null; href: string | null; visible: boolean; outline: string }> =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      const style = el === null ? null : getComputedStyle(el);
+      const details = el?.tagName === 'SUMMARY' ? (el.parentElement as HTMLDetailsElement) : null;
+      return {
+        summary: el?.tagName === 'SUMMARY' ? (el.textContent ?? '').trim().replace(/\s+/g, ' ') : null,
+        open: details === null ? null : details.open,
+        href: el instanceof HTMLAnchorElement ? el.getAttribute('href') : null,
+        visible: el?.matches(':focus-visible') ?? false,
+        outline: style === null ? '' : `${style.outlineWidth} ${style.outlineStyle} ${style.outlineColor}`,
+      };
+    });
+
+  const seen: string[] = [];
+  let reached = false;
+  for (let i = 0; i < MAX_TABS && !reached; i++) {
+    await page.keyboard.press('Tab');
+    const stop = await focus();
+    seen.push(stop.summary ?? stop.href ?? '?');
+    reached = stop.summary === 'Commands and files';
+  }
+  expect(reached, `the Commands and files summary within ${MAX_TABS} presses; stops seen:\n${seen.join('\n')}`).toBe(true);
+  const summary = await focus();
+  expect(summary.open, 'the Commands and files subgroup starts closed on the Reference index').toBe(false);
+  expect(summary.visible, 'the summary matches :focus-visible').toBe(true);
+  expect(summary.outline, 'the summary outline').toBe('2px solid rgb(79, 168, 255)');
+
+  await page.keyboard.press('Enter');
+  expect((await focus()).open, 'the subgroup after Enter').toBe(true);
+  await page.keyboard.press('Tab');
+  const link = await focus();
+  expect(link.href ?? '', 'the next Tab after opening the subgroup lands on its link').toContain('/reference/files/_fixture-long-title/');
 });
