@@ -20,10 +20,10 @@ On the board below, the top Sink sends each item as a request to a web address a
 
 ## Targets
 
-The <Fact id="config.Sink.target" /> field picks what the Sink does with each item. It has two settings, named here the way a board file writes them.
+The <Fact id="config.Sink.target" /> field picks what the Sink does with each item. It has two settings, given here by their names in the code.
 
 - <Fact id="sink.target.Debug" /> records each item and sends nothing. A Sink you place from the palette starts here, which makes it a safe end for a line you're still building.
-- <Fact id="sink.target.Http" /> sends each item as the body of a request to the URL you set, with the method you pick in the Sink's inspector: <Fact id="http.method.Post.label" />, <Fact id="http.method.Put.label" />, <Fact id="http.method.Patch.label" />, <Fact id="http.method.Delete.label" /> or <Fact id="http.method.Get.label" />. A new HTTP Sink uses <Fact id="http.method.Post.label" />. A board file writes the methods as <Fact id="http.method.Post" />, <Fact id="http.method.Put" />, <Fact id="http.method.Patch" />, <Fact id="http.method.Delete" /> and <Fact id="http.method.Get" />.
+- <Fact id="sink.target.Http" /> sends each item as the body of a request to the URL you set, with the method you pick in the Sink's inspector: <Fact id="http.method.Post.label" />, <Fact id="http.method.Put.label" />, <Fact id="http.method.Patch.label" />, <Fact id="http.method.Delete.label" /> or <Fact id="http.method.Get.label" />. A new HTTP Sink uses <Fact id="http.method.Post.label" />. In the code the methods are <Fact id="http.method.Post" />, <Fact id="http.method.Put" />, <Fact id="http.method.Patch" />, <Fact id="http.method.Delete" /> and <Fact id="http.method.Get" />.
 
 <Aside type="caution">
 An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
