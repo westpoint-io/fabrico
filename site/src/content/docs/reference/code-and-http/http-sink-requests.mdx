@@ -1,0 +1,59 @@
+---
+title: HTTP Sink requests
+description: The request an HTTP Sink sends for each item, its method, body and idempotency key, and how long it waits before the request counts as failed.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+An HTTP Sink sends each item it takes to another service as an HTTP request. This page gives what that request holds, how long the Sink waits for an answer, and what each answer turns into.
+
+In the example below, the top Sink's request is answered 40 ticks after it leaves. The second Sink's request fails, and the third Sink's request is never answered, so it times out. Those two Sinks show as faulted.
+
+<Board name="docs-script-outcomes" faultsAbout="CommandFailure CommandTimeout" />
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+## The request
+
+A Sink sends one request for each item, to the URL in its config, with the method you pick.
+
+| Method | Sends the item as the body |
+|---|---|
+| <Fact id="http.method.Post" /> | Yes |
+| <Fact id="http.method.Put" /> | Yes |
+| <Fact id="http.method.Patch" /> | Yes |
+| <Fact id="http.method.Get" /> | No |
+| <Fact id="http.method.Delete" /> | No |
+
+A new HTTP Sink uses <Fact id="http.method.Post" />. The body is the item's bytes, exactly as they arrived, and the Sink adds no `content-type` header. A request with <Fact id="http.method.Get" /> or <Fact id="http.method.Delete" /> goes without a body, because enough servers refuse or mishandle one there.
+
+## The idempotency key
+
+The Sink puts an `Idempotency-Key` header on each request, whatever its method. Its value is `fabrico-cmd-` followed by the tick the Sink sent it on, a number for the Sink, and a sequence number, joined with hyphens, such as `fabrico-cmd-172-4294967303-0` for the second Sink in the example. The key comes from the engine's own logged history, so a request for the same item gets the same key on every replay. A service that stores the keys it has seen can use it to ignore a repeat.
+
+## Waiting for the answer
+
+The Sink takes one item each time it runs and sends its request, and the other machines keep running while the request is out. The answer comes back on a later tick.
+
+| What comes back | What it becomes |
+|---|---|
+| A status from 200 to 299 | Success. The Sink doesn't read the reply's body. |
+| Any other status, a connection error, or no answer within 30 seconds | A <Fact id="fault.CommandFailure" /> fault. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-failure) |
+| Nothing by the deadline, 600 ticks after the request left | A <Fact id="fault.CommandTimeout" /> fault. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-timeout) |
+
+The 30 seconds are real time on your computer, measured by the app's network client. The 600 ticks are ticks of the engine. Both faults rest on the Sink's Fault port, where a docked belt can carry them to another Sink.
+
+In the example, the second Sink's request leaves on tick 172 and its failure comes back three ticks later, so the Sink shows <Fact id="fault.CommandFailure" /> from tick 176. The third Sink's request leaves on tick 222 and gets no answer, so the Sink shows <Fact id="fault.CommandTimeout" /> from tick 823.
+
+## Related pages
+
+- [Sink](../../machines/sink/): ends a line and sends each item out as an HTTP request, or records it.
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Webhook ingress](../webhook-ingress/): how a webhook reaches a Source, its URL, size limit, repeats and order.
+- [Reference](../../): the list of machine pages and the other reference pages.

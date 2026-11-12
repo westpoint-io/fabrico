@@ -1,0 +1,100 @@
+---
+title: Handler requests and replies
+description: The request an HTTP Handler's code receives from a Route, the reply it sends back, and what the caller gets when no good reply comes.
+sidebar:
+  order: 2
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+
+When a program calls a Route, the app hands the request to the HTTP Handler at the other end of the Route's wire. The Handler's code reads the request and answers with a reply, and the Route sends that reply back to the caller. This page gives the fields of both, and the status the caller gets when something goes wrong.
+
+In the example below, a Handler reads the name in each request's body. It replies 200 with a greeting to the request that has a name, and 400 to the one that doesn't.
+
+<Board name="docs-machines-http-handler" />
+
+## The URL
+
+A Route answers POST requests at `/endpoint/` followed by its path, on the app's local port. A Route with the path `/hello` takes requests at `http://127.0.0.1:PORT/endpoint/hello`. The path can have more than one segment, such as `/users/42`, and is at most <Fact id="limit.max_endpoint_path_bytes" /> long. When you select a Route in the app, its config panel shows the whole URL under POST URL, with a Copy button.
+
+In this example, `PORT` stands for the port the app picked when it started; copy the URL from the panel to get it. The command sends a JSON body to the Route with the path `/hello`:
+
+```bash wrap
+curl -X POST http://127.0.0.1:PORT/endpoint/hello \
+  -H 'content-type: application/json' \
+  -d '{"name":"Ada"}'
+```
+
+The call waits until the Handler replies. With the code in the example above, it prints `hello Ada`.
+
+## The request
+
+The Handler's code gets the request as `input`, an object with five fields.
+
+| Field | Type | What it holds |
+|---|---|---|
+| `method` | string | Always `"POST"`. |
+| `path` | string | The URL's path. |
+| `query` | string | The text after `?`. |
+| `headers` | object | Header names and values. |
+| `body` | string | The body, as text. |
+
+The path starts with `/endpoint/`, and the query is `""` when the URL has none. Header names are in lower case, each value is text, and a header sent twice keeps its last value.
+
+For the `curl` call above, `input` is the object below. It shows only the header the command sets; `curl` adds a few of its own, such as `host` and `user-agent`.
+
+```json wrap
+{
+  "method": "POST",
+  "path": "/endpoint/hello",
+  "query": "",
+  "headers": { "content-type": "application/json" },
+  "body": "{\"name\":\"Ada\"}"
+}
+```
+
+The body stays text, so code that expects JSON parses it with `JSON.parse(input.body)`. The header values depend on the program that calls.
+
+## The reply
+
+The code replies with `ctx.command(reply, 0)`. The reply is an object with three fields.
+
+| Field | Type | What it holds |
+|---|---|---|
+| `status` | number | The HTTP status. |
+| `headers` | object | Header names and values. |
+| `body` | string | The reply body, as text. |
+
+`headers` and `body` are optional. Left out, they are `{}` and `""`.
+
+```json wrap
+{
+  "status": 200,
+  "headers": { "content-type": "text/plain" },
+  "body": "hello Ada"
+}
+```
+
+The app sends the headers in alphabetical order of their names. The [Factory JavaScript API](../factory-api/#ctxcommand) page describes `ctx.command` itself.
+
+## When no good reply comes
+
+| What happened | Status |
+|---|---|
+| The app can't read the reply | 502 |
+| No reply came by the deadline | 504 |
+| The body is too big | 413 |
+| No Route has that path | 404 |
+| The queue is full, or the engine isn't running | 503 |
+
+A reply the app can't read is one that isn't an object with a `status` from 100 to 999, or that has a header name or value an HTTP header can't hold; its 502 has an empty body. The Handler has <Fact id="limit.endpoint_deadline_ticks" />, counted from when the request arrives, and the 504 comes with the body `{"error":"timeout"}`. The queue is full when it already holds <Fact id="limit.endpoint_ingress_capacity" />.
+
+The deadline counts ticks of the engine, not seconds. When the Handler's code throws or runs out of budget, that run sends no reply, the request leaves by the Handler's Fault port, and the caller gets the 504 once the deadline passes. The [webhook ingress](../webhook-ingress/) page gives the size limit, which is shared with webhooks. The host's test `oversized_body_is_413` checks the 413.
+
+## Related pages
+
+- [Route](../../machines/route/): takes HTTP requests at a path you choose and sends each one down its wire.
+- [HTTP Handler](../../machines/http-handler/): runs your JavaScript on each request and sends back a reply.
+- [Factory JavaScript API](../factory-api/): the function a Factory runs, each member of ctx, the Math it may use and the limits on one run.
+- [Reference](../../): the list of machine pages and the other reference pages.

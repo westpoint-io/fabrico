@@ -1,0 +1,63 @@
+---
+title: Webhook ingress
+description: How a webhook reaches a Source in the app, the URL and method it uses, the body size limit, repeat deliveries and the order in one tick.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../../components/Board.astro';
+
+A webhook is an HTTP request another program sends to tell the app something happened. The app listens for webhooks on your own computer and turns each one into an item on a Source, which sends it down the line. This page gives the URL, what the app answers, and the rules for size, repeats and order.
+
+In the example below, the top Source makes an item from each of three webhooks, and the bottom Source makes one on its timer.
+
+<Board name="docs-machines-source" />
+
+<Aside type="caution">
+The app listens on 127.0.0.1, the loopback address, so only programs on the same computer can send it a webhook. This page gives no way to reach it from another computer.
+</Aside>
+
+## The URL and method
+
+Each Source has its own URL, `http://127.0.0.1:PORT/hook/src-ID`, and accepts POST only. The app picks a free port each time it starts, and `ID` is a number the app gives the Source. When you select a Source in the app, its config panel shows the whole URL under Webhook URL, with a Copy button.
+
+In the command below, replace `PORT` and `ID` with the values from that URL. It sends one webhook with a JSON body:
+
+```bash wrap
+curl -X POST http://127.0.0.1:PORT/hook/src-ID \
+  -H 'x-delivery-id: order-1' \
+  -d '{"order":1}'
+```
+
+The body becomes the item's bytes, exactly as sent. The app doesn't read it or check that it is JSON; a Factory further down the line parses it.
+
+## What the app answers
+
+| Status | When |
+|---|---|
+| 200 | The app logged the request, or dropped it as a repeat. |
+| 404 | No Source has that URL. |
+| 413 | The body is over the size limit. |
+| 503 | The engine isn't running, too many requests are waiting, or you opened another project while the request waited. |
+
+The 200 goes back after the tick that took the request, and it means the app logged the request. If the Source's backlog is full, the Source then drops the item, as the [Source](../../machines/source/) page explains.
+
+## The body size limit
+
+The app accepts a body of up to 64 MiB. A body over that gets 413 and the app doesn't log it, which the host's test `webhook_body_over_limit_is_rejected` checks. A body of exactly 64 MiB is accepted: the limit turns away only a body longer than the limit. Requests to a Route share the same listener and the same limit.
+
+## Repeat deliveries
+
+A sender that retries can put a delivery id in the `x-delivery-id` header. The app keeps a list of the ids it has logged since you opened the current project. A request whose id is already on the list gets 200 and makes no item, so a retry doesn't make a second one. A request without the header always counts as new. Opening another project, or restarting the app, starts a new list, so a retry that arrives after that makes an item again.
+
+## Order in one tick
+
+At the start of each tick, the engine takes every request that arrived since the last tick, in the order the listener queued them. Each new request becomes one item, in that order, so two webhooks to one Source in the same tick leave it in the order they arrived. In the examples on this site, a script plays the role of the sender, and two webhooks on the same tick arrive in the order the script lists them.
+
+## Related pages
+
+- [Source](../../machines/source/): puts a new item on the board for each webhook it gets or on a timer.
+- [Handler requests and replies](../handler-requests-and-replies/): the request a Handler's code receives, the reply it sends and what the caller gets.
+- [A webhook call gets connection refused](../../../troubleshooting/common-problems/#symptom-a-webhook-call-gets-connection-refused): why a call can't connect, and what to check.
+- [Reference](../../): the list of machine pages and the other reference pages.

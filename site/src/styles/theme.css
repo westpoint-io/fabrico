@@ -303,6 +303,16 @@ mobile-starlight-toc a[aria-current='true'] {
   outline-offset: -2px;
 }
 
+/*
+ * A bash block gets Expressive Code's terminal frame, whose title bar sets weight 500 and a little
+ * letter spacing. The bar holds no visible title on these pages, only a screen-reader label, but the
+ * site keeps to weights 400 and 700, so the bar uses 400.
+ */
+.sl-markdown-content .expressive-code .frame.is-terminal .header {
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
 /* A long page title wraps inside the 300 px sidebar instead of running out of it. */
 #starlight__sidebar a {
   overflow-wrap: anywhere;
