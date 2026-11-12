@@ -98,6 +98,53 @@ export function faultReasonsOf(prop: string, page: string, known: readonly strin
   return names;
 }
 
+/** The repo path of the file that names each board's measured fault reasons. */
+export const FAULTS_MANIFEST = 'examples/boards/faults.manifest';
+
+/**
+ * The fault reasons each board raises, by board id, read from examples/boards/faults.manifest: one
+ * line per board that faults, its path and then its reasons, separated by single spaces. Lines
+ * starting with # are comments. crates/fabrico-engine/tests/board_faults.rs plays every board and
+ * fails when its reasons differ from its line, so this is what the board really does. A malformed
+ * line throws.
+ */
+export function declaredFaultsOf(text: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  text.split('\n').forEach((line, index) => {
+    if (line === '' || line.startsWith('#')) return;
+    const [path, ...reasons] = line.split(' ');
+    const id = boardIdOf(path);
+    if (id === null || reasons.length === 0 || reasons.some((r) => r === '')) {
+      throw new Error(`[Board] ${FAULTS_MANIFEST} line ${index + 1} isn't a board path and its fault reasons: "${line}"`);
+    }
+    out.set(id, reasons);
+  });
+  return out;
+}
+
+/**
+ * Throws the message an author sees in the build log when a page's faultsAbout (null when the
+ * <Board> has none) doesn't name exactly the reasons the board raises, as faults.manifest records
+ * them. The order on the page is the author's; only the set is compared.
+ */
+export function checkFaultsAbout(page: string, board: string, named: readonly string[] | null, declared: ReadonlyMap<string, readonly string[]>): void {
+  const raised = declared.get(board) ?? [];
+  const shown = named ?? [];
+  const same = raised.length === shown.length && raised.every((r) => shown.includes(r));
+  if (same) return;
+  if (raised.length === 0) {
+    throw new Error(
+      `[Board] ${page} says board "${board}" faults on purpose with ${shown.join(' ')}, and ${FAULTS_MANIFEST} records no ` +
+        'fault for it. Drop faultsAbout, or make the board fault and add its line there.',
+    );
+  }
+  throw new Error(
+    `[Board] board "${board}" raises ${raised.join(' ')} (${FAULTS_MANIFEST}), and ${page} ` +
+      (named === null ? 'gives it no faultsAbout. ' : `gives it faultsAbout="${shown.join(' ')}". `) +
+      `Write faultsAbout="${raised.join(' ')}" so the line under the board names the reasons it shows.`,
+  );
+}
+
 /** One name in the board's fault line and the text that follows it: ", ", " and " or nothing. */
 export interface FaultLabelPart {
   name: string;

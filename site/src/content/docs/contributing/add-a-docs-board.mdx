@@ -51,7 +51,7 @@ A docs board is a board file that a page embeds and plays in the reader's browse
    <Board name="docs-machines-router" />
    ```
 
-   The site build fails when no board file has that id. A board that faults on purpose names each fault reason it shows, separated by spaces, for example `<Board name="docs-faults-no-match" faultsAbout="NoMatch" />`. Each name has to be a fault reason the code defines, or the build fails, and a line under the board tells the reader the faults are intended. The [Fault reasons](../../reference/board/fault-reasons/) page shows several, and the [Router](../../reference/machines/router/) page shows a board with none.
+   The site build fails when no board file has that id. A board that faults on purpose names each fault reason it shows, separated by spaces, for example `<Board name="docs-faults-no-match" faultsAbout="NoMatch" />`, and a line under the board tells the reader the faults are intended. The names have to be the reasons the board really raises, as `examples/boards/faults.manifest` records them, or the build fails. A board that faults needs its line in that file: `cargo test -p fabrico-engine --test board_faults` plays every board, reads the reason of each fault, and fails with the line to write when a board's reasons differ from its line. The [Fault reasons](../../reference/board/fault-reasons/) page shows several, and the [Router](../../reference/machines/router/) page shows a board with none.
 
 6. Build the site and run the docs suite.
 

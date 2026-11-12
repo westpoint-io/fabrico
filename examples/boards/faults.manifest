@@ -1,0 +1,24 @@
+# The fault reasons each board in this folder raises on purpose.
+#
+# Format: one line per board that faults, with fields separated by a single space:
+#
+#   <board path> <reason> [<reason> ...]
+#
+# Each reason is a FaultReason name, listed once, in byte order. Lines are sorted byte-wise by
+# board path. A board with no line raises no fault.
+#
+# crates/fabrico-engine/tests/board_faults.rs plays every board, reads the reason of each fault it
+# raises, and fails when they differ from the board's line here. The docs site's build fails when a
+# page's <Board faultsAbout="..."> names other reasons than the board's line. Edit this file by
+# hand: when a board's faults change, the test's failure message gives the line to write.
+examples/boards/demo_scene.board.ron FactoryError
+examples/boards/docs/faults-branch-busy.board.ron BranchBusy
+examples/boards/docs/faults-command-failure.board.ron CommandFailure
+examples/boards/docs/faults-command-timeout.board.ron CommandTimeout
+examples/boards/docs/faults-factory-error.board.ron FactoryError
+examples/boards/docs/faults-factory-timeout.board.ron FactoryTimeout
+examples/boards/docs/faults-no-entry-wire.board.ron NoEntryWire
+examples/boards/docs/faults-no-match.board.ron NoMatch
+examples/boards/docs/faults-wire-overflow.board.ron WireOverflow
+examples/boards/docs/rules-machine-states.board.ron NoMatch
+examples/boards/docs/script-outcomes.board.ron CommandFailure CommandTimeout

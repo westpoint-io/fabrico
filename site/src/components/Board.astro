@@ -5,11 +5,23 @@
 // state, and the element's own shadow root replaces it once the embed script defines the element.
 //
 // A board that faults on purpose names its fault reasons: <Board name="..." faultsAbout="NoMatch" />.
-// Each name must be a fault reason in facts.json. The slot then carries data-faults-about, which the
-// docs suite reads (a board without it must show zero faults, one with it at least one), and a line
-// under the board tells the reader the fault is intended.
+// Each name must be a fault reason in facts.json, and the names must be exactly the reasons the
+// board raises, as examples/boards/faults.manifest records them (a native test plays every board
+// and checks that file). A board the manifest lists needs faultsAbout, and one it doesn't list can't
+// have it. The slot then carries data-faults-about, which the docs suite reads (a board without it
+// must show zero faults, one with it at least one), and a line under the board tells the reader the
+// fault is intended.
 import facts from '../generated/facts.json';
-import { boardIdsOf, faultLabelParts, faultReasonsOf, resolveBoard, type KnownBoard } from '../lib/boards.ts';
+import {
+  FAULTS_MANIFEST,
+  boardIdsOf,
+  checkFaultsAbout,
+  declaredFaultsOf,
+  faultLabelParts,
+  faultReasonsOf,
+  resolveBoard,
+  type KnownBoard,
+} from '../lib/boards.ts';
 
 interface Props {
   name?: string;
@@ -49,6 +61,14 @@ const reasons = Object.keys(facts.facts)
   .filter((id) => id.startsWith('fault.'))
   .map((id) => id.slice('fault.'.length));
 const faultNames = faultsAbout === undefined ? null : faultReasonsOf(faultsAbout, page, reasons, board.id);
+
+// The measured fault reasons of every board. A missing file fails the build rather than passing
+// every board as fault-free.
+const manifests = Object.values(
+  import.meta.glob<string>('../../../examples/boards/faults.manifest', { query: '?raw', import: 'default', eager: true }),
+);
+if (manifests.length !== 1) throw new Error(`[Board] ${FAULTS_MANIFEST} is missing; the build needs it to check faultsAbout.`);
+checkFaultsAbout(page, board.id, faultNames, declaredFaultsOf(manifests[0]));
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 

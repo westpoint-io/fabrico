@@ -198,3 +198,6 @@ crates/fabrico-engine/tests/board_arrival_order.rs
 # The board floor goes from 4 to 5 for the arrival-order board, and the check's own tests use five
 # made-up boards to match.
 crates/fabrico-engine/tests/board_manifest.rs
+# The fault check: each board raises exactly the fault reasons examples/boards/faults.manifest names
+# for it, read natively, so a page's faultsAbout can't name a reason its board doesn't raise.
+crates/fabrico-engine/tests/board_faults.rs

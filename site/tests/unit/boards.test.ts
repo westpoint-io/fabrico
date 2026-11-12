@@ -3,7 +3,19 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boardIdsOf, editDistance, faultLabelParts, faultReasonsOf, resolveBoard, suggest, type KnownBoard } from '../../src/lib/boards.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  boardIdsOf,
+  checkFaultsAbout,
+  declaredFaultsOf,
+  editDistance,
+  faultLabelParts,
+  faultReasonsOf,
+  resolveBoard,
+  suggest,
+  type KnownBoard,
+} from '../../src/lib/boards.ts';
 
 const PAGE = 'site/src/content/docs/get-started/index.mdx';
 const IDS = ['advanced', 'demo_scene', 'docs-arrival-order', 'docs-script-outcomes', 'order_processing'];
@@ -128,4 +140,75 @@ test('the fault line joins one name alone, two with and, three as A, B and C', (
     { name: 'A', after: ' and ' },
     { name: 'B', after: '' },
   ]);
+});
+
+const MANIFEST = [
+  '# comment',
+  'examples/boards/demo_scene.board.ron FactoryError',
+  'examples/boards/docs/script-outcomes.board.ron CommandFailure CommandTimeout',
+  '',
+].join('\n');
+
+/** The message checkFaultsAbout throws, or a failed assertion when it passes. */
+function checkThrown(board: string, named: string[] | null): string {
+  try {
+    checkFaultsAbout(PAGE, board, named, declaredFaultsOf(MANIFEST));
+  } catch (err) {
+    assert.ok(err instanceof Error);
+    return err.message;
+  }
+  return assert.fail(`checkFaultsAbout(${board}, ${JSON.stringify(named)}) passed instead of throwing`);
+}
+
+test('the faults manifest reads as board id to reasons, skipping comments and blank lines', () => {
+  assert.deepEqual(
+    [...declaredFaultsOf(MANIFEST)],
+    [
+      ['demo_scene', ['FactoryError']],
+      ['docs-script-outcomes', ['CommandFailure', 'CommandTimeout']],
+    ],
+  );
+});
+
+test('a faults manifest line with no reason or no board path throws', () => {
+  assert.throws(() => declaredFaultsOf('examples/boards/demo_scene.board.ron\n'), /line 1 isn't a board path and its fault reasons/);
+  assert.throws(() => declaredFaultsOf('demo_scene FactoryError\n'), /line 1 isn't a board path/);
+});
+
+test('faultsAbout that names the board\'s reasons passes, in any order', () => {
+  const declared = declaredFaultsOf(MANIFEST);
+  checkFaultsAbout(PAGE, 'demo_scene', ['FactoryError'], declared);
+  checkFaultsAbout(PAGE, 'docs-script-outcomes', ['CommandTimeout', 'CommandFailure'], declared);
+  checkFaultsAbout(PAGE, 'advanced', null, declared);
+});
+
+test('faultsAbout naming another reason than the board raises throws with the value to write', () => {
+  assert.equal(
+    checkThrown('demo_scene', ['NoMatch']),
+    `[Board] board "demo_scene" raises FactoryError (examples/boards/faults.manifest), and ${PAGE} gives it ` +
+      'faultsAbout="NoMatch". Write faultsAbout="FactoryError" so the line under the board names the reasons it shows.',
+  );
+  assert.match(checkThrown('docs-script-outcomes', ['CommandFailure']), /Write faultsAbout="CommandFailure CommandTimeout"/);
+});
+
+test('a board that faults shown with no faultsAbout throws', () => {
+  assert.match(checkThrown('demo_scene', null), /gives it no faultsAbout\. Write faultsAbout="FactoryError"/);
+});
+
+test('faultsAbout on a board that raises no fault throws', () => {
+  assert.equal(
+    checkThrown('advanced', ['NoMatch']),
+    `[Board] ${PAGE} says board "advanced" faults on purpose with NoMatch, and examples/boards/faults.manifest records no ` +
+      'fault for it. Drop faultsAbout, or make the board fault and add its line there.',
+  );
+});
+
+test('the committed faults manifest parses, and names only fault reasons the facts know', () => {
+  const site = path.resolve(import.meta.dirname, '../..');
+  const declared = declaredFaultsOf(fs.readFileSync(path.join(site, '../examples/boards/faults.manifest'), 'utf8'));
+  const facts = JSON.parse(fs.readFileSync(path.join(site, 'src/generated/facts.json'), 'utf8')) as { facts: Record<string, unknown> };
+  assert.ok(declared.size >= 1, 'the manifest lists at least one board');
+  for (const [board, reasons] of declared) {
+    for (const reason of reasons) assert.ok(`fault.${reason}` in facts.facts, `${board}: ${reason} is no fault.* fact`);
+  }
 });
