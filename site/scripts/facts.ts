@@ -5,9 +5,12 @@
 //     limits, fault reasons, config fields, machine kinds and ports from the real constants,
 //     enums and tables;
 //   - the TypeScript half, `node frontend/scripts/export-docs-facts.ts`, which reads refusal
-//     messages, keyboard shortcuts and the docs board's play rate from the frontend's modules.
-// It merges the two, sorts every object's keys, and writes the file with two-space indent and a
-// trailing newline, so running it twice at one revision writes the same bytes.
+//     messages, keyboard shortcuts and the docs board's play rate from the frontend's modules, and
+//     prints the app's machine names (KIND_NAMES) as `appNames`.
+// It merges the two, joins appNames with machines[] by kind into machine.<CodeName>.name facts
+// (machine.Endpoint.name reads "Route"), sorts every object's keys, and writes the file with
+// two-space indent and a trailing newline, so running it twice at one revision writes the same
+// bytes.
 //
 // The file is committed. Pages show its values only through <Fact id="..." />, and CI runs this
 // script and fails when `git diff --exit-code -- site/src/generated/facts.json` shows a change.
@@ -18,8 +21,9 @@
 //
 // EXIT CODES
 //   0  the file was written.
-//   1  a half failed (its stderr is printed), printed something that isn't the expected JSON, or
-//      both halves define the same fact id.
+//   1  a half failed (its stderr is printed), printed something that isn't the expected JSON,
+//      both halves define the same fact id, an app name's kind has no machine, or a machine with a
+//      port catalog has no app name.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -35,7 +39,7 @@ const OUT_REL = 'site/src/generated/facts.json';
 const SCHEMA = 1;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-type Half = { facts: Record<string, Json>; machines: Json[] };
+type Half = { facts: Record<string, Json>; machines: Json[]; appNames: Record<string, string> };
 
 function fail(message: string): never {
   console.error(`facts: ${message}`);
@@ -57,10 +61,20 @@ function runHalf(name: string, command: string, args: string[]): Half {
     fail(`${name} printed something that isn't JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) fail(`${name} printed JSON that isn't an object`);
-  const { facts, machines } = parsed as { facts?: unknown; machines?: unknown };
+  const { facts, machines, appNames } = parsed as { facts?: unknown; machines?: unknown; appNames?: unknown };
   if (typeof facts !== 'object' || facts === null || Array.isArray(facts)) fail(`${name} printed no "facts" object`);
   if (machines !== undefined && !Array.isArray(machines)) fail(`${name} printed a "machines" value that isn't an array`);
-  return { facts: facts as Record<string, Json>, machines: (machines ?? []) as Json[] };
+  if (
+    appNames !== undefined &&
+    (typeof appNames !== 'object' || appNames === null || Array.isArray(appNames) || !Object.values(appNames).every((v) => typeof v === 'string'))
+  ) {
+    fail(`${name} printed an "appNames" value that isn't an object of strings`);
+  }
+  return {
+    facts: facts as Record<string, Json>,
+    machines: (machines ?? []) as Json[],
+    appNames: (appNames ?? {}) as Record<string, string>,
+  };
 }
 
 /** The same value with every object's keys in sorted order. Arrays keep their order. */
@@ -82,10 +96,28 @@ const rust = runHalf('the Rust half (docs_facts)', 'cargo', ['run', '-q', '--loc
 const ts = runHalf('the TypeScript half (export-docs-facts.ts)', process.execPath, ['frontend/scripts/export-docs-facts.ts']);
 
 if (ts.machines.length > 0) fail('the TypeScript half printed machines; only the Rust half writes them');
+if (Object.keys(rust.appNames).length > 0) fail('the Rust half printed appNames; only the TypeScript half writes them');
 const facts: Record<string, Json> = { ...rust.facts };
 for (const [id, fact] of Object.entries(ts.facts)) {
   if (id in facts) fail(`both halves define the fact "${id}"; give one of them a different id`);
   facts[id] = fact;
+}
+
+// The app's name for each machine, keyed by the Rust code name. Wire (no port catalog, no app name)
+// gets none.
+type Machine = { kind: number; name: string; catalog: boolean };
+const machines = rust.machines as unknown as Machine[];
+for (const [kind, appName] of Object.entries(ts.appNames)) {
+  const machine = machines.find((m) => String(m.kind) === kind);
+  if (machine === undefined) fail(`KIND_NAMES names kind ${kind} "${appName}", and machines[] has no machine of that kind`);
+  const id = `machine.${machine.name}.name`;
+  if (id in facts) fail(`the fact "${id}" is written twice`);
+  facts[id] = { kind: 'text', value: appName, source: 'frontend/shared/kindNames.ts', symbol: 'KIND_NAMES' };
+}
+for (const machine of machines) {
+  if (machine.catalog && !(String(machine.kind) in ts.appNames)) {
+    fail(`machine ${machine.name} (kind ${machine.kind}) has a port catalog and no name in KIND_NAMES (frontend/shared/kindNames.ts)`);
+  }
 }
 
 const merged = sortKeys({ schema: SCHEMA, facts, machines: rust.machines });

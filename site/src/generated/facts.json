@@ -10,6 +10,78 @@
       "unit": "ms",
       "value": 16
     },
+    "command.AddPort": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "AddPort"
+    },
+    "command.Configure": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Configure"
+    },
+    "command.Delete": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Delete"
+    },
+    "command.Dock": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Dock"
+    },
+    "command.DrawBelt": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "DrawBelt"
+    },
+    "command.DrawWire": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "DrawWire"
+    },
+    "command.Place": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Place"
+    },
+    "command.Redo": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Redo"
+    },
+    "command.RemovePort": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "RemovePort"
+    },
+    "command.Rotate": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Rotate"
+    },
+    "command.Undo": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Undo"
+    },
+    "command.Unlink": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "GridCommand",
+      "value": "Unlink"
+    },
     "config.Belt": {
       "kind": "code",
       "source": "crates/fabrico-core/src/edit.rs",
@@ -128,6 +200,156 @@
       "unit": "ticks a second",
       "value": 60
     },
+    "factory.ctx.command": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "ctx",
+      "value": "command"
+    },
+    "factory.ctx.emit": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "ctx",
+      "value": "emit"
+    },
+    "factory.ctx.random": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "ctx",
+      "value": "random"
+    },
+    "factory.ctx.randomInt": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "ctx",
+      "value": "randomInt"
+    },
+    "factory.ctx.state": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "ctx",
+      "value": "state"
+    },
+    "factory.math.E": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "E"
+    },
+    "factory.math.LN10": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "LN10"
+    },
+    "factory.math.LN2": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "LN2"
+    },
+    "factory.math.LOG10E": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "LOG10E"
+    },
+    "factory.math.LOG2E": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "LOG2E"
+    },
+    "factory.math.PI": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "PI"
+    },
+    "factory.math.SQRT1_2": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "SQRT1_2"
+    },
+    "factory.math.SQRT2": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "SQRT2"
+    },
+    "factory.math.abs": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "abs"
+    },
+    "factory.math.ceil": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "ceil"
+    },
+    "factory.math.clz32": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "clz32"
+    },
+    "factory.math.floor": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "floor"
+    },
+    "factory.math.fround": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "fround"
+    },
+    "factory.math.imul": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "imul"
+    },
+    "factory.math.max": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "max"
+    },
+    "factory.math.min": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "min"
+    },
+    "factory.math.round": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "round"
+    },
+    "factory.math.sign": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "sign"
+    },
+    "factory.math.sqrt": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "sqrt"
+    },
+    "factory.math.trunc": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/factory.rs",
+      "symbol": "Math",
+      "value": "trunc"
+    },
     "fault.BranchBusy": {
       "kind": "code",
       "source": "crates/fabrico-core/src/fault.rs",
@@ -181,6 +403,64 @@
       "source": "crates/fabrico-core/src/fault.rs",
       "symbol": "FaultReason",
       "value": "WireOverflow"
+    },
+    "http.method.Delete": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "HttpMethod",
+      "value": "Delete"
+    },
+    "http.method.Get": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "HttpMethod",
+      "value": "Get"
+    },
+    "http.method.Patch": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "HttpMethod",
+      "value": "Patch"
+    },
+    "http.method.Post": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "HttpMethod",
+      "value": "Post"
+    },
+    "http.method.Put": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "HttpMethod",
+      "value": "Put"
+    },
+    "limit.belt_pace_max": {
+      "also": [
+        "ticks per slot"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-command/src/command.rs",
+      "symbol": "BELT_PACE_RANGE",
+      "unit": "ticks a slot",
+      "value": 20
+    },
+    "limit.belt_pace_min": {
+      "also": [
+        "ticks per slot"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-command/src/command.rs",
+      "symbol": "BELT_PACE_RANGE",
+      "unit": "ticks a slot",
+      "value": 2
+    },
+    "limit.default_arity": {
+      "also": [],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/tick.rs",
+      "symbol": "DEFAULT_ARITY",
+      "unit": "ports",
+      "value": 2
     },
     "limit.default_ticks_per_slot": {
       "also": [
@@ -349,6 +629,17 @@
       "unit": "bytes a label",
       "value": 512
     },
+    "limit.max_project_bytes": {
+      "also": [
+        "MiB a project file",
+        "MiB per project file"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-host/src/project.rs",
+      "symbol": "MAX_PROJECT_BYTES",
+      "unit": "MiB",
+      "value": 256
+    },
     "limit.max_route_expect_bytes": {
       "also": [
         "bytes per route match"
@@ -436,11 +727,23 @@
       "symbol": "machine_kind",
       "value": "4"
     },
+    "machine.Balancer.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Balancer"
+    },
     "machine.Belt.kind": {
       "kind": "code",
       "source": "crates/fabrico-protocol/src/lib.rs",
       "symbol": "machine_kind",
       "value": "1"
+    },
+    "machine.Belt.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Belt"
     },
     "machine.Endpoint.kind": {
       "kind": "code",
@@ -448,11 +751,23 @@
       "symbol": "machine_kind",
       "value": "9"
     },
+    "machine.Endpoint.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Route"
+    },
     "machine.Factory.kind": {
       "kind": "code",
       "source": "crates/fabrico-protocol/src/lib.rs",
       "symbol": "machine_kind",
       "value": "2"
+    },
+    "machine.Factory.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Factory"
     },
     "machine.Handler.kind": {
       "kind": "code",
@@ -460,11 +775,23 @@
       "symbol": "machine_kind",
       "value": "10"
     },
+    "machine.Handler.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "HTTP Handler"
+    },
     "machine.Label.kind": {
       "kind": "code",
       "source": "crates/fabrico-protocol/src/lib.rs",
       "symbol": "machine_kind",
       "value": "11"
+    },
+    "machine.Label.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Label"
     },
     "machine.Merge.kind": {
       "kind": "code",
@@ -472,11 +799,23 @@
       "symbol": "machine_kind",
       "value": "6"
     },
+    "machine.Merge.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Merge"
+    },
     "machine.Router.kind": {
       "kind": "code",
       "source": "crates/fabrico-protocol/src/lib.rs",
       "symbol": "machine_kind",
       "value": "5"
+    },
+    "machine.Router.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Router"
     },
     "machine.Sink.kind": {
       "kind": "code",
@@ -484,11 +823,23 @@
       "symbol": "machine_kind",
       "value": "7"
     },
+    "machine.Sink.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Sink"
+    },
     "machine.Source.kind": {
       "kind": "code",
       "source": "crates/fabrico-protocol/src/lib.rs",
       "symbol": "machine_kind",
       "value": "0"
+    },
+    "machine.Source.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Source"
     },
     "machine.Tee.kind": {
       "kind": "code",
@@ -496,11 +847,89 @@
       "symbol": "machine_kind",
       "value": "3"
     },
+    "machine.Tee.name": {
+      "kind": "text",
+      "source": "frontend/shared/kindNames.ts",
+      "symbol": "KIND_NAMES",
+      "value": "Tee"
+    },
     "machine.Wire.kind": {
       "kind": "code",
       "source": "crates/fabrico-protocol/src/lib.rs",
       "symbol": "machine_kind",
       "value": "8"
+    },
+    "port.medium.Electrical": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Medium",
+      "value": "Electrical"
+    },
+    "port.medium.Mechanical": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Medium",
+      "value": "Mechanical"
+    },
+    "port.role.Fault": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Role",
+      "value": "Fault"
+    },
+    "port.role.In": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Role",
+      "value": "In"
+    },
+    "port.role.Out": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Role",
+      "value": "Out"
+    },
+    "port.side.E": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Side",
+      "value": "E"
+    },
+    "port.side.N": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Side",
+      "value": "N"
+    },
+    "port.side.S": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Side",
+      "value": "S"
+    },
+    "port.side.W": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "Side",
+      "value": "W"
+    },
+    "project.file_version": {
+      "kind": "code",
+      "source": "crates/fabrico-host/src/project.rs",
+      "symbol": "PROJECT_FILE_VERSION",
+      "value": "13"
+    },
+    "project.pre_slot_change_version": {
+      "kind": "code",
+      "source": "crates/fabrico-host/src/project.rs",
+      "symbol": "PRE_SLOT_CHANGE_PROJECT_VERSION",
+      "value": "6"
+    },
+    "project.pre_speed_change_version": {
+      "kind": "code",
+      "source": "crates/fabrico-host/src/project.rs",
+      "symbol": "PRE_SPEED_CHANGE_PROJECT_VERSION",
+      "value": "7"
     },
     "refusal.BeltEndTaken": {
       "kind": "text",
@@ -526,6 +955,12 @@
       "symbol": "REFUSAL_COPY",
       "value": "A belt is drawn, not placed. Use the Belt tool."
     },
+    "refusal.BeltOnlyPort": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "CLIENT_REFUSAL_COPY",
+      "value": "That port takes belts, not wires."
+    },
     "refusal.BeltTooLong": {
       "kind": "text",
       "source": "frontend/src/chrome/RefusalMessage.tsx",
@@ -537,6 +972,12 @@
       "source": "frontend/src/chrome/RefusalMessage.tsx",
       "symbol": "REFUSAL_COPY",
       "value": "The board changed first. That edit was not made."
+    },
+    "refusal.DockNotSent": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "CLIENT_REFUSAL_COPY",
+      "value": "A belt you drew is missing a connection."
     },
     "refusal.DuplicatePath": {
       "kind": "text",
@@ -836,6 +1277,42 @@
       "labelMac": "Cmd+Z",
       "source": "frontend/src/input/shortcuts.ts",
       "symbol": "shortcutTable"
+    },
+    "sink.target.Debug": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "SinkTemplate",
+      "value": "Debug"
+    },
+    "sink.target.Http": {
+      "kind": "code",
+      "source": "crates/fabrico-core/src/state.rs",
+      "symbol": "SinkTemplate",
+      "value": "Http"
+    },
+    "state.BACKED_UP": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "state_tag",
+      "value": "BACKED_UP"
+    },
+    "state.FAULTED": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "state_tag",
+      "value": "FAULTED"
+    },
+    "state.IDLE": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "state_tag",
+      "value": "IDLE"
+    },
+    "state.WORKING": {
+      "kind": "code",
+      "source": "crates/fabrico-protocol/src/lib.rs",
+      "symbol": "state_tag",
+      "value": "WORKING"
     },
     "trigger.Timer": {
       "kind": "code",

@@ -33,7 +33,8 @@
 # THE DOCS SITE FAMILY, for tracked files under `site/` only. The published docs pages are
 # written beside the private planning notes, which label their work with ids a reader of
 # the site can't look up. Under `site/` four more patterns must match nothing:
-#   - a phase id: `phase` or `Phase`, an optional space or hyphen, then a digit;
+#   - a phase id: "phase" in any letter case (`phase`, `Phase`, `PHASE`), an optional space or
+#     hyphen, then a digit;
 #   - a requirement id: two to eight capital letters, a hyphen and two digits, with no
 #     letter or digit on either side (`SITE-04`, `GATE-07`). Any prefix counts, because the
 #     planning notes hold ids from every workstream and milestone, and a list of known
@@ -143,7 +144,7 @@ PATTERNS=(
 SITE_PREFIX="site/"
 REQ_PREFIX='[A-Z]{2,8}'
 SITE_PATTERNS=(
-    "phase id under site/	-	[Pp]hase[ -]?[0-9]"
+    "phase id under site/	-	[Pp][Hh][Aa][Ss][Ee][ -]?[0-9]"
     "requirement id under site/	-	(^|[^A-Za-z0-9])${REQ_PREFIX}-[0-9]{2}([^A-Za-z0-9]|$)"
     "plan id under site/	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
     "decision id under site/	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"

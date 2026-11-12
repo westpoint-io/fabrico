@@ -8,18 +8,24 @@
 //
 // The facts here come from the frontend's own modules, read as values, never parsed as text:
 //   - the docs board's play rate, TICKS_PER_SECOND in src/embed/controller.ts;
-//   - every refusal message the app shows, REFUSAL_COPY in src/chrome/RefusalMessage.tsx;
+//   - every refusal message the app shows: REFUSAL_COPY in src/chrome/RefusalMessage.tsx (the
+//     host's verdicts) and CLIENT_REFUSAL_COPY beside it (the ones the app says with no host
+//     verdict), both as refusal.<Tag>, failing when a client tag equals a host tag;
 //   - every keyboard shortcut, from shortcutTable('Ctrl') and shortcutTable('Cmd') in
 //     src/input/shortcuts.ts, so a Ctrl entry carries both spellings, with helpOmits set on the
 //     entries the Help panel leaves out (HELP_OMITS).
 // Each family is read from the table itself, so a new refusal or shortcut joins the file on the
 // next run with no change here.
 //
+// It also prints KIND_NAMES from shared/kindNames.ts, the name the app shows for each machine kind,
+// as `appNames` (kind number to name). This half doesn't know the Rust code names, so site/scripts/
+// facts.ts joins appNames with the Rust half's machines[] and writes machine.<CodeName>.name.
+//
 // shortcuts.ts has no imports, so plain Node loads it as it is. The other modules are TypeScript
 // that plain Node can't strip (a .tsx file, for one), so they load through Vite's module runner.
 //
-// OUTPUT: one JSON object on stdout, `{ "facts": { "<id>": { ... } } }`. Source paths are
-// repo-relative and carry no line numbers.
+// OUTPUT: one JSON object on stdout, `{ "facts": { "<id>": { ... } }, "appNames": { "<kind>": "<name>" } }`.
+// Source paths are repo-relative and carry no line numbers.
 //
 // EXIT CODES
 //   0  the JSON was printed.
@@ -48,8 +54,22 @@ async function load<T>(rel: string): Promise<T> {
 
 type Controller = typeof import('../src/embed/controller.ts');
 type Refusals = typeof import('../src/chrome/RefusalMessage.tsx');
+type KindNames = typeof import('../shared/kindNames.ts');
 
 type Fact = Record<string, unknown>;
+
+/** KIND_NAMES as kind number (a string key) to the name the app shows. */
+async function appNames(): Promise<Record<string, string>> {
+  const { KIND_NAMES } = await load<KindNames>('shared/kindNames.ts');
+  const out: Record<string, string> = {};
+  for (const [kind, name] of Object.entries(KIND_NAMES)) {
+    if (!/^\d+$/.test(kind)) throw new Error(`KIND_NAMES has the key "${kind}", which isn't a kind number`);
+    if (typeof name !== 'string' || name === '') throw new Error(`KIND_NAMES[${kind}] isn't a non-empty string`);
+    out[kind] = name;
+  }
+  if (Object.keys(out).length === 0) throw new Error('KIND_NAMES loaded with no entries');
+  return out;
+}
 
 async function collect(): Promise<Record<string, Fact>> {
   const facts: Record<string, Fact> = {};
@@ -71,6 +91,15 @@ async function collect(): Promise<Record<string, Fact>> {
     const text = copy[tag];
     if (typeof text !== 'string' || text === '') throw new Error(`REFUSAL_COPY.${tag} isn't a non-empty string`);
     facts[`refusal.${tag}`] = { kind: 'text', value: text, source: REFUSALS, symbol: 'REFUSAL_COPY' };
+  }
+  const clientCopy: Record<string, unknown> = refusals.CLIENT_REFUSAL_COPY;
+  const clientTags = Object.keys(clientCopy);
+  if (clientTags.length === 0) throw new Error('CLIENT_REFUSAL_COPY loaded with no entries');
+  for (const tag of clientTags) {
+    if (tags.includes(tag)) throw new Error(`CLIENT_REFUSAL_COPY.${tag} has the same tag as REFUSAL_COPY.${tag}; give one of them another tag`);
+    const text = clientCopy[tag];
+    if (typeof text !== 'string' || text === '') throw new Error(`CLIENT_REFUSAL_COPY.${tag} isn't a non-empty string`);
+    facts[`refusal.${tag}`] = { kind: 'text', value: text, source: REFUSALS, symbol: 'CLIENT_REFUSAL_COPY' };
   }
 
   const ctrl = shortcutTable('Ctrl');
@@ -96,7 +125,7 @@ async function collect(): Promise<Record<string, Fact>> {
 
 try {
   const facts = await collect();
-  process.stdout.write(`${JSON.stringify({ facts }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ facts, appNames: await appNames() }, null, 2)}\n`);
 } catch (err) {
   console.error(`export-docs-facts: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);

@@ -45,8 +45,9 @@
 #       id in a `crates/` file exits 0, because code elsewhere cites those ids on purpose;
 #       and a `site/` file holding a date exits 0, because a date is not a plan id. A
 #       requirement id with a prefix from another workstream (`GATE-07`) also exits 1; an
-#       allowed token (`UTF-16`) exits 0; and the allowed token beside a requirement id on
-#       one line still exits 1.
+#       allowed token (`UTF-16`) exits 0; the allowed token beside a requirement id on
+#       one line still exits 1; and a phase id in capitals (`PHASE 97`) exits 1, because the
+#       phase pattern matches any letter case.
 #   X   COULD NOT ASSERT. A scan set below the floor, a positive control that cannot be
 #       found, and a missing exclusion must each exit EXACTLY 2, never 0.
 #
@@ -106,7 +107,7 @@ HANDLE="$(rot13 'zniqv')"
 FIRST_UP="$(printf '%s' "$FIRST" | tr 'a-z' 'A-Z')"
 HOME_ROOT="/home"
 
-DECLARED_TOTAL=61
+DECLARED_TOTAL=62
 
 # The gate runs under a UTF-8 locale when this machine has one, as it does on CI's ubuntu
 # runners. That is the locale in which GNU grep classes a file holding one Latin-1 byte as
@@ -326,6 +327,9 @@ check S8 0 "-"
 new_repo
 track "site/src/content/docs/concepts/index.md" "Read as UTF-16, see GATE-07."
 check S9 1 "site/src/content/docs/concepts/index.md"
+new_repo
+track "site/src/content/docs/reference/index.mdx" "PHASE 97 adds the machine pages."
+check S10 1 "site/src/content/docs/reference/index.mdx"
 
 echo "prove-no-private-residue-bites: could not assert"
 new_repo
