@@ -576,3 +576,31 @@ footer a[href*='/edit/main/'] {
   border-inline-start: 3px solid var(--fab-ink);
   padding-inline-start: var(--fab-space-md);
 }
+
+/*
+ * A machine's fact table (<MachineFacts>). Each caption reads like an aside title, Sono 700 12 px
+ * caps in ink, 8 px above its table and set at the start. Starlight already puts 16 px between the
+ * two tables; the note under the last one sits 8 px below it in Martian Mono 12 px.
+ */
+.sl-markdown-content .fab-machine-facts caption {
+  caption-side: top;
+  text-align: start;
+  padding: 0 0 var(--fab-space-sm);
+  font-family: var(--site-font-heading);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fab-ink);
+}
+.sl-markdown-content .fab-machine-facts > table + table {
+  margin-top: var(--sl-content-gap-y);
+}
+.sl-markdown-content .fab-machine-facts > .fab-machine-note {
+  margin-top: var(--fab-space-sm);
+  font-family: var(--site-font);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--fab-ink);
+}

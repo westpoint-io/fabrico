@@ -43,9 +43,29 @@ export interface ShortcutFact {
 
 export type Fact = QuantityFact | CodeFact | TextFact | ShortcutFact;
 
+/** One port of a machine, as the catalog lists it. `local_offset` is [column, row] from the top-left cell. */
+export interface MachinePort {
+  role: string;
+  medium: string;
+  side: string;
+  local_offset: [number, number];
+}
+
+/** One entry of facts.json `machines[]`: a machine kind as the code defines it. */
+export interface MachineEntry {
+  kind: number;
+  name: string;
+  catalog: boolean;
+  footprint: { w: number; h: number } | null;
+  ports: MachinePort[];
+  config: string | null;
+  configFields: string[];
+}
+
 /** The parts of facts.json this file reads. */
 export interface FactsFile {
   facts: Record<string, Fact>;
+  machines?: MachineEntry[];
 }
 
 /**
@@ -177,4 +197,124 @@ export function emptyFixMessage(page: string, label: string): string {
     `[Fix] ${page} has a <Fix> for "${label}" with no fix text. ` +
     'Write what causes it and how to fix it between <Fix> and </Fix>.'
   );
+}
+
+/** One row of a machine's ports table, in the words a reader sees. */
+export interface PortRow {
+  role: string;
+  takes: string;
+  side: string;
+  cell: string;
+}
+
+/** What <MachineFacts kind={N} /> renders for one machine kind. */
+export interface MachineView {
+  kind: number;
+  /** The name the app shows: the app-name fact's value, or machines[].name when there is no such fact. */
+  name: string;
+  /** The app-name fact id (machine.Endpoint.name), or null when facts.json has none (Wire). */
+  nameFact: string | null;
+  /** machines[].name, the name in the code. */
+  codeName: string;
+  /** The kind number's fact id (machine.Router.kind). */
+  kindFact: string;
+  /** "2 cells wide, 3 cells tall", or the no-footprint sentence. */
+  size: string;
+  /** One config.<Config>.<field> fact id per config field, in data order. Empty when there are none. */
+  configFacts: string[];
+  /** One row per port, in data order, which is the catalog's port index order. */
+  ports: PortRow[];
+}
+
+/** Where the words for port values live, named in the build error for a value with no word. */
+const PORT_WORDS_FILE = 'site/src/lib/facts.ts';
+
+function unknownPortValue(kind: number, field: string, value: string): Error {
+  return new Error(
+    `[MachineFacts] machine kind ${kind} has a port with ${field} "${value}", and ${PORT_WORDS_FILE} ` +
+      'has no word for it. Add one there.',
+  );
+}
+
+// Closed mappings: each lists every value the exporter writes today, with no default arm, and a
+// value with no word falls through to the throw. A new value in the code fails the build here
+// instead of showing a made-up word.
+
+function roleWord(role: string, kind: number): string {
+  switch (role) {
+    case 'In':
+      return 'In';
+    case 'Out':
+      return 'Out';
+    case 'Fault':
+      return 'Fault';
+  }
+  throw unknownPortValue(kind, 'role', role);
+}
+
+function mediumWord(medium: string, kind: number): string {
+  switch (medium) {
+    case 'Mechanical':
+      return 'Belt';
+    case 'Electrical':
+      return 'Wire';
+  }
+  throw unknownPortValue(kind, 'medium', medium);
+}
+
+function sideWord(side: string, kind: number): string {
+  switch (side) {
+    case 'N':
+      return 'North';
+    case 'E':
+      return 'East';
+    case 'S':
+      return 'South';
+    case 'W':
+      return 'West';
+  }
+  throw unknownPortValue(kind, 'side', side);
+}
+
+/** "1 cell" or "3 cells". */
+function cells(n: number): string {
+  return n === 1 ? '1 cell' : `${n} cells`;
+}
+
+/**
+ * The fact table of one machine kind, or a thrown Error with the line an author reads in the build
+ * log: for a kind facts.json doesn't hold, and for a port value with no word above.
+ */
+export function machineView(kind: number, page: string, facts: FactsFile): MachineView {
+  const machines = facts.machines ?? [];
+  const entry = machines.find((m) => m.kind === kind);
+  if (entry === undefined) {
+    const known = machines.map((m) => m.kind).join(', ');
+    throw new Error(
+      `[MachineFacts] ${page} asks for machine kind ${kind}, and site/src/generated/facts.json has no ` +
+        `machine with that kind. Known kinds: ${known}.`,
+    );
+  }
+  const nameId = `machine.${entry.name}.name`;
+  const nameFact = Object.hasOwn(facts.facts, nameId) ? nameId : null;
+  const nameValue = nameFact === null ? undefined : facts.facts[nameFact];
+  const name = nameValue !== undefined && 'value' in nameValue ? String(nameValue.value) : entry.name;
+  const size =
+    entry.footprint === null
+      ? 'None. It takes no grid cells.'
+      : `${cells(entry.footprint.w)} wide, ${cells(entry.footprint.h)} tall`;
+  if (entry.config === null && entry.configFields.length > 0) {
+    throw new Error(
+      `[MachineFacts] machine kind ${kind} lists config fields with no config name in ` +
+        'site/src/generated/facts.json. Regenerate it with npm run facts from site/.',
+    );
+  }
+  const configFacts = entry.configFields.map((field) => `config.${entry.config}.${field}`);
+  const ports = entry.ports.map((port) => ({
+    role: roleWord(port.role, kind),
+    takes: mediumWord(port.medium, kind),
+    side: sideWord(port.side, kind),
+    cell: `${port.local_offset[0]}, ${port.local_offset[1]}`,
+  }));
+  return { kind, name, nameFact, codeName: entry.name, kindFact: `machine.${entry.name}.kind`, size, configFacts, ports };
 }

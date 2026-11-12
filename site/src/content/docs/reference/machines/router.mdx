@@ -1,0 +1,38 @@
+---
+title: Router
+description: The Router machine sends each item out one output, picked by matching the start of the item. Its ports, size and config fields come from the source code.
+---
+
+import Board from '../../../../components/Board.astro';
+import Fact from '../../../../components/Fact.astro';
+import MachineFacts from '../../../../components/MachineFacts.astro';
+
+A Router reads the bytes of each item that reaches it and sends the item out one of its outputs. You give it an ordered list of routes, each a run of bytes and the output it leads to, and a default output for an item that no route matches.
+
+On the board below, one Source sends three webhooks to a Router: the first two each match a route and leave by the top and bottom outputs, and the third matches neither and takes the default output in the middle.
+
+<Board name="docs-machines-router" />
+
+## Facts
+
+<MachineFacts kind={5} />
+
+## How routes match
+
+The <Fact id="config.Router.routes" /> field holds the routes in the order you wrote them. Each route has a byte position, a run of bytes and an output. The Router compares the item's bytes, starting at that position, with the route's bytes, and the first route that matches decides the output. The Router never sorts the routes, so put a narrow route above a broad one that would also match. A Router holds at most <Fact id="limit.max_routes" />, and a route's bytes run to at most <Fact id="limit.max_route_expect_bytes" bare /> bytes.
+
+An item too short to hold the route's bytes at that position doesn't match the route. In the app's config panel you type a route's bytes as text, and the Router compares them byte for byte, so case and spacing count.
+
+## The default output
+
+The <Fact id="config.Router.default" /> field names the output an item takes when no route matches it. A Router you place from the palette has no routes yet and its default is its first output, so it sends every item that way until you add a route.
+
+## An item that matches nothing, with no default
+
+When you clear the default and an item matches no route, the Router sends the item out its Fault port as a <Fact id="fault.NoMatch" /> fault, and the Router shows as faulted on that tick. Dock a belt on the Fault port to carry those items to a Sink where you can read them. With nothing docked there, the item goes no further. The troubleshooting entry for [a NoMatch fault](../../../troubleshooting/fault-reasons/#fault-no-match) says how to fix one.
+
+## Related pages
+
+- [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Common problems](../../../troubleshooting/common-problems/): fixes for things you might see on a board.
+- [Reference](../../): the list of machine pages and the other reference pages.

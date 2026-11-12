@@ -1,0 +1,76 @@
+// A docs board for the Router. One Source gets three webhooks, and its belt carries each item to a
+// Router with two routes and a default output. The first route sends a body that starts with
+// {"to":"a" out the top output, the second sends one that starts with {"to":"b" out the bottom
+// output, and the third body matches neither, so it takes the default, the middle output. Each
+// output has its own belt into a Debug Sink, so the reader sees one item take each way. The run
+// makes no outbound call.
+//
+//   row 0:                                                   +-b6-> SINK 2
+//   row 1:                              ROUTER 1 Out (emit 2) -+
+//   row 2:   SOURCE 0 -b5-> ROUTER 1 In,         Out (emit 0) -b7---> SINK 3   (the default)
+//   row 3:                              ROUTER 1 Out (emit 1) -+
+//   row 4:                                                   +-b8-> SINK 4
+//
+// The top and bottom belts turn one row out, so the three Sinks sit a row apart and their names
+// don't overlap.
+//
+// The Router's Fault port, on its bottom-left cell facing south, stays undocked. With a default
+// output set, no item goes there.
+//
+// Handles mint in command order: the Source 0, the Router 1, the Sinks 2, 3 and 4, then the belts
+// 5 to 8. The 18 commands and the history seal end the boot on tick 19.
+//
+// machine_kind u8 legend: SOURCE=0, ROUTER=5, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; ROUTER In=0, Outs 1, 2 and 3 (emit 0, 1 and 2, on its east rows 1, 2 and 0),
+// Fault=4; SINK In=0. A route names its output by emit number, not by catalog index.
+//
+// Each route's `expect` is the UTF-8 bytes of a prefix at offset 0, written as a number list
+// because RON has no byte strings: 123 34 116 111 34 58 34 97 34 is {"to":"a" and the second ends
+// in 98 34 for {"to":"b".
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Router",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 5, cell_x: 6, cell_y: 1),        // 1: ROUTER, 2x3
+        Place(kind: 7, cell_x: 11, cell_y: 0),       // 2: SINK, Debug by default
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 3: SINK
+        Place(kind: 7, cell_x: 11, cell_y: 4),       // 4: SINK
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2)]),                // 5
+        DrawBelt(cells: [(8, 1), (9, 1), (9, 0), (10, 0)]),               // 6
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),                       // 7
+        DrawBelt(cells: [(8, 3), (9, 3), (9, 4), (10, 4)]),               // 8
+        Dock(belt: 5, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 5, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 6, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 7, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 8, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 8, endpoint: Head, node: 4, port: 0),
+        Configure(node: 1, config: Router(routes: [
+            // {"to":"a"  -> emit 2, the top output
+            ((offset: 0, expect: [123, 34, 116, 111, 34, 58, 34, 97, 34]), 2),
+            // {"to":"b"  -> emit 1, the bottom output
+            ((offset: 0, expect: [123, 34, 116, 111, 34, 58, 34, 98, 34]), 1),
+        ], default: Some(0))),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"to":"a","order":1}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"to":"b","order":2}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"to":"c","order":3}"#)),
+    ],
+    captions: [
+        Caption(tick: 71, highlight: 1, text: "This item's body starts with {\"to\":\"a\", so the first route sends it out the top output."),
+        Caption(tick: 131, highlight: 1, text: "This body starts with {\"to\":\"b\". The first route doesn't match it and the second does, so it leaves by the bottom output."),
+        Caption(tick: 191, highlight: 1, text: "This body matches neither route, so the Router sends it out the default output in the middle."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)

@@ -147,9 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# One new line for examples/boards/docs/arrival-order.board.ron, written by the generator. The four
-# older lines are unchanged.
-examples/boards/hashes.manifest 3487302d0cadaea128a10e8e6084da25fdc123657a6b4aa216a025383e9d89e3
+# One new line for examples/boards/docs/machines-router.board.ron, written by the generator. The
+# five older lines are unchanged.
+examples/boards/hashes.manifest 2798ac9fd6302fbc28867d6635cb976f57eb77b7f808f8137b2fe44c71e12b44
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

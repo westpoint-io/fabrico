@@ -1,0 +1,61 @@
+---
+// The fact table on a machine page: <MachineFacts kind={5} />. Everything in it comes from the
+// machine's entry in src/generated/facts.json `machines[]`, which `npm run facts` writes from the
+// source, so the table changes when the code does. A kind with no entry, or a port value with no
+// word in site/src/lib/facts.ts, fails the build with a line naming the page or the kind.
+//
+// Two tables: a summary (name in the app and in the code, kind number, size, config fields) and the
+// ports in catalog order, or a line saying the machine has none. Names and numbers render through
+// <Fact>, so the docs suite checks them like any other fact. The wrapper carries data-machine-kind,
+// which the reference coverage check reads. It isn't not-content, so the site's table rules apply.
+import facts from '../generated/facts.json';
+import Fact from './Fact.astro';
+import { machineView, type FactsFile } from '../lib/facts.ts';
+
+interface Props {
+  kind: number;
+}
+
+const { kind } = Astro.props;
+const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
+const view = machineView(kind, page, facts as unknown as FactsFile);
+const generated = 'Generated from the source code when the site is built.';
+const note =
+  view.ports.length === 0
+    ? generated
+    : `Sides and cells are for the machine before any rotation. Cell counts columns, then rows, from the top-left cell. ${generated}`;
+---
+
+<div class="fab-machine-facts" data-machine-kind={String(view.kind)}>
+  <table class="fab-machine-summary">
+    <caption>{view.name} at a glance</caption>
+    <tbody>
+      <tr><th scope="row">Name in the app</th><td>{view.nameFact === null ? view.name : <Fact id={view.nameFact} />}</td></tr>
+      <tr><th scope="row">Name in the code</th><td><code>{view.codeName}</code></td></tr>
+      <tr><th scope="row">Kind number</th><td><Fact id={view.kindFact} /></td></tr>
+      <tr><th scope="row">Size</th><td>{view.size}</td></tr>
+      <tr>
+        <th scope="row">Config fields</th>
+        <td>{view.configFacts.length === 0 ? 'None' : view.configFacts.map((id, i) => <Fragment>{i > 0 && ', '}<Fact id={id} /></Fragment>)}</td>
+      </tr>
+    </tbody>
+  </table>
+  {
+    view.ports.length === 0 ? (
+      <p>{view.name} has no ports.</p>
+    ) : (
+      <table class="fab-machine-ports">
+        <caption>{view.name} ports</caption>
+        <thead>
+          <tr><th scope="col">Role</th><th scope="col">Takes</th><th scope="col">Side</th><th scope="col">Cell</th></tr>
+        </thead>
+        <tbody>
+          {view.ports.map((port) => (
+            <tr><td>{port.role}</td><td>{port.takes}</td><td>{port.side}</td><td>{port.cell}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  <p class="fab-machine-note">{note}</p>
+</div>

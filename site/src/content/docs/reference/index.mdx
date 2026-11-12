@@ -5,6 +5,10 @@ description: A page for each machine kind and each engine rule, with ports, conf
 
 import Fact from '../../../components/Fact.astro';
 
-This section will hold a page for each machine kind and each engine rule. Its pages aren't written yet.
+Look up a machine, an engine rule, the Factory API, the HTTP contract, a command, a shortcut or a message the app shows. Each page has a running board beside the facts.
 
 Numbers on these pages come from the source code when the site is built. For example, the boards on these pages play at <Fact id="embed.ticks_per_second" />, and <Fact id="shortcut.playPause" /> starts or pauses a board in the app.
+
+## Machines
+
+- [Router](machines/router/): sends each item out one output, picked by matching the start of the item.
