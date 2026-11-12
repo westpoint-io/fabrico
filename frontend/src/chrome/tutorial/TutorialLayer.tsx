@@ -15,10 +15,12 @@ import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, ty
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
+import { acceptRouteUrl, curlWordFor } from '../../tutorial/request';
 import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
 import { frameTarget, offScreenFlag } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CONFIG_NOT_APPLIED_MARKER } from '../configCopy';
+import { ROUTE_URL_LABEL } from '../controlLabels';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { moveCamera, readCamera } from './cameraRead';
 import { HintPointer, readCodeText, type HintTarget } from './HintPointer';
@@ -406,6 +408,33 @@ function readTriggerPressed(): ChromeFacts['triggerPressed'] {
   return text === 'Webhook' || text === 'Timer' ? text : null;
 }
 
+/** The text in the inspector's POST URL row: the URL, the row's not-ready words, or null with no such row. */
+function readPostUrlText(): string | null {
+  const inspector = document.querySelector('aside[aria-labelledby="fab-config-heading"]');
+  if (inspector === null) return null;
+  for (const label of inspector.querySelectorAll('label')) {
+    if (label.textContent?.trim() !== ROUTE_URL_LABEL) continue;
+    return label.parentElement?.querySelector('span.fab-field')?.textContent ?? null;
+  }
+  return null;
+}
+
+/**
+ * The bound Route's URL for this frame. It is read off the inspector's POST URL row only while that Route
+ * is selected, and only in the strict endpoint shape, so the row's "Webhook not ready" words or a port 0
+ * URL never reach the card. Otherwise the URL already held stands, as long as it was read about the same
+ * handle at the same board generation: an Undo keyframe re-mints handles, and a URL from before it is
+ * dropped. A read that finds no URL keeps the held one too, because a freshly mounted row shows its
+ * not-ready words until the host answers, and the card shouldn't lose its line on every reselect.
+ */
+function readRouteUrl(held: ChromeFacts['routeUrl'], route: number | undefined, selectedNode: number | null, generation: number): ChromeFacts['routeUrl'] {
+  const kept = held !== null && held.node === route && held.generation === generation ? held : null;
+  if (route === undefined || selectedNode !== route) return kept;
+  const url = acceptRouteUrl(readPostUrlText());
+  if (url === null || kept?.url === url) return kept;
+  return { node: route, generation, url };
+}
+
 export interface TutorialLayerProps {
   handleRef: RefObject<SceneHandle | null>;
   armed: ArmedTool | null;
@@ -480,6 +509,14 @@ export function TutorialLayer({
   // The card's left edge while the open inspector meets its centred place. The same pattern again.
   const cardLeftRef = useRef<number | null>(null);
   const [cardLeft, setCardLeft] = useState<number | null>(null);
+  // The bound Route's URL as read off its POST URL row. The ref is what the frame loop keeps and hands the
+  // reducer; the card's copy is React state set only when the URL changes, because the layer re-renders on a
+  // view change and a URL that arrives after its stage began must still reach the card.
+  const routeUrlRef = useRef<ChromeFacts['routeUrl']>(null);
+  const cardUrlRef = useRef<string | null>(null);
+  const [cardUrl, setCardUrl] = useState<string | null>(null);
+  // The browser doesn't change under a running app, so the word is read once.
+  const [curlWord] = useState(() => curlWordFor(navigator.userAgent));
   const targetRef = useRef<HintTarget | null>(null);
   const paintRingRef = useRef<(() => void) | null>(null);
   // The host's last config answer about each bound machine, by handle, tagged with the generation its
@@ -595,6 +632,13 @@ export function TutorialLayer({
       const camera = readCamera();
       if (handle !== null && camera !== null) {
         const board = sceneSnapshot(handle.sceneState);
+        const routeUrl = readRouteUrl(
+          routeUrlRef.current,
+          stateRef.current.bindings.route?.id,
+          chromeRef.current.selectedNode,
+          board.generation,
+        );
+        routeUrlRef.current = routeUrl;
         const chrome: ChromeFacts = {
           ...chromeRef.current,
           editsInFlight: readEditsInFlightRef.current(),
@@ -603,8 +647,14 @@ export function TutorialLayer({
           appliedConfigs: answersForFrame(answersRef.current, boundMachineIds(stateRef.current), board.generation),
           codeNotApplied: readCodeNotApplied(),
           codeText: readCodeText(),
+          routeUrl,
           view: { camera, freeArea: readFreeArea() },
         };
+        const urlNow = routeUrl?.url ?? null;
+        if (urlNow !== cardUrlRef.current) {
+          cardUrlRef.current = urlNow;
+          setCardUrl(urlNow);
+        }
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);
         factsRef.current = { board, chrome };
         if (next.card === 'finished' && stateRef.current.card !== 'finished' && next.lessonId !== null) {
@@ -709,6 +759,7 @@ export function TutorialLayer({
         progress.write(withLessonStarted(progress.read(), lessonId));
         dispatch({ type: 'newSent', lessonId, floorAtSend });
         answersRef.current.clear();
+        routeUrlRef.current = null;
         setStage(null);
         onLessonsOpenChange(false);
       });
@@ -850,6 +901,7 @@ export function TutorialLayer({
           onKeepBuilding={keepBuilding}
           onShowMe={showMe}
           simStopped={simStopped}
+          request={cardUrl === null ? null : { word: curlWord, url: cardUrl }}
           {...(cardLeft === null ? {} : { left: cardLeft })}
           {...(lessonId === null ? {} : { onRestart: () => start(lessonId) })}
         />

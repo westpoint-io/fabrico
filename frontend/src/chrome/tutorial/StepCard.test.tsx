@@ -466,3 +466,32 @@ describe('StepCard', () => {
     expect(text.indexOf('needs doing again')).toBeLessThan(text.indexOf('Step 1 of 6'));
   });
 });
+
+describe('StepCard request line', () => {
+  const URL = 'http://127.0.0.1:54321/endpoint/route-1';
+  const WITH_LINE: StepCardView = {
+    ...RUNNING,
+    stepNumber: 4,
+    stepCount: 4,
+    text: ['Type this line in a terminal:', { requestLine: 'route' }, 'Then press Enter.'],
+  } as StepCardView;
+
+  /** The live region's elements, in tree order. */
+  const liveOf = (tree: El[]): El[] => {
+    const live = tree.find((el) => el.props['aria-live'] !== undefined);
+    return live === undefined ? [] : elements(live.props.children);
+  };
+
+  it('renders the instruction, the request line and the line after it, in that order, inside the live region', () => {
+    const live = liveOf(elements(StepCard({ view: WITH_LINE, ...NOOPS, request: { word: 'curl', url: URL } })));
+    const at = (mark: string): number => live.findIndex((el) => el.props[mark] !== undefined);
+    const text = live[at('data-fab-step-text')];
+    const line = live[at('data-fab-request-line')];
+    const after = live[at('data-fab-step-after')];
+    expect(textOf(text)).toBe('Type this line in a terminal:');
+    expect(textOf(line)).toBe(`curl -X POST ${URL}`);
+    expect(textOf(after)).toBe('Then press Enter.');
+    expect(at('data-fab-step-text')).toBeLessThan(at('data-fab-request-line'));
+    expect(at('data-fab-request-line')).toBeLessThan(at('data-fab-step-after'));
+  });
+});

@@ -14,7 +14,8 @@
 // Hook-free, so a node test can call it as a function. `TutorialLayer` holds the state.
 
 import type { CSSProperties, JSX } from 'react';
-import { phrase } from '../../tutorial/phrase';
+import { phrase, splitAtBlock } from '../../tutorial/phrase';
+import { requestLineText } from '../../tutorial/request';
 import type { PhraseToken } from '../../tutorial/types';
 import { SIM_STOPPED_COPY } from '../SimStoppedCard';
 
@@ -58,6 +59,12 @@ export interface StepCardProps {
    * place. Without it the card is centred. Only x moves: the width and the bottom anchor stay.
    */
   left?: number;
+  /**
+   * The curl word and the URL the layer read off the POST URL row, for a stage holding the request line
+   * token. Null or absent while no URL has been read, and then the card shows no request line row. The
+   * card never builds the URL itself.
+   */
+  request?: { word: string; url: string } | null;
 }
 
 /** Show me's title, and the off-screen line, while a belt draw is held. */
@@ -92,6 +99,43 @@ function Words({ tokens, mark }: { tokens: readonly PhraseToken[]; mark?: string
         ),
       )}
     </p>
+  );
+}
+
+/**
+ * The request line's box, coloured like the POST URL field it came from, at body weight. It wraps at the
+ * space before the URL and anywhere inside it, and passes the pointer through like the rest of the card body.
+ */
+const requestLineStyle: CSSProperties = {
+  ...textStyle,
+  fontWeight: 400,
+  background: 'var(--fab-substrate)',
+  border: '1px solid var(--fab-edge-lit)',
+  padding: 'var(--fab-space-sm)',
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'anywhere',
+  pointerEvents: 'none',
+};
+/** A `code` element takes the browser's monospace face unless told to inherit the card's. */
+const requestCodeStyle: CSSProperties = { font: 'inherit' };
+
+/**
+ * A running stage's text. Without the request line token it is the one instruction paragraph it always
+ * was. With it, the instruction, then the request line row while a URL is held, then the line after.
+ */
+function StageText({ tokens, request }: { tokens: readonly PhraseToken[]; request: { word: string; url: string } | null }): JSX.Element {
+  const { before, block, after } = splitAtBlock(tokens);
+  if (block === null) return <Words tokens={before} mark="data-fab-step-text" />;
+  return (
+    <>
+      <Words tokens={before} mark="data-fab-step-text" />
+      {request !== null && request.url !== '' && (
+        <div data-fab-request-line="" style={requestLineStyle}>
+          <code style={requestCodeStyle}>{requestLineText(request.word, request.url)}</code>
+        </div>
+      )}
+      {after.length > 0 && <Words tokens={after} mark="data-fab-step-after" />}
+    </>
   );
 }
 
@@ -236,7 +280,7 @@ export function StepCard(props: StepCardProps): JSX.Element {
                 </div>
               )}
               <p style={{ ...textStyle, fontWeight: 700 }}>{`Step ${view.stepNumber} of ${view.stepCount}`}</p>
-              <Words tokens={view.text} mark="data-fab-step-text" />
+              <StageText tokens={view.text} request={props.request ?? null} />
             </>
           )}
           {view.state === 'finished' && (

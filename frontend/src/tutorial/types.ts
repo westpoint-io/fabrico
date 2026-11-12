@@ -98,6 +98,12 @@ export interface ChromeFacts {
   codeNotApplied: boolean;
   /** The text in the Factory's code editor, its lines joined by newlines, or null with no Factory editor showing. */
   codeText: string | null;
+  /**
+   * The URL read off the inspector's POST URL row while the Route with handle `node` was selected, at board
+   * generation `generation`, accepted only in the strict endpoint shape. Null until one has been read. An
+   * Undo keyframe re-mints handles, so a reader checks both against the board before trusting it.
+   */
+  routeUrl: { node: number; generation: number; url: string } | null;
   view: {
     camera: { x: number; y: number; scale: number };
     freeArea: { left: number; right: number; top: number; bottom: number };
@@ -245,8 +251,11 @@ export type Gesture =
 /**
  * Lesson words: plain text, a key named through `SHORTCUTS`, a machine named through `KIND_NAMES`, or a
  * fragment of code, shown as it is and never broken across lines.
+ *
+ * `requestLine` is a block token, not a word: the card splits the stage's text at it (`splitAtBlock`) and
+ * sets the bound Route's request line on its own row between the two parts. At most one per text.
  */
-export type PhraseToken = string | { key: ShortcutId } | { kind: number } | { code: string };
+export type PhraseToken = string | { key: ShortcutId } | { kind: number } | { code: string } | { requestLine: BindingName };
 
 /** One thing a step asks for. A step's stages are read top to bottom, and the first that holds is shown. */
 export interface Stage {

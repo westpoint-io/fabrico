@@ -8,7 +8,7 @@
 
 import { KIND_NAMES } from '../../shared/kindNames';
 import { SHORTCUTS, type ShortcutId } from '../input/shortcuts';
-import type { Lesson, PhraseToken } from './types';
+import type { BindingName, Lesson, PhraseToken } from './types';
 
 export interface WordTables {
   shortcuts: { readonly [K in ShortcutId]: { readonly label: string } };
@@ -32,7 +32,31 @@ export interface PhraseSegment {
 export const MAX_INSTRUCTION_CHARS = 141;
 export const MAX_NOTE_CHARS = 94;
 
-function wordOf(token: Exclude<PhraseToken, string | { code: string }>, tables: WordTables): string {
+/** The request line's token: a row of its own on the card, never a word in a sentence. */
+type BlockToken = { requestLine: BindingName };
+
+function isBlock(token: PhraseToken): token is BlockToken {
+  return typeof token !== 'string' && 'requestLine' in token;
+}
+
+/**
+ * A stage's text cut at its block token. `before` is the instruction and `after` the line under the
+ * request line, each measured on its own budget. With no block token, `block` is null and `before` is the
+ * whole text. A text holding two block tokens throws: the card has one request line row.
+ */
+export function splitAtBlock(tokens: readonly PhraseToken[]): {
+  before: readonly PhraseToken[];
+  block: BlockToken | null;
+  after: readonly PhraseToken[];
+} {
+  const at = tokens.findIndex(isBlock);
+  if (at === -1) return { before: tokens, block: null, after: [] };
+  const after = tokens.slice(at + 1);
+  if (after.some(isBlock)) throw new Error('lesson text holds two requestLine block tokens, and the card shows one request line');
+  return { before: tokens.slice(0, at), block: tokens[at] as BlockToken, after };
+}
+
+function wordOf(token: Exclude<PhraseToken, string | { code: string } | BlockToken>, tables: WordTables): string {
   if ('kind' in token) {
     if (!Object.hasOwn(tables.kinds, token.kind)) {
       throw new Error(`lesson text names kind ${token.kind}, and the kind table has no such entry`);
@@ -51,6 +75,11 @@ export function phrase(tokens: readonly PhraseToken[], tables: WordTables = REAL
   return tokens.map((token) => {
     if (typeof token === 'string') return { text: token, strong: false };
     if ('code' in token) return { text: token.code, strong: true, code: true };
+    // Before `wordOf`, which would read the token as a key. A text still holding the block token wasn't
+    // split, so a length audit on it would measure a placeholder: refuse it by name instead.
+    if (isBlock(token)) {
+      throw new Error(`lesson text still holds the requestLine block token for "${token.requestLine}": split it with splitAtBlock first`);
+    }
     return { text: wordOf(token, tables), strong: true };
   });
 }
