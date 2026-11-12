@@ -178,10 +178,10 @@ fn observe(text: &str) -> Result<Observed, String> {
             }
         }
         for record in &run.effects()[effects_read..] {
-            if let EffectSummary::Debug { message } = &record.effect {
-                if let Some(fault) = fault_in(&Item(message.clone())) {
-                    note(&mut observed, &mut producers, fault, record.tick);
-                }
+            if let EffectSummary::Debug { message } = &record.effect
+                && let Some(fault) = fault_in(&Item(message.clone()))
+            {
+                note(&mut observed, &mut producers, fault, record.tick);
             }
         }
         effects_read = run.effects().len();
