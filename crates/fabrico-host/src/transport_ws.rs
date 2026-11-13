@@ -71,7 +71,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::config_view::ConfigView;
 use crate::gesture_verdict::{VerdictFrame, VerdictSink, VerdictTx};
-use crate::demo_scene::SceneId;
+use crate::demo_scene::{LessonBoard, SceneId};
 use crate::render_packet::{RenderFrame, RenderProducer, RenderRelay};
 use crate::sim_loop::{
     BELT_RUN_PACE_LEAD, BeltRunPace, ControlMsg, GestureEnvelope, GestureFrame, MAX_RUN_PACE_BELTS,
@@ -131,12 +131,15 @@ pub const MAX_CONTROL_FRAME: usize = 4 * 1024;
 /// "pause" | "resume" | "step" | "load_demo" | "new"   (no argument)
 /// "save\n<path>" | "load\n<path>"              (kind, newline, then the path)
 /// "load_example\n<scene-id>"                   (kind, newline, then the scene id)
+/// "load_lesson_board\n<board-id>"              (kind, newline, then the lesson board id)
 /// ```
 ///
 /// The `kind` is the text up to the first `\n`; anything after it is the argument
 /// (the path for Save/Load, the scene id for `load_example`). The ONLY legal scene
 /// ids are the three shipped scenes, `demo_scene`, `order_processing` and `advanced`:
-/// [`SceneId::parse`] is the typed boundary (T-55-04); an unknown id is `Malformed`, never a silent demo load. An
+/// [`SceneId::parse`] is the typed boundary (T-55-04); an unknown id is `Malformed`, never a silent demo load.
+/// The only legal lesson board id is `belts_that_join`, through [`LessonBoard::parse`], with the
+/// same `Malformed` for anything else. An
 /// unknown kind, a missing/empty argument where one is required, or an argument on
 /// an argument-less kind is a typed [`CommandError::Malformed`] — the transport
 /// drops the frame and keeps the socket alive (threat T-18-CTRL-WS).
@@ -164,6 +167,10 @@ pub fn decode_control(text: &str) -> Result<ControlMsg, CommandError> {
         // alive) — NEVER a silent demo fallback.
         ("load_example", Some(id)) => SceneId::parse(id)
             .map(ControlMsg::LoadScene)
+            .ok_or(CommandError::Malformed),
+        // The lesson board id is closed the same way: ids only, never a path.
+        ("load_lesson_board", Some(id)) => LessonBoard::parse(id)
+            .map(ControlMsg::LoadLessonBoard)
             .ok_or(CommandError::Malformed),
         _ => Err(CommandError::Malformed),
     }
@@ -1505,6 +1512,29 @@ mod tests {
             decode_control("load_example"),
             Err(CommandError::Malformed)
         ));
+    }
+
+    /// The `load_lesson_board` verb parses its id through [`LessonBoard::parse`]: the one good
+    /// id decodes to `LoadLessonBoard`, and an unknown id, a scene id, a path or a bare frame is
+    /// `Malformed` (frame dropped, socket alive).
+    #[test]
+    fn transport_ws_decode_load_lesson_board_frames() {
+        assert!(matches!(
+            decode_control("load_lesson_board\nbelts_that_join"),
+            Ok(ControlMsg::LoadLessonBoard(LessonBoard::BeltsThatJoin))
+        ));
+        for bad in [
+            "load_lesson_board\nbogus",
+            "load_lesson_board\ndemo_scene",
+            "load_lesson_board\nlessons/belts-that-join.board.ron",
+            "load_lesson_board\n",
+            "load_lesson_board",
+        ] {
+            assert!(
+                matches!(decode_control(bad), Err(CommandError::Malformed)),
+                "{bad:?} is Malformed"
+            );
+        }
     }
 
     #[test]

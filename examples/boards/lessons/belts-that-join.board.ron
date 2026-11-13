@@ -1,0 +1,39 @@
+// The board the "Belts that join" lesson starts on. A Source on a timer puts an item on its belt
+// every 60 ticks, the pace a new Timer starts at. The belt runs four tiles east and stops short: its
+// end docks to nothing, so items ride it, bunch at the end and fill it. A Sink sits three cells
+// below the cell past the belt's end, turned once clockwise so its input faces north, up toward
+// that cell. The lesson asks the user to draw on from the ring past the belt's end, straight down
+// into the Sink's input, so the belt turns a corner on that cell and items reach the Sink. The run
+// makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b2------> (6,2) the empty cell past the belt's end
+//   rows 3-5:                     (free)
+//   row 6:                        SINK 1, input facing north
+//
+// The Examples list reads only the top of the boards folder, so this board never shows there.
+//
+// Handles mint in command order: the Source 0, the Sink 1, then the belt 2. The 6 commands and the
+// history seal end the boot on tick 7.
+//
+// machine_kind u8 legend: SOURCE=0, SINK=7. Dock `port` is the catalog port index: SOURCE Out=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on. This board has no captions.
+Board(
+    format: 2,
+    title: "Belts that join",
+    seed: 61,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 7, cell_x: 6, cell_y: 6),        // 1: SINK, Debug by default
+        Rotate(node: 1, ccw: false),                 // the Sink's input turns from west to north
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2)]),        // 2: its end at (5,2) docks to nothing
+        Dock(belt: 2, endpoint: Tail, node: 0, port: 0),
+        Configure(node: 0, config: Source(trigger: Timer(interval_ticks: 60))),
+    ],
+    script: [],
+    captions: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 360,
+)

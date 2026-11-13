@@ -1,9 +1,12 @@
-//! The shipped scenes as DATA, and THE one function that boots any of them.
+//! The shipped boards as DATA, and THE one function that boots any of them.
 //!
-//! The boards live in `examples/boards/`, with one `<wire id>.board.ron` per [`SceneId`]. This
-//! module embeds them at build time, so no file is read at run time and [`SceneId`] stays a closed
-//! list: a board in `examples/boards/docs/` never reaches the Examples menu. A test in
-//! `tests/scene_catalog_guard.rs` holds the files and the catalog together.
+//! This module embeds four boards at build time, so no file is read at run time: the three
+//! Examples boards, `examples/boards/<wire id>.board.ron`, one per [`SceneId`], and one lesson
+//! board, `examples/boards/lessons/belts-that-join.board.ron`, named by [`LessonBoard`]. Both lists
+//! are closed, and [`BoardId`] wraps the two so a lesson board rides the same boot and swap path as
+//! an example. The Examples list reads only the top of `examples/boards/`, so neither the lesson
+//! subfolder nor `examples/boards/docs/` ever reaches it. A test in `tests/scene_catalog_guard.rs`
+//! holds the top-level files and [`SceneId`] together.
 //!
 //! Every shipped board (the demo, the order-processing example and the advanced example) is
 //! a build-embedded board file (`examples/boards/*.board.ron`) holding a list of
@@ -96,6 +99,15 @@ pub const ORDER_GENESIS_SEED: u64 = 55;
 /// scenes share a factory sub-seed stream by accident. Value arbitrary; logged
 /// in the `LogHeader` exactly like the others.
 pub const ADVANCED_GENESIS_SEED: u64 = 88;
+
+/// The build-embedded board the "Belts that join" lesson starts on: a Source on a timer, a belt
+/// that stops short, and a Sink below the cell past the belt's end. It lives in a subfolder the
+/// Examples list doesn't read, and [`LessonBoard`] names it by id, never by path.
+const BELTS_THAT_JOIN_RON: &str = include_str!("../../../examples/boards/lessons/belts-that-join.board.ron");
+
+/// The "Belts that join" lesson board's genesis seed, distinct from every other shipped board's.
+/// `each_board_carries_its_scene_seed` holds it equal to the board file's own `seed` field.
+pub const BELTS_THAT_JOIN_SEED: u64 = 61;
 
 /// The typed scene-id boundary (EX-02): the ONE choke point every path that
 /// names a shipped scene parses through — the dev-WS `load_example` verb, the
@@ -193,6 +205,113 @@ impl SceneId {
             Self::Demo => DEMO_GENESIS_SEED,
             Self::OrderProcessing => ORDER_GENESIS_SEED,
             Self::Advanced => ADVANCED_GENESIS_SEED,
+        }
+    }
+}
+
+/// The typed id of a board a lesson starts on. A closed list like [`SceneId`], kept apart from it so
+/// a lesson board never shows in the Examples list or the toolbar's example badge. The dev-WS
+/// `load_lesson_board` verb and the Tauri `load_lesson_board` command both parse through
+/// [`LessonBoard::parse`], which accepts ids only, never a path; an unknown id is each transport's
+/// typed error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LessonBoard {
+    /// The "Belts that join" board (`examples/boards/lessons/belts-that-join.board.ron`).
+    BeltsThatJoin,
+}
+
+impl LessonBoard {
+    /// Every lesson board, once each.
+    pub const ALL: [LessonBoard; 1] = [Self::BeltsThatJoin];
+
+    /// Parse a wire id. Exactly `"belts_that_join"` is legal; anything else, a path or a scene id
+    /// included, is `None`.
+    #[must_use]
+    pub fn parse(wire: &str) -> Option<Self> {
+        match wire {
+            "belts_that_join" => Some(Self::BeltsThatJoin),
+            _ => None,
+        }
+    }
+
+    /// The wire id [`LessonBoard::parse`] accepts.
+    #[must_use]
+    pub fn wire_id(self) -> &'static str {
+        match self {
+            Self::BeltsThatJoin => "belts_that_join",
+        }
+    }
+
+    /// The board's fixed genesis seed.
+    #[must_use]
+    pub fn genesis_seed(self) -> u64 {
+        match self {
+            Self::BeltsThatJoin => BELTS_THAT_JOIN_SEED,
+        }
+    }
+
+    /// The board's command list from its build-embedded file. Fallible for the same reason as
+    /// [`SceneId::commands`]: it runs on the sim thread on every load.
+    ///
+    /// # Errors
+    /// [`SeedError::Board`] if the embedded file isn't a well-formed board.
+    pub fn commands(self) -> Result<Vec<GridCommand>, SeedError> {
+        match self {
+            Self::BeltsThatJoin => load_board_commands(BELTS_THAT_JOIN_RON),
+        }
+    }
+}
+
+/// Any board the host can boot by id: an Examples board or a lesson board. [`boot_scene`], the
+/// swap latch and `load_scene_swap` all take this, so a lesson board arrives the way an example
+/// does, through one swap function, with its history sealed and its timers projected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardId {
+    /// One of the three Examples boards.
+    Scene(SceneId),
+    /// A board a lesson starts on.
+    Lesson(LessonBoard),
+}
+
+impl From<SceneId> for BoardId {
+    fn from(id: SceneId) -> Self {
+        Self::Scene(id)
+    }
+}
+
+impl From<LessonBoard> for BoardId {
+    fn from(id: LessonBoard) -> Self {
+        Self::Lesson(id)
+    }
+}
+
+impl BoardId {
+    /// The board's wire id, as its own list's `parse` accepts it.
+    #[must_use]
+    pub fn wire_id(self) -> &'static str {
+        match self {
+            Self::Scene(id) => id.wire_id(),
+            Self::Lesson(id) => id.wire_id(),
+        }
+    }
+
+    /// The board's fixed genesis seed.
+    #[must_use]
+    pub fn genesis_seed(self) -> u64 {
+        match self {
+            Self::Scene(id) => id.genesis_seed(),
+            Self::Lesson(id) => id.genesis_seed(),
+        }
+    }
+
+    /// The board's command list from its build-embedded file.
+    ///
+    /// # Errors
+    /// [`SeedError::Board`] if the embedded file isn't a well-formed board.
+    pub fn commands(self) -> Result<Vec<GridCommand>, SeedError> {
+        match self {
+            Self::Scene(id) => id.commands(),
+            Self::Lesson(id) => id.commands(),
         }
     }
 }
@@ -372,8 +491,8 @@ pub fn seed_scene(host: &mut Host, commands: &[GridCommand]) -> Result<Vec<NodeI
 /// `load_scene_swap` warns with the scene named and keeps the board it has.
 #[derive(Debug)]
 pub struct SceneLoadError {
-    /// The scene that failed.
-    pub scene: SceneId,
+    /// The board that failed.
+    pub scene: BoardId,
     /// Why it failed.
     pub source: SeedError,
 }
@@ -394,16 +513,18 @@ impl std::error::Error for SceneLoadError {
 /// list, apply it to `host` with [`seed_scene`] (which seals the history after the last
 /// command), then project the board's timers out of the edit log it just wrote and install
 /// them. The Tauri shell's boot, the dev render server's boot and `load_scene_swap` all call
-/// this, so the three can never build a scene three ways again.
+/// this, so the three can never build a scene three ways again. A lesson board takes the same
+/// path: `id` is a [`SceneId`], a [`LessonBoard`] or a [`BoardId`].
 ///
-/// `host` must be a fresh genesis host at the scene's [`SceneId::genesis_seed`]. Timers come
+/// `host` must be a fresh genesis host at the board's [`BoardId::genesis_seed`]. Timers come
 /// strictly AFTER seeding: a timer installed first would fire during the seed ticks and
 /// inject into a half-built board, diverging the regenerability hash (Pitfall 3).
 ///
 /// # Errors
 /// [`SceneLoadError`] naming `id` if the embedded RON does not parse, a command is refused,
 /// a tick fails to persist, the list mints nothing, or the edit log cannot be read back.
-pub fn boot_scene(host: Host, id: SceneId) -> Result<Host, SceneLoadError> {
+pub fn boot_scene(host: Host, id: impl Into<BoardId>) -> Result<Host, SceneLoadError> {
+    let id = id.into();
     boot_scene_from(host, id, id.commands())
 }
 
@@ -411,7 +532,7 @@ pub fn boot_scene(host: Host, id: SceneId) -> Result<Host, SceneLoadError> {
 /// malformed RON or an empty list for any scene (the DEMO-09 proof) without a broken build.
 fn boot_scene_from(
     mut host: Host,
-    id: SceneId,
+    id: BoardId,
     commands: Result<Vec<GridCommand>, SeedError>,
 ) -> Result<Host, SceneLoadError> {
     let named = |source: SeedError| SceneLoadError { scene: id, source };
@@ -599,6 +720,50 @@ mod tests {
         assert_eq!(order.seed, ORDER_GENESIS_SEED);
         let advanced = parse_board(ADVANCED_SCENE_RON).expect("the embedded advanced board parses");
         assert_eq!(advanced.seed, ADVANCED_GENESIS_SEED);
+        let lesson = parse_board(BELTS_THAT_JOIN_RON).expect("the embedded lesson board parses");
+        assert_eq!(
+            lesson.seed, BELTS_THAT_JOIN_SEED,
+            "the lesson board boots at the seed its own file names"
+        );
+    }
+
+    /// Every board the host can boot by id: the three Examples boards, then the lesson boards.
+    fn every_board() -> Vec<BoardId> {
+        SceneId::ALL
+            .into_iter()
+            .map(BoardId::from)
+            .chain(LessonBoard::ALL.into_iter().map(BoardId::from))
+            .collect()
+    }
+
+    /// The lesson board id is closed: one wire id, and nothing else gets through, not a scene id,
+    /// not a path, not the empty string.
+    #[test]
+    fn lesson_board_parses_exactly_its_wire_id() {
+        assert_eq!(LessonBoard::parse("belts_that_join"), Some(LessonBoard::BeltsThatJoin));
+        for bad in ["bogus", "", "demo_scene", "lessons/belts-that-join", "Belts_That_Join"] {
+            assert_eq!(LessonBoard::parse(bad), None, "{bad:?} is not a lesson board id");
+        }
+        for id in LessonBoard::ALL {
+            assert_eq!(LessonBoard::parse(id.wire_id()), Some(id), "wire_id round-trips");
+            assert_eq!(BoardId::Lesson(id).wire_id(), id.wire_id());
+            assert_eq!(BoardId::Lesson(id).genesis_seed(), id.genesis_seed());
+        }
+        assert_eq!(
+            BoardId::from(SceneId::Advanced).genesis_seed(),
+            ADVANCED_GENESIS_SEED,
+            "a scene keeps its own seed through BoardId"
+        );
+    }
+
+    /// No two boards the host boots share a seed, so no two share a factory sub-seed stream.
+    #[test]
+    fn every_board_has_its_own_seed() {
+        let seeds: Vec<u64> = every_board().into_iter().map(BoardId::genesis_seed).collect();
+        let mut sorted = seeds.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seeds.len(), "distinct seeds: {seeds:?}");
     }
 
     /// Phase-55 (EX-02) substrate proof: the RON format is expressive enough to
@@ -802,13 +967,13 @@ export default function (input, ctx) {
         assert_eq!(seen, [1, 1, 1], "every SceneId appears in ALL exactly once");
     }
 
-    /// DEMO-09: a scene that fails to load names itself, by the exact string
-    /// `SceneId::wire_id` returns, for every shipped scene and both ways a load can fail
+    /// DEMO-09: a board that fails to load names itself, by the exact string
+    /// `BoardId::wire_id` returns, for every shipped board, the lesson board included, and both ways a load can fail
     /// before anything is on the board: a malformed RON and an empty command list. The
     /// wrapped `SeedError`'s own sentence names no scene (D-25).
     #[test]
     fn every_scene_load_error_names_its_scene() {
-        for id in SceneId::ALL {
+        for id in every_board() {
             let cases: [(&str, Result<Vec<GridCommand>, SeedError>); 2] = [
                 ("a malformed RON", load_board_commands("this is not ron [[[")),
                 ("an empty command list", Ok(Vec::new())),
@@ -837,13 +1002,13 @@ export default function (input, ctx) {
         }
     }
 
-    /// Every shipped scene boots through `boot_scene`, and every node on the booted board
+    /// Every shipped board, the lesson board included, boots through `boot_scene`, and every node on the booted board
     /// was minted by a record in its edit log (plan 85-08, D-02): the board's node count is
     /// what its minting commands mint, one per `Place` and `DrawBelt`, and per `DrawWire`
     /// one cable, or two when it joins a Route and an HTTP Handler (phase 72, D-04).
     #[test]
     fn every_scene_boots_through_boot_scene_with_every_node_from_the_log() {
-        for id in SceneId::ALL {
+        for id in every_board() {
             let dir = tempfile::tempdir().expect("tempdir");
             let core = Core::genesis(LogHeader {
                 schema_version: SCHEMA_VERSION,

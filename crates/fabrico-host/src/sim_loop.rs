@@ -44,7 +44,7 @@ use tokio::sync::{Notify, broadcast, watch};
 use crate::command_error_view::CommandErrorView;
 use crate::config::HostConfig;
 use crate::gesture_verdict::VerdictSink;
-use crate::demo_scene::{SceneId, boot_scene, timers_from_log};
+use crate::demo_scene::{BoardId, LessonBoard, SceneId, boot_scene, timers_from_log};
 use crate::driver::Host;
 use crate::executor::dispatch;
 use crate::ingress::endpoint::{EndpointIngress, HttpResponse, descriptor_to_response};
@@ -90,6 +90,9 @@ pub const TICK_PAUSE: Duration = Duration::from_millis(16);
 ///   control (EX-02): swap in ANY shipped build-embedded scene by typed
 ///   [`SceneId`], through the identical host-swap path. `LoadDemo` is the
 ///   wire-compatible legacy verb routing to `LoadScene(SceneId::Demo)`.
+/// - [`LoadLessonBoard`](ControlMsg::LoadLessonBoard) - swap in a board a lesson starts on,
+///   by typed [`LessonBoard`], through the same host-swap path. The toolbar's example badge
+///   stays empty.
 #[non_exhaustive]
 pub enum ControlMsg {
     /// Drain to quiescence then freeze (HOST-02).
@@ -112,6 +115,12 @@ pub enum ControlMsg {
     /// unknown id is a typed error at each decode boundary and never reaches
     /// this variant (T-55-04). Same swap-safety latch as [`LoadDemo`](ControlMsg::LoadDemo).
     LoadScene(SceneId),
+    /// Load a board a lesson starts on, by typed [`LessonBoard`]: the dev-WS
+    /// `load_lesson_board\n<id>` verb and the Tauri `load_lesson_board(board_id)` command
+    /// both land here after parsing through [`LessonBoard::parse`], so an unknown id never
+    /// reaches this variant. It rides the same swap latch as [`LoadScene`](ControlMsg::LoadScene),
+    /// and it leaves the loaded-scene identity `None`: a lesson board is no Examples board.
+    LoadLessonBoard(LessonBoard),
     /// Swap in a truly EMPTY genesis board (SAVE-04: the toolbar "New" CTA). Same
     /// host-swap path as [`LoadDemo`](ControlMsg::LoadDemo) but seeds NOTHING — a
     /// 0-node board. Never postcard-serialized (a live host verb only).
@@ -192,10 +201,11 @@ enum RunState {
 enum PendingLoad {
     /// A [`ControlMsg::Load`] of a `.fab` at `path`.
     File(PathBuf),
-    /// A [`ControlMsg::LoadDemo`] / [`ControlMsg::LoadScene`] command-built
-    /// scene swap, parameterized by the typed [`SceneId`] (Phase 55 clean
-    /// break: the old `Demo` variant IS `Scene(SceneId::Demo)`).
-    Scene(SceneId),
+    /// A [`ControlMsg::LoadDemo`] / [`ControlMsg::LoadScene`] /
+    /// [`ControlMsg::LoadLessonBoard`] command-built board swap, parameterized by the
+    /// typed [`BoardId`] (Phase 55 clean break: the old `Demo` variant IS
+    /// `Scene(BoardId::Scene(SceneId::Demo))`).
+    Scene(BoardId),
     /// A [`ControlMsg::New`] blank genesis-empty-board swap (SAVE-04).
     New,
 }
@@ -1553,14 +1563,19 @@ impl SimLoop {
                     // the SAME typed Scene(SceneId::Demo) latch as LoadScene
                     // (Phase 55), so the demo load and an example load share
                     // one certified quiescence + swap + auto-resume path.
-                    self.control_load_scene(SceneId::Demo);
+                    self.control_load_scene(SceneId::Demo.into());
                 }
                 ControlMsg::LoadScene(id) => {
                     // EX-02: the parameterized scene-select control. The id
                     // was parsed through SceneId::parse at the transport's own
                     // decode boundary (dev-WS load_example verb / Tauri
                     // load_example command) — never a silent demo fallback.
-                    self.control_load_scene(id);
+                    self.control_load_scene(id.into());
+                }
+                ControlMsg::LoadLessonBoard(board) => {
+                    // The id was parsed through LessonBoard::parse at the transport's own
+                    // decode boundary. Same latch, same swap, no badge.
+                    self.control_load_scene(BoardId::Lesson(board));
                 }
                 ControlMsg::New => {
                     // SAVE-04: same drain-to-quiescence-before-swap contract as
@@ -1932,10 +1947,10 @@ impl SimLoop {
 
     /// Service a scene-load control ([`ControlMsg::LoadDemo`] /
     /// [`ControlMsg::LoadScene`]): the quiescence check + [`PendingLoad`] latch +
-    /// auto-resume tail, parameterized by [`SceneId`] (Phase 55). Every scene
-    /// load — demo or example — rides the SAME WR-02 swap-safety latch and
+    /// auto-resume tail, parameterized by [`BoardId`] (Phase 55). Every board
+    /// load (demo, example or lesson board) rides the SAME WR-02 swap-safety latch and
     /// full-keyframe-as-feedback semantics.
-    fn control_load_scene(&mut self, id: SceneId) {
+    fn control_load_scene(&mut self, id: BoardId) {
         // WR-02: same drain-to-quiescence-before-swap contract as Load.
         if self.ready_to_save_or_swap() {
             // LIVE-03/EX-02: swap in the command-built scene via the host-swap
@@ -1955,7 +1970,7 @@ impl SimLoop {
     /// [`ControlMsg::LoadDemo`] / [`ControlMsg::LoadScene`] (LIVE-03 generalized
     /// by EX-02). Build a FRESH genesis Host on THIS sim thread (Core + its
     /// lazily-created rquickjs runtimes are affine to the sim thread - correct
-    /// by construction) at the scene's own [`SceneId::genesis_seed`], hand it to
+    /// by construction) at the board's own [`BoardId::genesis_seed`], hand it to
     /// [`boot_scene`] (the ONE boot function every scene and every boot site uses, plan
     /// 85-08, D-02: seed through the certified gesture path, seal, project timers), then
     /// swap + reset + re-seed exactly like Load. Every scene takes the same path; nothing
@@ -1967,7 +1982,7 @@ impl SimLoop {
     /// so a POST that arrives during the swap reaches the old board's table or the new
     /// one's, never a board part-way through its commands. A POST that read the old table
     /// is refused by its board stamp when it reaches `acquire_input`.
-    fn load_scene_swap(&mut self, id: SceneId) {
+    fn load_scene_swap(&mut self, id: BoardId) {
         let scene = id.wire_id();
         let new_dir = match tempfile::tempdir() {
             Ok(d) => d,
@@ -2029,8 +2044,12 @@ impl SimLoop {
         self.install_swapped_host(new_host, new_dir);
         // WR-03: the board now HOLDS this shipped scene. Written only here, after
         // the swap actually installed - every early `return` above keeps the
-        // current scene AND therefore the current identity.
-        self.loaded_scene = Some(id);
+        // current scene AND therefore the current identity. A lesson board is no
+        // Examples board, so it clears the identity and the badge stays empty.
+        self.loaded_scene = match id {
+            BoardId::Scene(scene) => Some(scene),
+            BoardId::Lesson(_) => None,
+        };
     }
 
     /// Swap in a truly EMPTY genesis board for a [`ControlMsg::New`] (SAVE-04: the
@@ -4667,6 +4686,51 @@ mod tests {
         );
     }
 
+    /// `ControlMsg::LoadLessonBoard` swaps in the lesson board through the same swap as an
+    /// example: a full keyframe with the board's two machines and its one belt, Undo greyed,
+    /// and the loaded-scene identity cleared, so the toolbar's example badge stays empty even
+    /// when an example was loaded before it.
+    #[test]
+    fn load_lesson_board_swaps_in_the_board_with_no_badge_and_nothing_to_undo() {
+        let rt = test_rt();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let host = build_host(dir.path(), |c| {
+            c.state.add_source();
+        });
+        let (_gtx, grx) = gesture_channel();
+        let (ctx, crx) = unbounded_channel::<ControlMsg>();
+        let mut sim = SimLoop::new(host, RenderProducer::new(), rt.handle(), test_cfg(), grx)
+            .with_loaded_scene(SceneId::Demo)
+            .with_control(crx);
+        let (_kf_rx, mut diff_rx) = sim.subscribe();
+
+        ctx.send(ControlMsg::Pause).expect("pause");
+        sim.step().expect("freeze");
+        assert!(sim.is_paused(), "frozen before the load");
+
+        ctx.send(ControlMsg::LoadLessonBoard(LessonBoard::BeltsThatJoin))
+            .expect("send load-lesson-board");
+        sim.step().expect("service load-lesson-board");
+
+        let bytes = diff_rx
+            .try_recv()
+            .expect("the lesson board load rides the diff broadcast");
+        let pkt: fabrico_protocol::RenderPacket =
+            postcard::from_bytes(&bytes.bytes).expect("decode reset packet");
+        assert!(pkt.full, "the lesson board packet is a full:true keyframe");
+        assert_eq!(pkt.placed.len(), 2, "the lesson board's Source and Sink");
+        assert_eq!(pkt.belts.len(), 1, "the lesson board's one belt");
+        assert_eq!(
+            sim.loaded_scene, None,
+            "a lesson board is no Examples board: the badge identity is cleared"
+        );
+        assert!(!sim.host().can_undo(), "Undo is greyed right after the lesson board load");
+        assert!(
+            sim.host().session().undo_floor() > 0,
+            "the board's own commands sit under the undo floor"
+        );
+    }
+
     /// WR-03: the host, not the click, is the authority on WHICH shipped scene the
     /// board holds. `ControlMsg::QueryScene` answers it at the tick boundary, and a
     /// swap maintains it: LoadScene sets the id, New clears it (a user board has no
@@ -6821,7 +6885,7 @@ mod tests {
             let rt = test_rt();
             let (_save_dir, fab) = saved_two_node_board(&rt);
             let swaps: [Swap<'_>; 3] = [
-                ("load_scene_swap", Box::new(|s| s.load_scene_swap(SceneId::OrderProcessing))),
+                ("load_scene_swap", Box::new(|s| s.load_scene_swap(SceneId::OrderProcessing.into()))),
                 ("new_swap", Box::new(|s| s.new_swap())),
                 ("load_swap", Box::new(|s| assert!(s.load_swap(&fab), "the saved board loads"))),
             ];
