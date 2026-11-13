@@ -68,6 +68,8 @@ export interface StepCardProps {
    * card never builds the URL itself.
    */
   request?: { word: string; url: string } | null;
+  /** The lesson starts on its own prepared board, so the starting card says it is loading one. */
+  loadsBoard?: boolean;
 }
 
 /** The most lines the request line shows. A longer one ends in an ellipsis. */
@@ -310,7 +312,9 @@ export function StepCard(props: StepCardProps): JSX.Element {
           aria-atomic="true"
           style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--fab-space-sm)' }}
         >
-          {view.state === 'starting' && <p style={textStyle}>Clearing the board.</p>}
+          {view.state === 'starting' && (
+            <p style={textStyle}>{props.loadsBoard === true ? "Loading the lesson's board." : 'Clearing the board.'}</p>
+          )}
           {view.state === 'swapped' && (
             <>
               {/* A heading, as Lesson done is, so a screen reader can jump to it, at the Lessons heading's size and line height. */}

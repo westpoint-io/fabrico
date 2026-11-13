@@ -335,6 +335,20 @@ describe('StepCard', () => {
     expect(text).toContain('Leave');
   });
 
+  it("reads Loading the lesson's board with Leave while a lesson's prepared board is on its way", () => {
+    const text = textOf(StepCard({ view: { state: 'starting' }, ...NOOPS, loadsBoard: true }));
+    expect(text).toContain("Loading the lesson's board.");
+    expect(text).not.toContain('Clearing the board.');
+    expect(text).not.toMatch(/Step \d/);
+    expect(text).toContain('Leave');
+  });
+
+  it('keeps Clearing the board for a lesson that starts on an empty board', () => {
+    const text = textOf(StepCard({ view: { state: 'starting' }, ...NOOPS, loadsBoard: false }));
+    expect(text).toContain('Clearing the board.');
+    expect(text).not.toContain("Loading the lesson's board.");
+  });
+
   it('calls onLeave when Leave is pressed', () => {
     let left = 0;
     const tree = elements(StepCard({ view: { state: 'starting' }, ...NOOPS, onLeave: () => (left += 1) }));

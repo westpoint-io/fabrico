@@ -849,6 +849,7 @@ export function TutorialLayer({
       })
     : [];
   const lessonId = state.lessonId;
+  const loadsBoard = LESSONS.find((l) => l.id === lessonId)?.board !== undefined;
 
   // A swap can take away the action that holds focus, and focus then falls to the page, where Escape
   // can't reach the list. Read during render, because this is the last moment that button is mounted.
@@ -892,6 +893,7 @@ export function TutorialLayer({
           onKeepBuilding={keepBuilding}
           onShowMe={showMe}
           simStopped={simStopped}
+          loadsBoard={loadsBoard}
           request={cardUrl === null ? null : { word: curlWord, url: cardUrl }}
           {...(cardLeft === null ? {} : { left: cardLeft })}
           {...(lessonId === null ? {} : { onRestart: () => start(lessonId) })}

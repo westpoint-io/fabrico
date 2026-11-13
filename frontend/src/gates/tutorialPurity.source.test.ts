@@ -1,9 +1,10 @@
 // THE RULES THAT KEEP THE TUTORIAL A READER OF THE APP.
 //
 // The lesson engine under `src/tutorial/` has to run in a node test and in the walk, so it can't reach
-// for React, Pixi or the DOM. The tutorial's two folders also can't send anything to the host: the one
-// thing a lesson asks for is New, through a callback the app hands it, so a transport call, a network
-// call or a press on the app's own controls in either folder is a lesson finishing a step for the user.
+// for React, Pixi or the DOM. The tutorial's two folders also can't send anything to the host: a lesson
+// asks only for New or its own lesson board's load, through a callback the app hands it, so a transport
+// call, a network call or a press on the app's own controls in either folder is a lesson finishing a
+// step for the user.
 // The one thing a lesson reads from the host is a bound machine's applied config, and `triggerRead.ts`
 // is the only file holding a host bridge. It hands the bridge to `loadConfig` and to nothing else, and
 // exports the answer, so no other file can get hold of a value that can send any command. Lesson text must never
@@ -197,7 +198,7 @@ export function auditTutorialSources(files: readonly SourceFile[]): string[] {
     }
     if (pure || layer) {
       for (const hit of namesFound(stripped, NO_WRITE_NAMES)) {
-        findings.push(`${path}:${hit.line}: names ${hit.name}, and the tutorial sends nothing but a New through its callback`);
+        findings.push(`${path}:${hit.line}: names ${hit.name}, and the tutorial sends nothing but a New or its lesson board's load through its callback`);
       }
       for (const hit of namesFound(stripped, HTML_SINKS)) {
         findings.push(`${path}:${hit.line}: names ${hit.name}, and lesson text must never be able to become HTML`);
