@@ -19,8 +19,9 @@
 // a browser API or HTML sink these lists don't name, a forbidden word inside a string, which reads as a
 // finding, and a write made by a helper in some other folder that wraps its own bridge, because the
 // scan reads only what these folders name. The copy path is the exception: `THROUGH_HOST_MODULE` names
-// the clipboard helper and the POST URL row, so importing either is a finding. Any other wrapping helper
-// stays unseen until it is named there too. The parity walk counts sends on the paths it walks, under
+// the clipboard helper and the POST URL row, so importing either is a finding, and `NO_WRITE_NAMES`
+// holds the browser's own clipboard names, so a direct call in either folder is one too. Any other
+// wrapping helper stays unseen until it is named there. The parity walk counts sends on the paths it walks, under
 // Vite. The first case below is the tripwire for the scan reading nothing, and the mutation cases are
 // what stop it being a check that can't fail.
 
@@ -76,6 +77,13 @@ const NO_WRITE_NAMES: ReadonlyArray<readonly [string, RegExp]> = [
   ['.click(', /\.click\s*(?:\?\.)?\(/],
   ['.dispatchEvent(', /\.dispatchEvent\s*(?:\?\.)?\(/],
   ['invoke', /\binvoke\b/],
+  // The clipboard, read or written straight from the browser: the one copy the tutorial allows is the
+  // user's own press on the POST URL row's Copy button. `\bclipboard\b` takes `navigator.clipboard` in
+  // any spelling and a destructured `{ clipboard }`.
+  ['clipboard', /\bclipboard\b/],
+  ['execCommand', /\bexecCommand\b/],
+  ['ClipboardItem', /\bClipboardItem\b/],
+  ['clipboardData', /\bclipboardData\b/],
   ['@tauri-apps/', /@tauri-apps\//],
   ['__TAURI', /\b__TAURI/],
 ];
@@ -326,6 +334,24 @@ describe('the tutorial stays a reader of the app', () => {
       ] as const) {
         expect(auditTutorialSources([layerFile(source)]).join('\n'), `layer: ${source}`).toContain(`names ${name}`);
         expect(auditTutorialSources([pureFile(source)]).join('\n'), `pure: ${source}`).toContain(`names ${name}`);
+      }
+    });
+
+    it('each direct clipboard call in either folder', () => {
+      // The layer may read navigator. for the user agent, so a clipboard call there is caught by its own
+      // name, not by the pure folder's global rule.
+      for (const [source, name] of [
+        ['void navigator.clipboard.writeText(url);', 'clipboard'],
+        ['await navigator.clipboard.read();', 'clipboard'],
+        ['const text = await window.navigator.clipboard.readText();', 'clipboard'],
+        ['const { clipboard } = navigator;', 'clipboard'],
+        ["document.execCommand('copy');", 'execCommand'],
+        ["document.execCommand('paste');", 'execCommand'],
+        ["new ClipboardItem({ 'text/plain': blob });", 'ClipboardItem'],
+        ["const pasted = event.clipboardData?.getData('text');", 'clipboardData'],
+      ] as const) {
+        expect(auditTutorialSources([layerFile(source)]).join('\n'), `layer: ${source}`).toContain(`names ${name}, and the tutorial sends nothing`);
+        expect(auditTutorialSources([pureFile(source)]).join('\n'), `pure: ${source}`).toContain(`names ${name}, and the tutorial sends nothing`);
       }
     });
 
