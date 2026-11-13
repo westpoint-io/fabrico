@@ -1,13 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import { addFrameBudget } from '../e2e/support/frameSampler';
-// The PNG decoder @playwright/test already bundles (pngjs), the idiom
-// `06-fault-red-probe.spec.ts` uses: no new dependency is added to read the canvas.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-import { PNG } from 'playwright-core/lib/utilsBundle';
 import {
   DEMO_NODE_COUNT,
   cameraOf,
-  captureClip,
   captureCostLine,
   clickAt,
   expectRefusalStayedSilent,
@@ -26,10 +21,25 @@ import {
   watchPageErrors,
   type SceneFacts,
 } from './support/oracle';
-import { CELL, rampOracles, colorToRgb } from '../shared/geometry';
-// Phase 91 (D-10, CHROME-10): the empty board's words, imported so the hint's boxes are found by
-// the words the app renders (a retyped body stopped matching and its box silently dropped out).
-import { EMPTY_FLOOR_BODY, EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
+import { CELL } from '../shared/geometry';
+// The ink reader, its boxes and their floors live in a support file since plan 106-08, so lesson 2's
+// walk reads its seam the same way; they moved unchanged apart from `groundColour` taking its tile.
+import {
+  ARC_BOX,
+  ARC_EXIT_TREAD_BOX,
+  ARC_EXIT_TREAD_FLOOR_AT_1,
+  ARC_EXIT_TREAD_FLOOR_AT_3_PLUS,
+  ARC_INK_FLOOR_AT_1,
+  ARC_INK_FLOOR_AT_3_PLUS,
+  SIG_BOXES,
+  SIG_CORNER_CEILING,
+  SIG_FLOOR_AT_1,
+  SIG_FLOOR_AT_3_PLUS,
+  SIG_NAMES,
+  expectOnCanvas,
+  groundColour,
+  tileInk,
+} from './support/seamInk';
 
 // 74.1-seam-corner.live.spec.ts (CORNER-01, CORNER-06) - the JOIN graded on what the user
 // SEES: the tile kind the real `dev_render_server` ships at a docked seam.
@@ -52,8 +62,8 @@ import { EMPTY_FLOOR_BODY, EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy'
 // ---------------------------------------------------------------------------
 //
 // `74.1-corner-connects.live.spec.ts` is count-gated at exactly 6 tests by its plans, so the
-// seam legs live here. The helpers below are COPIED from it, not imported: spec files export
-// nothing. This file declares exactly 1 test after plan 74.1-07 and 3 after plan 74.1-09.
+// seam legs live here. The helpers were COPIED from it, not imported: spec files export
+// nothing. Since plan 106-08 the ink reader lives in `support/seamInk.ts`. This file declares exactly 1 test after plan 74.1-07 and 3 after plan 74.1-09.
 //
 // ---------------------------------------------------------------------------
 // THE THREE LEGS (this file declares exactly 3 tests)
@@ -167,15 +177,6 @@ function seamBeltKinds(scene: SceneFacts): unknown[] | null {
   return down[0].tiles.map((t) => t.kind);
 }
 
-/** Assert every screen point is on the CANVAS, so no chrome panel eats the press. */
-async function expectOnCanvas(page: Page, pts: { x: number; y: number }[], context: string): Promise<void> {
-  const tags = await page.evaluate(
-    (ps) => ps.map((p) => document.elementFromPoint(p.x, p.y)?.tagName ?? null),
-    pts,
-  );
-  expect(tags, `${context}: every point is on the canvas, not under chrome`).toEqual(pts.map(() => 'CANVAS'));
-}
-
 /**
  * Drive the pointer through `cells` (the first already pressed), cell centre to cell centre,
  * each move emitting `steps` samples, so the first samples land inside the pressed tile.
@@ -241,211 +242,6 @@ const REF_STRAIGHT = [8, 5] as const;
 const GROUND_TILE = [10, 5] as const;
 /** The world point the pointer parks on and the zoom is anchored at: row 5's top edge. */
 const PARK_WORLD = { x: 10.5 * CELL, y: 5 * CELL } as const;
-
-/** A world-px box inside a tile, relative to the tile's top-left corner: [x0, x1) x [y0, y1). */
-type Box = readonly [number, number, number, number];
-
-/**
- * THE INK SIGNATURE, and why it reads these two boxes. The belt lane is HOLLOW: two 1 px
- * rails `laneHalf` 10 either side of the centreline, painted on the board's own ground
- * colour, plus a centreline dash that marches with the render clock (`BELT_GEOM`,
- * `shared/geometry.ts`). So the signature reads RAILS, never the centreline:
- *
- *   - S, by the SOUTH edge east of centre, x 18..30, y 24..30; E, by the EAST edge south
- *     of centre, x 24..30, y 18..30 (world px inside the tile).
- *   - A north-south STRAIGHT has its east rail at x 26 through both; an east-west straight
- *     has its south rail at y 26 through both. The centreline (x or y 15..17) is in
- *     neither, so the count does not depend on tread phase.
- *   - A Corner{E,N} (in from the west, out to the north) is a quarter annulus about the
- *     tile's north-west corner, outer rail radius 26: at y >= 24 it is at x <= 10, at
- *     x >= 24 it is at y <= 10. Neither box holds any of it.
- *   - Neither box touches the WEST edge, where the junction collar is drawn on the seam,
- *     or a tile edge, where the floor grid lines are.
- *
- * Measured on the grid of 4 world px boxes at scale 1 and 3.32 before these were chosen.
- */
-const SIG_BOXES: readonly Box[] = [
-  [18, 30, 24, 30],
-  [24, 30, 18, 30],
-];
-const SIG_NAMES = ['S', 'E'] as const;
-/**
- * THE FLOORS, measured at this tree on the live suite's Desktop Chrome (three runs, every
- * count identical), and set as 74.1-04 set its ring floor: half the smaller measured inked
- * count of the reference straight. Measured S/E: 5/11 at scale 1, 57/117 at scale 3.32; so
- * 2 at scale 1 and 28 at 3 or more. The seam and the reference corner measured 0/0 at both
- * scales, so the corner ceiling is 0.
- */
-const SIG_FLOOR_AT_1 = 2;
-const SIG_FLOOR_AT_3_PLUS = 28;
-const SIG_CORNER_CEILING = 0;
-
-/**
- * THE POSITIVE HALF (plan 74.1-21, review WR-06). The two boxes above only grade where a
- * straight's rail WOULD be, and every assertion on them is an upper bound, so a seam tile
- * drawn blank, not drawn at all, or drawn at zero alpha scores 0/0 and passes. This box
- * reads ink that only a drawn corner puts there: the corner's OUTER RAIL ARC.
- *
- * WHERE IT IS, DERIVED FROM THE BELTS LAYER'S CORNER GEOMETRY (`beltGeometry.ts`
- * `cornerRailCommands`): a Corner{E,N} is a quarter annulus about the tile's north-west
- * vertex, centreline radius `elbowR` 16, and its outer rail inks radius 25..26 at the
- * identity quantum (`elbowR + laneHalf` with the half-band inset). The box x 14..24,
- * y 14..24 holds the arc's middle third (about 30 to 60 degrees off either axis):
- *
- *   - its nearest point to the vertex, (14,14), is at radius 19.8, clear of the tread band
- *     (radius 15..17) and the inner rail (6..7), so it does not depend on tread phase;
- *   - its nearest point to the west-edge midpoint (0,16), where the junction collar is
- *     drawn (ring radius 7, stroke 2, so ink to radius 8), is (14,16) at 14 world px, so the
- *     collar never reaches it;
- *   - it touches no tile edge, where the floor grid lines are.
- *
- * A north-south straight's centreline dash crosses it, so on its own this box cannot tell
- * a corner from a straight: the S and E ceilings above do that. This box tells a drawn
- * corner from NO corner.
- */
-const ARC_BOX: Box = [14, 24, 14, 24];
-/**
- * THE ARC FLOORS, measured on the REFERENCE CORNER (12,6) on the real renderer, three runs
- * at plan 74.1-21 on the live suite's Desktop Chrome, every reading identical: 10 at scale
- * 1, 103 at scale 3.32. Set as the straight floors above were: half the smallest reading.
- */
-const ARC_INK_FLOOR_AT_1 = 5;
-const ARC_INK_FLOOR_AT_3_PLUS = 51;
-/**
- * THE DIRECTION HALF, added because the rail box alone was WATCHED to pass a reversed
- * corner (plan 74.1-21, mutation 3: tile 0 drawn as Corner{S,W}, ARC seam 10 / 103, leg
- * green). Corner{S,W} rounds the SAME north-west vertex, and a corner's two rails are
- * symmetric under reversing the flow, so no rail box can tell the two apart. The TREAD can:
- * `cornerCommands` lays its dashes by arc length from the ENTRY edge, so the pattern of a
- * reversed corner is the mirror image along the arc.
- *
- * THE PHASE IS FIXED, which is what makes a tread box sound here. The render clock is
- * pinned at 0 below, so a tile's march bucket is a function of its tail offset alone
- * (`bucketOf`), and both probed corners sit at offset 0 mod the 16 px dash period: the
- * seam is its belt's tile 0 (offset 0) and the reference corner is the reference belt's
- * tile 2 (offset 64). At that phase a Corner{E,N} inks its centreline band (radius
- * 15..17) at arc length 6..16 and 22..25.1 from its WEST entry; a Corner{S,W} inks 0..3.1
- * and 9.1..19.1 measured from the west. The run at 22..25.1 (78.8 to 90 degrees off the
- * vertical, ending on the NORTH edge midpoint) is ink ONLY for the right direction, and
- * the reversed corner is blank from 68.5 degrees up.
- *
- * The box x 13..19, y 0.5..4 holds that run: at the band's inner radius 15 its lowest row
- * is 74.5 degrees off the vertical, 6 degrees clear of the reversed dash's radial end cap;
- * it starts half a pixel below the tile's north edge, clear of the floor grid line; and it
- * is 13 world px from the west-edge collar. A north-south straight's dash also crosses it,
- * which, as for `ARC_BOX`, the S and E ceilings answer.
- */
-const ARC_EXIT_TREAD_BOX: Box = [13, 19, 0.5, 4];
-/**
- * Measured on the reference corner exactly as the arc floors were: 4 at scale 1, 58 at
- * scale 3.32, every one of three runs identical; half the smallest reading.
- */
-const ARC_EXIT_TREAD_FLOOR_AT_1 = 2;
-const ARC_EXIT_TREAD_FLOOR_AT_3_PLUS = 29;
-
-/** A pixel is belt ink when some channel is more than this many levels from the ground. */
-const INK_TOLERANCE = 24;
-
-/** The empty-floor hint's two text blocks, which are drawn over the canvas without pointer events. */
-async function hintRects(page: Page): Promise<{ x: number; y: number; width: number; height: number }[]> {
-  const out: { x: number; y: number; width: number; height: number }[] = [];
-  for (const loc of [
-    page.getByRole('heading', { name: EMPTY_FLOOR_HEADING, exact: true }),
-    page.getByText(EMPTY_FLOOR_BODY, { exact: true }),
-  ]) {
-    if ((await loc.count()) > 0 && (await loc.first().isVisible())) {
-      const bb = await loc.first().boundingBox();
-      if (bb) out.push(bb);
-    }
-  }
-  return out;
-}
-
-/**
- * The ink count of world-px boxes inside one tile, read off a decoded screenshot clip of
- * that tile (so the device pixel ratio is the image's, not assumed). The clip must lie on
- * the canvas, inside the viewport, and clear of the empty-floor hint's text.
- */
-async function tileInk(
-  page: Page,
-  cell: readonly [number, number],
-  boxes: readonly Box[],
-  ground: { r: number; g: number; b: number },
-): Promise<number[]> {
-  const cam = await cameraOf(page);
-  const tl = await screenPoint(page, { x: cell[0] * CELL, y: cell[1] * CELL });
-  const x0 = Math.floor(tl.x);
-  const y0 = Math.floor(tl.y);
-  const side = Math.ceil(CELL * cam.scale) + 2;
-  const vp = page.viewportSize();
-  expect(vp, 'the live page reports a viewport size').not.toBeNull();
-  expect(
-    x0 >= 0 && y0 >= 0 && x0 + side <= vp!.width && y0 + side <= vp!.height,
-    `the clip of tile (${cell[0]},${cell[1]}) lies inside the viewport at scale ${cam.scale}`,
-  ).toBe(true);
-  await expectOnCanvas(
-    page,
-    [
-      { x: x0, y: y0 },
-      { x: x0 + side - 1, y: y0 },
-      { x: x0, y: y0 + side - 1 },
-      { x: x0 + side - 1, y: y0 + side - 1 },
-    ],
-    `the clip of tile (${cell[0]},${cell[1]})`,
-  );
-  for (const r of await hintRects(page)) {
-    const clear = r.x >= x0 + side || r.x + r.width <= x0 || r.y >= y0 + side || r.y + r.height <= y0;
-    expect(clear, `the clip of tile (${cell[0]},${cell[1]}) is clear of the empty-floor hint text`).toBe(true);
-  }
-  const png = PNG.sync.read(await captureClip(page, { x: x0, y: y0, width: side, height: side }));
-  const ratio = png.width / side;
-  return boxes.map(([bx0, bx1, by0, by1]) => {
-    const px0 = Math.ceil((tl.x + bx0 * cam.scale - x0) * ratio);
-    const px1 = Math.floor((tl.x + bx1 * cam.scale - x0) * ratio);
-    const py0 = Math.ceil((tl.y + by0 * cam.scale - y0) * ratio);
-    const py1 = Math.floor((tl.y + by1 * cam.scale - y0) * ratio);
-    let ink = 0;
-    for (let py = Math.max(0, py0); py < Math.min(png.height, py1); py++) {
-      for (let px = Math.max(0, px0); px < Math.min(png.width, px1); px++) {
-        const i = (py * png.width + px) << 2;
-        if (
-          Math.abs(png.data[i] - ground.r) > INK_TOLERANCE ||
-          Math.abs(png.data[i + 1] - ground.g) > INK_TOLERANCE ||
-          Math.abs(png.data[i + 2] - ground.b) > INK_TOLERANCE
-        ) {
-          ink++;
-        }
-      }
-    }
-    return ink;
-  });
-}
-
-/**
- * The board ground colour: the most common pixel in the middle of an empty floor tile,
- * asserted to be the skin's `ramp[0]`, the colour the floor and a belt's hollow share.
- */
-async function groundColour(page: Page): Promise<{ r: number; g: number; b: number }> {
-  const cam = await cameraOf(page);
-  const tl = await screenPoint(page, { x: GROUND_TILE[0] * CELL + 8, y: GROUND_TILE[1] * CELL + 8 });
-  const png = PNG.sync.read(
-    await captureClip(page, {
-      x: Math.ceil(tl.x),
-      y: Math.ceil(tl.y),
-      width: Math.floor(14 * cam.scale),
-      height: Math.floor(14 * cam.scale),
-    }),
-  );
-  const counts = new Map<string, number>();
-  for (let i = 0; i < png.data.length; i += 4) {
-    const k = `${png.data[i]},${png.data[i + 1]},${png.data[i + 2]}`;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
-  const [top] = [...counts].sort((a, b) => b[1] - a[1]);
-  const [r, g, b] = top[0].split(',').map(Number);
-  expect({ r, g, b }, 'the floor reads as the skin ground ramp[0]').toEqual(colorToRgb(rampOracles.locked[0]));
-  return { r, g, b };
-}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -568,7 +364,7 @@ test.describe('CORNER-01 seam on the real host: the join is graded on the shippe
     try {
       const probe = async (label: string): Promise<void> => {
         const scale = (await cameraOf(page)).scale;
-        const ground = await groundColour(page);
+        const ground = await groundColour(page, GROUND_TILE);
         const seam = await tileInk(page, BELT_DOORSTEP, SIG_BOXES, ground);
         const corner = await tileInk(page, REF_CORNER, SIG_BOXES, ground);
         const straight = await tileInk(page, REF_STRAIGHT, SIG_BOXES, ground);

@@ -30,8 +30,11 @@ import {
   rejectFlashCellsSeen,
   screenCellCentre,
   stopRejectFlashLatch,
+  tileKindAt,
   webhookUrl,
+  type SceneFacts,
 } from './oracle';
+import { SEAM_BOXES_E_TO_S, SEAM_E_TO_S_AT_1, groundColour, tileInk, type SeamBox } from './seamInk';
 import { decodePngRows } from './pngRows';
 import { changedPixels, sampleFramesInPage, type CaptureRect } from './frameCapture';
 
@@ -265,6 +268,8 @@ interface WalkState {
    * Source's output, and its captures A (before the delete) and B (after it). Null until A is taken.
    */
   beltTile: { cell: readonly [number, number]; a: Buffer; b: Buffer | null } | null;
+  /** The ring cell a `lineTurnsAt` step's carry-on drag started from, read off the board as the drag began. */
+  seamCell: readonly [number, number] | null;
 }
 
 /**
@@ -1259,6 +1264,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const from = stage.when.is === 'lineStopsShort' ? bound[stage.when.from] : undefined;
         const cell = from === undefined ? null : lineDoorstep(await readScene(page), from, boundBeltsOf(bound));
         if (cell === null) throw new Error(`${label}: the board holds no line end to carry on from`);
+        if (step.done.is === 'lineTurnsAt') state.seamCell = cell;
         await expectBeltEndRingPainted(page, label, cell);
         const at = await screenCellCentre(page, cell[0], cell[1]);
         const start = { x: at.x + walk.dragFrom.dx, y: at.y + walk.dragFrom.dy };
@@ -1315,6 +1321,9 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     expect(node?.kind, `${label}: the bound ${step.done.bind} is on the board with the right kind`).toBe(step.done.kind);
   }
   if (step.done.is === 'wireJoins') await expectWiresJoin(page, label, step.done.a, step.done.b);
+  if (step.done.is === 'lineTurnsAt') {
+    await expectSeamDrawnAsCorner(page, label, state);
+  }
   if (goneTarget !== null) await expectTargetGone(page, label, goneTarget);
   if (handlesBefore !== null) {
     const after = (await readProbe(page)).bound;
@@ -1764,6 +1773,132 @@ async function middleTileClip(
   return { cell, clip: await cellClipOf(page, cell) };
 }
 
+/** How far from 1 the camera's zoom may read for the seam read, whose floors were measured at zoom 1. */
+const SEAM_SCALE_TOLERANCE = 0.01;
+/** Captures of the ring cell the seam read takes, each graded on its own. */
+const SEAM_SAMPLES = 3;
+/** Wire directions, as `TileKindView` carries them. */
+const DIR_NAMES = ['N', 'E', 'S', 'W'] as const;
+
+/** The seam boxes measured for each turn, keyed `<from>-><to>`. A turn with no entry has no measured boxes. */
+const SEAM_TURNS: Readonly<Record<string, { boxes: typeof SEAM_BOXES_E_TO_S; limits: typeof SEAM_E_TO_S_AT_1 }>> = {
+  '1->2': { boxes: SEAM_BOXES_E_TO_S, limits: SEAM_E_TO_S_AT_1 },
+};
+
+/** The direction from cell `a` to the next cell `b`, N=0, E=1, S=2, W=3, or null when they aren't neighbours. */
+function stepDir(a: readonly [number, number], b: readonly [number, number]): number | null {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  if (dx === 0 && dy === -1) return 0;
+  if (dx === 1 && dy === 0) return 1;
+  if (dx === 0 && dy === 1) return 2;
+  if (dx === -1 && dy === 0) return 3;
+  return null;
+}
+
+/** Ask the page to pin or free the render clock, and show or hide the item layer, then wait two drawn frames. */
+async function holdTheFrame(page: Page, pin: number | null, itemsVisible: boolean): Promise<void> {
+  await page.evaluate(
+    async ([pinned, visible]) => {
+      const hook = (window as { __fabrico?: { pinClock(n: number | null): void; setItemLayerVisible(on: boolean): void } }).__fabrico;
+      if (!hook) throw new Error('window.__fabrico not installed');
+      hook.pinClock(pinned);
+      hook.setItemLayerVisible(visible);
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+    },
+    [pin, itemsVisible] as const,
+  );
+}
+
+/**
+ * THE SEAM READ (phase 106, ROADMAP criterion 2). After a `lineTurnsAt` step is done, read what is drawn on
+ * the ring cell the carry-on drag started from, and the tile kind the host shipped there. The model read
+ * alone passed while users saw a T (phase 74.1), so the claim here is the pixels: belt ink by the west and
+ * south edges and in the corner's arc, and none where a straight's rail would run by the north and east
+ * edges, in boxes mirrored from the 74.1 seam spec with floors measured on this board (`seamInk.ts`).
+ *
+ * The turn the drag asked for comes from the board, not the host: in from the stub's last tile, out to
+ * the carry-on's second tile. The host's kind must be that Corner, and the ink is graded in the boxes
+ * measured for that turn. The board keeps playing, so the item layer is hidden and the render clock pinned
+ * at 0 for the captures, which holds the treads at the phase the floors were measured at; both are put back
+ * in the `finally`.
+ */
+async function expectSeamDrawnAsCorner(page: Page, label: string, state: WalkState): Promise<void> {
+  const ring = state.seamCell;
+  if (ring === null) throw new Error(`${label} seam read: the walk never saw the carry-on drag start, so it has no ring cell to read`);
+  const scene: SceneFacts = await readScene(page);
+  const on = (t: { cell_x: number; cell_y: number }, c: readonly [number, number]) => t.cell_x === c[0] && t.cell_y === c[1];
+  const covering = scene.belts.filter((b) => b.tiles.some((t) => on(t, ring)));
+  expect(covering.length, `${label} seam read: one belt covers the ring cell (${ring[0]},${ring[1]})`).toBe(1);
+  const carry = covering[0]!;
+  expect(carry.tiles.length, `${label} seam read: the carry-on is longer than one tile`).toBeGreaterThan(1);
+  expect(on(carry.tiles[0]!, ring), `${label} seam read: the carry-on starts on the ring cell`).toBe(true);
+  const stub = scene.belts.find((b) => b.id !== carry.id && b.docks.some((d) => d.end === 'Head' && d.node === carry.id));
+  if (stub === undefined) throw new Error(`${label} seam read: no belt's Head docks the carry-on, so nothing feeds the ring cell`);
+  const stubHead = stub.tiles[stub.tiles.length - 1]!;
+  const from = stepDir([stubHead.cell_x, stubHead.cell_y], ring);
+  const second = carry.tiles[1]!;
+  const to = stepDir(ring, [second.cell_x, second.cell_y]);
+  if (from === null || to === null) throw new Error(`${label} seam read: the stub's end, the ring cell and the carry-on's second tile aren't in a row of neighbours`);
+  const want = { Corner: { from, to } };
+  const shipped = tileKindAt(scene, ring[0], ring[1]);
+  console.log(`MEASURE seam-kind cell=${ring[0]},${ring[1]} kind=${JSON.stringify(shipped)}`);
+  expect(shipped, `${label} seam read: the host ships a Corner from ${DIR_NAMES[from]} to ${DIR_NAMES[to]} on the ring cell (${ring[0]},${ring[1]})`).toEqual(want);
+  const turn = SEAM_TURNS[`${from}->${to}`];
+  if (turn === undefined) throw new Error(`${label} seam read: no seam boxes are measured for a turn from ${DIR_NAMES[from]} to ${DIR_NAMES[to]}`);
+  const scale = (await cameraOf(page)).scale;
+  expect(Math.abs(scale - 1), `${label} seam read: the camera reads zoom 1, where the floors were measured (read ${scale})`).toBeLessThanOrEqual(SEAM_SCALE_TOLERANCE);
+
+  // Empty floor next to the seam, where the ground colour is read: one cell back along the stub's row's
+  // far side from the carry-on. Checked empty off the model.
+  const groundCell = [ring[0] - 1, ring[1] + 1] as const;
+  expect(tileKindAt(scene, groundCell[0], groundCell[1]), `${label} seam read: the ground cell (${groundCell[0]},${groundCell[1]}) holds no belt`).toBeNull();
+  expect(
+    scene.nodes.some((n) => (n.cells ?? []).some((c) => c[0] === groundCell[0] && c[1] === groundCell[1])),
+    `${label} seam read: the ground cell (${groundCell[0]},${groundCell[1]}) holds no machine`,
+  ).toBe(false);
+
+  const { boxes, limits } = turn;
+  const order: SeamBox[] = [boxes.N, boxes.E, boxes.ARC, boxes.EXIT, boxes.W];
+  const straightCell = [second.cell_x, second.cell_y] as const;
+  const reads: number[][] = [];
+  const straightReads: number[][] = [];
+  await holdTheFrame(page, 0, false);
+  try {
+    const ground = await groundColour(page, groundCell);
+    for (let i = 0; i < SEAM_SAMPLES; i++) {
+      reads.push(await tileInk(page, ring, order.map((b) => b.box), ground));
+      straightReads.push(await tileInk(page, straightCell, [boxes.N.box, boxes.E.box], ground));
+    }
+  } finally {
+    await holdTheFrame(page, null, true);
+  }
+  order.forEach((b, k) => {
+    console.log(`MEASURE seam-ink box=${b.name} inked=${reads.map((r) => r[k]).join(',')}`);
+  });
+  ['N', 'E'].forEach((name, k) => {
+    console.log(`MEASURE seam-ink box=straight-${name} cell=${straightCell[0]},${straightCell[1]} inked=${straightReads.map((r) => r[k]).join(',')}`);
+  });
+  const where = `on the ring cell (${ring[0]},${ring[1]})`;
+  reads.forEach((r, i) => {
+    const sample = `${label} seam read, capture ${i + 1} of ${SEAM_SAMPLES}`;
+    const [n, e, arc, exit, west] = r as [number, number, number, number, number];
+    const [sn, se] = straightReads[i] as [number, number];
+    // The probe can see a straight: the carry-on's own straight tile next to the seam inks both boxes.
+    expect.soft(sn, `${sample}: the carry-on's straight tile (${straightCell[0]},${straightCell[1]}) has ${boxes.N.reads} in box N (floor ${limits.straightNFloor})`).toBeGreaterThanOrEqual(limits.straightNFloor);
+    expect.soft(se, `${sample}: the carry-on's straight tile (${straightCell[0]},${straightCell[1]}) has ${boxes.E.reads} in box E (floor ${limits.straightEFloor})`).toBeGreaterThanOrEqual(limits.straightEFloor);
+    expect.soft(arc, `${sample}: the seam is drawn as a corner ${where}: ${boxes.ARC.reads} in box ARC (read ${arc}, floor ${limits.arcFloor})`).toBeGreaterThanOrEqual(limits.arcFloor);
+    expect.soft(exit, `${sample}: the seam turns the right way ${where}: ${boxes.EXIT.reads} in box EXIT (read ${exit}, floor ${limits.exitFloor})`).toBeGreaterThanOrEqual(limits.exitFloor);
+    expect.soft(west, `${sample}: the seam is drawn ${where}: ${boxes.W.reads} in box W (read ${west}, floor ${limits.westFloor})`).toBeGreaterThanOrEqual(limits.westFloor);
+    expect.soft(n, `${sample}: the seam reads as a corner, not a T, ${where}: no ${boxes.N.reads} in box N (read ${n}, straight ${sn}, ceiling ${limits.cornerCeiling})`).toBeLessThanOrEqual(limits.cornerCeiling);
+    expect.soft(e, `${sample}: the seam reads as a corner, not a T, ${where}: no ${boxes.E.reads} in box E (read ${e}, straight ${se}, ceiling ${limits.cornerCeiling})`).toBeLessThanOrEqual(limits.cornerCeiling);
+  });
+  expect(test.info().errors, `${label} seam read: the ink on the ring cell (${ring[0]},${ring[1]}) reads as the corner the host shipped`).toHaveLength(0);
+  console.log(`SEAM ${label}: ring (${ring[0]},${ring[1]}) ships and draws Corner ${DIR_NAMES[from]} to ${DIR_NAMES[to]}`);
+}
+
 async function walkSteps(page: Page, lesson: Lesson, state: WalkState, from: number, to: number): Promise<void> {
   for (let stepIndex = from; stepIndex < to; stepIndex++) {
     const step = lesson.steps[stepIndex] as Step;
@@ -1815,6 +1950,7 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
     ringsRead: new Set(),
     undone: false,
     beltTile: null,
+    seamCell: null,
   };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
