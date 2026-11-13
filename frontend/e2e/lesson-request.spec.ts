@@ -496,4 +496,30 @@ test.describe('Answer a web request on a mock host', () => {
     await expect.poll(() => host.urlAsked(), { message: 'the row asked the host for the URL again after the Apply' }).toBeGreaterThan(asked);
     await expect.poll(() => requestLineOf(page), { message: 'the request line follows the new URL' }).toBe(`${word} -X POST ${ORDERS_URL}`);
   });
+
+  test("after a path Apply whose URL fetch fails, the card drops the old path's URL and waits", async ({ page }) => {
+    const { h, host, board } = await toAnswerStep(page);
+    await selectRoute(page);
+    await ringAt(page, STAGE.sendRequest);
+    const word = await expectedCurlWord(page);
+    await expect.poll(() => requestLineOf(page), { message: 'the first URL is on the card' }).toBe(`${word} -X POST ${ROUTE_URL}`);
+
+    const asked = host.urlAsked();
+    // The host folds the new path but has no bound URL for it, so the row reads its not-ready words.
+    host.set(board.route.id, routeConfig('/orders'));
+    host.setUrl(null);
+    const inspector = page.locator('aside[aria-labelledby="fab-config-heading"]');
+    await inspector.getByLabel('Path', { exact: true }).fill('/orders');
+    const configures = sentCount(h, CMD.Configure);
+    await inspector.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect.poll(() => sentCount(h, CMD.Configure), { message: 'Apply sent the new path' }).toBe(configures + 1);
+    await expect.poll(() => host.urlAsked(), { message: 'the row asked the host for the URL again after the Apply' }).toBeGreaterThan(asked);
+    await expect(
+      page.locator('aside[aria-labelledby="fab-config-heading"] span.fab-field', { hasText: URL_NOT_READY_TEXT }),
+      'the POST URL row reads not ready for the new path',
+    ).toBeVisible();
+    await expectAt(page, STEP.answer, STAGE.urlPending, 'the old path URL left the card once the row stopped showing it');
+    await expect(page.locator(`${CARD} [data-fab-request-line]`), "no request line for a path the listener doesn't serve").toHaveCount(0);
+    await expect(page.locator(CARD)).toContainText(wordsOf(STEP.answer, STAGE.urlPending));
+  });
 });

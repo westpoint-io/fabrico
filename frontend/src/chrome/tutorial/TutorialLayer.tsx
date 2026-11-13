@@ -15,7 +15,7 @@ import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, ty
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
-import { acceptRouteUrl, curlWordFor } from '../../tutorial/request';
+import { curlWordFor } from '../../tutorial/request';
 import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
 import { frameTarget, offScreenFlag } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
@@ -26,6 +26,7 @@ import { moveCamera, readCamera } from './cameraRead';
 import { HintPointer, readCodeText, type HintTarget } from './HintPointer';
 import { LESSONS_PANEL_ID, LessonPanel, focusListClose, type ResetFooter } from './LessonPanel';
 import { StepCard, type StepCardView } from './StepCard';
+import { NO_ROUTE_URL, heldRouteUrl, readRouteUrl, type RouteUrlHeld } from './routeUrlRead';
 import { readAppliedConfig } from './triggerRead';
 
 export interface HintRect {
@@ -419,22 +420,6 @@ function readPostUrlText(): string | null {
   return null;
 }
 
-/**
- * The bound Route's URL for this frame. It is read off the inspector's POST URL row only while that Route
- * is selected, and only in the strict endpoint shape, so the row's "Webhook not ready" words or a port 0
- * URL never reach the card. Otherwise the URL already held stands, as long as it was read about the same
- * handle at the same board generation: an Undo keyframe re-mints handles, and a URL from before it is
- * dropped. A read that finds no URL keeps the held one too, because a freshly mounted row shows its
- * not-ready words until the host answers, and the card shouldn't lose its line on every reselect.
- */
-function readRouteUrl(held: ChromeFacts['routeUrl'], route: number | undefined, selectedNode: number | null, generation: number): ChromeFacts['routeUrl'] {
-  const kept = held !== null && held.node === route && held.generation === generation ? held : null;
-  if (route === undefined || selectedNode !== route) return kept;
-  const url = acceptRouteUrl(readPostUrlText());
-  if (url === null || kept?.url === url) return kept;
-  return { node: route, generation, url };
-}
-
 export interface TutorialLayerProps {
   handleRef: RefObject<SceneHandle | null>;
   armed: ArmedTool | null;
@@ -512,7 +497,7 @@ export function TutorialLayer({
   // The bound Route's URL as read off its POST URL row. The ref is what the frame loop keeps and hands the
   // reducer; the card's copy is React state set only when the URL changes, because the layer re-renders on a
   // view change and a URL that arrives after its stage began must still reach the card.
-  const routeUrlRef = useRef<ChromeFacts['routeUrl']>(null);
+  const routeUrlRef = useRef<RouteUrlHeld>(NO_ROUTE_URL);
   const cardUrlRef = useRef<string | null>(null);
   const [cardUrl, setCardUrl] = useState<string | null>(null);
   // The browser doesn't change under a running app, so the word is read once.
@@ -632,13 +617,14 @@ export function TutorialLayer({
       const camera = readCamera();
       if (handle !== null && camera !== null) {
         const board = sceneSnapshot(handle.sceneState);
-        const routeUrl = readRouteUrl(
+        routeUrlRef.current = readRouteUrl(
           routeUrlRef.current,
           stateRef.current.bindings.route?.id,
           chromeRef.current.selectedNode,
           board.generation,
+          readPostUrlText(),
         );
-        routeUrlRef.current = routeUrl;
+        const routeUrl = heldRouteUrl(routeUrlRef.current);
         const chrome: ChromeFacts = {
           ...chromeRef.current,
           editsInFlight: readEditsInFlightRef.current(),
@@ -759,7 +745,7 @@ export function TutorialLayer({
         progress.write(withLessonStarted(progress.read(), lessonId));
         dispatch({ type: 'newSent', lessonId, floorAtSend });
         answersRef.current.clear();
-        routeUrlRef.current = null;
+        routeUrlRef.current = NO_ROUTE_URL;
         setStage(null);
         onLessonsOpenChange(false);
       });
