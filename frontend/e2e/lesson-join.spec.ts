@@ -3,6 +3,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { nubAnchor } from '../shared/geometry';
 import type { TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
 import { BELTS_THAT_JOIN } from '../src/tutorial/lessons/beltsThatJoin';
+import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { phrasePlain } from '../src/tutorial/phrase';
 import type { Stage } from '../src/tutorial/types';
 import { CELL, CMD, buildPacket, cameraOf, type Harness, type InjectBelt, type InjectNode, type InjectTileKind } from './support/wire';
@@ -23,6 +24,8 @@ import {
   SOURCE_TIMER,
   beltsThatJoinBoard,
   boot,
+  boxOf,
+  OUTSET,
   configByNode,
   joinStub,
   joinedBoard,
@@ -55,7 +58,6 @@ const LEGEND = '#fab-legend-panel';
 /** The free area's top, the dock line under the toolbar (`FREE_AREA_TOP_PX` in TutorialLayer.tsx). */
 const FREE_TOP = 116;
 const BAND = '#fab-refusal';
-const NOTE = `${CARD} [data-fab-step-note]`;
 /** `CLIENT_REFUSAL_COPY.BeltEndTile`, mirrored because the band's copy module pulls in SVG assets the e2e runner can't load. */
 const BELT_END_TILE_WORDS = "Start from the ring past the belt's end.";
 
@@ -248,6 +250,75 @@ async function recordBand(page: Page): Promise<void> {
   }, BAND);
 }
 
+/** A ring around a toolbar control, less its outset, against that control's box. */
+async function expectRingOnUndo(page: Page, what: string): Promise<void> {
+  const undo = await boxOf(page.locator('header button[aria-label="Undo"]'), 'the toolbar Undo');
+  await expect
+    .poll(async () => {
+      const ring = (await readProbe(page)).hint;
+      if (ring === null) return Number.POSITIVE_INFINITY;
+      return Math.max(
+        Math.abs(ring.x + OUTSET - undo.x),
+        Math.abs(ring.y + OUTSET - undo.y),
+        Math.abs(ring.width - 2 * OUTSET - undo.width),
+        Math.abs(ring.height - 2 * OUTSET - undo.height),
+      );
+    }, { message: what })
+    .toBeLessThanOrEqual(TOLERANCE);
+}
+
+/** The card's instruction, as the page sets it. */
+async function cardWords(page: Page): Promise<string> {
+  return (await page.locator(`${CARD} [data-fab-step-text]`).textContent()) ?? '';
+}
+
+/**
+ * A joined board whose ring cell ships a Straight: the piece leaves the ring cell east, runs down a
+ * column one cell over, and comes back west onto the Sink's doorstep, so its turns land elsewhere.
+ */
+function detourBoard(): { nodes: InjectNode[]; belts: InjectBelt[] } {
+  const { nodes } = beltsThatJoinBoard();
+  const corner = (from: number, to: number): InjectTileKind => ({ Corner: { from, to } });
+  const joiner: InjectBelt = {
+    id: JOINER_ID,
+    tiles: [[6, 2], [7, 2], [7, 3], [7, 4], [7, 5], [6, 5]],
+    kinds: [{ Straight: { axis: 0 } }, corner(1, 2), undefined, undefined, corner(2, 3), corner(3, 2)],
+    docks: [
+      { end: 'Tail', node: JOIN_STUB_ID, port: 0 },
+      { end: 'Head', node: SINK_ID, port: JOIN_SINK_IN.index },
+    ],
+  };
+  return { nodes, belts: [joinStub(JOINER_ID), joiner] };
+}
+
+/**
+ * The stub itself carried on by its Head handle and docked into the Sink's In: one belt from the
+ * Source. With `cornerAtRing` it runs on through the ring cell and turns down there; otherwise it turns
+ * up on the stub's old last tile, runs over and comes down through the ring cell straight.
+ */
+function extendedBoard(cornerAtRing: boolean): { nodes: InjectNode[]; belts: InjectBelt[] } {
+  const { nodes } = beltsThatJoinBoard();
+  const corner = (from: number, to: number): InjectTileKind => ({ Corner: { from, to } });
+  const stub: InjectBelt = cornerAtRing
+    ? {
+        id: JOIN_STUB_ID,
+        tiles: [[2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [6, 3], [6, 4], [6, 5]],
+        kinds: [undefined, undefined, undefined, undefined, EAST_TO_SOUTH],
+        docks: [],
+      }
+    : {
+        id: JOIN_STUB_ID,
+        tiles: [[2, 2], [3, 2], [4, 2], [5, 2], [5, 1], [6, 1], [6, 2], [6, 3], [6, 4], [6, 5]],
+        kinds: [undefined, undefined, undefined, corner(1, 0), corner(0, 1), corner(1, 2), { Straight: { axis: 1 } }],
+        docks: [],
+      };
+  stub.docks = [
+    { end: 'Tail', node: SOURCE_ID, port: 0 },
+    { end: 'Head', node: SINK_ID, port: JOIN_SINK_IN.index },
+  ];
+  return { nodes, belts: [stub] };
+}
+
 test.describe('Belts that join on the mock host', () => {
   test.use({ viewport: { width: 1280, height: 720 } });
 
@@ -304,6 +375,122 @@ test.describe('Belts that join on the mock host', () => {
     await expect.poll(async () => (await readProbe(page)).card, { message: 'the arrival finished the lesson' }).toBe('finished');
     await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
     await expect(card).toContainText(phrasePlain(BELTS_THAT_JOIN.closing));
+  });
+
+  test('loading, a late frame: a demo board past the floor and a stale keyframe leave the loading card up, and the declared board starts the lesson', async ({ page }) => {
+    const card = page.locator(CARD);
+    await startJoin(page, async (h) => {
+      const holds = async (what: string): Promise<void> => {
+        await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => done())))));
+        await page.waitForTimeout(150);
+        await expect(card, `${what}: the loading line stays`).toContainText("Loading the lesson's board.");
+        await expect(card, `${what}: no step counter`).not.toContainText(/Step \d/);
+        expect((await readProbe(page)).card, `${what}: the lesson is still starting`).toBe('starting');
+      };
+      // The demo board past the floor: the right floor, not the lesson's machines.
+      const demoSink: InjectNode = { id: 8, kind: 7, cell_x: 6, cell_y: 9 };
+      h.inject(buildPacket({ full: true, tick: 4, generation: 1, swapFloor: 1, nodes: [OLD_MACHINE, demoSink] }));
+      await holds('a demo board past the floor');
+      // A stale keyframe: the lesson's machines, from below the floor at send.
+      h.inject(buildPacket({ full: true, tick: 2, generation: 0, swapFloor: 0, ...beltsThatJoinBoard() }));
+      await holds('a stale keyframe of the lesson board');
+    });
+    await expectStage(page, 'join-belt', 'belt-tool', 'the declared board started step 1');
+  });
+
+  for (const armed of [false, true]) {
+    test(`error, joined with no corner at the ring cell: the no-corner stage rings Undo and step 1 stays open, with the Belt tool ${armed ? 'armed' : 'down'}`, async ({ page }) => {
+      const h = await startJoin(page);
+      if (armed) await armBelt(page);
+      h.inject(diff(detourBoard()));
+      await expect.poll(() => sceneKindAt(page, RING_CELL[0], RING_CELL[1]), { message: 'the ring cell ships a Straight' }).toEqual({ Straight: { axis: 0 } });
+      const probe = await expectStage(page, 'join-belt', 'belt-no-corner', 'a join with no corner on the ring cell shows the no-corner stage');
+      expect(probe.bound.belt, 'no belt is bound').toBeUndefined();
+      expect(await cardWords(page)).toBe(words('join-belt', 'belt-no-corner'));
+      await expectRingOnUndo(page, 'the no-corner ring sits on the toolbar Undo');
+      await page.waitForTimeout(300);
+      expect((await readProbe(page)).stepId, 'step 1 stays open').toBe('join-belt');
+    });
+  }
+
+  test("error, a piece that ends where it can't carry on: the can't-carry-on stage shows lesson 2's words", async ({ page }) => {
+    const h = await startJoin(page);
+    await armBelt(page);
+    // From the ring cell down over the Sink input's doorstep, then turned away east.
+    const { nodes } = beltsThatJoinBoard();
+    const stuck: InjectBelt = {
+      id: JOINER_ID,
+      tiles: [[6, 2], [6, 3], [6, 4], [6, 5], [7, 5]],
+      kinds: [EAST_TO_SOUTH, undefined, undefined, { Corner: { from: 2, to: 1 } }],
+      docks: [{ end: 'Tail', node: JOIN_STUB_ID, port: 0 }],
+    };
+    h.inject(diff({ nodes, belts: [joinStub(JOINER_ID), stuck] }));
+    const probe = await expectStage(page, 'join-belt', 'belt-undo', "a piece over the doorstep shows the can't-carry-on stage");
+    expect(probe.hint, 'the stage rings nothing').toBeNull();
+    const shown = await cardWords(page);
+    expect(shown).toBe(words('join-belt', 'belt-undo'));
+    expect(shown, 'not the shipped words').not.toContain("until it's gone");
+  });
+
+  test('partial, a Head handle drag through the ring cell: a Straight there shows the no-corner stage, a Corner there finishes step 1', async ({ page }) => {
+    const h = await startJoin(page);
+    await armBelt(page);
+    h.inject(diff(extendedBoard(false)));
+    await expectStage(page, 'join-belt', 'belt-no-corner', 'the turn on the stub\'s old last tile, with a Straight at the ring cell, shows the no-corner stage');
+    await expectRingOnUndo(page, 'the no-corner ring sits on the toolbar Undo');
+    h.inject(diff(extendedBoard(true)));
+    await expect.poll(() => sceneKindAt(page, RING_CELL[0], RING_CELL[1]), { message: 'the ring cell ships the Corner' }).toEqual({ Corner: { from: 1, to: 2 } });
+    const probe = await expectStage(page, 'press-play', 'board-running', 'the extended belt with a Corner at the ring cell finished step 1');
+    expect(probe.bound.belt, 'the extended stub is the bound belt').toBe(JOIN_STUB_ID);
+  });
+
+  test('partial, the stub deleted: the plain draw stage shows with lesson 1\'s sentence', async ({ page }) => {
+    const h = await startJoin(page);
+    await armBelt(page);
+    const { nodes } = beltsThatJoinBoard();
+    h.inject(diff({ nodes, belts: [] }, { removed: [JOIN_STUB_ID] }));
+    const probe = await expectStage(page, 'join-belt', 'belt-draw', 'with the stub gone and the Belt tool armed the plain draw stage shows');
+    expect(probe.hint?.shape, 'the drag starts on the Source Out').toBe('square');
+    expect(probe.hintTo?.shape, "and ends on the Sink's In").toBe('circle');
+    const lessonOne = YOUR_FIRST_LINE.steps.find((st) => st.id === 'draw-belt')?.stages.find((st) => st.id === 'belt-draw');
+    expect(await cardWords(page)).toBe(phrasePlain(lessonOne?.text ?? []));
+    expect(words('join-belt', 'belt-draw'), "lesson 2's draw stage holds lesson 1's sentence").toBe(phrasePlain(lessonOne?.text ?? []));
+  });
+
+  test('partial, the board already playing: step 2 finishes at once and the card says why', async ({ page }) => {
+    const h = await startJoin(page);
+    await expect(page.locator('header button[aria-label="Pause"]'), 'the board is playing').toBeVisible();
+    h.inject(diff(joinedBoard()));
+    await expectStage(page, 'press-play', 'board-running', 'the join finished step 1 on a playing board');
+    h.inject(diff(joinedBoard(EAST_TO_SOUTH, [5])));
+    const probe = await expectStage(page, 'watch', 'watch', 'the playing board finished step 2 at once');
+    expect(probe.noteKind, 'the note says the board was already running').toBe('alreadyRunning');
+    await expect(page.locator(CARD)).toContainText('The board was already running, so step 2 is done.');
+    expect(h.controls, 'the lesson sent no Play').not.toContain('resume');
+  });
+
+  test("error, a Belt press on the stub's last tile: the band's sentence and lesson 2's coaching line, nothing sent, the stage held", async ({ page }) => {
+    const h = await startJoin(page);
+    await armBelt(page);
+    await recordBand(page);
+    const drawsBefore = sentCount(h, CMD.DrawBelt);
+    const docksBefore = sentCount(h, CMD.Dock);
+    const last = await cellRect(page, 5, 2);
+    const at = { x: last.x + last.width / 2 + 4, y: last.y + last.height / 2 - 3 };
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __bandSentences: string[] }).__bandSentences[0] ?? ''), { message: "the band showed the BeltEndTile sentence" })
+      .toBe(BELT_END_TILE_WORDS);
+    await expect(page.locator(`${CARD} [data-fab-step-note="refusal"]`), "the card's note slot holds the coaching line").toHaveText(COACH_LINE);
+    expect(COACH_LINE, 'the coaching line is not the band sentence').not.toBe(BELT_END_TILE_WORDS);
+    await page.waitForTimeout(300);
+    expect(sentCount(h, CMD.DrawBelt), 'no DrawBelt sent').toBe(drawsBefore);
+    expect(sentCount(h, CMD.Dock), 'no Dock sent').toBe(docksBefore);
+    const probe = await readProbe(page);
+    expect(`${probe.stepId}/${probe.stageId}`, 'the step and stage held').toBe('join-belt/belt-carry-on');
+    expect(probe.noteKind).toBe('refusal');
   });
 
   for (const size of SIZES) {
