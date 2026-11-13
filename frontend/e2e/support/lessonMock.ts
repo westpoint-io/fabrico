@@ -30,6 +30,7 @@ import {
   type InjectBelt,
   type InjectNode,
   type InjectPort,
+  type InjectTileKind,
   type InjectWire,
 } from './wire';
 
@@ -152,16 +153,57 @@ export function beltsThatJoinBoard(): { nodes: InjectNode[]; belts: InjectBelt[]
       { index: 1, cell_x: 6, cell_y: 6, side: 0, role: 0 },
     ],
   };
-  const stub: InjectBelt = { id: 4, tiles: [[2, 2], [3, 2], [4, 2], [5, 2]], docks: [{ end: 'Tail', node: SOURCE_ID, port: 0 }] };
-  return { nodes: [sourceAt([1, 2]), sink], belts: [stub] };
+  return { nodes: [sourceAt([1, 2]), sink], belts: [joinStub()] };
+}
+
+/** The prepared stub's handle on Belts that join's board. */
+export const JOIN_STUB_ID = 4;
+/** The handle the host mints for the piece drawn on from the ring cell. */
+export const JOINER_ID = 5;
+/** The cell past the stub's free end, where the app rings the carry-on start. */
+export const RING_CELL = [6, 2] as const;
+/** The Sink's In on the prepared board: its index, and the cell and side its dot sits on. */
+export const JOIN_SINK_IN = { index: 1, cell_x: 6, cell_y: 6, side: 0 } as const;
+/** The Corner the host ships on the ring cell for a belt that runs east and turns south there. */
+export const EAST_TO_SOUTH: InjectTileKind = { Corner: { from: 1, to: 2 } };
+
+/** The four-tile stub, Tail on the Source's Out, Head free unless `head` names the belt it docks to. */
+export function joinStub(head?: number, itemSlots: number[] = []): InjectBelt {
+  return {
+    id: JOIN_STUB_ID,
+    tiles: [[2, 2], [3, 2], [4, 2], [5, 2]],
+    itemSlots,
+    docks: [{ end: 'Tail', node: SOURCE_ID, port: 0 }, ...(head === undefined ? [] : [{ end: 'Head' as const, node: head, port: 0 }])],
+  };
+}
+
+/**
+ * The prepared board after a straight drag down from the ring cell into the Sink's In: the stub's Head
+ * docks to the new piece, and the piece runs (6,2) to (6,5) with its Head on the Sink's In. The ring
+ * cell ships `ringKind`, which the host makes a Corner from the seam with the stub.
+ */
+export function joinedBoard(ringKind: InjectTileKind = EAST_TO_SOUTH, itemSlots: number[] = []): { nodes: InjectNode[]; belts: InjectBelt[] } {
+  const { nodes } = beltsThatJoinBoard();
+  const joiner: InjectBelt = {
+    id: JOINER_ID,
+    tiles: [[6, 2], [6, 3], [6, 4], [6, 5]],
+    kinds: [ringKind],
+    itemSlots,
+    docks: [
+      { end: 'Tail', node: JOIN_STUB_ID, port: 0 },
+      { end: 'Head', node: SINK_ID, port: JOIN_SINK_IN.index },
+    ],
+  };
+  return { nodes, belts: [joinStub(JOINER_ID), joiner] };
 }
 
 /**
  * Help, Lessons, Start, then the Starting card, then the board the host answers with: New's empty board,
  * or for a lesson with a prepared board the board its load brings. The lesson defaults to the first, so
- * lesson 1's specs call it as they always did.
+ * lesson 1's specs call it as they always did. `beforeBoard` runs while the loading card is up, before
+ * the host's answer, so a case can send late frames first or start reading every frame.
  */
-export async function startLesson(page: Page, h: Harness, lesson: Lesson = YOUR_FIRST_LINE): Promise<void> {
+export async function startLesson(page: Page, h: Harness, lesson: Lesson = YOUR_FIRST_LINE, beforeBoard?: () => Promise<void>): Promise<void> {
   await page.getByRole('button', { name: 'Help', exact: true }).click();
   await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
   await page.getByRole('button', { name: `Start ${lesson.title}`, exact: true }).click();
@@ -180,6 +222,7 @@ export async function startLesson(page: Page, h: Harness, lesson: Lesson = YOUR_
   expect(starting.card, 'the lesson waits for the new board').toBe('starting');
   expect(starting.hint, 'no ring while the board is on its way').toBeNull();
   await expect(page.locator('[data-fab-hint]'), 'no ring while the board is on its way').toBeHidden();
+  await beforeBoard?.();
 
   if (board === undefined) {
     h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1 }));
@@ -441,7 +484,11 @@ export function beltOverDoorstep(id: number, from: InjectNode, to: InjectNode): 
   const [lx, ly] = straight.tiles[straight.tiles.length - 1]!;
   const turned: [number, number] = [lx, ly + 1];
   if (covers(to, ...turned)) throw new Error(`beltOverDoorstep's turned tile (${turned[0]},${turned[1]}) lands on the machine`);
-  return { id, tiles: [...straight.tiles, turned], docks: (straight.docks ?? []).filter((d) => d.end === 'Tail') };
+  // The doorstep tile turns south, so the host ships it as a Corner from the row's direction.
+  const [fx] = straight.tiles[0]!;
+  const kinds: InjectTileKind[] = [];
+  kinds[straight.tiles.length - 1] = { Corner: { from: lx >= fx ? 1 : 3, to: 2 } };
+  return { id, tiles: [...straight.tiles, turned], kinds, docks: (straight.docks ?? []).filter((d) => d.end === 'Tail') };
 }
 
 /**

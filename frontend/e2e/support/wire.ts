@@ -264,10 +264,25 @@ export interface InjectDock {
   port: number;
 }
 
+/**
+ * A belt tile's kind as the host ships it, for a fixture that names one. Directions are the host's
+ * flow directions, N=0 E=1 S=2 W=3: a belt running east that turns south ships `{ Corner: { from: 1, to: 2 } }`
+ * on the turning cell. `from` and `to` must be perpendicular, because the host never ships any other corner.
+ */
+export type InjectTileKind = { Straight: { axis: 0 | 1 } } | { Corner: { from: number; to: number } };
+
 export interface InjectBelt {
   id: number;
-  /** Straight orthogonal tile path (Tail = first cell, Head = last cell). */
+  /**
+   * Orthogonal tile path (Tail = first cell, Head = last cell). With no `kinds` the path must run
+   * straight, and a turn throws. A path that turns names the kind of each turning tile in `kinds`.
+   */
   tiles: [number, number][];
+  /**
+   * The kind the host ships for each tile, by index, where the fixture names one. A tile left
+   * undefined is a Straight on the axis its neighbours give, and may not be a turn.
+   */
+  kinds?: ReadonlyArray<InjectTileKind | undefined>;
   /** Number of items currently on the belt - drives the snapshot count. They sit at
    *  slots 0..n-1, packed from the HEAD (slot 0, the delivery end), which is what a
    *  belt whose head cannot deliver looks like on the wire. */
@@ -349,34 +364,57 @@ export interface PacketOpts {
   swapFloor?: number;
 }
 
+/** The axis a direction runs on: N and S are Y (1), E and W are X (0). */
+function axisOfDir(dir: number): 0 | 1 {
+  return dir % 2 === 0 ? 1 : 0;
+}
+
 /**
- * Write a `Vec<TileView>` as Straight tiles, deriving each tile's axis from the
- * path direction. Fixtures use straight runs only - a turning path THROWS, so a
- * fixture can never silently encode a wrong-geometry corner.
+ * Write a `Vec<TileView>`, deriving each unnamed tile's Straight axis from the
+ * path direction. A tile whose two neighbours sit on different axes is a turn: a
+ * turn with no named kind THROWS, so a fixture can never silently encode a
+ * wrong-geometry corner. A named kind is written as given, a Corner as disc 1
+ * with its `from` and `to` bytes in `readTileView`'s order, and a Corner whose
+ * two directions aren't perpendicular throws, because the host can't ship one.
  *
  * ONE writer for belt tiles and wire paths alike, because the decoder has one
  * reader for both (`readWireView`'s `path` reuses `readTileView`, decode.ts:422).
  * A second copy here is exactly the per-file drift this module's header exists to
  * prevent.
  */
-function writeTiles(w: PostcardWriter, tiles: [number, number][]): void {
+function writeTiles(w: PostcardWriter, tiles: [number, number][], kinds: ReadonlyArray<InjectTileKind | undefined> = []): void {
   w.varintU(tiles.length);
   for (let i = 0; i < tiles.length; i++) {
     const [cx, cy] = tiles[i];
-    const [nx, ny] = tiles[i + 1] ?? tiles[i - 1] ?? [cx + 1, cy];
+    const kind = kinds[i];
+    if (kind !== undefined && 'Corner' in kind) {
+      const { from, to } = kind.Corner;
+      if (![from, to].every((d) => Number.isInteger(d) && d >= 0 && d <= 3) || axisOfDir(from) === axisOfDir(to)) {
+        throw new Error(`wire.ts fixture Corner at (${cx},${cy}) needs perpendicular directions, got from ${from} to ${to}`);
+      }
+      w.varintI(cx).varintI(cy).varintU(1).u8(from).u8(to); // disc 1 = Corner
+      continue;
+    }
+    const prev = tiles[i - 1];
+    const next = tiles[i + 1];
+    const [nx, ny] = next ?? prev ?? [cx + 1, cy];
     if (nx !== cx && ny !== cy) {
       throw new Error('wire.ts fixture paths must be straight orthogonal runs');
     }
     const axis = ny === cy ? 0 : 1; // X=0, Y=1
-    w.varintI(cx).varintI(cy).varintU(0).u8(axis); // disc 0 = Straight
+    if (kind === undefined && prev !== undefined && next !== undefined && (prev[1] === cy ? 0 : 1) !== axis) {
+      throw new Error(`wire.ts fixture paths must be straight orthogonal runs; name the kind of the turning tile at (${cx},${cy})`);
+    }
+    w.varintI(cx).varintI(cy).varintU(0).u8(kind === undefined ? axis : kind.Straight.axis); // disc 0 = Straight
   }
 }
 
 /**
  * Build one render-packet in the CURRENT decodeRenderPacket field order. Belt
  * tiles are written as Straight tiles with the axis derived from the path
- * direction (fixtures use straight runs only - a turning path throws so a
- * fixture can never silently encode a wrong-geometry corner).
+ * direction, unless the belt names a tile's kind in `kinds` (a turning path with
+ * an unnamed turn throws, so a fixture can never silently encode a wrong-geometry
+ * corner).
  */
 export function buildPacket(opts: PacketOpts): Buffer {
   const w = new PostcardWriter();
@@ -441,7 +479,7 @@ export function buildPacket(opts: PacketOpts): Buffer {
     for (const slot of slots) {
       w.varintU(slot).u8(0); // ItemView{ arrival_tick (the slot index), tag }
     }
-    writeTiles(w, b.tiles);
+    writeTiles(w, b.tiles, b.kinds);
     const docks = b.docks ?? [];
     w.varintU(docks.length);
     for (const d of docks) {
