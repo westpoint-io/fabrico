@@ -333,7 +333,11 @@ test('the drop disc docks inside and not outside, zoom near 2', async ({ page })
 
 const WIRE_LESSON = ANSWER_A_WEB_REQUEST;
 const WIRE_STEP = WIRE_LESSON.steps.findIndex((s) => s.id === 'wire');
-/** Sim ticks the board is watched after the outside press, for a wire on its way from the host. */
+/**
+ * Sim ticks the board is watched after a release, for a wire on its way from the host. The inside press
+ * must lay its legs inside this same window, so the outside press is watched for as long as a press that
+ * works is given.
+ */
 const WIRE_TICKS = 30;
 
 function wireStage(id: string): Stage {
@@ -364,6 +368,29 @@ async function legsBetween(page: Page, route: number, handler: number): Promise<
     .filter((w) => (w.from.node === route && w.to.node === handler) || (w.from.node === handler && w.to.node === route))
     .map((w) => `${w.from.node}>${w.to.node}`)
     .sort();
+}
+
+/**
+ * Watch the board from the moment of the call (just after a release) for `ticks` sim ticks, or until a
+ * wire joins the two machines. A drag takes about 20 ticks itself, so a watch counted from before the
+ * press would end before a wire from the host could land.
+ */
+async function watchForWire(page: Page, ticks: number, route: number, handler: number): Promise<{ legs: string[]; after: number }> {
+  const tick0 = (await readScene(page)).tick;
+  let legs: string[] = [];
+  let now = tick0;
+  await expect
+    .poll(
+      async () => {
+        legs = await legsBetween(page, route, handler);
+        now = (await readScene(page)).tick;
+        if (legs.length > 0) return 'wired';
+        return now >= tick0 + ticks ? 'quiet' : 'watching';
+      },
+      { message: `the board kept ticking for ${ticks} ticks after the release`, timeout: tickBudgetMs(ticks) + frameBudgetMs(STAGE_FRAMES) },
+    )
+    .not.toBe('watching');
+  return { legs, after: now - tick0 };
 }
 
 async function wireDiscTest(page: Page, lo: number, hi: number): Promise<void> {
@@ -434,17 +461,11 @@ async function wireDiscTest(page: Page, lo: number, hi: number): Promise<void> {
   );
   expect(inDotDist, "the outside press is farther from the Route's In dot than from its Out").toBeGreaterThan(outsideDist);
   await expectOnBoard(page, [outside, drop.hitCentre], 'the outside press and its release are on the board');
-  const tick0 = (await readScene(page)).tick;
   await dragByHand(page, outside, drop.hitCentre);
-  await expect
-    .poll(async () => (await readScene(page)).tick >= tick0 + WIRE_TICKS, {
-      message: `the board kept ticking for ${WIRE_TICKS} ticks after the outside press`,
-      timeout: tickBudgetMs(WIRE_TICKS) + frameBudgetMs(STAGE_FRAMES),
-    })
-    .toBe(true);
-  expect(await legsBetween(page, route.id, handler.id), `a press ${outsideDist.toFixed(1)} px from the Route Out's dot started no wire`).toEqual([]);
+  const missed = await watchForWire(page, WIRE_TICKS, route.id, handler.id);
   const held = await readProbe(page);
-  console.log(`MEASURE wire-disc-outside-result zoom=${scale.toFixed(3)} step=${held.stepId} stage=${held.stageId}`);
+  console.log(`MEASURE wire-disc-outside-result zoom=${scale.toFixed(3)} legs=${missed.legs.length} watched_ticks=${missed.after} step=${held.stepId} stage=${held.stageId}`);
+  expect(missed.legs, `a press ${outsideDist.toFixed(1)} px from the Route Out's dot started no wire in ${missed.after} ticks after the release`).toEqual([]);
   expect(`${held.stepId}/${held.stageId}`, 'the outside press leaves the lesson on wire-draw').toBe('wire/wire-draw');
 
   // 6. The inside press: hitR - 1 px out on the same side, released on the Handler's In disc.
@@ -459,12 +480,16 @@ async function wireDiscTest(page: Page, lo: number, hi: number): Promise<void> {
   console.log(`MEASURE wire-disc-inside zoom=${scale.toFixed(3)} r=${disc2.hitRadiusPx.toFixed(2)} dist=${insideDist.toFixed(2)}`);
   await expectOnBoard(page, [inside, drop2.hitCentre], 'the inside press and its release are on the board');
   await dragByHand(page, inside, drop2.hitCentre);
+  const wired = await watchForWire(page, WIRE_TICKS, route.id, handler.id);
+  console.log(`MEASURE wire-disc-inside-result zoom=${scale.toFixed(3)} legs=${wired.legs.length} after_ticks=${wired.after}`);
+  // A wire's two legs come back in one packet; poll briefly in case the watch saw the first alone.
   await expect
     .poll(() => legsBetween(page, route.id, handler.id), {
-      message: `a press ${insideDist.toFixed(1)} px from the Route Out's dot, inside the disc, laid both legs`,
-      timeout: tickBudgetMs(WIRE_TICKS) + frameBudgetMs(STAGE_FRAMES),
+      message: `a press ${insideDist.toFixed(1)} px from the Route Out's dot, inside the disc, laid both legs within ${WIRE_TICKS} ticks of the release (first seen after ${wired.after})`,
+      timeout: frameBudgetMs(STAGE_FRAMES),
     })
     .toEqual([`${handler.id}>${route.id}`, `${route.id}>${handler.id}`].sort());
+  expect(wired.legs.length, `the inside press's wire landed inside the ${WIRE_TICKS}-tick window the outside press was watched for`).toBeGreaterThan(0);
   await expect
     .poll(async () => (await readProbe(page)).stepIndex, {
       message: 'the two legs moved the lesson past wire',
