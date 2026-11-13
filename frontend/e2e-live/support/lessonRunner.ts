@@ -1915,8 +1915,11 @@ async function expectSeamDrawnAsCorner(page: Page, label: string, state: WalkSta
 
 /** The stub-motion read samples the stub's clip about this often. */
 const MOTION_SAMPLE_MS = 250;
-/** For this long with the item layer shown, and again with it hidden. */
-const MOTION_WINDOW_MS = 3_000;
+/**
+ * Samples a window takes with the item layer shown, and again with it hidden: 3 s at `MOTION_SAMPLE_MS`
+ * where a capture is quick. A count, not a deadline, so a slow machine takes the same samples, only later.
+ */
+const MOTION_SAMPLES = 12;
 /**
  * A sample differs from the one before when more than this many pixels changed in any channel. Zero, as
  * `93-boards-load.live.spec.ts` grades its first belt: under pinned treads any change counts, which is
@@ -1951,12 +1954,11 @@ async function tickerTimeNow(page: Page): Promise<number> {
   });
 }
 
-/** Sample the stub's clip every `MOTION_SAMPLE_MS` for `MOTION_WINDOW_MS`. */
+/** Take `MOTION_SAMPLES` samples of the stub's clip, `MOTION_SAMPLE_MS` apart where the capture allows. */
 async function sampleStub(page: Page, beltId: number, clip: { x: number; y: number; width: number; height: number }): Promise<StubSample[]> {
   const itemsOn = (scene: SceneFacts) => scene.belts.find((b) => b.id === beltId)?.items ?? 0;
   const out: StubSample[] = [];
-  const began = Date.now();
-  while (Date.now() - began < MOTION_WINDOW_MS) {
+  for (let i = 0; i < MOTION_SAMPLES; i++) {
     const at = Date.now();
     const before = itemsOn(await readScene(page));
     const png = await captureClip(page, clip);
@@ -2039,7 +2041,7 @@ async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, step
       timeout: addWaitBudget(tickBudgetMs(MOTION_ITEM_TICKS) + frameBudgetMs(MOVE_ON_FRAMES), `${label}: the first item on the stub`),
     })
     .toBeGreaterThan(0);
-  addWaitBudget(2 * MOTION_WINDOW_MS, `${label}: two ${MOTION_WINDOW_MS} ms sample windows`);
+  addWaitBudget(2 * MOTION_SAMPLES * MOTION_SAMPLE_MS, `${label}: two windows of ${MOTION_SAMPLES} samples ${MOTION_SAMPLE_MS} ms apart`);
   let shown: StubSample[] = [];
   let hidden: StubSample[] = [];
   await holdTheFrame(page, 0, true);
