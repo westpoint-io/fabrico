@@ -20,6 +20,8 @@ These are the words the reference pages use, in alphabetical order. Each one say
 <dd>One edit as the engine receives it, such as placing a machine or docking a belt. The [Commands](../commands/) page lists them all.</dd>
 <dt id="term-dock">Dock</dt>
 <dd>To join one end of a belt to a port on a machine, or to the start of another belt. Unlinking takes the end off again. See [Docking, unlinking and rotation](../../board/docking-unlinking-rotation/).</dd>
+<dt id="term-event">Event</dt>
+<dd>Something from outside the board, such as a webhook call, that the app logs and a Source turns into an item. See [Webhook ingress](../../code-and-http/webhook-ingress/).</dd>
 <dt id="term-factory">Factory</dt>
 <dd>A machine that runs your JavaScript on each item it gets and sends out what the code emits. See [Factory](../../machines/factory/) and the [Factory JavaScript API](../../code-and-http/factory-api/).</dd>
 <dt id="term-fault">Fault</dt>
@@ -28,6 +30,8 @@ These are the words the reference pages use, in alphabetical order. Each one say
 <dd>A port kept apart from a machine's numbered outputs, where its faults leave. Dock a belt on it to collect the faults, or they go no further. See [Ports](../../board/ports/).</dd>
 <dt id="term-fault-reason">Fault reason</dt>
 <dd>The name a fault carries to say why the machine faulted, such as <Fact id="fault.NoMatch" /> for an item a Router can't match to any of its outputs. See [Fault reasons](../../board/fault-reasons/), and the [fixes for each reason](../../../troubleshooting/fault-reasons/).</dd>
+<dt id="term-hash">Hash</dt>
+<dd>A short fingerprint of the engine's whole state at a tick. Two runs with the same hash at a tick are in the same state, and the badge under each example on these pages shows the hash its run ended on.</dd>
 <dt id="term-http-handler">HTTP Handler</dt>
 <dd>A machine that runs your JavaScript on each request a Route sends it over a wire, and sends back a reply. See [HTTP Handler](../../machines/http-handler/) and [Handler requests and replies](../../code-and-http/handler-requests-and-replies/).</dd>
 <dt id="term-item">Item</dt>
@@ -44,6 +48,8 @@ These are the words the reference pages use, in alphabetical order. Each one say
 <dd>The `.fab` file the app writes when you save. See [Project files](../project-files/).</dd>
 <dt id="term-refusal">Refusal</dt>
 <dd>The engine's answer to an edit it won't apply. The grid stays as it was and the app shows a message saying why. See [Refusal messages](../refusal-messages/).</dd>
+<dt id="term-replay">Replay</dt>
+<dd>Running the logged events and edits forward again from a saved state. A replay ends in the same state as the first run, and opening a project file is one. See [Project files](../project-files/).</dd>
 <dt id="term-route">Route</dt>
 <dd>A machine that answers HTTP requests at a path you choose and sends each one down its wire to an HTTP Handler. See [Route](../../machines/route/).</dd>
 <dt id="term-sink">Sink</dt>

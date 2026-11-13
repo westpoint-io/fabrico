@@ -1,15 +1,41 @@
 ---
-title: Get started
-description: Install Fabrico and build your first factory, one step at a time, with a running board beside each step.
+title: What is Fabrico
+description: "Fabrico is an automation engine you build like a factory: machines on a grid, joined by belts, running the same way on every replay."
+sidebar:
+  order: 0
 prev:
   link: /fabrico/
   label: Overview
 ---
 
+import { LinkCard } from '@astrojs/starlight/components';
 import Board from '../../../components/Board.astro';
 
-This section will cover installing Fabrico and building a first factory. Its pages aren't written yet. Until they are, here is the demo factory, running on the real engine in this page.
+Fabrico is an automation engine you build like a factory. You place machines on a grid and join them with belts, and events from the outside world, such as a webhook, ride the belts as items. The same board given the same events ends in the same state on every run.
+
+The board below is the demo factory, running on the real engine in this page. One of its Factories throws on one item on purpose, so you can see what a fault looks like.
 
 <Board name="demo_scene" faultsAbout="FactoryError" />
 
-Press Play to run it, or Step to move one tick at a time. When the run reaches its last tick, the badge under the board shows the engine's state hash and the word match. That means this run ended exactly where every run of this board ends.
+Press Play to run it, or Step to move one [tick](../reference/files/glossary/#term-tick) at a time. When the run reaches its last tick, the badge under the board shows the engine's state [hash](../reference/files/glossary/#term-hash) and the word match. That means this run ended exactly where every run of this board ends.
+
+## How it works
+
+Something happens outside the app: a webhook call arrives, or a timer fires. The app logs it as an [event](../reference/files/glossary/#term-event), and a [Source](../reference/files/glossary/#term-source) turns it into an item on the belt docked to its output.
+
+[Belts](../reference/files/glossary/#term-belt) carry [items](../reference/files/glossary/#term-item) from machine to machine, and each machine does one job with them. A Router sends an item down one of its outputs, a [Factory](../reference/files/glossary/#term-factory) runs your JavaScript on it, and a [Sink](../reference/files/glossary/#term-sink) at the end of the line sends it out as an HTTP request or records it.
+
+The engine moves the whole board forward one tick at a time, and it logs every event and every edit with the tick it happened on. Running that log again from a saved state is a [replay](../reference/files/glossary/#term-replay), and a replay ends in the same state, with the same hash, every time.
+
+## What it isn't yet
+
+Fabrico hasn't reached its 1.0 release, so the way it saves boards and the way machines behave can still change between versions. There is no download yet: to run the app you build it from source. The app listens for webhooks on 127.0.0.1, the loopback address, so only programs on the same computer can send it a webhook.
+
+## Where to go next
+
+<LinkCard title="Concepts" href="../concepts/" description="The ideas underneath: items, ticks, belts, faults and replay." />
+<LinkCard
+  title="Reference"
+  href="../reference/"
+  description="A page for each machine kind and each engine rule, with ports, settings and limits."
+/>

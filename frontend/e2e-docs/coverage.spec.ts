@@ -4,9 +4,12 @@ import { expect, test } from '@playwright/test';
 import { distFileFor } from './support/site.ts';
 
 // Section coverage. site/coverage-manifest.json lists, for each of the site's six sections in
-// sidebar order, the source pages that section must have. This spec checks the manifest against the
-// sidebar in site/astro.config.mjs and against the built site in site/dist/: every listed page must
-// have been built. A section that adds a page to its list and forgets the page fails here.
+// sidebar order, the source pages that section must have and how many there are (`pageCount`). This
+// spec checks the manifest against the sidebar in site/astro.config.mjs and against the built site in
+// site/dist/: every listed page must have been built. A section that adds a page to its list and
+// forgets the page fails here. One test per section also checks the list against its count and
+// against the page files in the section's folder, so a section can't ship short of its count, and a
+// page added to a folder without a manifest line fails too.
 //
 // The manifest and the config are read from disk at run time, never imported: a docs-only change
 // doesn't run the frontend's type check, so the suite must not depend on site/ files at compile time.
@@ -20,23 +23,49 @@ const SOURCE_ROOT = 'site/src/content/docs';
 interface Section {
   name: string;
   folder: string;
+  /** How many pages the section must have. */
+  pageCount: number;
   pages: string[];
 }
 
-/** The manifest's sections. Throws unless the file has schema 1 and a list of sections. */
+/** The manifest's sections. Throws unless the file has schema 2 and a list of sections, each with a pageCount. */
 function manifestSections(): Section[] {
   const raw: unknown = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
   if (typeof raw !== 'object' || raw === null) throw new Error(`${MANIFEST} is not a JSON object`);
   const { schema, sections } = raw as { schema?: unknown; sections?: unknown };
-  if (schema !== 1) throw new Error(`${MANIFEST} has schema ${String(schema)}, and this spec reads schema 1`);
+  if (schema !== 2) {
+    throw new Error(`${MANIFEST} has schema ${String(schema)}, and this spec reads schema 2 only (each section needs a pageCount)`);
+  }
   if (!Array.isArray(sections)) throw new Error(`${MANIFEST} has no sections list`);
   return sections.map((s: unknown, i: number) => {
-    const { name, folder, pages } = (s ?? {}) as { name?: unknown; folder?: unknown; pages?: unknown };
+    const { name, folder, pageCount, pages } = (s ?? {}) as { name?: unknown; folder?: unknown; pageCount?: unknown; pages?: unknown };
     if (typeof name !== 'string' || typeof folder !== 'string' || !Array.isArray(pages) || !pages.every((p) => typeof p === 'string')) {
       throw new Error(`section ${i + 1} of ${MANIFEST} needs a string name, a string folder and a list of page paths`);
     }
-    return { name, folder, pages: pages as string[] };
+    if (typeof pageCount !== 'number' || !Number.isInteger(pageCount) || pageCount < 1) {
+      throw new Error(`section "${name}" in ${MANIFEST} needs a pageCount, a whole number of 1 or more`);
+    }
+    return { name, folder, pageCount, pages: pages as string[] };
   });
+}
+
+/**
+ * The published pages in a section's folder, as paths under site/src/content/docs/, sorted: every
+ * .md and .mdx file at any depth, except those whose file name starts with _ (the test pages, which
+ * only the fixture build takes).
+ */
+function publishedPagesIn(folder: string): string[] {
+  const root = path.join(REPO, SOURCE_ROOT);
+  const found: string[] = [];
+  const walk = (rel: string): void => {
+    for (const entry of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile() && /\.mdx?$/.test(entry.name) && !entry.name.startsWith('_')) found.push(child);
+    }
+  };
+  walk(folder);
+  return found.sort();
 }
 
 /**
@@ -123,3 +152,20 @@ test('every page the coverage manifest lists was built', () => {
   expect(checked, 'pages the coverage manifest lists').toBeGreaterThanOrEqual(6);
   expect(missing, missing.join('\n')).toEqual([]);
 });
+
+// One test per section, named from the manifest. The list must hold exactly `pageCount` pages, and
+// every published page in the section's folder must be on it.
+for (const section of manifestSections()) {
+  test(`section "${section.name}" lists exactly its pageCount pages, and every published page in its folder`, () => {
+    const listed = new Set(section.pages);
+    const unlisted = publishedPagesIn(section.folder).filter((page) => !listed.has(page));
+    console.log(`SECTION "${section.name}" pageCount=${section.pageCount} listed=${section.pages.length} unlisted=${unlisted.length}`);
+    const problems = unlisted.map(
+      (page) => `${SOURCE_ROOT}/${page} is a published page in the "${section.name}" folder, and the coverage manifest doesn't list it.`,
+    );
+    if (section.pages.length !== section.pageCount) {
+      problems.push(`Section "${section.name}" lists ${section.pages.length} pages in the coverage manifest, and its pageCount is ${section.pageCount}.`);
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+}

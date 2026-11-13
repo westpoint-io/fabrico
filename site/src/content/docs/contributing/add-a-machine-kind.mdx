@@ -70,7 +70,7 @@ A machine kind runs through every layer of Fabrico: the protocol gives it a numb
 
    It fails naming the machine if `KIND_NAMES` has no entry for it. Commit the new `site/src/generated/facts.json`: CI's docs job runs the same command and fails when the committed file differs.
 
-8. Write its reference page. Add `site/src/content/docs/reference/machines/<slug>.mdx` with `<MachineFacts kind={N} />`, where N is the kind number, and a board that shows the machine at work, saved as `examples/boards/docs/machines-<slug>.board.ron` and embedded as `<Board name="docs-machines-<slug>" />`. [Add a docs board](../add-a-docs-board/) covers the board itself. Add the slug to `SLUGS` in `frontend/e2e-docs/reference.spec.ts`, the page to `site/coverage-manifest.json`, and a row to the Reference index. The [Label page](../../reference/machines/label/) is a short example.
+8. Write its reference page. Add `site/src/content/docs/reference/machines/<slug>.mdx` with `<MachineFacts kind={N} />`, where N is the kind number, and a board that shows the machine at work, saved as `examples/boards/docs/machines-<slug>.board.ron` and embedded as `<Board name="docs-machines-<slug>" />`. [Add a docs board](../add-a-docs-board/) covers the board itself. Add the slug to `SLUGS` in `frontend/e2e-docs/reference.spec.ts`, the page to the Reference section of `site/coverage-manifest.json` with that section's `pageCount` raised by one, and a row to the Reference index. The [Label page](../../reference/machines/label/) is a short example.
 
    ```bash
    bash scripts/build-site.sh && bash scripts/check-docs.sh
