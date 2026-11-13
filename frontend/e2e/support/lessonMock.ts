@@ -11,6 +11,7 @@ import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/Tutorial
 import type { MachineConfig } from '../../src/protocol/decode';
 import { doorstepCell, nubAnchor } from '../../src/protocol/ports';
 import { GESTURE_REFUSAL_KIND } from '../../src/transport/transport';
+import { ANSWER_A_WEB_REQUEST } from '../../src/tutorial/lessons/answerAWebRequest';
 import { YOUR_FIRST_LINE } from '../../src/tutorial/lessons/yourFirstLine';
 import { TWO_OUTPUTS } from '../../src/tutorial/lessons/twoOutputs';
 import type { Lesson } from '../../src/tutorial/types';
@@ -1310,4 +1311,157 @@ export async function nubCentre(page: Page, node: number, index: number): Promis
   const cam = await cameraOf(page);
   const anchor = nubAnchor(port.cell_x, port.cell_y, port.side);
   return { x: anchor.x * cam.scale + cam.x, y: anchor.y * cam.scale + cam.y };
+}
+
+// Lesson 5's flow, moved out of `lesson-request.spec.ts` so the clearance and three-line specs drive the
+// same steps. Stage ids are checked against the lesson's data, so a renamed stage throws here by name.
+
+/** A lesson 5 stage id, checked against the lesson's data. */
+function requestStageOf(stepId: string, id: string): string {
+  const step = ANSWER_A_WEB_REQUEST.steps.find((s) => s.id === stepId);
+  if (step === undefined) throw new Error(`${ANSWER_A_WEB_REQUEST.id} has no step ${stepId}`);
+  if (!step.stages.some((stage) => stage.id === id)) throw new Error(`${ANSWER_A_WEB_REQUEST.id} step ${stepId} has no stage ${id}`);
+  return id;
+}
+
+/** A lesson 5 step id, checked against the lesson's data. */
+function requestStepOf(id: string): string {
+  if (!ANSWER_A_WEB_REQUEST.steps.some((s) => s.id === id)) throw new Error(`${ANSWER_A_WEB_REQUEST.id} has no step ${id}`);
+  return id;
+}
+
+/** Lesson 5's step ids, checked against its data. */
+export const REQUEST_STEP = {
+  placeRoute: requestStepOf('place-route'),
+  placeHandler: requestStepOf('place-handler'),
+  wire: requestStepOf('wire'),
+  answer: requestStepOf('answer'),
+} as const;
+
+/** Lesson 5's stage ids, checked against its data. */
+export const REQUEST_STAGE = {
+  routeTool: requestStageOf('place-route', 'route-tool'),
+  routeFloor: requestStageOf('place-route', 'route-floor'),
+  handlerTool: requestStageOf('place-handler', 'handler-tool'),
+  handlerFloor: requestStageOf('place-handler', 'handler-floor'),
+  wireTool: requestStageOf('wire', 'wire-tool'),
+  wireDraw: requestStageOf('wire', 'wire-draw'),
+  requestPaused: requestStageOf('answer', 'request-paused'),
+  toolDown: requestStageOf('answer', 'tool-down'),
+  selectRoute: requestStageOf('answer', 'select-route'),
+  urlPending: requestStageOf('answer', 'url-pending'),
+  sendRequest: requestStageOf('answer', 'send-request'),
+} as const;
+
+/** The URL the mock host answers `webhook_url` with by default: the host's loopback endpoint, the default path. */
+export const REQUEST_URL = 'http://127.0.0.1:54321/endpoint/route-1';
+export const REQUEST_PATH = '/route-1';
+
+/**
+ * Boot on a host that answers the Route's config and its POST URL, start lesson 5, run `afterStart`
+ * (a spec opens the Legend there), and zoom to about 1. New keeps the camera, and the mock's first board
+ * fits one machine at the closest zoom, where the 9-cell span can't fit. A user building a line zooms out.
+ */
+export async function startRequestLesson(
+  page: Page,
+  host: RequestHost = requestHost(REQUEST_URL),
+  afterStart?: () => Promise<void>,
+): Promise<{ h: Harness; host: RequestHost }> {
+  const h = await boot(page, host.opts);
+  await startLesson(page, h, ANSWER_A_WEB_REQUEST);
+  await ringAt(page, REQUEST_STAGE.routeTool);
+  if (afterStart !== undefined) await afterStart();
+  const view = page.viewportSize() ?? { width: 1280, height: 720 };
+  await zoomInto(page, { x: view.width / 2, y: view.height / 2 }, 0.9, 1.1);
+  return { h, host };
+}
+
+/**
+ * Steps 1 and 2 through their rings, with the host's machines injected, the Route's config at `path`.
+ * Ends with the Handler's tool armed, on step 3's first stage.
+ */
+export async function placeRouteAndHandler(
+  page: Page,
+  h: Harness,
+  host: RequestHost,
+  visit?: Visit,
+  path: string = REQUEST_PATH,
+): Promise<RequestBoard> {
+  await stopAt(page, REQUEST_STAGE.routeTool, visit);
+  await pressRing(page, await ringAt(page, REQUEST_STAGE.routeTool));
+  await stopAt(page, REQUEST_STAGE.routeFloor, visit);
+  const routeRing = await ringAt(page, REQUEST_STAGE.routeFloor);
+  const route = routeAt(cellOfRing(routeRing, await cameraOf(page)));
+  host.set(route.id, routeConfig(path));
+  await placeThrough(page, h, routeRing);
+  injectBoard(h, { nodes: [route], tick: 6 });
+
+  await expectAt(page, REQUEST_STEP.placeHandler, REQUEST_STAGE.handlerTool, 'the Route appeared and finished step 1');
+  await stopAt(page, REQUEST_STAGE.handlerTool, visit);
+  await pressRing(page, await ringAt(page, REQUEST_STAGE.handlerTool));
+  await stopAt(page, REQUEST_STAGE.handlerFloor, visit);
+  const handlerRing = await ringAt(page, REQUEST_STAGE.handlerFloor);
+  const handler = handlerAt(cellOfRing(handlerRing, await cameraOf(page)));
+  await placeThrough(page, h, handlerRing);
+  injectBoard(h, { nodes: [route, handler], tick: 7 });
+  await expectAt(page, REQUEST_STEP.wire, REQUEST_STAGE.wireTool, 'the Handler appeared and finished step 2');
+  return { route, handler, wires: [], tick: 7, generation: 1 };
+}
+
+/** The wire-draw stage's two discs: where the drag starts and where it ends. */
+export async function wireDiscs(page: Page): Promise<{ from: HintRect; to: HintRect }> {
+  const from = await ringAt(page, REQUEST_STAGE.wireDraw);
+  const to = (await readProbe(page)).hintTo;
+  if (to === null) throw new Error('wire-draw shows no release disc');
+  return { from, to };
+}
+
+/** A pointer drag from one point to another, in two legs of five moves. */
+export async function dragBetween(page: Page, start: { x: number; y: number }, end: { x: number; y: number }): Promise<void> {
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 5 });
+  await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.mouse.up();
+}
+
+/** Step 3: the Wire tool through its ring, the drag between the discs, and both legs injected. Ends on step 4's tool-down. */
+export async function wireThroughDiscs(page: Page, h: Harness, board: RequestBoard, visit?: Visit): Promise<void> {
+  await stopAt(page, REQUEST_STAGE.wireTool, visit);
+  await pressRing(page, await ringAt(page, REQUEST_STAGE.wireTool));
+  await stopAt(page, REQUEST_STAGE.wireDraw, visit);
+  const { from, to } = await wireDiscs(page);
+  const before = sentCount(h, CMD.DrawWire);
+  await dragBetween(page, from.hitCentre ?? centreOf(from), to.hitCentre ?? centreOf(to));
+  await expect.poll(() => sentCount(h, CMD.DrawWire), { message: 'the drag between the discs sent a wire' }).toBe(before + 1);
+  board.wires = wireLegs(board.route, board.handler);
+  injectBoard(h, { nodes: [board.route, board.handler], wires: board.wires, tick: ++board.tick, generation: board.generation });
+  await expectAt(page, REQUEST_STEP.answer, REQUEST_STAGE.toolDown, 'both legs finished step 3, and the Wire tool is still armed');
+}
+
+/** Steps 1 to 3 played through their rings, ending on step 4's tool-down stage with the Wire tool armed. */
+export async function toAnswerStep(
+  page: Page,
+  host: RequestHost = requestHost(REQUEST_URL),
+  opts: { afterStart?: () => Promise<void>; visit?: Visit; path?: string } = {},
+): Promise<{ h: Harness; host: RequestHost; board: RequestBoard }> {
+  const { h } = await startRequestLesson(page, host, opts.afterStart);
+  const board = await placeRouteAndHandler(page, h, host, opts.visit, opts.path);
+  await wireThroughDiscs(page, h, board, opts.visit);
+  return { h, host, board };
+}
+
+/** From step 4's tool-down: the tool put down and the Route selected through its ring. */
+export async function selectRoute(page: Page, visit?: Visit): Promise<void> {
+  await stopAt(page, REQUEST_STAGE.toolDown, visit);
+  await page.keyboard.press('Escape');
+  await stopAt(page, REQUEST_STAGE.selectRoute, visit);
+  await pressRing(page, await ringAt(page, REQUEST_STAGE.selectRoute));
+}
+
+/** The window point a press lands on to clear the selection: an empty cell three rows above the Route. */
+export async function emptyFloor(page: Page, route: { cell_x: number; cell_y: number }): Promise<{ x: number; y: number }> {
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  return { x: route.cell_x * size + cam.x + size / 2, y: (route.cell_y - 3) * size + cam.y + size / 2 };
 }

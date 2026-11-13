@@ -67,6 +67,9 @@ export interface StepCardProps {
   request?: { word: string; url: string } | null;
 }
 
+/** The most lines the request line shows. A longer one ends in an ellipsis. */
+export const REQUEST_LINE_MAX_LINES = 3;
+
 /** Show me's title, and the off-screen line, while a belt draw is held. */
 export const SHOW_ME_DRAWING_TITLE = 'Finish or cancel the belt first.';
 /** The off-screen line while no draw is held. */
@@ -104,7 +107,10 @@ function Words({ tokens, mark }: { tokens: readonly PhraseToken[]; mark?: string
 
 /**
  * The request line's box, coloured like the POST URL field it came from, at body weight. It wraps at the
- * space before the URL and anywhere inside it, and passes the pointer through like the rest of the card body.
+ * space before the URL, after the slashes of a URL too long for one line, and anywhere inside a segment
+ * still too long, and stops at three lines with an ellipsis: a Route path can be 1024 bytes, and the URL
+ * the user runs comes from Copy. The clamp hides the rest from sight only, so textContent is still the
+ * whole line. It passes the pointer through like the rest of the card body.
  */
 const requestLineStyle: CSSProperties = {
   ...textStyle,
@@ -114,10 +120,40 @@ const requestLineStyle: CSSProperties = {
   padding: 'var(--fab-space-sm)',
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
+  display: '-webkit-box',
+  WebkitBoxOrient: 'vertical',
+  WebkitLineClamp: REQUEST_LINE_MAX_LINES,
+  overflow: 'hidden',
   pointerEvents: 'none',
 };
 /** A `code` element takes the browser's monospace face unless told to inherit the card's. */
 const requestCodeStyle: CSSProperties = { font: 'inherit' };
+
+/**
+ * The characters one line of the request line box holds: its 362 px text width (the card's 380 px column
+ * less the box's 8 px padding and 1 px border each side) at Martian Mono's 8 px advance. The three-line
+ * check in `lesson-lines.spec.ts` sets the line in the real column, so a wider face fails there.
+ */
+export const REQUEST_LINE_CHARS = 45;
+
+/**
+ * The URL as React text pieces. One that fits a line is one piece, so the space before it is the only
+ * break and the command sets on line 1 with the URL whole on line 2. A longer one gets a `wbr` element
+ * after each slash after the host, so it packs from line 1 on and breaks at its slashes before it breaks
+ * inside a segment. Every piece is a text child, never markup.
+ */
+export function urlPieces(url: string): (string | JSX.Element)[] {
+  const pathAt = url.indexOf('/', url.indexOf('//') + 2);
+  if (url.length <= REQUEST_LINE_CHARS || pathAt < 0) return [url];
+  const out: (string | JSX.Element)[] = [url.slice(0, pathAt)];
+  const parts = url.slice(pathAt).split('/');
+  // The path starts with a slash, so the first part is empty: each later part follows a slash.
+  for (let i = 1; i < parts.length; i++) {
+    out.push('/', <wbr key={`w${i}`} />);
+    if (parts[i] !== '') out.push(parts[i]);
+  }
+  return out;
+}
 
 /**
  * A running stage's text. Without the request line token it is the one instruction paragraph it always
@@ -131,7 +167,10 @@ function StageText({ tokens, request }: { tokens: readonly PhraseToken[]; reques
       <Words tokens={before} mark="data-fab-step-text" />
       {request !== null && request.url !== '' && (
         <div data-fab-request-line="" style={requestLineStyle}>
-          <code style={requestCodeStyle}>{requestLineText(request.word, request.url)}</code>
+          <code style={requestCodeStyle}>
+            {requestLineText(request.word, '')}
+            {urlPieces(request.url)}
+          </code>
         </div>
       )}
       {after.length > 0 && <Words tokens={after} mark="data-fab-step-after" />}

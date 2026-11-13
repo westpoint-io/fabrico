@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { noteTokens } from '../../tutorial/machine.ts';
 import { MAX_NOTE_CHARS } from '../../tutorial/phrase.ts';
-import { OFFSCREEN_LINE, SHOW_ME_DRAWING_TITLE, StepCard, type StepCardView } from './StepCard.tsx';
+import { requestLineText } from '../../tutorial/request.ts';
+import { OFFSCREEN_LINE, REQUEST_LINE_CHARS, REQUEST_LINE_MAX_LINES, SHOW_ME_DRAWING_TITLE, StepCard, type StepCardView } from './StepCard.tsx';
 
 // The vitest env is `node`, with no DOM, so the component is called directly and its element tree is
 // walked, as `WelcomeCard.test.tsx` does. `Words` is a component the tree holds unexpanded, so the walk
@@ -502,7 +503,7 @@ describe('StepCard request line', () => {
     expect(textOf(line)).toBe(`curl -X POST ${odd}`);
     const inner = elements(line!.props.children);
     expect(inner.map((el) => el.type), 'one code element, no b element').toEqual(['code']);
-    expect(inner[0]?.props.children).toBe(`curl -X POST ${odd}`);
+    expect(textOf(inner[0]?.props.children)).toBe(`curl -X POST ${odd}`);
     expect(tree.some((el) => el.type === 'b')).toBe(false);
     expect(styleOf(line!)).toMatchObject({
       background: 'var(--fab-substrate)',
@@ -513,6 +514,64 @@ describe('StepCard request line', () => {
       overflowWrap: 'anywhere',
       pointerEvents: 'none',
     });
+  });
+
+  it('stops the line at three lines with the clamp, and keeps the pointer passing through', () => {
+    const tree = elements(StepCard({ view: WITH_LINE, ...NOOPS, request: { word: 'curl', url: URL } }));
+    const line = tree.find((el) => el.props['data-fab-request-line'] !== undefined);
+    expect(REQUEST_LINE_MAX_LINES).toBe(3);
+    expect(styleOf(line!)).toMatchObject({
+      display: '-webkit-box',
+      WebkitBoxOrient: 'vertical',
+      WebkitLineClamp: 3,
+      overflow: 'hidden',
+      whiteSpace: 'pre-wrap',
+      overflowWrap: 'anywhere',
+      pointerEvents: 'none',
+    });
+    expect(styleOf(line!).userSelect, 'the line is not made selectable').toBeUndefined();
+  });
+
+  /** The children of the request line's code element, flattened, with each wbr as the string `<wbr>`. */
+  const piecesOf = (word: string, url: string): string[] => {
+    const tree = elements(StepCard({ view: WITH_LINE, ...NOOPS, request: { word, url } }));
+    const code = tree.find((el) => el.type === 'code');
+    const flat = (node: unknown): string[] =>
+      Array.isArray(node) ? node.flatMap(flat) : typeof node === 'string' ? [node] : isEl(node) ? [`<${String(node.type)}>`] : [];
+    return flat(code?.props.children);
+  };
+
+  it('puts a wbr after each slash after the host in a URL too long for one line, and textContent stays the whole line', () => {
+    const long = 'http://127.0.0.1:65535/endpoint/orders/2026/november/route-12';
+    expect(long.length).toBeGreaterThan(REQUEST_LINE_CHARS);
+    for (const word of ['curl', 'curl.exe']) {
+      const pieces = piecesOf(word, long);
+      expect(pieces).toEqual([
+        `${word} -X POST `,
+        'http://127.0.0.1:65535',
+        '/', '<wbr>', 'endpoint',
+        '/', '<wbr>', 'orders',
+        '/', '<wbr>', '2026',
+        '/', '<wbr>', 'november',
+        '/', '<wbr>', 'route-12',
+      ]);
+      expect(pieces.filter((p) => p !== '<wbr>').join(''), 'textContent').toBe(requestLineText(word, long));
+      // Each wbr follows a slash, and only the slashes after the host have one.
+      pieces.forEach((p, i) => (p === '<wbr>' ? expect(pieces[i - 1]).toBe('/') : undefined));
+      expect(pieces.filter((p) => p === '<wbr>')).toHaveLength(5);
+    }
+  });
+
+  it('keeps a URL that fits one line as one piece, so the space before it is the only break', () => {
+    const url = 'http://127.0.0.1:65535/endpoint/route-999';
+    expect(url.length).toBeLessThanOrEqual(REQUEST_LINE_CHARS);
+    expect(piecesOf('curl.exe', url)).toEqual(['curl.exe -X POST ', url]);
+  });
+
+  it('keeps the whole 1024-byte path as text, the clamp being the only bound', () => {
+    const url = `http://127.0.0.1:65535/endpoint/${'a'.repeat(1023)}`;
+    const pieces = piecesOf('curl', url);
+    expect(pieces.filter((p) => p !== '<wbr>').join('')).toBe(requestLineText('curl', url));
   });
 
   it('renders no request line row for a stage holding the token while no URL is held', () => {

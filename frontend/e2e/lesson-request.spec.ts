@@ -1,41 +1,46 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { HintRect } from '../src/chrome/tutorial/TutorialLayer';
 import { ANSWER_A_WEB_REQUEST } from '../src/tutorial/lessons/answerAWebRequest';
 import { phrasePlain } from '../src/tutorial/phrase';
 import { wireNubHitRadiusWorld } from '../src/protocol/ports';
 import { COPY_LABELS } from '../src/chrome/WebhookUrlRow';
-import { CELL, CMD, buildPacket, cameraOf, type Harness } from './support/wire';
+import { CMD, buildPacket, type Harness } from './support/wire';
 import {
   CARD,
   HANDLER_FAULT,
   HANDLER_IN,
   HANDLER_OUT,
   OUTSET,
+  REQUEST_STAGE,
+  REQUEST_STEP,
+  REQUEST_URL,
   ROUTE_IN,
   ROUTE_OUT,
-  boot,
-  cellOfRing,
   centreOf,
+  dragBetween,
+  emptyFloor,
   expectAt,
   expectedCurlWord,
   handlerAt,
   injectBoard,
   injectRefusal,
   nubCentre,
-  placeThrough,
+  placeRouteAndHandler,
   pressRing,
   readProbe,
   requestHost,
   ringAt,
   routeAt,
   routeConfig,
+  selectRoute,
   sentCount,
-  startLesson,
+  startRequestLesson,
+  toAnswerStep,
+  wireDiscs,
   wireLegs,
+  wireThroughDiscs,
   zoomInto,
   type Box,
   type RequestBoard,
-  type RequestHost,
 } from './support/lessonMock';
 
 // lesson-request.spec.ts - lesson 5, Answer a web request, on a mock host.
@@ -44,23 +49,10 @@ import {
 // It can't hold the host's POST URL answer back, make the row read "Webhook not ready" for good, make
 // the clipboard refuse a write, or send an Undo keyframe at step 4. The mock host can, because a case
 // decides every packet the board gets and every answer the host gives. Stage and step ids come from the
-// lesson's own data through `stageOf`, so a renamed stage fails here by name.
+// lesson's own data through `REQUEST_STAGE` in lessonMock.ts, so a renamed stage fails there by name.
 
 const LESSON = ANSWER_A_WEB_REQUEST;
 const STEPS = LESSON.steps.length;
-
-/** A stage id, checked against the lesson's data: a renamed or moved stage throws here, by name. */
-function stageOf(stepId: string, id: string): string {
-  const step = LESSON.steps.find((s) => s.id === stepId);
-  if (step === undefined) throw new Error(`${LESSON.id} has no step ${stepId}`);
-  if (!step.stages.some((stage) => stage.id === id)) throw new Error(`${LESSON.id} step ${stepId} has no stage ${id}`);
-  return id;
-}
-
-function stepOf(id: string): string {
-  if (!LESSON.steps.some((s) => s.id === id)) throw new Error(`${LESSON.id} has no step ${id}`);
-  return id;
-}
 
 /** What the card says at a stage, through the real key and machine tables. */
 function wordsOf(stepId: string, id: string): string {
@@ -69,95 +61,16 @@ function wordsOf(stepId: string, id: string): string {
   return phrasePlain(stage.text);
 }
 
-const STEP = {
-  placeRoute: stepOf('place-route'),
-  placeHandler: stepOf('place-handler'),
-  wire: stepOf('wire'),
-  answer: stepOf('answer'),
-};
+const STEP = REQUEST_STEP;
+const STAGE = REQUEST_STAGE;
 
-const STAGE = {
-  routeTool: stageOf(STEP.placeRoute, 'route-tool'),
-  routeFloor: stageOf(STEP.placeRoute, 'route-floor'),
-  handlerTool: stageOf(STEP.placeHandler, 'handler-tool'),
-  handlerFloor: stageOf(STEP.placeHandler, 'handler-floor'),
-  wireTool: stageOf(STEP.wire, 'wire-tool'),
-  wireDraw: stageOf(STEP.wire, 'wire-draw'),
-  requestPaused: stageOf(STEP.answer, 'request-paused'),
-  toolDown: stageOf(STEP.answer, 'tool-down'),
-  selectRoute: stageOf(STEP.answer, 'select-route'),
-  urlPending: stageOf(STEP.answer, 'url-pending'),
-  sendRequest: stageOf(STEP.answer, 'send-request'),
-};
-
-/** The URL the mock host answers `webhook_url` with: the host's loopback endpoint, the default path. */
-const ROUTE_URL = 'http://127.0.0.1:54321/endpoint/route-1';
-const ROUTE_PATH = '/route-1';
+const ROUTE_URL = REQUEST_URL;
 
 /**
  * `CLIENT_REFUSAL_COPY.BeltOnlyPort`, the band's own sentence, transcribed as `belt-port-refusal.spec.ts`
  * does: `RefusalMessage.tsx` imports SVG art the spec loader can't read.
  */
 const BELT_ONLY_PORT = 'That port takes belts, not wires.';
-
-/** Boot on a host that answers the Route's config and its POST URL, and start lesson 5. */
-async function startRequestLesson(page: Page, host: RequestHost = requestHost(ROUTE_URL)): Promise<{ h: Harness; host: RequestHost }> {
-  const h = await boot(page, host.opts);
-  await startLesson(page, h, LESSON);
-  await ringAt(page, STAGE.routeTool);
-  // New keeps the camera, and the mock's first board fits one machine at the closest zoom, where the
-  // 9-cell span can't fit. A user building a line zooms out.
-  await zoomInto(page, { x: 640, y: 360 }, 0.9, 1.1);
-  return { h, host };
-}
-
-/** Steps 1 and 2 through their rings, with the host's machines injected. Ends with the Handler's tool armed. */
-async function placeRouteAndHandler(page: Page, h: Harness, host: RequestHost): Promise<RequestBoard> {
-  await pressRing(page, await ringAt(page, STAGE.routeTool));
-  const routeRing = await ringAt(page, STAGE.routeFloor);
-  const route = routeAt(cellOfRing(routeRing, await cameraOf(page)));
-  host.set(route.id, routeConfig(ROUTE_PATH));
-  await placeThrough(page, h, routeRing);
-  injectBoard(h, { nodes: [route], tick: 6 });
-
-  await expectAt(page, STEP.placeHandler, STAGE.handlerTool, 'the Route appeared and finished step 1');
-  await pressRing(page, await ringAt(page, STAGE.handlerTool));
-  const handlerRing = await ringAt(page, STAGE.handlerFloor);
-  const handler = handlerAt(cellOfRing(handlerRing, await cameraOf(page)));
-  await placeThrough(page, h, handlerRing);
-  injectBoard(h, { nodes: [route, handler], tick: 7 });
-  await expectAt(page, STEP.wire, STAGE.wireTool, 'the Handler appeared and finished step 2');
-  return { route, handler, wires: [], tick: 7, generation: 1 };
-}
-
-/** The wire-draw stage's two discs: where the drag starts and where it ends. */
-async function wireDiscs(page: Page): Promise<{ from: HintRect; to: HintRect }> {
-  const from = await ringAt(page, STAGE.wireDraw);
-  const to = (await readProbe(page)).hintTo;
-  if (to === null) throw new Error('wire-draw shows no release disc');
-  return { from, to };
-}
-
-/** A pointer drag from one point to another, in two legs of five moves. */
-async function dragBetween(page: Page, start: { x: number; y: number }, end: { x: number; y: number }): Promise<void> {
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  await page.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 5 });
-  await page.mouse.move(end.x, end.y, { steps: 5 });
-  await page.mouse.up();
-}
-
-/** Step 3: the Wire tool through its ring, the drag between the discs, and both legs injected. */
-async function wireThroughDiscs(page: Page, h: Harness, board: RequestBoard): Promise<void> {
-  await pressRing(page, await ringAt(page, STAGE.wireTool));
-  const { from, to } = await wireDiscs(page);
-  const before = sentCount(h, CMD.DrawWire);
-  await dragBetween(page, from.hitCentre ?? centreOf(from), to.hitCentre ?? centreOf(to));
-  await expect.poll(() => sentCount(h, CMD.DrawWire), { message: 'the drag between the discs sent a wire' }).toBe(before + 1);
-  board.wires = wireLegs(board.route, board.handler);
-  injectBoard(h, { nodes: [board.route, board.handler], wires: board.wires, tick: ++board.tick, generation: board.generation });
-  await expectAt(page, STEP.answer, STAGE.toolDown, 'both legs finished step 3, and the Wire tool is still armed');
-}
 
 /** The return leg again, now carrying one reply pulse, as the host sends it while the reply travels home. */
 function sendReply(h: Harness, board: RequestBoard): void {
@@ -175,20 +88,6 @@ function coachOf(stepId: string, id: string, tag: string): string {
   const line = stage?.coach?.[tag as keyof NonNullable<typeof stage.coach>];
   if (line === undefined) throw new Error(`${LESSON.id} step ${stepId} stage ${id} has no ${tag} coaching line`);
   return phrasePlain(line);
-}
-
-/** Steps 1 to 3 played through their rings, ending on step 4's tool-down stage with the Wire tool armed. */
-async function toAnswerStep(page: Page, host: RequestHost = requestHost(ROUTE_URL)): Promise<{ h: Harness; host: RequestHost; board: RequestBoard }> {
-  const { h } = await startRequestLesson(page, host);
-  const board = await placeRouteAndHandler(page, h, host);
-  await wireThroughDiscs(page, h, board);
-  return { h, host, board };
-}
-
-/** From step 4's tool-down: the tool put down and the Route selected through its ring. */
-async function selectRoute(page: Page): Promise<void> {
-  await page.keyboard.press('Escape');
-  await pressRing(page, await ringAt(page, STAGE.selectRoute));
 }
 
 /** A rect grown by the ring's outset on each side, the box a ring around `box` takes. */
@@ -239,13 +138,6 @@ function within(p: { x: number; y: number }, box: Box): boolean {
 /** The inspector's POST URL row's Copy button, found by the row's label, never by its word. */
 function copyButton(page: Page) {
   return page.locator('aside[aria-labelledby="fab-config-heading"] label', { hasText: 'POST URL' }).locator('xpath=..').getByRole('button');
-}
-
-/** The window point a press lands on to clear the selection: an empty cell three rows above the Route. */
-async function emptyFloor(page: Page, route: { cell_x: number; cell_y: number }): Promise<{ x: number; y: number }> {
-  const cam = await cameraOf(page);
-  const size = CELL * cam.scale;
-  return { x: route.cell_x * size + cam.x + size / 2, y: (route.cell_y - 3) * size + cam.y + size / 2 };
 }
 
 test.describe('Answer a web request on a mock host', () => {
