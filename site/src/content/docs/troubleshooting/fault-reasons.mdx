@@ -51,5 +51,5 @@ A request reached a Route that has no wire leading out of it, so there was nowhe
 </Fix>
 
 <Fix id="fault.WireOverflow">
-Too many requests were in flight on one wire at once, more than <Fact id="limit.wire_inflight_cap" />, or a request passed through more than <Fact id="limit.wire_budget" />, which usually means the wires form a loop. If requests arrive faster than the HTTP Handler answers them, send fewer or make the Handler answer sooner. If the wires form a loop, delete one wire to break it. [See it run](../../reference/board/fault-reasons/#wireoverflow)
+Too many requests were in flight on one wire at once, more than <Fact id="limit.wire_inflight_cap" />, or a request was passed from wire to wire more than <Fact id="limit.wire_budget" bare /> times, which usually means the wires form a loop. If requests arrive faster than the HTTP Handler answers them, send fewer or make the Handler answer sooner. If the wires form a loop, delete one wire to break it. [See it run](../../reference/board/fault-reasons/#wireoverflow)
 </Fix>

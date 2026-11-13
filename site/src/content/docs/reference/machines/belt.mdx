@@ -25,7 +25,7 @@ An item that reaches a head with nothing docked stays at the end of the belt, an
 
 ## Pace
 
-Each tile has <Fact id="limit.slots_per_tile" bare /> slots, and an item moves forward one slot at a time. The <Fact id="config.Belt.ticks_per_slot" /> field sets how many ticks an item waits before each step, so a larger number is a slower belt. The pace runs from <Fact id="limit.belt_pace_min" /> to <Fact id="limit.belt_pace_max" />, and a belt you draw starts at <Fact id="limit.default_ticks_per_slot" />.
+Each tile has <Fact id="limit.slots_per_tile" bare /> slots, and an item moves forward one slot at a time. The <Fact id="config.Belt.ticks_per_slot" /> field sets how many ticks an item waits before each step, so a larger number is a slower belt. The pace runs from <Fact id="limit.belt_pace_min" bare /> to <Fact id="limit.belt_pace_max" />, and a belt you draw starts at <Fact id="limit.default_ticks_per_slot" />.
 
 A belt's length and pace together set how long an item takes to cross it and how many items it can hold at once. A long belt is also a buffer: it holds items while the machine at its head is busy.
 

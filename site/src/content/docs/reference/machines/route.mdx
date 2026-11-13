@@ -21,13 +21,13 @@ On the board below, two Routes have different paths, and each request reaches th
 
 The path field, listed under Config fields above, holds the path, for example `/orders`. The app answers a POST to `/endpoint` followed by the path, so a Route with the path `/orders` takes requests sent to `/endpoint/orders` on the app's local port. Two Routes can't share a path.
 
-A path starts with one `/`, is at most <Fact id="limit.max_endpoint_path_bytes" /> long, and uses only letters, digits, `-`, `.`, `_`, `~` and `/`. The app refuses a path that breaks these rules or that another Route already has; the entries for [an invalid path](../../../troubleshooting/refusals/#refusal-invalid-path) and [a duplicate path](../../../troubleshooting/refusals/#refusal-duplicate-path) say what to change.
+A path starts with one `/`, is at most <Fact id="limit.max_endpoint_path_bytes" bare /> bytes long, and uses only letters, digits, `-`, `.`, `_`, `~` and `/`. The app refuses a path that breaks these rules or that another Route already has; the entries for [an invalid path](../../../troubleshooting/refusals/#refusal-invalid-path) and [a duplicate path](../../../troubleshooting/refusals/#refusal-duplicate-path) say what to change.
 
 The examples on this site have no server, so their requests come from a script that names the Route directly. The path each scripted request carries is the one the app would have read.
 
 ## The reply
 
-The Route turns each request into an item holding its method, path, query, headers and body, and sends it down its wire. The HTTP Handler at the other end runs its code and sends back a reply with a status, headers and a body, and the Route answers the caller with it. A request that gets no reply within <Fact id="limit.endpoint_deadline_ticks" /> gets a timeout answer instead. In this example, each reply is back at its Route two ticks after the request arrived.
+The Route turns each request into an item holding its method, path, query, headers and body, and sends it down its wire. The HTTP Handler at the other end runs its code and sends back a reply with a status, headers and a body, and the Route answers the caller with it. A request that gets no reply within <Fact id="limit.endpoint_deadline_ticks" bare /> ticks gets a timeout answer instead. In this example, each reply is back at its Route two ticks after the request arrived.
 
 ## A Route with no wire
 

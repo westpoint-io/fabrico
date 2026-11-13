@@ -56,7 +56,7 @@ A Factory's code runs with a memory limit of <Fact id="limit.factory_memory" /> 
 
 ## `FactoryTimeout`
 
-A Factory gives this reason when its code uses up its budget of <Fact id="limit.factory_gas_budget" /> on an item, which most often means a loop that never ends or one that does too much work. The budget counts steps of the code, not time, so the code stops at the same point on every run and on every computer. As with `FactoryError`, the failed run sends nothing and the Factory's state stays as it was. The fault leaves by the Factory's Fault port and carries the error message.
+A Factory gives this reason when its code uses up its budget of <Fact id="limit.factory_gas_budget" bare /> gas units on an item, which most often means a loop that never ends or one that does too much work. The budget counts steps of the code, not time, so the code stops at the same point on every run and on every computer. As with `FactoryError`, the failed run sends nothing and the Factory's state stays as it was. The fault leaves by the Factory's Fault port and carries the error message.
 
 In the example below, the code adds up the numbers below the item's n field. The first item asks for 10, and the total reaches the Sink on the right. The second asks for 100,000,000. The loop runs out of budget, and the fault reaches a Sink by the belt from the Fault port.
 

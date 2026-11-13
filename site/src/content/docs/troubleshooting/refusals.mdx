@@ -25,7 +25,7 @@ The belt's Pace (px/sec) field held 0, a negative number, nothing, or something 
 </Fix>
 
 <Fix id="refusal.PaceOutOfRange">
-The pace you typed is faster than the Fastest end of the Belt pace scale or slower than the Slowest end. The engine takes a belt interval from <Fact id="limit.belt_pace_min" /> up to <Fact id="limit.belt_pace_max" />, and the two ends of the scale are those limits in px/sec. Type a pace between the two ends, which the panel prints beside the buttons, or press one of the buttons.
+The pace you typed is faster than the Fastest end of the Belt pace scale or slower than the Slowest end. The engine takes a belt interval from <Fact id="limit.belt_pace_min" bare /> up to <Fact id="limit.belt_pace_max" />, and the two ends of the scale are those limits in px/sec. Type a pace between the two ends, which the panel prints beside the buttons, or press one of the buttons.
 </Fix>
 
 <Fix id="refusal.InvalidBeltJoin">
@@ -135,7 +135,7 @@ Another Route on the board already answers at that path. Pick a path no other Ro
 </Fix>
 
 <Fix id="refusal.InvalidPath">
-The Route's path breaks one of three rules: it starts with exactly one `/` and has something after it, it is at most <Fact id="limit.max_endpoint_path_bytes" /> long, and it uses only letters, digits, `-`, `.`, `_`, `~` and `/`. Change the path to fit them, for example `/orders/new`. Spaces, `?` and `%` aren't allowed, so the app never decodes a path before it compares it.
+The Route's path breaks one of three rules: it starts with exactly one `/` and has something after it, it is at most <Fact id="limit.max_endpoint_path_bytes" bare /> bytes long, and it uses only letters, digits, `-`, `.`, `_`, `~` and `/`. Change the path to fit them, for example `/orders/new`. Spaces, `?` and `%` aren't allowed, so the app never decodes a path before it compares it.
 </Fix>
 
 ## Undo and redo
@@ -163,7 +163,7 @@ The edit chose an option the app doesn't have: an output role, a port type or a 
 </Fix>
 
 <Fix id="refusal.OverLimit">
-A setting went past a limit the app sets. A Router holds at most <Fact id="limit.max_routes" />, and each rule's Match text is at most <Fact id="limit.max_route_expect_bytes" />. A label's text is at most <Fact id="limit.max_label_bytes" />, and a label can be up to <Fact id="limit.label_max_w" /> and <Fact id="limit.label_max_h" />. Bring the setting back inside its limit: fewer rules, shorter Match text, shorter label text or a smaller label.
+A setting went past a limit the app sets. A Router holds at most <Fact id="limit.max_routes" />, and each rule's Match text is at most <Fact id="limit.max_route_expect_bytes" bare /> bytes. A label's text is at most <Fact id="limit.max_label_bytes" bare /> bytes, and a label can be up to <Fact id="limit.label_max_w" /> and <Fact id="limit.label_max_h" />. Bring the setting back inside its limit: fewer rules, shorter Match text, shorter label text or a smaller label.
 </Fix>
 
 <Fix id="refusal.WrongKind">

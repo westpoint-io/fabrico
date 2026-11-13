@@ -16,7 +16,7 @@ In the example below, a Handler reads the name in each request's body. It replie
 
 ## The URL
 
-A Route answers POST requests at `/endpoint/` followed by its path, on the app's local port. A Route with the path `/hello` takes requests at `http://127.0.0.1:PORT/endpoint/hello`. The path can have more than one segment, such as `/users/42`, and is at most <Fact id="limit.max_endpoint_path_bytes" /> long. When you select a Route in the app, its config panel shows the whole URL under POST URL, with a Copy button.
+A Route answers POST requests at `/endpoint/` followed by its path, on the app's local port. A Route with the path `/hello` takes requests at `http://127.0.0.1:PORT/endpoint/hello`. The path can have more than one segment, such as `/users/42`, and is at most <Fact id="limit.max_endpoint_path_bytes" bare /> bytes long. When you select a Route in the app, its config panel shows the whole URL under POST URL, with a Copy button.
 
 In this example, `PORT` stands for the port the app picked when it started; copy the URL from the panel to get it. The command sends a JSON body to the Route with the path `/hello`:
 
