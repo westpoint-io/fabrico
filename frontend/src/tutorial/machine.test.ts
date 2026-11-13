@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { boundMachineHandles, evaluateCheck, nodeKey } from './check.ts';
 import { ANSWER_A_WEB_REQUEST } from './lessons/answerAWebRequest.ts';
+import { BELTS_THAT_JOIN } from './lessons/beltsThatJoin.ts';
 import { LESSONS } from './lessons/index.ts';
 import { TWO_OUTPUTS } from './lessons/twoOutputs.ts';
 import { YOUR_FIRST_LINE } from './lessons/yourFirstLine.ts';
@@ -15,6 +16,7 @@ import {
   type RowView,
   type TutorialState,
 } from './machine.ts';
+import { coachLine, noteFor } from './note.ts';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain, splitAtBlock, stageTextFindings } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId, Stage } from './types.ts';
@@ -2409,6 +2411,128 @@ describe('answer a web request', () => {
       'a URL from the previous generation',
     ).toBe('url-pending');
     expect(stageAt(s, { nodes: MACHINES, wires: wired() }, { ...selected, routeUrl: { node: ROUTE_AT.id, generation: 1, url: URL } })).toBe('send-request');
+  });
+});
+
+// LESSON 2, run through the shipped data from its prepared board: a Source at (1,2) with a four-tile stub
+// running east, the cell past its end at (6,2), and the Sink at (6,6) below it. Tile kinds are the plain
+// objects the host ships.
+describe('lesson 2: Belts that join', () => {
+  const L2 = 'belts-that-join';
+  const SRC2: BoardNode = node(1, SOURCE, 1, 2);
+  const SNK2: BoardNode = node(2, SINK, 6, 6);
+  const DECLARED = [SRC2, SNK2];
+  const CORNER = { Corner: { from: 1, to: 2 } };
+  const STRAIGHT = { Straight: { axis: 1 } };
+  const STUB: BoardBelt = {
+    id: 10,
+    items: 0,
+    occupiedSlots: [],
+    tiles: [2, 3, 4, 5].map((cell_x) => ({ cell_x, cell_y: 2 })),
+    docks: [{ end: 'Tail', node: SRC2.id, port: 0 }],
+  };
+  /** The piece drawn from the ring cell down into the Sink, with `ringKind` shipped on its first tile. */
+  const joiner = (ringKind: unknown, slots: number[] = []): BoardBelt => ({
+    id: 11,
+    items: slots.length,
+    occupiedSlots: slots,
+    tiles: [{ cell_x: 6, cell_y: 2, kind: ringKind }, { cell_x: 6, cell_y: 3 }, { cell_x: 6, cell_y: 4 }, { cell_x: 6, cell_y: 5 }],
+    docks: [
+      { end: 'Tail', node: STUB.id, port: 0 },
+      { end: 'Head', node: SNK2.id, port: 0 },
+    ],
+  });
+  const joined = (ringKind: unknown, slots: number[] = []): BoardBelt[] => [{ ...STUB, docks: [...STUB.docks, { end: 'Head', node: 11, port: 0 }] }, joiner(ringKind, slots)];
+  const sent = (): TutorialState => reduce(IDLE, { type: 'newSent', lessonId: L2, floorAtSend: FLOOR }, LESSONS);
+  const onItsBoard = (): TutorialState => frame(sent(), { nodes: DECLARED, belts: [STUB] });
+  const stageAt = (s: TutorialState, b: Partial<BoardFacts>, c: Partial<ChromeFacts> = {}): Stage | null => currentStage(s, board(b), chrome(c), LESSONS);
+  const carryOn = BELTS_THAT_JOIN.steps[0]?.stages.find((g) => g.id === 'belt-carry-on');
+
+  it('is second in the list, with three steps inside the card budgets and its board declared', () => {
+    expect(LESSONS[1]).toBe(BELTS_THAT_JOIN);
+    expect(BELTS_THAT_JOIN.title).toBe('Belts that join');
+    expect(BELTS_THAT_JOIN.board).toEqual({
+      id: 'belts_that_join',
+      machines: [
+        { nodeKey: '0@1,2', bind: 'source' },
+        { nodeKey: '7@6,6', bind: 'sink' },
+      ],
+    });
+    const stages = (id: string): string[] => BELTS_THAT_JOIN.steps.find((st) => st.id === id)?.stages.map((g) => g.id) ?? [];
+    expect(BELTS_THAT_JOIN.steps.map((st) => st.id)).toEqual(['join-belt', 'press-play', 'watch']);
+    expect(stages('join-belt')).toEqual(['board-paused', 'belt-no-corner', 'belt-tool', 'belt-undo', 'belt-carry-on', 'belt-draw']);
+    expect(stages('press-play')).toEqual(['board-paused', 'board-running']);
+    expect(stages('watch')).toEqual(['board-paused', 'watch']);
+    expect(BELTS_THAT_JOIN.steps[0]?.done).toEqual({ is: 'lineTurnsAt', a: 'source', b: 'sink', bind: 'belt' });
+    expect(auditLessonWords([BELTS_THAT_JOIN])).toEqual([]);
+    for (const st of BELTS_THAT_JOIN.steps) {
+      for (const stage of st.stages) {
+        expect(stageTextFindings(`${st.id} ${stage.id}`, stage.text)).toEqual([]);
+        expect(phrasePlain(stage.text).length, `${st.id} ${stage.id}`).toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
+        for (const line of Object.values(stage.coach ?? {})) {
+          expect(phrasePlain(line).length, `${st.id} ${stage.id} coach`).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        }
+      }
+    }
+    expect(BELTS_THAT_JOIN.refused).toEqual({ atStep: 'join-belt', atStage: 'belt-carry-on', press: { on: 'lineEnd', from: 'source' }, tag: 'BeltEndTile' });
+    expect(phrasePlain(BELTS_THAT_JOIN.closing, REAL_TABLES)).toBe('A Belt can carry on from its end, and the tile where it turns becomes a corner.');
+  });
+
+  it('holds on starting until its declared board arrives, then binds the prepared Source and Sink', () => {
+    let s = frame(sent(), {});
+    expect(s.card, "New's empty board is not the lesson's").toBe('starting');
+    s = frame(s, { nodes: DECLARED, belts: [STUB] });
+    expect([s.card, s.stepIndex]).toEqual(['running', 0]);
+    expect(s.bindings.source).toEqual({ nodeKey: '0@1,2', id: SRC2.id });
+    expect(s.bindings.sink).toEqual({ nodeKey: '7@6,6', id: SNK2.id });
+    expect(s.baseline?.ringCell).toEqual({ x: 6, y: 2 });
+  });
+
+  it('shows belt-tool with the tool down, then carry-on with the Belt tool armed, in its own words', () => {
+    const s = onItsBoard();
+    const tool = stageAt(s, { nodes: DECLARED, belts: [STUB] });
+    expect(tool?.id).toBe('belt-tool');
+    expect(phrasePlain(tool?.text ?? [], REAL_TABLES)).toBe('A Belt can carry on from its free end. Click Belt in the palette.');
+    const armed = stageAt(s, { nodes: DECLARED, belts: [STUB] }, { armed: { kind: 'belt' } });
+    expect(armed?.id).toBe('belt-carry-on');
+    expect(armed?.hint).toEqual({ on: 'port', of: 'sink', role: 'in' });
+    expect(phrasePlain(armed?.text ?? [], REAL_TABLES)).toBe("That Belt stops short of the Sink. Drag from the ring past its end down to the Sink's input dot.");
+    expect(stageAt(s, { nodes: DECLARED, belts: [STUB] }, { playing: false })?.id).toBe('board-paused');
+  });
+
+  it('puts the coaching line in the note for a BeltEndTile refusal at the carry-on stage', () => {
+    expect(carryOn).toBeDefined();
+    const view = noteFor({ refusal: coachLine(carryOn!, 'BeltEndTile'), offScreen: false, lessonNote: null });
+    expect(view.slot?.kind).toBe('refusal');
+    expect(phrasePlain(view.slot?.tokens ?? [], REAL_TABLES)).toBe("The ring is one cell past the Belt's last tile. Press there and drag down to the Sink.");
+  });
+
+  it('finishes the join on a Corner at the ring cell, and binds the belt', () => {
+    const s = frame(onItsBoard(), { nodes: DECLARED, belts: joined(CORNER) });
+    expect(s.stepIndex).toBe(1);
+    expect(s.bindings.belt?.id).toBe(11);
+  });
+
+  it('keeps the join open on a Straight at the ring cell and shows belt-no-corner, ringing Undo', () => {
+    const s = frame(onItsBoard(), { nodes: DECLARED, belts: joined(STRAIGHT) });
+    expect([s.stepIndex, s.bindings.belt]).toEqual([0, undefined]);
+    const shown = stageAt(s, { nodes: DECLARED, belts: joined(STRAIGHT) }, { armed: { kind: 'belt' } });
+    expect(shown?.id).toBe('belt-no-corner');
+    expect(shown?.hint).toEqual({ on: 'panel', target: { kind: 'undoButton' } });
+    expect(phrasePlain(shown?.text ?? [], REAL_TABLES)).toBe(
+      "That Belt doesn't turn where the ring was. Press Ctrl+Z until it stops short, then draw straight down from the ring.",
+    );
+  });
+
+  it('ends the lesson once an item reaches the Sink after play', () => {
+    let s = frame(onItsBoard(), { nodes: DECLARED, belts: joined(CORNER), tick: 10 });
+    expect(s.stepIndex).toBe(1);
+    s = frame(s, { nodes: DECLARED, belts: joined(CORNER, [5]), tick: 11 });
+    expect(s.stepIndex, 'a higher tick finishes press-play').toBe(2);
+    s = frame(s, { nodes: DECLARED, belts: joined(CORNER, [0]), tick: 12 });
+    expect(s.card, 'an item at the head has not been taken yet').toBe('running');
+    s = frame(s, { nodes: DECLARED, belts: joined(CORNER, []), tick: 13 });
+    expect(s.card).toBe('finished');
   });
 });
 
