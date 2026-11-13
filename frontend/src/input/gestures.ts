@@ -461,9 +461,10 @@ export interface GestureController {
    */
   waiting(): { placements: number; belts: number; docks: number };
   /**
-   * Is a belt draw held: a belt path, an output-dot press or drag, or a belt-end or handle press or
-   * drag? A read with no effect. The lesson card disables Show me with it, so the camera can't move
-   * under a held draw.
+   * Is a board gesture held: a belt path, an output-dot press or drag, a belt-end or handle press or
+   * drag, a pressed wire source with the Wire tool armed, or a rotate-handle press? It covers every
+   * held board gesture Show me must wait for, the same holds Escape treats as the board's. A read with
+   * no effect. The lesson card disables Show me with it, so the camera can't move under a held gesture.
    */
   beltDrawInFlight(): boolean;
   /** Detach all listeners + clear affordances. */
@@ -6441,7 +6442,14 @@ export function createGestureController(deps: GestureDeps): GestureController {
     onResume,
     onSwap,
     waiting: () => ({ placements: pendingPlacements.length, belts: beltFollowUps.length, docks: dockOwners.size }),
-    beltDrawInFlight: () => drawnCells !== null || outPress !== null || outDrag !== null || endPress !== null || handleDrag !== null,
+    beltDrawInFlight: () =>
+      drawnCells !== null ||
+      outPress !== null ||
+      outDrag !== null ||
+      endPress !== null ||
+      handleDrag !== null ||
+      (wireArmed && wireSource !== null) ||
+      rotatePress !== null,
     beginRouterPreset,
     armBeltDraw,
     armWireDraw,
