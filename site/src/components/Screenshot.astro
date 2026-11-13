@@ -1,0 +1,81 @@
+---
+// One picture of the app with its caption:
+//   <Screenshot name="palette" alt="What the picture shows" caption="What to notice." />
+// The name is a file under site/src/assets/tour/ without .png. `npm run capture:tour` from
+// frontend/ takes those files from the real frontend and engine, at twice the screen size.
+//
+// The build fails, with a [Screenshot] message naming the page or the file and the fix, when the
+// name matches no file, alt or caption is missing, alt equals caption, or the file has an odd
+// side. So a tour page can't ship pointing at a missing picture.
+//
+// The img gets half the file's pixel size as its width and height, with the full file in the 2x
+// srcset, and stays PNG (lossy formats smear the app's small text). A picture wider than the
+// column (COLUMN_MAX_CSS) adds an Open full size link to the original file in its caption. The
+// first <Screenshot> on a page loads eagerly and the rest lazily; the width and height attributes
+// reserve each picture's space either way.
+import type { ImageMetadata } from 'astro';
+import { Image } from 'astro:assets';
+import { checkAltAndCaption, checkEvenSize, opensFullSize, resolveShot, tourNamesOf } from '../lib/screenshot.ts';
+
+interface Props {
+  name: string;
+  alt: string;
+  caption: string;
+}
+
+const { name, alt, caption } = Astro.props;
+const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
+
+const files = import.meta.glob<{ default: ImageMetadata }>('../assets/tour/*.png', { eager: true });
+const byName = new Map(Object.entries(files).map(([key, mod]) => [tourNamesOf([key])[0], mod.default]));
+const shot = resolveShot(name, page, [...byName.keys()].sort());
+checkAltAndCaption(page, shot, alt, caption);
+const img = byName.get(shot) as ImageMetadata;
+checkEvenSize(shot, img.width, img.height);
+
+const width = img.width / 2;
+const height = img.height / 2;
+const fullSize = opensFullSize(width);
+
+// The first Screenshot rendered for this request loads eagerly. Astro.locals is one object per
+// page render, so it keys the count.
+const counts = ((globalThis as { __fabShotCounts?: WeakMap<object, number> }).__fabShotCounts ??= new WeakMap());
+const index = counts.get(Astro.locals) ?? 0;
+counts.set(Astro.locals, index + 1);
+const loading = index === 0 ? 'eager' : 'lazy';
+---
+
+<figure class="fab-shot not-content" data-shot={shot}>
+  <Image src={img} width={width} height={height} densities={[1, 2]} format="png" alt={alt} loading={loading} decoding="async" />
+  <figcaption>{caption}{fullSize && <>{' '}<a href={img.src}>Open full size</a></>}</figcaption>
+</figure>
+
+<style>
+  /* 32 px above and below, the same as a board. */
+  .fab-shot {
+    margin: var(--fab-space-xl) 0;
+  }
+  /* The app's ground is the page's ground, so a 1 px edge marks where the picture ends. A crop
+     narrower than the column shows at its own size at the start of the column; a wider picture
+     scales down to fit. */
+  .fab-shot img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--fab-edge-lit);
+  }
+  /* Martian Mono 12/400 in ink, the board note look. The figure is not-content, so the prose link
+     look is written here. */
+  .fab-shot figcaption {
+    margin: var(--fab-space-sm) 0 0;
+    font-family: var(--site-font);
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--fab-ink);
+  }
+  .fab-shot figcaption a {
+    color: var(--fab-ink);
+    text-decoration: underline;
+  }
+</style>

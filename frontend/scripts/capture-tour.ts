@@ -1,0 +1,370 @@
+// capture-tour.ts - the pictures on the docs page "A tour of the app", taken from the real app.
+//
+// The tour page shows the palette, the inspector, the toolbar and the camera. Those pictures have
+// to be the app as it is, so this script runs the same frontend and engine the desktop app runs:
+// it starts the dev host (`dev_render_server`, the engine behind a WebSocket on 8787) and the Vite
+// dev server on 5173, opens the frontend in Playwright's Chromium at 1440 x 900 CSS px with a
+// device scale of 2, loads the demo board through Examples so the run starts again at tick 0,
+// holds it on a fixed tick with Step, and takes each picture.
+//
+// It writes `site/src/assets/tour/<name>.png` for every picture in SHOTS. The site's
+// <Screenshot> component reads them from there while it builds.
+//
+// It exits non-zero, naming the file, when:
+// - port 8787 or 5173 already answers (it starts its own servers and won't share them),
+// - a full-window picture isn't 2880 x 1800 pixels, or a crop has an odd side or differs by more
+//   than 2 px from twice the CSS box it measured in the same run,
+// - one colour covers more than 95 percent of a picture (a blank capture),
+// - the page threw, or a render packet failed to apply, while taking a picture,
+// - the render loop wasn't finishing frames when a picture was taken.
+// It doesn't compare the pictures with the committed ones: a picture of a changed app is a new
+// picture, and the person who commits it looks at it.
+//
+// It kills only the two process groups it started, in a `finally`.
+//
+// NO PATH INPUT. Every path comes from this file's own location, so it runs the same from the
+// repo root and from `frontend/`. Erasure-only TypeScript, so Node runs it as it is. The live
+// suite's oracle (`e2e-live/support/oracle.ts`) can't be imported outside the test runner, so the
+// two render-health checks it would give are copied here in their own small form.
+
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium, type Page } from '@playwright/test';
+import { PNG } from 'playwright-core/lib/utilsBundle';
+
+const FRONTEND = fileURLToPath(new URL('..', import.meta.url));
+const REPO = path.resolve(FRONTEND, '..');
+const OUT_DIR = path.join(REPO, 'site', 'src', 'assets', 'tour');
+const HOST_BIN = path.join(REPO, 'target', 'debug', 'examples', 'dev_render_server');
+const VITE_BIN = path.join(FRONTEND, 'node_modules', 'vite', 'bin', 'vite.js');
+
+const LOOPBACK = '127.0.0.1';
+const VITE_PORT = 5173;
+const HOST_PORT = 8787;
+const APP_URL = `http://${LOOPBACK}:${VITE_PORT}/`;
+
+/** The window the pictures are taken in, in CSS px, and the device scale (pictures are 2x). */
+const VIEWPORT = { width: 1440, height: 900 };
+const SCALE = 2;
+/** A full-window picture's size in pixels. */
+const FULL = { width: 2880, height: 1800 };
+/** A crop may differ from twice its measured CSS box by this many pixels. */
+const CROP_SLACK_PX = 2;
+/** A picture where one colour covers more than this share of the pixels is blank. */
+const BLANK_PERCENT = 95;
+
+/**
+ * The tick every picture shows. The demo boots one command per tick and has all 67 commands in by
+ * tick 67; by tick 240 orders are on the belts. The script lets the board run to HOLD_FROM, then
+ * presses Step until the board stands on TOUR_TICK, so each run shows the same tick whatever the
+ * machine's speed.
+ */
+const TOUR_TICK = 240;
+const HOLD_FROM = 200;
+
+/** The GL arguments every browser check in this repo launches Chromium with. */
+const GL_ARGS = ['--use-gl=angle', '--use-angle=swiftshader'];
+/** The line the packet pipeline logs when a render packet fails to apply (oracle.ts). */
+const PACKET_HANDLER_FAILED = 'packet handler failed';
+/** The flag the welcome card sets once it has been seen; set first so it never covers the app. */
+const ONBOARDING_FLAG = 'fab.onboarding.seen.v1';
+/** The Examples entry that loads the demo board, by its title. */
+const DEMO_ENTRY_TITLE = 'Load the demo scene and watch the engine run';
+/** One grid cell's side in world px (`shared/geometry.ts` CELL). */
+const CELL = 32;
+/** The Factory machine kind (fabrico-protocol `machine_kind`). */
+const FACTORY_KIND = 2;
+
+const BOOT_TIMEOUT_MS = 120_000;
+const WAIT_TIMEOUT_MS = 60_000;
+
+type Box = { x: number; y: number; width: number; height: number };
+type SceneRead = {
+  tick: number;
+  generation: number;
+  nodes: { id: number; kind: number; cells: [number, number][] }[];
+  belts: { tiles: { cell_x: number; cell_y: number }[] }[];
+  wires: { path: { cell_x: number; cell_y: number }[] }[];
+};
+type Camera = { x: number; y: number; scale: number };
+
+/** A full-window picture, or a crop whose size is checked against the box it was taken from. */
+type Shot = { file: string; kind: 'full' } | { file: string; kind: 'crop'; box: Box };
+
+class CaptureError extends Error {}
+
+const fail = (message: string): never => {
+  throw new CaptureError(`capture:tour: ${message}`);
+};
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// --- Servers ----------------------------------------------------------------
+
+function portAnswers(port: number): Promise<boolean> {
+  return new Promise((res) => {
+    const sock = net.connect({ host: LOOPBACK, port }, () => {
+      sock.end();
+      res(true);
+    });
+    sock.on('error', () => res(false));
+    sock.setTimeout(500, () => {
+      sock.destroy();
+      res(false);
+    });
+  });
+}
+
+async function waitForPort(port: number, what: string): Promise<void> {
+  const deadline = Date.now() + BOOT_TIMEOUT_MS;
+  while (!(await portAnswers(port))) {
+    if (Date.now() > deadline) fail(`${what} didn't start listening on ${LOOPBACK}:${port} within ${BOOT_TIMEOUT_MS} ms.`);
+    await sleep(300);
+  }
+}
+
+/** Kill a detached child's whole process group, and nothing else. */
+function killGroup(child: ChildProcess | null): void {
+  if (child === null || child.pid === undefined || child.exitCode !== null) return;
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+async function refuseBusyPorts(): Promise<void> {
+  for (const port of [HOST_PORT, VITE_PORT]) {
+    if (await portAnswers(port)) {
+      fail(`port ${port} on ${LOOPBACK} is already in use. Free it before running capture:tour; the script starts its own host and dev server.`);
+    }
+  }
+}
+
+function startHost(): ChildProcess {
+  if (!existsSync(HOST_BIN)) {
+    fail(`the dev host is missing at ${HOST_BIN}. Build it first: cargo build -p fabrico-host --example dev_render_server`);
+  }
+  return spawn(HOST_BIN, [], { cwd: REPO, detached: true, stdio: 'ignore' });
+}
+
+function startVite(): ChildProcess {
+  return spawn(process.execPath, [VITE_BIN, '--host', LOOPBACK, '--port', String(VITE_PORT), '--strictPort'], {
+    cwd: FRONTEND,
+    detached: true,
+    stdio: 'ignore',
+  });
+}
+
+// --- Page reads -------------------------------------------------------------
+
+const readScene = (page: Page): Promise<SceneRead> =>
+  page.evaluate(() => {
+    const s = (window as unknown as { __fabrico: { scene(): SceneRead } }).__fabrico.scene();
+    return {
+      tick: s.tick,
+      generation: s.generation,
+      nodes: s.nodes.map((n) => ({ id: n.id, kind: n.kind, cells: n.cells })),
+      belts: s.belts.map((b) => ({ tiles: b.tiles.map((t) => ({ cell_x: t.cell_x, cell_y: t.cell_y })) })),
+      wires: s.wires.map((w) => ({ path: w.path.map((t) => ({ cell_x: t.cell_x, cell_y: t.cell_y })) })),
+    };
+  });
+
+const readCamera = (page: Page): Promise<Camera> =>
+  page.evaluate(() => (window as unknown as { __fabrico: { camera(): Camera } }).__fabrico.camera());
+
+const readTickerTime = (page: Page): Promise<number> =>
+  page.evaluate(() => (window as unknown as { __fabrico: { tickerTime(): number } }).__fabrico.tickerTime());
+
+async function waitUntil<T>(what: string, read: () => Promise<T>, done: (v: T) => boolean, timeoutMs = WAIT_TIMEOUT_MS): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let last = await read();
+  while (!done(last)) {
+    if (Date.now() > deadline) fail(`${what}: still not true after ${timeoutMs} ms (last read ${JSON.stringify(last).slice(0, 200)}).`);
+    await sleep(50);
+    last = await read();
+  }
+  return last;
+}
+
+/** A cell's centre on screen, in CSS px, through the camera. */
+function cellCentre(cam: Camera, cx: number, cy: number): { x: number; y: number } {
+  return { x: cam.x + (cx * CELL + CELL / 2) * cam.scale, y: cam.y + (cy * CELL + CELL / 2) * cam.scale };
+}
+
+// --- Health and picture checks ---------------------------------------------
+
+/** Page errors and failed render packets since the page opened (the live suite's watchPageErrors). */
+function watchPageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && m.text().startsWith(PACKET_HANDLER_FAILED)) errors.push(m.text());
+  });
+  return errors;
+}
+
+/**
+ * The render loop is alive on a held board (the live suite's expectRenderLoopAlive with
+ * boardHeld): the Pixi ticker's last frame time takes at least three distinct values, and the
+ * board's tick stays put while it is read.
+ */
+async function checkRenderLoop(page: Page, file: string, tick: number): Promise<void> {
+  const seen = new Set<number>([await readTickerTime(page)]);
+  const deadline = Date.now() + 5_000;
+  while (seen.size < 3 && Date.now() < deadline) {
+    await sleep(50);
+    seen.add(await readTickerTime(page));
+  }
+  if (seen.size < 3) fail(`the render loop stopped while taking ${file}: the Pixi ticker finished ${seen.size - 1} frames in 5 s.`);
+  const now = (await readScene(page)).tick;
+  if (now !== tick) fail(`the board moved while taking ${file}: it was paused on tick ${tick} and now reads ${now}.`);
+}
+
+function checkPicture(shot: Shot, png: Buffer): { width: number; height: number; topPercent: number } {
+  const img = PNG.sync.read(png);
+  if (shot.kind === 'full') {
+    if (img.width !== FULL.width || img.height !== FULL.height) {
+      fail(`${shot.file} is ${img.width} x ${img.height}, expected ${FULL.width} x ${FULL.height}.`);
+    }
+  } else {
+    const want = { width: Math.round(shot.box.width * SCALE), height: Math.round(shot.box.height * SCALE) };
+    const odd = img.width % 2 !== 0 || img.height % 2 !== 0;
+    const off = Math.abs(img.width - want.width) > CROP_SLACK_PX || Math.abs(img.height - want.height) > CROP_SLACK_PX;
+    if (odd || off) fail(`${shot.file} is ${img.width} x ${img.height}, expected ${want.width} x ${want.height}.`);
+  }
+  // The most common exact colour, as a share of all pixels.
+  const pixels = new Uint32Array(img.data.buffer, img.data.byteOffset, img.width * img.height);
+  const counts = new Map<number, number>();
+  let top = 0;
+  for (const p of pixels) {
+    const c = (counts.get(p) ?? 0) + 1;
+    counts.set(p, c);
+    if (c > top) top = c;
+  }
+  const topPercent = (top / pixels.length) * 100;
+  if (topPercent > BLANK_PERCENT) fail(`${shot.file} is blank: one colour covers ${topPercent.toFixed(1)}% of it.`);
+  return { width: img.width, height: img.height, topPercent };
+}
+
+async function take(page: Page, errors: string[], shot: Shot, tick: number): Promise<void> {
+  await checkRenderLoop(page, shot.file, tick);
+  const png =
+    shot.kind === 'full'
+      ? await page.screenshot({ animations: 'allow' })
+      : await page.screenshot({ clip: shot.box, animations: 'allow' });
+  if (errors.length > 0) fail(`the page threw while taking ${shot.file}: ${errors.join('; ')}`);
+  const got = checkPicture(shot, png);
+  writeFileSync(path.join(OUT_DIR, shot.file), png);
+  console.log(`capture:tour: wrote ${shot.file} ${got.width} x ${got.height}, top colour ${got.topPercent.toFixed(1)}%`);
+}
+
+// --- The board ----------------------------------------------------------------
+
+/**
+ * Load the demo through Examples, let it run to HOLD_FROM, then hold it with Step and step on to
+ * TOUR_TICK. Step on a running board runs one tick and freezes it where it is. Pause would not do:
+ * the host drains every belt before it freezes, so a paused demo shows empty belts, and the tick it
+ * stops on depends on what was in flight.
+ */
+async function holdDemoAtTourTick(page: Page): Promise<SceneRead> {
+  const before = await waitUntil('the host streams its first board', () => readScene(page), (s) => s.nodes.length > 0 && s.tick > 30);
+  await page.getByRole('button', { name: 'Examples' }).click();
+  await page.getByTitle(DEMO_ENTRY_TITLE).click();
+  await waitUntil(
+    'the demo board loads again from tick 0',
+    () => readScene(page),
+    (s) => s.generation !== before.generation || s.tick < before.tick,
+  );
+  await waitUntil(`the demo runs to tick ${HOLD_FROM}`, () => readScene(page), (s) => s.tick >= HOLD_FROM);
+  const step = page.getByRole('button', { name: 'Step', exact: true });
+  await step.click();
+  // Held once two reads 250 ms apart agree.
+  let last = -1;
+  const settled = await waitUntil(
+    'the board holds still after Step',
+    async () => {
+      await sleep(250);
+      const s = await readScene(page);
+      const same = s.tick === last;
+      last = s.tick;
+      return { s, same };
+    },
+    (r) => r.same,
+  );
+  let held = settled.s;
+  if (held.tick > TOUR_TICK) fail(`the board stopped on tick ${held.tick}, past the tour's tick ${TOUR_TICK}.`);
+  while (held.tick < TOUR_TICK) {
+    const from = held.tick;
+    await step.click();
+    held = await waitUntil(`Step moves the board on from tick ${from}`, () => readScene(page), (r) => r.tick > from);
+  }
+  if (held.tick !== TOUR_TICK) fail(`Step went past the tour's tick: the board reads ${held.tick}, not ${TOUR_TICK}.`);
+  // Let the render clock settle on the held tick.
+  await sleep(1_000);
+  return held;
+}
+
+/** Click the first Factory on the board so the inspector opens on it. */
+async function selectFirstFactory(page: Page, scene: SceneRead): Promise<void> {
+  const factory = scene.nodes.find((n) => n.kind === FACTORY_KIND);
+  if (factory === undefined) return fail('the demo board has no Factory to select for overview.png.');
+  const [cx, cy] = factory.cells[0];
+  const at = cellCentre(await readCamera(page), cx, cy);
+  await page.mouse.click(at.x, at.y);
+  const heading = page.locator('#fab-config-heading');
+  await heading.waitFor({ state: 'visible', timeout: WAIT_TIMEOUT_MS });
+  const text = (await heading.textContent())?.trim();
+  if (text !== 'Factory') fail(`clicking the first Factory opened the inspector on "${text}", not "Factory".`);
+  await sleep(500);
+}
+
+// --- Main -----------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  await refuseBusyPorts();
+  mkdirSync(OUT_DIR, { recursive: true });
+  let host: ChildProcess | null = null;
+  let vite: ChildProcess | null = null;
+  const browser = await chromium.launch({ args: GL_ARGS });
+  try {
+    host = startHost();
+    vite = startVite();
+    await waitForPort(HOST_PORT, 'the dev host');
+    await waitForPort(VITE_PORT, 'the Vite dev server');
+
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: SCALE });
+    const page = await context.newPage();
+    const errors = watchPageErrors(page);
+    await page.addInitScript((flag) => localStorage.setItem(flag, '1'), ONBOARDING_FLAG);
+    await page.goto(APP_URL);
+    await page.getByRole('button', { name: 'Place Factory' }).waitFor({ state: 'visible', timeout: BOOT_TIMEOUT_MS });
+
+    const scene = await holdDemoAtTourTick(page);
+    const tick = scene.tick;
+
+    // overview: the whole window with the first Factory selected, so the inspector is open.
+    await selectFirstFactory(page, scene);
+    await take(page, errors, { file: 'overview.png', kind: 'full' }, tick);
+
+    console.log(`CAPTURE_TOUR files=1 tick=${tick} dir=site/src/assets/tour`);
+  } finally {
+    await browser.close().catch(() => undefined);
+    killGroup(vite);
+    killGroup(host);
+  }
+}
+
+try {
+  await main();
+} catch (error) {
+  console.error(error instanceof CaptureError ? error.message : `capture:tour: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+  process.exit(1);
+}

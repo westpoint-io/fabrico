@@ -18,6 +18,7 @@
     "build:mark-sheet": "node scripts/build-mark-sheet.ts",
     "capture:mark-evidence": "node scripts/capture-mark-evidence.ts",
     "capture:lockup-hero": "node scripts/capture-lockup-hero.ts",
+    "capture:tour": "cargo build -p fabrico-host --example dev_render_server && node scripts/capture-tour.ts",
     "check:mark-craft": "node scripts/mark-craft.ts",
     "build:lockup": "node scripts/build-lockup.ts",
     "build:header-cut": "node scripts/build-header-cut.ts",
