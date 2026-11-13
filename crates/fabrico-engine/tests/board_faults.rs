@@ -10,12 +10,18 @@
 //!
 //! # How the reasons are read
 //! The engine's per-tick observation lists the nodes that emitted a fault, with no reason. So after
-//! every step the test decodes each [`Fault`] it can find:
-//! - resting in any node's inbox: on its fault port, or on any other port of a machine with no wire
-//!   port (a Route's or a Handler's other ports hold request envelopes, not faults);
-//! - riding a belt, in a slot or in the belt's staging inbox;
-//! - waiting in a Factory's queue of held emits (only on its fault port for a Handler);
-//! - recorded by a Debug Sink, whose message is the fault's bytes.
+//! every step the test decodes each [`Fault`] it finds on a path that carries faults. The path
+//! decides what an item is, never its bytes, the same rule the engine follows: plenty of other
+//! items decode as a fault by accident (a request envelope whose correlation id is 0 to 8 does), so
+//! the test reads only
+//! - the items resting on any node's fault port inbox;
+//! - the fault belts: every belt a node's fault port links to, and every belt those belts link on
+//!   to, with each one's slots and staging inbox;
+//! - the inbox port a fault belt hands its items to;
+//! - the emits a Factory holds on its fault port.
+//!
+//! An item counts as a fault only if its bytes decode as one and encode back to the same bytes, so
+//! a fault followed by trailing bytes is no fault.
 //!
 //! Two producers drop a fault when nothing is docked on their Fault port, and each has a counter
 //! that only one reason raises: a Router's `faults` counts `NoMatch`, and a Tee's counts
@@ -35,11 +41,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fabrico_core::fault::{FAULT_PORT, Fault, FaultReason};
-use fabrico_core::ids::{Item, NodeId};
-use fabrico_core::state::{Medium, Node};
-use fabrico_engine::board::parse_board;
+use fabrico_core::ids::{Item, NodeId, PortId};
+use fabrico_core::state::{GridState, Node};
+use fabrico_engine::board::{BoardFile, ScriptInput, parse_board};
 use fabrico_engine::render_packet::derive_state;
-use fabrico_engine::scripted::{BoardRun, EffectSummary};
+use fabrico_engine::scripted::BoardRun;
 use fabrico_protocol::state_tag;
 
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -83,14 +89,37 @@ fn handle_of(run: &BoardRun, id: NodeId) -> String {
         .map_or_else(|| format!("{id:?}"), |h| format!("handle {h}"))
 }
 
-/// The fault an item holds, if it holds one.
+/// The fault an item on a fault path holds: its bytes decode as a [`Fault`] and that fault encodes
+/// back to the same bytes. `Fault::decode` alone ignores trailing bytes.
 fn fault_in(item: &Item) -> Option<Fault> {
-    Fault::decode(item).ok()
+    Fault::decode(item).ok().filter(|fault| fault.encode() == *item)
+}
+
+/// Where faults ride on this tick: every belt reachable from some node's fault port link,
+/// following belt-to-belt links, and the (node, port) inboxes those belts hand items to.
+fn fault_paths(state: &GridState, ids: &[NodeId]) -> (BTreeSet<NodeId>, BTreeSet<(NodeId, PortId)>) {
+    let is_belt = |id: NodeId| matches!(state.node(id), Some(Node::Belt(_)));
+    let mut belts: BTreeSet<NodeId> = BTreeSet::new();
+    let mut ends: BTreeSet<(NodeId, PortId)> = BTreeSet::new();
+    let mut frontier: Vec<(NodeId, PortId)> =
+        ids.iter().filter_map(|&id| state.link_target((id, FAULT_PORT))).collect();
+    while let Some((dest, port)) = frontier.pop() {
+        if !is_belt(dest) {
+            ends.insert((dest, port));
+        } else if belts.insert(dest) {
+            frontier.extend(state.links_from(dest).map(|(_, to)| to));
+        }
+    }
+    (belts, ends)
 }
 
 /// Play a board's text to its end tick and read every fault reason it raises.
 fn observe(text: &str) -> Result<Observed, String> {
-    let board = parse_board(text).map_err(|e| format!("parse: {e}"))?;
+    observe_board(parse_board(text).map_err(|e| format!("parse: {e}"))?)
+}
+
+/// Play a parsed board to its end tick and read every fault reason it raises.
+fn observe_board(board: BoardFile) -> Result<Observed, String> {
     let mut run = BoardRun::boot(board).map_err(|e| format!("boot: {e}"))?;
     let mut observed = Observed::default();
     // The nodes each fault named as its producer, over the whole run.
@@ -99,11 +128,12 @@ fn observe(text: &str) -> Result<Observed, String> {
     let mut faulted: BTreeMap<NodeId, u64> = BTreeMap::new();
     // The counters last read, per node.
     let mut counters: BTreeMap<NodeId, u64> = BTreeMap::new();
-    let mut effects_read = 0;
 
-    let note = |observed: &mut Observed, producers: &mut BTreeSet<NodeId>, fault: Fault, tick: u64| {
-        observed.reasons.entry(reason_name(&fault.reason)).or_insert(tick);
-        producers.insert(fault.source);
+    let note = |observed: &mut Observed, producers: &mut BTreeSet<NodeId>, item: &Item, tick: u64| {
+        if let Some(fault) = fault_in(item) {
+            observed.reasons.entry(reason_name(&fault.reason)).or_insert(tick);
+            producers.insert(fault.source);
+        }
     };
 
     while !run.is_finished() {
@@ -111,39 +141,27 @@ fn observe(text: &str) -> Result<Observed, String> {
         let core = run.engine().core();
         let tick = core.tick;
         let ids: Vec<NodeId> = core.state.node_ids().collect();
+        let (fault_belts, fault_ends) = fault_paths(&core.state, &ids);
         for &id in &ids {
-            // A wire, and a machine with a wire port (a Route or an HTTP Handler), hold request
-            // envelopes in their inbox, and an envelope's bytes can decode as a fault. A fault
-            // reaches such a machine only on its own fault port, because a fault belt can't dock to
-            // a wire port, so only that port is read there.
-            let wired = matches!(core.state.node(id), Some(Node::Wire(_)))
-                || core
-                    .state
-                    .ports_of(id)
-                    .is_some_and(|ports| ports.iter().any(|p| p.medium == Medium::Electrical));
+            let fault_belt = fault_belts.contains(&id);
             if let Some(inbox) = core.state.inbox_of(id) {
-                for port in inbox.ports_sorted().filter(|&port| !wired || port == FAULT_PORT) {
+                let carries_faults =
+                    |port: PortId| fault_belt || port == FAULT_PORT || fault_ends.contains(&(id, port));
+                for port in inbox.ports_sorted().filter(|&port| carries_faults(port)) {
                     for item in inbox.items_on(port) {
-                        if let Some(fault) = fault_in(item) {
-                            note(&mut observed, &mut producers, fault, tick);
-                        }
+                        note(&mut observed, &mut producers, item, tick);
                     }
                 }
             }
             match core.state.node(id) {
-                Some(Node::Belt(belt)) => {
+                Some(Node::Belt(belt)) if fault_belt => {
                     for item in belt.slots.iter().flatten() {
-                        if let Some(fault) = fault_in(item) {
-                            note(&mut observed, &mut producers, fault, tick);
-                        }
+                        note(&mut observed, &mut producers, item, tick);
                     }
                 }
                 Some(Node::Factory(factory)) => {
-                    let held = factory.pending_emits.iter().filter(|&(&port, _)| !wired || port == FAULT_PORT);
-                    for item in held.flat_map(|(_, queue)| queue) {
-                        if let Some(fault) = fault_in(item) {
-                            note(&mut observed, &mut producers, fault, tick);
-                        }
+                    for item in factory.pending_emits.get(&FAULT_PORT).into_iter().flatten() {
+                        note(&mut observed, &mut producers, item, tick);
                     }
                     let before = counters.insert(id, factory.faults).unwrap_or(0);
                     if factory.faults > before {
@@ -177,14 +195,6 @@ fn observe(text: &str) -> Result<Observed, String> {
                 faulted.entry(id).or_insert(tick);
             }
         }
-        for record in &run.effects()[effects_read..] {
-            if let EffectSummary::Debug { message } = &record.effect
-                && let Some(fault) = fault_in(&Item(message.clone()))
-            {
-                note(&mut observed, &mut producers, fault, record.tick);
-            }
-        }
-        effects_read = run.effects().len();
     }
     for (&id, &tick) in &faulted {
         if !producers.contains(&id) {
@@ -453,6 +463,61 @@ fn a_router_no_match_with_no_fault_belt_reads_as_no_match() {
     let run = observe(ROUTER_NO_MATCH).expect("runs");
     assert_eq!(run.reasons.keys().copied().collect::<Vec<_>>(), ["NoMatch"], "{run:?}");
     assert!(run.unread.is_empty(), "{:?}", run.unread);
+}
+
+/// A Source, a belt and a Sink, one webhook at tick 40, end on tick 120. The belt carries no faults.
+const SOURCE_TO_SINK: &str = r#"Board(
+    format: 2,
+    title: "Source to Sink",
+    seed: 94,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),
+        Place(kind: 7, cell_x: 5, cell_y: 2),
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),
+        Dock(belt: 2, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 2, endpoint: Head, node: 1, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: "{}")),
+    ],
+    captions: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 120,
+)
+"#;
+
+/// The bytes of a `NoMatch` fault naming the Source of [`SOURCE_TO_SINK`], built as the engine
+/// builds one.
+fn no_match_bytes(board: &BoardFile) -> Vec<u8> {
+    let run = BoardRun::boot(board.clone()).expect("boots");
+    Fault::no_match(run.minted()[0], Item(b"{}".to_vec())).encode().0
+}
+
+/// A webhook whose body is a well-formed fault rides an ordinary belt into a Sink. The belt
+/// carries no faults, so the bytes are no fault and the Source they name is credited with nothing.
+/// Reading every item's bytes would report a `NoMatch` here.
+#[test]
+fn fault_bytes_on_a_belt_that_carries_no_faults_are_no_fault() {
+    let mut board = parse_board(SOURCE_TO_SINK).expect("parses");
+    let body = no_match_bytes(&board);
+    let Some(ScriptInput::Webhook { body: script_body, .. }) = board.script.first_mut().map(|e| &mut e.input) else {
+        panic!("the board's first input is a webhook");
+    };
+    *script_body = String::from_utf8(body).expect("the fault's bytes are ASCII on this board");
+    let run = observe_board(board).expect("runs");
+    assert!(run.reasons.is_empty() && run.unread.is_empty(), "{run:?}");
+}
+
+/// Trailing bytes after a fault make the item no fault, since `Fault::decode` alone accepts them.
+#[test]
+fn a_fault_with_trailing_bytes_is_no_fault() {
+    let bytes = no_match_bytes(&parse_board(SOURCE_TO_SINK).expect("parses"));
+    assert!(fault_in(&Item(bytes.clone())).is_some(), "the fault itself reads");
+    let mut longer = bytes;
+    longer.extend_from_slice(b"{}");
+    assert!(Fault::decode(&Item(longer.clone())).is_ok(), "postcard accepts trailing bytes");
+    assert!(fault_in(&Item(longer)).is_none(), "fault_in refuses them");
 }
 
 const ONE_BOARD: &str = "examples/boards/a.board.ron";
