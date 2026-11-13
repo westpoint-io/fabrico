@@ -1,14 +1,17 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
+import { ANSWER_A_WEB_REQUEST } from '../src/tutorial/lessons/answerAWebRequest';
 import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutputs';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { phrasePlain } from '../src/tutorial/phrase';
 import type { Lesson, Stage } from '../src/tutorial/types';
-import { buildPacket, cameraOf, type Harness, type InjectBelt, type InjectNode } from './support/wire';
+import { CELL, buildPacket, cameraOf, type Harness, type InjectBelt, type InjectNode } from './support/wire';
 import {
   CARD,
   OUTSET,
+  REQUEST_STAGE,
+  REQUEST_STEP,
   SINK_ID,
   SOURCE_ID,
   boot,
@@ -21,16 +24,21 @@ import {
   deleteSink,
   expectCaptureComplete,
   injectRefusal,
+  placeRouteAndHandler,
   pressRing,
   readProbe,
+  requestHost,
   ringAt,
+  selectRoute,
   sinkAt,
   sourceAt,
   startFactoryLesson,
   startLesson,
+  startRequestLesson,
   toTypeCode,
   typeAndApply,
   undoBoth,
+  wireThroughDiscs,
   zoomOut,
   type Visit,
 } from './support/lessonMock';
@@ -56,6 +64,12 @@ import {
 // window's bottom and goes over it (UI-SPEC "Card placement with the Legend open"), and the free area
 // stops at the Legend's top, so the lesson's spots and Show me keep the rings above it. A card that
 // climbed to sit above the Legend instead would land on the rings.
+//
+// Lesson 5 runs with the host answering a 1024-byte path's URL, so the send-request card holds a two-line
+// note, the 3-line instruction, the request line at its full three lines, the line under it and the
+// off-screen row: about 331 px, the tallest card any lesson shows. There the cable band at the floor spots
+// (the Handler's three rows plus one above and one below, across the 9-cell span) must lie inside the free
+// area and above the card's top, because step 4 is when the user watches the reply come back along it.
 
 const SIZES = [
   { width: 1280, height: 720 },
@@ -283,10 +297,10 @@ async function play(page: Page, h: Harness): Promise<void> {
   await blur(page);
 }
 
-/** Pause the board on the current step, measure its board-paused stage, and play again. */
-async function measurePaused(run: Run, back: string): Promise<void> {
+/** Pause the board on the current step, measure its paused stage (`board-paused` unless named), and play again. */
+async function measurePaused(run: Run, back: string, pausedId = 'board-paused'): Promise<void> {
   await pause(run.page, run.h);
-  await measureAt(run, 'board-paused');
+  await measureAt(run, pausedId);
   await play(run.page, run.h);
   await ringAt(run.page, back);
 }
@@ -403,13 +417,13 @@ for (const size of SIZES) {
  * The visit lessons 3 and 4 pass to the shared flows: on each step's first stop, pause and measure the
  * step's board-paused stage, then measure the stage itself.
  */
-function measuringVisit(run: Run): Visit {
+function measuringVisit(run: Run, pausedOf: (stepId: string) => string = () => 'board-paused'): Visit {
   const paused = new Set<string>();
   return async (stageId) => {
     const step = (await readProbe(run.page)).stepId ?? '';
     if (!paused.has(step)) {
       paused.add(step);
-      await measurePaused(run, stageId);
+      await measurePaused(run, stageId, pausedOf(step));
     }
     await measureAt(run, stageId);
   };
@@ -450,6 +464,69 @@ for (const size of SIZES) {
       await typeAndApply(page, h, visit);
 
       expect([...run.visited].sort(), 'every ringed stage of lesson 4 was visited').toEqual([...ringedOf(TWO_OUTPUTS)].sort());
+    });
+  }
+}
+
+/**
+ * The host's POST URL for lesson 5's clearance run: a 1024-byte path, the longest a Route takes, so the
+ * send-request card's request line sets its full three lines and the card is the tallest the lesson shows.
+ */
+const LONG_PATH = `/${'route-1234567890'.repeat(64).slice(0, 1023)}`;
+const LONG_URL = `http://127.0.0.1:65535/endpoint${LONG_PATH}`;
+
+/**
+ * The cable band at the floor spots, in window px: the Handler's three rows plus one above and one below,
+ * across the 9-cell span from one cell west of the Route to one cell east of the Handler.
+ */
+async function cableBand(page: Page, route: InjectNode, handler: InjectNode): Promise<Rect> {
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const left = (route.cell_x - 1) * size + cam.x;
+  const right = (handler.cell_x + 3 + 1) * size + cam.x;
+  const top = (handler.cell_y - 1) * size + cam.y;
+  const bottom = (handler.cell_y + 3 + 1) * size + cam.y;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+for (const size of SIZES) {
+  for (const legend of LEGEND_STATES) {
+    const label = labelOf(size, legend);
+    test(`lesson 5: the tallest card clears every ring at every ringed stage of ANSWER_A_WEB_REQUEST, at ${label}`, async ({ page }) => {
+      test.setTimeout(240_000);
+      await page.setViewportSize(size);
+      const host = requestHost(LONG_URL);
+      const { h } = await startRequestLesson(page, host, legend ? () => openLegend(page) : undefined);
+      const run: Run = { page, h, lesson: ANSWER_A_WEB_REQUEST, label, visited: new Set<string>() };
+      // Step 4 has its own paused stage, because a paused board turns a request away.
+      const visit = measuringVisit(run, (step) => (step === REQUEST_STEP.answer ? REQUEST_STAGE.requestPaused : 'board-paused'));
+      const board = await placeRouteAndHandler(page, h, host, visit, LONG_PATH);
+      await wireThroughDiscs(page, h, board, visit);
+      await selectRoute(page, visit);
+
+      // Step 4's send-request: the tallest card, with a two-line note and the three-line request line.
+      await ringAt(page, REQUEST_STAGE.sendRequest);
+      await expect
+        .poll(async () => (await page.locator(`${CARD} [data-fab-request-line]`).textContent()) ?? '', {
+          message: `${label}: the request line shows the 1024-byte path's URL`,
+        })
+        .toContain(LONG_URL);
+      await measureAt(run, REQUEST_STAGE.sendRequest);
+      const lines = await page.locator(`${CARD} [data-fab-request-line]`).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return Math.round((el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / parseFloat(cs.lineHeight));
+      });
+      expect(lines, `${label}: the request line sets its full three lines`).toBe(3);
+      const band = await cableBand(page, board.route, board.handler);
+      const read = await readAll(page);
+      const card = read.card as Rect;
+      console.log(
+        `MEASURE clearance ${size.width}x${size.height} legend=${legend ? 'open' : 'closed'} band_bottom=${(band.y + band.height).toFixed(1)} card_top=${card.y.toFixed(1)} card_height=${card.height.toFixed(1)} band=${fmt(band)} free=${fmt(read.free)}`,
+      );
+      expect(within(band, read.free), `${label}: the cable band ${fmt(band)} lies inside the free area ${fmt(read.free)}`).toBe(true);
+      expect(band.y + band.height, `${label}: the cable band's bottom sits above the tallest card's top`).toBeLessThanOrEqual(card.y + TOLERANCE);
+
+      expect([...run.visited].sort(), 'every ringed stage of lesson 5 was visited').toEqual([...ringedOf(ANSWER_A_WEB_REQUEST)].sort());
     });
   }
 }

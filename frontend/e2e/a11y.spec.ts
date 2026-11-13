@@ -7,7 +7,21 @@ import {
   type Harness,
   type PacketOpts,
 } from './support/wire';
-import { CARD, boot, buildBoard, injectRefusal, readProbe, ringAt, startFactoryLesson, startLesson, toTypeCode } from './support/lessonMock';
+import {
+  CARD,
+  REQUEST_STAGE,
+  REQUEST_URL,
+  boot,
+  buildBoard,
+  injectRefusal,
+  readProbe,
+  ringAt,
+  selectRoute,
+  startFactoryLesson,
+  startLesson,
+  toAnswerStep,
+  toTypeCode,
+} from './support/lessonMock';
 
 // a11y.spec.ts (TEST-04, Phase 13-04) — an axe accessibility audit of the React
 // chrome ONLY.
@@ -124,6 +138,22 @@ test("the lesson card passes axe on lesson 4's code stage, with the Factory pane
   expect(await card.locator('[data-fab-code]').count(), 'the code stage names two fragments').toBeGreaterThanOrEqual(2);
   await expect(page.locator('aside[aria-labelledby="fab-config-heading"]'), 'the Factory panel is open').toBeVisible();
   expect(await axeLessonScope(page, 'lesson-4-type-code')).toEqual([]);
+});
+
+// Lesson 5's send stage puts the request line in the card, a box in the POST URL field's colours, with
+// the Route's panel open beside it. The line is asserted on screen with the default URL first, so the
+// scan can't pass over a card without it. As on lesson 4's run, the Lessons list half matches nothing.
+test("the lesson card passes axe with lesson 5's send-request stage and its request line showing", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await toAnswerStep(page);
+  await selectRoute(page);
+  await ringAt(page, REQUEST_STAGE.sendRequest);
+  expect((await readProbe(page)).stageId, 'on the send stage').toBe(REQUEST_STAGE.sendRequest);
+  const line = page.locator(`${CARD} [data-fab-request-line]`);
+  await expect(line, 'the request line shows').toBeVisible();
+  await expect(line, 'the request line holds the default URL').toContainText(REQUEST_URL);
+  await expect(page.locator('aside[aria-labelledby="fab-config-heading"]'), "the Route's panel is open").toBeVisible();
+  expect(await axeLessonScope(page, 'lesson-5-send-request')).toEqual([]);
 });
 
 // The step card paints over an open Legend at the window's bottom (plan 104-06); axe reads the card there.
