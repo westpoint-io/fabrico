@@ -7,9 +7,17 @@ import {
   type Harness,
   type PacketOpts,
 } from './support/wire';
+import { BELTS_THAT_JOIN } from '../src/tutorial/lessons/beltsThatJoin';
+import { cameraOf, CELL } from './support/wire';
 import {
   CARD,
   REQUEST_STAGE,
+  SINK_DEBUG,
+  SINK_ID,
+  SOURCE_ID,
+  SOURCE_TIMER,
+  configByNode,
+  pressRing,
   REQUEST_URL,
   boot,
   buildBoard,
@@ -172,6 +180,29 @@ test("the lesson card passes axe with lesson 5's send-request stage and its requ
   await expect(line, 'the request line holds the default URL').toContainText(REQUEST_URL);
   await expect(page.locator('aside[aria-labelledby="fab-config-heading"]'), "the Route's panel is open").toBeVisible();
   expect(await axeLessonScope(page, 'lesson-5-send-request', 'code')).toEqual([]);
+});
+
+// Lesson 2's carry-on stage with its coaching line in the note slot, raised the way a user raises it: a
+// Belt press on the stub's last tile, which the app refuses as BeltEndTile. As on lesson 4's run, the
+// Lessons list half matches nothing.
+test("the lesson card passes axe with lesson 2's carry-on stage and its coaching line showing", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const host = configByNode();
+  host.set(SOURCE_ID, SOURCE_TIMER);
+  host.set(SINK_ID, SINK_DEBUG);
+  const h = await boot(page, host.opts);
+  await startLesson(page, h, BELTS_THAT_JOIN);
+  await pressRing(page, await ringAt(page, 'belt-tool'));
+  await ringAt(page, 'belt-carry-on');
+  const cam = await cameraOf(page);
+  const px = CELL * cam.scale;
+  await page.mouse.move(5.5 * px + cam.x + 4, 2.5 * px + cam.y - 3);
+  await page.mouse.down();
+  await page.mouse.up();
+  const note = page.locator(`${CARD} [data-fab-step-note="refusal"]`);
+  await expect(note, 'the coaching line shows').toContainText("The ring is one cell past the Belt's last tile.");
+  expect((await readProbe(page)).stageId, 'on the carry-on stage').toBe('belt-carry-on');
+  expect(await axeLessonScope(page, 'lesson-2-carry-on-coach')).toEqual([]);
 });
 
 // The step card paints over an open Legend at the window's bottom (plan 104-06); axe reads the card there.

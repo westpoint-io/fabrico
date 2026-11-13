@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { BELTS_THAT_JOIN } from '../src/tutorial/lessons/beltsThatJoin';
 import { LESSONS } from '../src/tutorial/lessons/index';
 import { noteTokens, type LessonNote } from '../src/tutorial/machine';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, phrase, splitAtBlock, type PhraseSegment } from '../src/tutorial/phrase';
@@ -216,6 +217,16 @@ test.describe('every lesson text fits the step card column', () => {
           `lesson 4's ${stage} stage is measured`,
         ).toBe(true);
       }
+      // Lesson 2's stages are each measured, the no-corner sentence (its longest) among them.
+      for (const step of BELTS_THAT_JOIN.steps) {
+        for (const stage of step.stages) {
+          const where = `${BELTS_THAT_JOIN.id} ${step.id}/${stage.id}`;
+          const m = measuredInstructions.find((x) => x.where === where);
+          expect(m, `${where} is measured`).toBeDefined();
+        }
+      }
+      const noCorner = measuredInstructions.find((m) => m.where === `${BELTS_THAT_JOIN.id} join-belt/belt-no-corner`);
+      expect(noCorner?.lines, "lesson 2's no-corner sentence sets 3 lines or fewer").toBeLessThanOrEqual(INSTRUCTION_LINES);
       const afterList = afters();
       expect(afterList.map((t) => t.where), 'the line under the request line is measured').toContain('answer-a-web-request answer/send-request after');
       const measuredAfters = await measure(page, `${CARD} [data-fab-step-text]`, afterList);
@@ -229,6 +240,8 @@ test.describe('every lesson text fits the step card column', () => {
       const noteList = notes();
       const measuredNotes = await measure(page, `${CARD} [data-fab-step-note] p`, noteList);
       expect(measuredNotes).toHaveLength(noteList.length);
+      const coach = measuredNotes.find((m) => m.where === `${BELTS_THAT_JOIN.id} join-belt/belt-carry-on coach=BeltEndTile`);
+      expect(coach, "lesson 2's coaching line is measured").toBeDefined();
       check(size, measuredNotes, NOTE_LINES, 'note');
 
       await finishLessonOne(page, h, host);

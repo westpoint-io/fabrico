@@ -400,6 +400,33 @@ test.describe('Five lessons in the list', () => {
 test.describe("The finished card's heading", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
+  test('with the Legend open at 1280x720 the scroll box reaches Start on the fifth row, and the press starts Answer a web request', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const h = await boot(page);
+    await page.getByRole('button', { name: 'Legend' }).click();
+    await expect(page.locator('#fab-legend-panel'), 'the Legend is open').toBeVisible();
+    await openLessons(page);
+    await expect(page.locator('#fab-legend-panel'), 'the Legend stays open under the list').toBeVisible();
+    const box = page.locator(`${PANEL} [data-fab-help-scroll]`);
+    const fifth = LESSONS[4]!;
+    const start = page.locator(`${PANEL} [data-fab-lesson-row="${fifth.id}"]`).getByRole('button', { name: `Start ${fifth.title}`, exact: true });
+    await start.scrollIntoViewIfNeeded();
+    const inBox = await start.evaluate((el) => {
+      const scroll = el.closest('[data-fab-help-scroll]');
+      if (scroll === null) return 'no scroll box';
+      const b = el.getBoundingClientRect();
+      const s = scroll.getBoundingClientRect();
+      const inside = b.top >= s.top - 1 && b.bottom <= s.bottom + 1 && b.bottom <= window.innerHeight;
+      return inside ? 'inside' : `button ${b.top.toFixed(1)}-${b.bottom.toFixed(1)}, box ${s.top.toFixed(1)}-${s.bottom.toFixed(1)}`;
+    });
+    console.log(`MEASURE lessons-panel legend=open 1280x720 box_client=${await box.evaluate((el) => el.clientHeight)} box_scroll=${await box.evaluate((el) => el.scrollHeight)} fifth=${inBox}`);
+    expect(inBox, "the fifth row's Start sits inside the scroll box, on screen").toBe('inside');
+    await start.click();
+    await expect.poll(() => h.controls, { message: 'the press sent New' }).toContain('new');
+    await expect.poll(async () => (await readProbe(page)).lessonId, { message: 'the fifth lesson is the one starting' }).toBe(fifth.id);
+    expect(fifth.title).toBe('Answer a web request');
+  });
+
   test("Lesson done sets the Lessons heading's size and a line height of 1.2", async ({ page }) => {
     const h = await bootConfigured(page);
     await startLesson(page, h);

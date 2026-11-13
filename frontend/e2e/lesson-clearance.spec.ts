@@ -1,15 +1,23 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
 import { ANSWER_A_WEB_REQUEST } from '../src/tutorial/lessons/answerAWebRequest';
+import { BELTS_THAT_JOIN } from '../src/tutorial/lessons/beltsThatJoin';
 import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
 import { TWO_OUTPUTS } from '../src/tutorial/lessons/twoOutputs';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { phrasePlain } from '../src/tutorial/phrase';
 import type { Lesson, Stage } from '../src/tutorial/types';
 import { CELL, buildPacket, cameraOf, type Harness, type InjectBelt, type InjectNode } from './support/wire';
+import { nubAnchor } from '../shared/geometry';
 import {
   CARD,
+  EAST_TO_SOUTH,
+  JOINER_ID,
+  JOIN_SINK_IN,
+  JOIN_STUB_ID,
   OUTSET,
+  SINK_DEBUG,
+  SOURCE_TIMER,
   REQUEST_STAGE,
   REQUEST_STEP,
   SINK_ID,
@@ -23,7 +31,10 @@ import {
   deleteBelt,
   deleteSink,
   expectCaptureComplete,
+  beltsThatJoinBoard,
   injectRefusal,
+  joinStub,
+  joinedBoard,
   placeRouteAndHandler,
   pressRing,
   readProbe,
@@ -64,6 +75,12 @@ import {
 // window's bottom and goes over it (UI-SPEC "Card placement with the Legend open"), and the free area
 // stops at the Legend's top, so the lesson's spots and Show me keep the rings above it. A card that
 // climbed to sit above the Legend instead would land on the rings.
+//
+// Lesson 2 opens its prepared board with the Legend already in the state the test names, because the
+// tutorial frames that board once, at the start, in the free area it reads then. Its carry-on stage's
+// tallest note is the coaching line for the BeltEndTile refusal, a client tag the host never sends, so
+// that refusal is raised by the press the app refuses: a Belt press on the stub's last tile. At that
+// stage the ring cell's square and the Sink's In disc must lie inside the free area with the card up.
 //
 // Lesson 5 runs with the host answering a 1024-byte path's URL, so the send-request card holds a two-line
 // note, the 3-line instruction, the request line at its full three lines, the line under it and the
@@ -222,6 +239,8 @@ interface Run {
   lesson: Lesson;
   label: string;
   visited: Set<string>;
+  /** For a client refusal tag, the gesture that raises it; a host tag is injected. */
+  raise?: Record<string, () => Promise<void>>;
 }
 
 /**
@@ -234,7 +253,11 @@ async function measureAt(run: Run, stageId: string): Promise<void> {
   await ringAt(page, stageId);
   const stage = stageIn(lesson, (await readProbe(page)).stepId, stageId);
   const board = stage.hint !== null && stage.hint.on !== 'panel';
-  injectRefusal(h, tallestTag(stage));
+  const tag = tallestTag(stage);
+  // A client tag never comes from the host, so the case raises it with the gesture the app refuses.
+  const raise = run.raise?.[tag];
+  if (raise !== undefined) await raise();
+  else injectRefusal(h, tag);
   await expect
     .poll(
       async () => {
@@ -409,6 +432,107 @@ for (const size of SIZES) {
       await measureAt(run, 'board-paused');
 
       expect([...run.visited].sort(), 'every ringed stage of lesson 1 was visited').toEqual([...ringedOf(YOUR_FIRST_LINE)].sort());
+    });
+  }
+}
+
+/** Lesson 2's host: the Source answers Timer and the Sink Debug, as the board file configures them. */
+function joinHost(): ReturnType<typeof configByNode> {
+  const host = configByNode();
+  host.set(SOURCE_ID, SOURCE_TIMER);
+  host.set(SINK_ID, SINK_DEBUG);
+  return host;
+}
+
+/** Lesson 2's joined board with a Straight on the ring cell: the piece detours east and comes back onto the doorstep. */
+function detourBoard(): { nodes: InjectNode[]; belts: InjectBelt[] } {
+  const { nodes } = beltsThatJoinBoard();
+  const joiner: InjectBelt = {
+    id: JOINER_ID,
+    tiles: [[6, 2], [7, 2], [7, 3], [7, 4], [7, 5], [6, 5]],
+    kinds: [{ Straight: { axis: 0 } }, { Corner: { from: 1, to: 2 } }, undefined, undefined, { Corner: { from: 2, to: 3 } }, { Corner: { from: 3, to: 2 } }],
+    docks: [
+      { end: 'Tail', node: JOIN_STUB_ID, port: 0 },
+      { end: 'Head', node: SINK_ID, port: JOIN_SINK_IN.index },
+    ],
+  };
+  return { nodes, belts: [joinStub(JOINER_ID), joiner] };
+}
+
+for (const size of SIZES) {
+  for (const legend of LEGEND_STATES) {
+    const label = labelOf(size, legend);
+    test(`lesson 2: the tallest card clears every ring at every ringed stage of BELTS_THAT_JOIN, with the carry-on rings in the free area, at ${label}`, async ({ page }) => {
+      test.setTimeout(180_000);
+      await page.setViewportSize(size);
+      const host = joinHost();
+      const h = await boot(page, host.opts);
+      if (legend) await openLegend(page);
+      await startLesson(page, h, BELTS_THAT_JOIN);
+      const { nodes } = beltsThatJoinBoard();
+      let tick = 10;
+      const send = (belts: InjectBelt[], removed?: number[]): void => {
+        tick += 1;
+        h.inject(buildPacket({ full: false, tick, generation: 1, swapFloor: 1, nodes, belts, removed }));
+      };
+      // The BeltEndTile refusal: a Belt press near the centre of the stub's last tile, (5,2).
+      const pressStubEnd = async (): Promise<void> => {
+        const cam = await cameraOf(page);
+        const px = CELL * cam.scale;
+        const x = 5.5 * px + cam.x + 4;
+        const y = 2.5 * px + cam.y - 3;
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.up();
+      };
+      const run: Run = { page, h, lesson: BELTS_THAT_JOIN, label, visited: new Set<string>(), raise: { BeltEndTile: pressStubEnd } };
+
+      // Step 1 on the prepared board: the tool, its paused stage, then the carry-on with the coaching line.
+      await measureAt(run, 'belt-tool');
+      await measurePaused(run, 'belt-tool');
+      await pressRing(page, await ringAt(page, 'belt-tool'));
+      await measureAt(run, 'belt-carry-on');
+      const read = await readAll(page);
+      const cam = await cameraOf(page);
+      const cell = CELL * cam.scale;
+      const ringCell: Rect = { x: 6 * cell + cam.x, y: 2 * cell + cam.y, width: cell, height: cell };
+      const disc = read.probe.hint;
+      const anchor = nubAnchor(JOIN_SINK_IN.cell_x, JOIN_SINK_IN.cell_y, JOIN_SINK_IN.side);
+      console.log(
+        `MEASURE carry-on lesson=${BELTS_THAT_JOIN.id} ${label} card=${fmt(read.card)} ring_cell=${fmt(ringCell)} disc=${fmt(disc)} free=${fmt(read.free)} scale=${cam.scale.toFixed(3)}`,
+      );
+      expect(read.probe.noteKind, `${label}: the coaching line holds the note slot`).toBe('refusal');
+      expect(within(ringCell, read.free), `${label}: the ring cell ${fmt(ringCell)} lies inside the free area ${fmt(read.free)}`).toBe(true);
+      expect(disc?.shape, `${label}: the carry-on ring is the Sink's In disc`).toBe('circle');
+      expect(Math.abs((disc as HintRect).x + (disc as HintRect).width / 2 - (anchor.x * cam.scale + cam.x)), `${label}: the disc sits on the In dot`).toBeLessThanOrEqual(1.5);
+      expect(within(disc as HintRect, read.free), `${label}: the Sink's In disc ${fmt(disc)} lies inside the free area ${fmt(read.free)}`).toBe(true);
+      expect(read.probe.offScreen, `${label}: the carry-on ring reads in view`).toBe(false);
+
+      // The no-corner stage: a join with a Straight on the ring cell, then back to the stub.
+      send(detourBoard().belts);
+      await measureAt(run, 'belt-no-corner');
+      send([joinStub()], [JOINER_ID]);
+      await ringAt(page, 'belt-carry-on');
+
+      // The plain draw stage: the stub deleted, then put back.
+      send([], [JOIN_STUB_ID]);
+      await measureAt(run, 'belt-draw');
+      send([joinStub()]);
+      await ringAt(page, 'belt-carry-on');
+
+      // The join on a paused board, so press-play opens on its paused stage.
+      await pause(page, h);
+      await ringAt(page, 'board-paused');
+      send(joinedBoard().belts);
+      await expect.poll(async () => (await readProbe(page)).stepId, { message: 'the join finished step 1' }).toBe('press-play');
+      await measureAt(run, 'board-paused');
+      await play(page, h);
+      send(joinedBoard(EAST_TO_SOUTH, [5]).belts);
+      await measureAt(run, 'watch');
+      await pause(page, h);
+      await measureAt(run, 'board-paused');
+
+      expect([...run.visited].sort(), 'every ringed stage of lesson 2 was visited').toEqual([...ringedOf(BELTS_THAT_JOIN)].sort());
     });
   }
 }
