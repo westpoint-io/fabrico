@@ -139,6 +139,8 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
   }
 
   let maxLive = 0;
+  /** How many times bottom-0 was checked for motion on its resumed scene, before any Restart. */
+  let resumedMotionChecks = 0;
   const pictureChanges: number[] = [];
   /** What each board was doing, and showing, just before its row left the viewport. */
   const left = new Map<
@@ -236,6 +238,24 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
       expect(Math.abs(size.height - want.height), `${context}: ${slot} (${p.id}) stage height`).toBeLessThanOrEqual(0.5);
     }
 
+    // A board that came back draws its resumed scene with a new renderer and no keyframe, so its
+    // items must move before any Restart sends one. The docking board in bottom-0 moves its belt
+    // on almost every tick, so this check doesn't depend on catching a rare item.
+    // A caption stop pauses it for a moment; the page presses Continue, so wait for it to play.
+    for (const slot of inView) {
+      if (slot !== 'bottom-0' || left.get(slot) === undefined) continue;
+      await expect
+        .poll(async () => {
+          const p = await readProbeAt(page, sel(slot));
+          return p.playing || p.tick >= p.endTick;
+        }, { message: `${context}: ${slot} plays again after it comes back`, timeout: 10_000, intervals: [50] })
+        .toBe(true);
+      const p = await readProbeAt(page, sel(slot));
+      if (p.tick >= p.endTick) continue;
+      await expectBoardDrawingAt(page, sel(slot), context, `${slot} (${p.id}) on its resumed scene, before Restart`);
+      resumedMotionChecks++;
+    }
+
     // Restart each board right before its drawing check, so the check starts where its belts move.
     // The tick and picture checks above are done, and leave() restarts again before the scroll.
     for (const slot of inView) {
@@ -286,6 +306,7 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
       `${Math.min(...pictureChanges).toFixed(2)} to ${Math.max(...pictureChanges).toFixed(2)} percent of its pixels`,
   );
 
+  expect(resumedMotionChecks, 'bottom-0 was checked for motion on its resumed scene at least once').toBeGreaterThan(0);
   errors.assertNone('over five scroll cycles');
   expect(consoleErrors).toEqual([]);
   expect(requests).toEqual([PAGE]);
