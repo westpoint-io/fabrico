@@ -25,7 +25,8 @@ import {
 // press now resolves BY CELL on the port's DOORSTEP (`gestures.ts` doorstepPressHit):
 // for this belt's Head at (13,9), the floor cell (14,9) one past it, where its ring now
 // sits. The draw seeds on that same cell, so the emitted bytes below did not move. A
-// press on the end tile (13,9) itself is now an ordinary press on an occupied tile.
+// press on the end tile (13,9) itself seeds nothing: the band says to start from the ring
+// past the belt's end and no frame is sent (the third case below).
 //
 // WHAT WOULD MAKE THIS A CHECK THAT CANNOT FAIL, and how each is closed:
 //
@@ -323,5 +324,48 @@ test.describe('LINK-10: the Belt tool draws a new run off an existing belt end',
       Array.from(h.sent[h.sent.length - 1]),
       'the auto-dock is LIVE on this board: Dock{belt:11, end:Head, node:8 (the Sink), port:0}',
     ).toEqual([CMD.Dock, 11, 0, 8, 0]);
+  });
+
+  test("a press on the free HEAD's own tile shows the ring sentence and sends no frame", async ({ page }) => {
+    // The ring for drawing on sits on the doorstep (14,9). A press on the Head tile (13,9)
+    // itself meant that ring, so it seeds nothing: the band names the ring and no DrawBelt
+    // and no Dock leave the page, through a drag and the release. The doorstep press after it
+    // on the same board sends its DrawBelt, so the empty record above it is a measured absence.
+    const h = await mockRenderSocket(page, {
+      answerGesture: (frame) => (frame[0] === CMD.DrawBelt ? { accept: [9] } : undefined),
+    });
+    await page.goto('/');
+    await waitForChrome(page);
+    await h.connected;
+    h.inject(buildPacket({ belts: [BELT] }));
+    await expect.poll(() => beltIds(page)).toEqual([3]);
+    await armBelt(page);
+
+    const head = await screenCellCentre(page, 13, 9);
+    await page.mouse.move(head.x + 4, head.y + 3);
+    await page.mouse.down();
+    for (const cx of [14, 15, 16]) {
+      const p = await screenCellCentre(page, cx, 9);
+      await page.mouse.move(p.x, p.y);
+    }
+    await page.mouse.up();
+
+    await expect(page.locator('#fab-refusal'), "the band names the ring past the belt's end").toHaveText(
+      "Start from the ring past the belt's end.",
+    );
+    await page.waitForTimeout(300);
+    expect(frameCounts(h.sent), 'no DrawBelt and no Dock left the page').toEqual({});
+
+    const door = await screenCellCentre(page, 14, 9);
+    await page.mouse.move(door.x, door.y);
+    await page.mouse.down();
+    for (const cx of [15, 16]) {
+      const p = await screenCellCentre(page, cx, 9);
+      await page.mouse.move(p.x, p.y);
+    }
+    await page.mouse.up();
+    await expect.poll(() => frameCounts(h.sent), { message: 'the doorstep press on the same board sends its DrawBelt' }).toEqual({
+      [CMD.DrawBelt]: 1,
+    });
   });
 });

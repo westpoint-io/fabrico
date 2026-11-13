@@ -13208,6 +13208,144 @@ describe('the doorstep press target (74.1, CORNER-01..05)', () => {
       expect(rig.overlay.rejectFlashCalls, 'and no second flash').toHaveLength(1);
       expect(rig.cursor(), 'the Belt tool stays armed').toBe('crosshair');
     });
+
+    // WHERE IT MUST NOT FIRE. The sentence tells the user to start from the ring past the
+    // belt's end, so it shows only where that ring is painted. Each case below presses a tile
+    // where it is not, and keeps today's path: the plain seed on an occupied cell, a red
+    // preview, and a release that is sent so the host refuses it in words. Each reads the ring
+    // set first, so "no sentence" cannot pass because the board painted nothing anywhere.
+    const noSentencePressSends = (r: Rig, pressAt: [number, number], what: string): void => {
+      press(r, offCentre(pressAt[0], pressAt[1]));
+      move(r, centre(pressAt[0], pressAt[1] + 1));
+      release(r, centre(pressAt[0], pressAt[1] + 1));
+      expect(r.clientRefusals, `${what}: no sentence`).toEqual([]);
+      const frame = expectIllegalDrawSent(r, what);
+      expect([...frame], `${what}: today's plain seed on the pressed tile, sent`).toEqual([
+        ...encodeGridCommand({
+          kind: 'DrawBelt',
+          cells: [
+            [pressAt[0], pressAt[1]],
+            [pressAt[0], pressAt[1] + 1],
+          ],
+        }),
+      ]);
+    };
+
+    it('BeltEndTile stays silent on a free Head whose next cell holds a machine (no ring there)', () => {
+      const blocker = node({
+        id: 5,
+        kind: machine_kind.SOURCE,
+        cell_x: 4,
+        cell_y: 0,
+        ports: [{ index: 0, cell_x: 4, cell_y: 0, side: 1, role: 1, medium: 0 }],
+      });
+      rig = setupRigWith({ cellsFromWorld: true }, blocker);
+      rig.scene.belts.set(21, eastBelt());
+      rig.armBelt();
+      const rings = rig.overlay.dockTargetCalls.at(-1) ?? [];
+      expect(rings, "NON-VACUITY: the machine's own Out doorstep (5,0) is ringed").toContainEqual({ ...centre(5, 0), filled: false });
+      expect(rings, 'and the blocked Head doorstep (4,0) is not').not.toContainEqual({ ...centre(4, 0), filled: false });
+      noSentencePressSends(rig, [3, 0], 'a blocked Head');
+    });
+
+    it('BeltEndTile stays silent on a middle tile of a belt whose Head is ringed', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.scene.belts.set(
+        21,
+        mkBelt(21, [
+          [1, 0],
+          [2, 0],
+          [3, 0],
+        ]),
+      );
+      rig.armBelt();
+      expect(rig.overlay.dockTargetCalls.at(-1), 'NON-VACUITY: the Head doorstep (4,0) is ringed').toEqual([
+        { ...centre(4, 0), filled: false },
+      ]);
+      noSentencePressSends(rig, [2, 0], 'a middle tile');
+    });
+
+    it('BeltEndTile stays silent on a one-tile belt, which has no direction and no ring', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.scene.belts.set(21, mkBelt(21, [[3, 0]]));
+      rig.scene.belts.set(
+        23,
+        mkBelt(23, [
+          [6, 3],
+          [7, 3],
+        ]),
+      );
+      rig.armBelt();
+      expect(rig.overlay.dockTargetCalls.at(-1), 'NON-VACUITY: only the two-tile belt is ringed, at (8,3)').toEqual([
+        { ...centre(8, 3), filled: false },
+      ]);
+      noSentencePressSends(rig, [3, 0], 'a one-tile belt');
+    });
+
+    it('BeltEndTile stays silent on a Head that carries a Head dock (no ring there)', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.scene.belts.set(21, { ...eastBelt(), docks: [{ end: 'Head', node: 99, port: 0 }] });
+      rig.scene.belts.set(
+        23,
+        mkBelt(23, [
+          [6, 3],
+          [7, 3],
+        ]),
+      );
+      rig.armBelt();
+      expect(rig.overlay.dockTargetCalls.at(-1), 'NON-VACUITY: only the free belt is ringed, at (8,3)').toEqual([
+        { ...centre(8, 3), filled: false },
+      ]);
+      noSentencePressSends(rig, [3, 0], 'a Head with a Head dock');
+    });
+
+    // WHAT STILL WORKS beside it: the two gestures that start at a belt end.
+
+    it('BeltEndTile leaves the ringed doorstep alone: a press there still draws on and docks the new Tail to the pressed belt, once each', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.scene.belts.set(21, eastBelt());
+      rig.armBelt();
+      press(rig, offCentre(4, 0));
+      move(rig, centre(5, 0));
+      move(rig, centre(6, 0));
+      release(rig, centre(6, 0));
+      const drawn: Array<[number, number]> = [
+        [4, 0],
+        [5, 0],
+        [6, 0],
+      ];
+      expect(rig.clientRefusals, 'no sentence').toEqual([]);
+      expect(rig.sent, 'ONE DrawBelt').toHaveLength(1);
+      expect([...rig.sent[0]]).toEqual([...encodeGridCommand({ kind: 'DrawBelt', cells: drawn })]);
+      echo(rig, drawn);
+      expect(dockFrames(rig), 'ONE Tail Dock onto the pressed Head').toEqual([
+        [...encodeGridCommand({ kind: 'Dock', belt: 42, end: 'Tail', node: 21, port: BELT_PORT_HEAD })],
+      ]);
+      expect(rig.overlay.rejectFlashCalls, 'and no flash').toEqual([]);
+    });
+
+    it('BeltEndTile leaves the Head handle alone: with no tool armed, dragging a selected belt Head onto another belt Tail still sends its one Dock', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.scene.belts.set(21, eastBelt());
+      rig.scene.belts.set(
+        22,
+        mkBelt(22, [
+          [4, 0],
+          [5, 0],
+        ]),
+      );
+      // Select belt 21 on its Tail tile, then grab its Head handle off centre and drop on 22's Tail.
+      press(rig, centre(2, 0));
+      release(rig, centre(2, 0));
+      rig.sent.length = 0;
+      press(rig, offCentre(3, 0));
+      move(rig, centre(4, 0));
+      release(rig, centre(4, 0));
+      expect(rig.clientRefusals, 'no sentence').toEqual([]);
+      expect(rig.sent.map((f) => [...f]), 'ONE Dock naming belt 22, as before').toEqual([
+        [...encodeGridCommand({ kind: 'Dock', belt: 21, end: 'Head', node: 22, port: 0 })],
+      ]);
+    });
   });
 });
 

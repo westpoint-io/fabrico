@@ -99,4 +99,5 @@ export const DRIVABLE_GESTURES: ReadonlyArray<Gesture['do']> = ['pressHint', 'dr
 export const REFUSED_SENTENCES: Readonly<Record<string, string>> = {
   FootprintCollision: 'That space is taken. Clear it or try elsewhere.',
   BeltOnlyPort: 'That port takes belts, not wires.',
+  BeltEndTile: "Start from the ring past the belt's end.",
 };

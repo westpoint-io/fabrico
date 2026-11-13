@@ -269,6 +269,11 @@ describe('every lesson has a walk', () => {
     }
   });
 
+  it("holds the walk's BeltEndTile sentence, the one lesson 2's line-end press reads, to the band's", () => {
+    expect(Object.hasOwn(REFUSED_SENTENCES, 'BeltEndTile'), 'the walk holds a BeltEndTile sentence').toBe(true);
+    expect(REFUSED_SENTENCES.BeltEndTile, "the walk's sentence against the app's").toBe(CLIENT_REFUSAL_COPY.BeltEndTile);
+  });
+
   it('holds a walk sentence for every lesson\'s refused tag', () => {
     for (const lesson of LESSONS) {
       expect(Object.hasOwn(REFUSED_SENTENCES, lesson.refused.tag), `${lesson.id}: the walk has a sentence for ${lesson.refused.tag}`).toBe(true);
