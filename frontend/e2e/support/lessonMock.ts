@@ -136,24 +136,57 @@ export async function boot(page: Page, opts: Parameters<typeof mockRenderSocket>
 }
 
 /**
- * Help, Lessons, Start, then the Starting card, then the empty board the host answers New with. The
- * lesson defaults to the first, so lesson 1's specs call it as they always did.
+ * The prepared board the host loads for Belts that join, as the board file builds it: the Source at (1,2),
+ * the Sink at (6,6) turned once clockwise so its In faces north and its Fault west, and the four-tile
+ * stub running east with its Tail docked to the Source's Out and its Head free.
+ */
+export function beltsThatJoinBoard(): { nodes: InjectNode[]; belts: InjectBelt[] } {
+  const sink: InjectNode = {
+    id: SINK_ID,
+    kind: 7,
+    cell_x: 6,
+    cell_y: 6,
+    rot: 1,
+    ports: [
+      { index: 0, cell_x: 6, cell_y: 6, side: 3, role: 2 },
+      { index: 1, cell_x: 6, cell_y: 6, side: 0, role: 0 },
+    ],
+  };
+  const stub: InjectBelt = { id: 4, tiles: [[2, 2], [3, 2], [4, 2], [5, 2]], docks: [{ end: 'Tail', node: SOURCE_ID, port: 0 }] };
+  return { nodes: [sourceAt([1, 2]), sink], belts: [stub] };
+}
+
+/**
+ * Help, Lessons, Start, then the Starting card, then the board the host answers with: New's empty board,
+ * or for a lesson with a prepared board the board its load brings. The lesson defaults to the first, so
+ * lesson 1's specs call it as they always did.
  */
 export async function startLesson(page: Page, h: Harness, lesson: Lesson = YOUR_FIRST_LINE): Promise<void> {
   await page.getByRole('button', { name: 'Help', exact: true }).click();
   await page.locator('#fab-help-panel').getByRole('button', { name: 'Lessons', exact: true }).click();
   await page.getByRole('button', { name: `Start ${lesson.title}`, exact: true }).click();
-  await expect.poll(() => h.controls, { message: 'Start sent New' }).toContain('new');
+  const board = lesson.board;
+  if (board === undefined) {
+    await expect.poll(() => h.controls, { message: 'Start sent New' }).toContain('new');
+  } else {
+    await expect.poll(() => h.controls, { message: "Start sent the lesson board's load" }).toContain(`load_lesson_board\n${board.id}`);
+    expect(h.controls, 'a lesson with a board sends no New').not.toContain('new');
+  }
 
   const card = page.locator(CARD);
-  await expect(card, 'the card says the board is on its way').toContainText('Clearing the board.');
+  await expect(card, 'the card says the board is on its way').toContainText(board === undefined ? 'Clearing the board.' : "Loading the lesson's board.");
   await expect(card).not.toContainText(/Step \d/);
   const starting = await readProbe(page);
   expect(starting.card, 'the lesson waits for the new board').toBe('starting');
   expect(starting.hint, 'no ring while the board is on its way').toBeNull();
   await expect(page.locator('[data-fab-hint]'), 'no ring while the board is on its way').toBeHidden();
 
-  h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1 }));
+  if (board === undefined) {
+    h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1 }));
+  } else {
+    if (board.id !== 'belts_that_join') throw new Error(`the mock host holds no board for ${board.id}`);
+    h.inject(buildPacket({ full: true, tick: 5, generation: 1, swapFloor: 1, ...beltsThatJoinBoard() }));
+  }
   await expect.poll(async () => (await readProbe(page)).card, { message: 'the new board started step 1' }).toBe('running');
   expect((await readProbe(page)).lessonId, 'the lesson the row named is the one running').toBe(lesson.id);
   await expect(card).toContainText(`Step 1 of ${lesson.steps.length}`);

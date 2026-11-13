@@ -379,6 +379,20 @@ test.describe('Five lessons in the list', () => {
     await expect(named, 'the accessible name reaches the button').toHaveClass(/\bfab-cta\b/);
     await expect(page.locator(`${PANEL} .fab-cta`)).toHaveCount(1);
   });
+
+  test('with all five Done, every row reads Done with a plain Restart and none carries the accent', async ({ page }) => {
+    const done = Object.fromEntries(LESSONS.map((l) => [l.id, 'done']));
+    await seed(page, JSON.stringify({ version: 1, lessons: done }));
+    await boot(page);
+    await openLessons(page);
+    const rows = await readRows(page);
+    console.log(`MEASURE list-rows all-five-done ${JSON.stringify(rows)}`);
+    expect(rows.map((r) => r.title), 'five rows in teaching order, titles read from the DOM').toEqual(TITLES);
+    expect(rows.map((r) => r.status)).toEqual(['Done', 'Done', 'Done', 'Done', 'Done']);
+    expect(rows.map((r) => r.buttons)).toEqual(TITLES.map((t) => [`Restart ${t}`]));
+    expect(rows.flatMap((r) => r.accent), 'no row carries the accent').toEqual([]);
+    await expect(page.locator(`${PANEL} [data-fab-lesson-row] .fab-cta`), 'no accent class among the rows').toHaveCount(0);
+  });
 });
 
 // The finished card's heading reads at the Lessons heading's size and line height (UI-SPEC "Carried

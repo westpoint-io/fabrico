@@ -3,7 +3,7 @@ import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLay
 import { EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
 import { SHORTCUTS } from '../src/input/shortcuts';
 import { LESSONS } from '../src/tutorial/lessons/index';
-import { DELETE_AND_UNDO } from '../src/tutorial/lessons/deleteAndUndo';
+import { BELTS_THAT_JOIN } from '../src/tutorial/lessons/beltsThatJoin';
 import { YOUR_FIRST_LINE } from '../src/tutorial/lessons/yourFirstLine';
 import { noteTokens } from '../src/tutorial/machine';
 import { REAL_TABLES, phrasePlain, splitAtBlock } from '../src/tutorial/phrase';
@@ -765,7 +765,7 @@ const START = `Start ${YOUR_FIRST_LINE.title}`;
 const RESUME = `Resume ${YOUR_FIRST_LINE.title}`;
 const RESTART = `Restart ${YOUR_FIRST_LINE.title}`;
 /** With the first lesson Done, the accent moves to the next lesson's Start. */
-const NEXT_START = `Start ${DELETE_AND_UNDO.title}`;
+const NEXT_START = `Start ${BELTS_THAT_JOIN.title}`;
 const GUARD_HEADING = 'Start a new board?';
 const STOPPED_TITLE = 'Unavailable: the simulation stopped';
 const SWAPPED_SENTENCE = 'The board changed, so this lesson stopped. Restart it, or leave it.';
