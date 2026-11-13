@@ -425,7 +425,10 @@ test.describe('Belts that join on the mock host', () => {
       docks: [{ end: 'Tail', node: JOIN_STUB_ID, port: 0 }],
     };
     h.inject(diff({ nodes, belts: [joinStub(JOINER_ID), stuck] }));
-    const probe = await expectStage(page, 'join-belt', 'belt-undo', "a piece over the doorstep shows the can't-carry-on stage");
+    await expectStage(page, 'join-belt', 'belt-undo', "a piece over the doorstep shows the can't-carry-on stage");
+    await page.waitForTimeout(300);
+    const probe = await readProbe(page);
+    expect(probe.stageId, 'the stage held').toBe('belt-undo');
     expect(probe.hint, 'the stage rings nothing').toBeNull();
     const shown = await cardWords(page);
     expect(shown).toBe(words('join-belt', 'belt-undo'));
@@ -449,9 +452,14 @@ test.describe('Belts that join on the mock host', () => {
     await armBelt(page);
     const { nodes } = beltsThatJoinBoard();
     h.inject(diff({ nodes, belts: [] }, { removed: [JOIN_STUB_ID] }));
-    const probe = await expectStage(page, 'join-belt', 'belt-draw', 'with the stub gone and the Belt tool armed the plain draw stage shows');
-    expect(probe.hint?.shape, 'the drag starts on the Source Out').toBe('square');
-    expect(probe.hintTo?.shape, "and ends on the Sink's In").toBe('circle');
+    await expectStage(page, 'join-belt', 'belt-draw', 'with the stub gone and the Belt tool armed the plain draw stage shows');
+    // The probe holds a ring only once the ring has moved for the stage, so poll for both ends.
+    await expect
+      .poll(async () => {
+        const p = await readProbe(page);
+        return `${p.hint?.shape ?? 'none'}/${p.hintTo?.shape ?? 'none'}`;
+      }, { message: "the drag starts on the Source Out and ends on the Sink's In" })
+      .toBe('square/circle');
     const lessonOne = YOUR_FIRST_LINE.steps.find((st) => st.id === 'draw-belt')?.stages.find((st) => st.id === 'belt-draw');
     expect(await cardWords(page)).toBe(phrasePlain(lessonOne?.text ?? []));
     expect(words('join-belt', 'belt-draw'), "lesson 2's draw stage holds lesson 1's sentence").toBe(phrasePlain(lessonOne?.text ?? []));
