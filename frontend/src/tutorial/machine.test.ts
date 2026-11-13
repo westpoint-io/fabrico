@@ -2410,3 +2410,160 @@ describe('answer a web request', () => {
     expect(stageAt(s, { nodes: MACHINES, wires: wired() }, { ...selected, routeUrl: { node: ROUTE_AT.id, generation: 1, url: URL } })).toBe('send-request');
   });
 });
+
+// A LESSON ON A PREPARED BOARD, built here so the engine is tested before any shipped lesson uses it. The
+// board is a Source at (1,2) with a four-tile stub running east and a Sink at (6,6) below the cell past the
+// stub's end, (6,2). Tile kinds are the plain objects the host ships; the engine never works one out.
+describe('a lesson on a prepared board', () => {
+  const B_SOURCE: BoardNode = node(1, SOURCE, 1, 2);
+  const B_SINK: BoardNode = node(2, SINK, 6, 6);
+  const DECLARED = [B_SOURCE, B_SINK];
+  const CORNER = { Corner: { from: 1, to: 2 } };
+  const STRAIGHT = { Straight: { axis: 1 } };
+  const cells = (...xy: ReadonlyArray<readonly [number, number, unknown?]>): BoardBelt['tiles'] =>
+    xy.map(([cell_x, cell_y, kind]) => (kind === undefined ? { cell_x, cell_y } : { cell_x, cell_y, kind }));
+  const STUB_TILES = cells([2, 2], [3, 2], [4, 2], [5, 2]);
+  const stub = (id: number, head?: number): BoardBelt => ({
+    id,
+    items: 0,
+    occupiedSlots: [],
+    tiles: STUB_TILES,
+    docks: [{ end: 'Tail', node: B_SOURCE.id, port: 0 }, ...(head === undefined ? [] : [{ end: 'Head', node: head, port: 0 }])],
+  });
+  /** The piece drawn from the ring cell down into the Sink, its first tile shipped with `ringKind`. */
+  const joiner = (id: number, stubId: number, ringKind: unknown, sinkId = B_SINK.id): BoardBelt => ({
+    id,
+    items: 0,
+    occupiedSlots: [],
+    tiles: cells([6, 2, ringKind], [6, 3], [6, 4], [6, 5]),
+    docks: [
+      { end: 'Tail', node: stubId, port: 0 },
+      { end: 'Head', node: sinkId, port: 0 },
+    ],
+  });
+  const JOINED_WITH = (ringKind: unknown): BoardBelt[] => [stub(10, 11), joiner(11, 10, ringKind)];
+  const JOIN_STEPS: Lesson['steps'] = [
+    { id: 'join-belt', stages: [], done: { is: 'lineTurnsAt', a: 'source', b: 'sink', bind: 'belt' } },
+    { id: 'press-play', stages: [], done: { is: 'tickRose' } },
+    { id: 'watch-items', stages: [], done: { is: 'itemArrived', at: 'sink' } },
+  ];
+  const boardLesson = (steps: Lesson['steps']): Lesson => ({
+    id: 'delete-and-undo',
+    title: 'hand-made board lesson',
+    board: {
+      id: 'belts_that_join',
+      machines: [
+        { nodeKey: '0@1,2', bind: 'source' },
+        { nodeKey: '7@6,6', bind: 'sink' },
+      ],
+    },
+    steps,
+    closing: [],
+    refused: { atStep: 'join-belt', atStage: 'none', press: { on: 'machine', of: 'source' }, tag: 'BeltOnlyPort' },
+  });
+  const JOIN_LESSON = boardLesson(JOIN_STEPS);
+  const run = (s: TutorialState, b: Partial<BoardFacts>, lessons: readonly Lesson[] = [JOIN_LESSON]): TutorialState =>
+    reduce(s, { type: 'frame', board: board(b), chrome: chrome({ playing: false }) }, lessons);
+  const sent = (lessons: readonly Lesson[] = [JOIN_LESSON]): TutorialState =>
+    reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, lessons);
+  /** The lesson running on its prepared board, at the join step. */
+  const onItsBoard = (): TutorialState => run(sent(), { nodes: DECLARED, belts: [stub(10)] });
+
+  describe('the start', () => {
+    it('waits through a frame below the swap floor, an empty board, the late demo frame, and its board with one machine more', () => {
+      const demo = [node(30, SOURCE, 2, 2), node(31, SINK, 8, 2)];
+      let s = sent();
+      s = run(s, { swapFloor: FLOOR, nodes: DECLARED, belts: [stub(10)] });
+      expect(s.card, 'a frame from the board before the swap').toBe('starting');
+      s = run(s, {});
+      expect(s.card, "an empty board is New's, not the lesson's").toBe('starting');
+      s = run(s, { nodes: demo });
+      expect(s.card, 'the late demo frame').toBe('starting');
+      s = run(s, { nodes: [...DECLARED, node(32, SINK, 9, 9)], belts: [stub(10)] });
+      expect(s.card, 'its board plus one extra machine').toBe('starting');
+      expect(s.floor, 'the floor to beat is still the one at the send').toBe(FLOOR);
+      s = run(s, { nodes: DECLARED, belts: [stub(10)], swapFloor: FLOOR + 2 });
+      expect([s.card, s.stepIndex, s.floor]).toEqual(['running', 0, FLOOR + 2]);
+    });
+
+    it('binds the declared machines from that frame and knows their keys, so a Source step finishes nothing', () => {
+      const s = onItsBoard();
+      expect(s.bindings.source).toEqual({ nodeKey: '0@1,2', id: B_SOURCE.id });
+      expect(s.bindings.sink).toEqual({ nodeKey: '7@6,6', id: B_SINK.id });
+      expect([...(s.baseline?.knownKeys ?? [])].sort()).toEqual(['0@1,2', '7@6,6']);
+
+      const placeLesson = boardLesson([
+        { id: 'join-belt', stages: [], done: { is: 'nodeAppeared', kind: SOURCE, bind: 'factory' } },
+        { id: 'press-play', stages: [], done: { is: 'tickRose' } },
+      ]);
+      const placed = run(sent([placeLesson]), { nodes: DECLARED, belts: [stub(10)] }, [placeLesson]);
+      expect([placed.card, placed.stepIndex], 'the prepared Source is not a new one').toEqual(['running', 0]);
+    });
+
+    it('leaves a lesson with no board on the empty-board rule', () => {
+      const plain = reduce(IDLE, { type: 'newSent', lessonId: LESSON, floorAtSend: FLOOR }, LESSONS);
+      expect(frame(plain, { nodes: DECLARED }).card).toBe('starting');
+      expect(frame(plain, {}).card).toBe('running');
+    });
+  });
+
+  describe('the ring cell', () => {
+    it('is captured at the join step from the cell past the stub', () => {
+      expect(onItsBoard().baseline?.ringCell).toEqual({ x: 6, y: 2 });
+    });
+
+    it('fills on the first later frame that has one, when the step began with no stub', () => {
+      let s = run(sent(), { nodes: DECLARED });
+      expect(s.card).toBe('running');
+      expect(s.baseline?.ringCell).toBeNull();
+      s = run(s, { nodes: DECLARED, belts: [stub(10)] });
+      expect(s.baseline?.ringCell).toEqual({ x: 6, y: 2 });
+    });
+
+    it('is not held at a step with another check', () => {
+      expect(started().baseline?.ringCell).toBeUndefined();
+    });
+  });
+
+  describe('lineTurnsAt in the reducer', () => {
+    it('finishes when the line reaches the Sink and the ring cell ships a Corner, and binds the belt', () => {
+      const s = run(onItsBoard(), { nodes: DECLARED, belts: JOINED_WITH(CORNER) });
+      expect(s.stepIndex).toBe(1);
+      expect(s.bindings.belt?.id).toBe(11);
+    });
+
+    it('stays open when the line joins with a Straight at the ring cell', () => {
+      const s = run(onItsBoard(), { nodes: DECLARED, belts: JOINED_WITH(STRAIGHT) });
+      expect([s.stepIndex, s.bindings.belt]).toEqual([0, undefined]);
+    });
+
+    it('finishes on a stub extended by its Head handle through the ring cell, one belt with no seam', () => {
+      const extended: BoardBelt = {
+        ...stub(10, B_SINK.id),
+        tiles: cells([2, 2], [3, 2], [4, 2], [5, 2], [6, 2, CORNER], [6, 3], [6, 4], [6, 5]),
+      };
+      const s = run(onItsBoard(), { nodes: DECLARED, belts: [extended] });
+      expect(s.stepIndex).toBe(1);
+      expect(s.bindings.belt?.id).toBe(10);
+    });
+
+    it('checks the join only once the step is behind it, so a later Straight at the ring cell sends nothing back', () => {
+      let s = run(onItsBoard(), { nodes: DECLARED, belts: JOINED_WITH(CORNER) });
+      // The same tick, so the play step stays open and this frame is read at step 2.
+      s = run(s, { nodes: DECLARED, belts: JOINED_WITH(STRAIGHT) });
+      expect(s.stepIndex).toBe(1);
+      expect(s.note?.kind).not.toBe('wentBack');
+    });
+
+    it('goes back when the join is undone, and clears the belt binding', () => {
+      let s = run(onItsBoard(), { nodes: DECLARED, belts: JOINED_WITH(CORNER) });
+      expect(s.bindings.belt?.id).toBe(11);
+      s = run(s, { nodes: DECLARED, belts: [stub(20)], generation: 2 });
+      expect(s.stepIndex).toBe(0);
+      expect(s.note).toEqual({ kind: 'wentBack', a: 1, b: 1 });
+      expect(s.bindings.belt, 'the belt binding is cleared').toBeUndefined();
+      expect(s.bindings.source?.nodeKey, 'the prepared machines stay bound').toBe('0@1,2');
+      expect(s.baseline?.ringCell).toEqual({ x: 6, y: 2 });
+    });
+  });
+});

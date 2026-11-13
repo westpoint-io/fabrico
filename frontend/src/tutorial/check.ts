@@ -161,6 +161,25 @@ export function lineDoorstep(board: Pick<BoardFacts, 'belts'>, a: number, skip: 
   return port === null ? null : doorstepCell(port);
 }
 
+/**
+ * Is this tile kind, as the host shipped it, a Corner? It reads the shape of the value only (an object
+ * with a `Corner` key, which is how the decoder carries the wire's corner tag). The host derives every
+ * tile's kind from its seams, and a second derivation here could disagree with what the user sees drawn.
+ */
+export function isShippedCorner(kind: unknown): boolean {
+  return typeof kind === 'object' && kind !== null && Object.hasOwn(kind, 'Corner');
+}
+
+/** The kinds the host shipped for every belt tile on this cell. Empty when no belt covers it. */
+function kindsAt(board: Pick<BoardFacts, 'belts'>, cell: { x: number; y: number }): unknown[] {
+  return board.belts.flatMap((belt) => belt.tiles.filter((t) => t.cell_x === cell.x && t.cell_y === cell.y).map((t) => t.kind));
+}
+
+/** Does some belt tile on this cell ship as a Corner? */
+export function cornerShippedAt(board: Pick<BoardFacts, 'belts'>, cell: { x: number; y: number }): boolean {
+  return kindsAt(board, cell).some(isShippedCorner);
+}
+
 /** The last piece of the line leaving `a`, following Head docks through belts. Undefined with no belt leaving it. */
 function lastPiece(board: Pick<BoardFacts, 'belts'>, a: number): BoardBelt | undefined {
   const seen = new Set<number>();
@@ -471,6 +490,16 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       if (from === undefined || to === undefined || baseline.replies === null || board.generation !== baseline.generation) return NOT_DONE;
       const seen = wireFrom(board, from.id, to.id)?.replyPulsesSeen;
       return seen !== undefined && seen > baseline.replies ? DONE : NOT_DONE;
+    }
+    // The ring cell is read off the step's baseline, because the stub's end moves once the join is drawn.
+    case 'lineTurnsAt': {
+      const a = bindings[check.a];
+      const b = bindings[check.b];
+      const ring = baseline.ringCell;
+      if (a === undefined || b === undefined || ring === undefined || ring === null) return NOT_DONE;
+      const belt = beltJoining(board, a.id, b.id);
+      if (belt === undefined || !cornerShippedAt(board, ring)) return NOT_DONE;
+      return { done: true, bound: { name: check.bind, node: { nodeKey: beltKey(a, b), id: belt.id } } };
     }
   }
 }

@@ -56,9 +56,10 @@ export interface BoundNode {
 /**
  * What a step compares with. It isn't a plain snapshot of the board at step start, because a snapshot
  * taken when step 2 begins already holds a Sink placed during step 1, and the user would have to place
- * a second one. So `knownKeys` holds the keys earlier steps bound, and a machine no step has claimed
- * still counts as new. Another board can't finish anything, because a lesson begins only on an empty
- * board with a higher swap floor. The rest are read when the step begins.
+ * a second one. So `knownKeys` holds the keys earlier steps bound, and the machines a prepared board
+ * starts with, and a machine no step has claimed still counts as new. Another board can't finish
+ * anything, because a lesson begins only on its own board, empty or prepared, with a higher swap floor.
+ * The rest are read when the step begins.
  */
 export interface StepBaseline {
   knownKeys: readonly string[];
@@ -89,6 +90,11 @@ export interface StepBaseline {
    * at any other step.
    */
   replies: number | null;
+  /**
+   * At a `lineTurnsAt` step, the cell past the free end of the line from the check's `a`, read when the
+   * step began, or from the first frame after that has one. Null until it's known. Left out at any other step.
+   */
+  ringCell?: { x: number; y: number } | null;
 }
 
 export type Card = 'none' | 'starting' | 'running' | 'swapped' | 'finished';
@@ -483,6 +489,13 @@ function repliesFor(check: Check | undefined, board: BoardFacts, bindings: Tutor
   return wireFrom(board, from.id, to.id)?.replyPulsesSeen ?? 0;
 }
 
+/** At a `lineTurnsAt` step, the cell past the free end of the line from its `a`, as the carry-on stage reads that line. Null with none. */
+function ringCellFor(check: Extract<Check, { is: 'lineTurnsAt' }>, board: BoardFacts, bindings: TutorialState['bindings']): { x: number; y: number } | null {
+  const from = bindings[check.a];
+  const cell = from === undefined ? null : lineDoorstep(board, from.id, boundBeltIds(bindings));
+  return cell === null ? null : { x: cell[0], y: cell[1] };
+}
+
 function baselineFor(
   step: Step | undefined,
   knownKeys: readonly string[],
@@ -490,15 +503,17 @@ function baselineFor(
   chrome: ChromeFacts,
   bindings: TutorialState['bindings'],
 ): StepBaseline {
+  const done = step?.done;
   return {
     knownKeys,
     tick: board.tick,
     playing: chrome.playing,
-    lowestSlots: slotsFor(step?.done, board, bindings),
+    lowestSlots: slotsFor(done, board, bindings),
     rose: [],
     generation: board.generation,
     factorySource: appliedSourceOf(codeWatch(step), board, chrome, bindings),
-    replies: repliesFor(step?.done, board, bindings),
+    replies: repliesFor(done, board, bindings),
+    ...(done?.is === 'lineTurnsAt' ? { ringCell: ringCellFor(done, board, bindings) } : {}),
   };
 }
 
@@ -626,7 +641,10 @@ function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: 
       const applied = chrome.appliedTrigger;
       return !(applied !== null && applied.node === s.bindings[check.of]?.id && applied.kind !== check.trigger);
     }
-    case 'beltJoins': {
+    // The ring cell belongs to the step's own baseline, which a later step no longer holds, so a join
+    // step stands on the join alone, as a plain belt step does.
+    case 'beltJoins':
+    case 'lineTurnsAt': {
       const a = s.bindings[check.a];
       const b = s.bindings[check.b];
       return a !== undefined && b !== undefined && beltJoining(board, a.id, b.id) !== undefined;
@@ -651,9 +669,9 @@ function stillStands(check: Check, s: TutorialState, board: BoardFacts, chrome: 
   }
 }
 
-/** The binding a check leaves behind, if any. */
+/** The binding a check leaves behind, if any. Going back clears it, so a check that binds has to be named here. */
 function bindingOf(check: Check): BindingName | null {
-  return check.is === 'nodeAppeared' || check.is === 'beltJoins' ? check.bind : null;
+  return check.is === 'nodeAppeared' || check.is === 'beltJoins' || check.is === 'lineTurnsAt' ? check.bind : null;
 }
 
 /**
@@ -777,6 +795,10 @@ function withWatchRead(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     const source = appliedSourceOf(codeWatch(step), board, chrome, s.bindings);
     if (source !== null) baseline = { ...baseline, factorySource: source };
   }
+  if (step.done.is === 'lineTurnsAt' && baseline.ringCell == null) {
+    const ringCell = ringCellFor(step.done, board, s.bindings);
+    if (ringCell !== null) baseline = { ...baseline, ringCell };
+  }
   return baseline === held ? s : { ...s, baseline };
 }
 
@@ -801,6 +823,28 @@ function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
   return withSpot(withWatchRead(next, board, chrome, lessons), board, chrome, lessons);
 }
 
+/**
+ * Is this frame, already past the swap floor, the board the lesson starts on? With no board, that's an
+ * empty board: New's board is always empty, and a higher floor with anything on it is a Load sent before
+ * this New, whose keyframe landed first. With a board, the frame's machines are exactly the declared ones,
+ * by `nodeKey`, so a late demo frame or a stale Load keyframe is refused too. The declared machines come
+ * back bound and known, so a step can't finish because the board already held them.
+ */
+function startOn(
+  lesson: Lesson | undefined,
+  board: BoardFacts,
+): { bindings: Partial<Record<BindingName, BoundNode>>; knownKeys: readonly string[] } | null {
+  const declared = lesson?.board?.machines;
+  if (declared === undefined) {
+    return board.nodes.length > 0 || board.belts.length > 0 ? null : { bindings: {}, knownKeys: [] };
+  }
+  const ids = new Map(board.nodes.map((n) => [nodeKey(n), n.id] as const));
+  if (ids.size !== board.nodes.length || ids.size !== declared.length || !declared.every((m) => ids.has(m.nodeKey))) return null;
+  const bindings: Partial<Record<BindingName, BoundNode>> = {};
+  for (const m of declared) bindings[m.bind] = { nodeKey: m.nodeKey, id: ids.get(m.nodeKey) as number };
+  return { bindings, knownKeys: declared.map((m) => m.nodeKey) };
+}
+
 export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Lesson[]): TutorialState {
   if (e.type === 'newSent') {
     return { ...IDLE, card: 'starting', lessonId: e.lessonId, floor: e.floorAtSend };
@@ -821,18 +865,21 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
   }
   if (s.card === 'starting') {
     // The swap floor, not the generation: Undo raises the generation too, and only a real swap
-    // means the empty board has arrived. Frames from the old board wait here, so its machines
-    // can't finish a step. So does a board with anything on it: New's board is always empty, and a
-    // higher floor with machines is a Load sent before this New, whose keyframe landed first.
-    if (e.board.swapFloor <= s.floor || e.board.nodes.length > 0 || e.board.belts.length > 0) return s;
+    // means the lesson's board has arrived. Frames from the old board wait here, so its machines
+    // can't finish a step.
+    if (e.board.swapFloor <= s.floor) return s;
     const lesson = lessons.find((l) => l.id === s.lessonId);
+    const start = startOn(lesson, e.board);
+    if (start === null) return s;
+    const bindings = { ...s.bindings, ...start.bindings };
     const running: TutorialState = {
       ...s,
       card: 'running',
       stepIndex: 0,
       floor: e.board.swapFloor,
-      baseline: baselineFor(lesson?.steps[0], [], e.board, e.chrome, s.bindings),
-      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, e.chrome, s.bindings, null),
+      bindings,
+      baseline: baselineFor(lesson?.steps[0], start.knownKeys, e.board, e.chrome, bindings),
+      capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, e.chrome, bindings, null),
     };
     return runFrame(running, e.board, e.chrome, lessons);
   }

@@ -9,6 +9,12 @@ import type { MachineConfig } from '../protocol/decode';
 
 export type LessonId = 'your-first-line' | 'delete-and-undo' | 'a-factory-with-two-outputs' | 'answer-a-web-request';
 /**
+ * A prepared board a lesson starts on, by the exact id the host's lesson board list parses. The id lives
+ * here and not in the transport, because the purity gate keeps every transport import out of this folder;
+ * the transport imports it from here.
+ */
+export type LessonBoardId = 'belts_that_join';
+/**
  * What a step can bind. `belt`, `beltIn`, `beltOut` and `beltOut2` are belts, each found by the two
  * machines `BELT_ENDS` in `check.ts` names for it; the rest are machines, each found by its `nodeKey`.
  * No step binds a wire: a wire is found by the two machines it joins (`wireFrom` in `check.ts`).
@@ -140,7 +146,13 @@ export type Check =
    * The wire from `from` to `to`, found by its machines, has carried more replies than when the step
    * began, read within one board generation.
    */
-  | { is: 'replyPulseRose'; from: BindingName; to: BindingName };
+  | { is: 'replyPulseRose'; from: BindingName; to: BindingName }
+  /**
+   * The line from `a` reaches `b` (`beltJoining`), and the tile at the ring cell captured when the step
+   * began ships as a Corner. It reads the kind the host sent and never works one out, so a draw from the
+   * ring, a reversed draw and a stub extended by its Head handle all finish it when the board agrees.
+   */
+  | { is: 'lineTurnsAt'; a: BindingName; b: BindingName; bind: BindingName };
 
 export type StageWhen =
   | { is: 'always' }
@@ -292,6 +304,13 @@ export interface Step {
 export interface Lesson {
   id: LessonId;
   title: string;
+  /**
+   * The prepared board the lesson starts on, and the machines already on it, each by its `nodeKey` and the
+   * name it's bound as. A lesson with a board begins on the first frame of a new board whose machines are
+   * exactly these, and those machines count as known, so they finish no step. With no board, a lesson
+   * begins on New's empty board.
+   */
+  board?: { id: LessonBoardId; machines: ReadonlyArray<{ nodeKey: string; bind: BindingName }> };
   steps: readonly Step[];
   /** What the card says once the last step is done. */
   closing: readonly PhraseToken[];

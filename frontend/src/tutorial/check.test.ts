@@ -854,3 +854,74 @@ describe('the wire checks', () => {
     });
   });
 });
+
+// The join step's check on a prepared board: a Source at (1,2), a stub over (2,2) to (5,2), and a Sink at
+// (6,6) below the ring cell (6,2). Tile kinds are the plain objects the host ships.
+describe('lineTurnsAt', () => {
+  const check = { is: 'lineTurnsAt', a: 'source', b: 'sink', bind: 'belt' } as const;
+  const SRC = node(1, SOURCE, 1, 2);
+  const SNK = node(2, SINK, 6, 6);
+  const BOUND: TutorialState['bindings'] = {
+    source: { nodeKey: nodeKey(SRC), id: SRC.id },
+    sink: { nodeKey: nodeKey(SNK), id: SNK.id },
+  };
+  const RING = { x: 6, y: 2 };
+  const CORNER = { Corner: { from: 1, to: 2 } };
+  const STRAIGHT = { Straight: { axis: 0 } };
+  const at = (cell_x: number, cell_y: number, kind?: unknown): BoardBelt['tiles'][number] =>
+    kind === undefined ? { cell_x, cell_y } : { cell_x, cell_y, kind };
+  const stub: BoardBelt = {
+    ...belt(10, [], [
+      { end: 'Tail', node: SRC.id, port: 0 },
+      { end: 'Head', node: 11, port: 0 },
+    ]),
+    tiles: [at(2, 2), at(3, 2), at(4, 2), at(5, 2)],
+  };
+  const down = (ringKind: unknown): BoardBelt => ({
+    ...belt(11, [], [
+      { end: 'Tail', node: 10, port: 0 },
+      { end: 'Head', node: SNK.id, port: 0 },
+    ]),
+    tiles: [at(6, 2, ringKind), at(6, 3), at(6, 4), at(6, 5)],
+  });
+  const result = (belts: readonly BoardBelt[], ringCell: StepBaseline['ringCell'] = RING) =>
+    evaluateCheck(check, ctx({ board: { nodes: [SRC, SNK], belts }, baseline: { ringCell }, bindings: BOUND }));
+
+  it('finishes when the line joins and the ring cell ships a Corner, and binds the piece into the Sink', () => {
+    expect(result([stub, down(CORNER)])).toEqual({ done: true, bound: { name: 'belt', node: { nodeKey: 'belt:0@1,2+7@6,6', id: 11 } } });
+  });
+
+  it('does not finish when the line joins with a Straight at the ring cell', () => {
+    expect(result([stub, down(STRAIGHT)]).done).toBe(false);
+  });
+
+  it('does not finish when the line joins with no tile at the ring cell', () => {
+    const elsewhere: BoardBelt = { ...down(CORNER), tiles: [at(5, 3, CORNER), at(5, 4), at(5, 5), at(5, 6)] };
+    expect(result([stub, elsewhere]).done).toBe(false);
+  });
+
+  it('does not finish on a Corner at the ring cell that does not reach the Sink', () => {
+    const short: BoardBelt = { ...down(CORNER), docks: [{ end: 'Tail', node: 10, port: 0 }] };
+    expect(result([stub, short]).done).toBe(false);
+  });
+
+  it('does not finish with no ring cell captured', () => {
+    expect(result([stub, down(CORNER)], null).done).toBe(false);
+    const noRing = evaluateCheck(check, ctx({ board: { nodes: [SRC, SNK], belts: [stub, down(CORNER)] }, bindings: BOUND }));
+    expect(noRing.done, 'a baseline with no ring cell at all').toBe(false);
+  });
+
+  it('finishes on one belt extended through the ring cell, and on a reversed draw that reached the same board', () => {
+    const extended: BoardBelt = {
+      ...belt(10, [], [
+        { end: 'Tail', node: SRC.id, port: 0 },
+        { end: 'Head', node: SNK.id, port: 0 },
+      ]),
+      tiles: [at(2, 2), at(3, 2), at(4, 2), at(5, 2), at(6, 2, CORNER), at(6, 3), at(6, 4), at(6, 5)],
+    };
+    expect(result([extended])).toEqual({ done: true, bound: { name: 'belt', node: { nodeKey: 'belt:0@1,2+7@6,6', id: 10 } } });
+    // A drag from the Sink's input onto the stub reaches the host as the same two belts, oriented from the
+    // Out end, so the check reads it exactly as the forward draw.
+    expect(result([down(CORNER), stub]).done).toBe(true);
+  });
+});
