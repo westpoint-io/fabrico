@@ -92,6 +92,14 @@ export default defineConfig({
         preloadFont('MartianMono.woff2'),
         preloadFont('Sono.woff2'),
       ],
+      // Search ranking. Starlight's defaults (termFrequency 0.1, termSaturation 2) rank a page by how
+      // many times it says a word, so pages that say "board" 20 to 40 times pushed What is Fabrico
+      // out of the first five results for "board". The first three values are Pagefind's own
+      // defaults, which weigh how often a word appears against the page's length. They weren't enough
+      // on their own: on a copy of the site with 15 extra pages that each say "board" 20 to 40 times,
+      // What is Fabrico still ranked 12th. Its first paragraph carries data-pagefind-meta="lead", and
+      // a match in that paragraph counts twice, which put it 3rd on the same copy.
+      pagefind: { ranking: { termFrequency: 1.0, pageLength: 0.75, termSaturation: 1.4, metaWeights: { lead: 2 } } },
       // Six groups in a fixed order, each listing its folder's pages. Groups start expanded. Reference
       // links to its index page and then holds four subgroups that start closed.
       sidebar: [

@@ -10,8 +10,12 @@ import { docsUrl, fixturesUrl } from './support/site.ts';
 // summary with the same outline, Enter opens it, and the next Tab reaches the link inside it.
 
 const URL_PATH = 'get-started/';
-/** Tab presses allowed before a part counts as unreachable. The page has about 30 tab stops. */
-const MAX_TABS = 80;
+/**
+ * Tab presses allowed before a part counts as unreachable. With all six Get started and all eleven
+ * Concepts pages in the sidebar, the page has 73 tab stops and the first pagination link is the
+ * 72nd (measured on a copy of the site holding all 17 pages), so the cap is that count plus 20.
+ */
+const MAX_TABS = 93;
 
 /** What the keyboard is on: the focused element, followed into shadow roots. */
 interface Stop {

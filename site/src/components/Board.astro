@@ -97,20 +97,33 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
       </p>
     )
   }
+  {
+    /* The script sits inside the slot so the page's first board doesn't leave a script element
+       between its slot and the next one: Astro writes a processed script where the first board
+       renders it, and the run-it-twice pair needs its two slots to be direct siblings. */
+  }
+  <script>
+    // A processed script: Astro bundles it and adds it to a page once, however many boards the page
+    // has. An inline script would run once per board and add the board script once per board.
+    const script = document.createElement('script');
+    script.src = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/embed/fabrico-board.js`;
+    document.head.append(script);
+  </script>
 </div>
-
-<script>
-  // A processed script: Astro bundles it and adds it to a page once, however many boards the page
-  // has. An inline script would run once per board and add the board script once per board.
-  const script = document.createElement('script');
-  script.src = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/embed/fabrico-board.js`;
-  document.head.append(script);
-</script>
 
 <style>
   /* 32 px above and below, from the app's spacing scale. */
   .fab-board-slot {
     margin-block: var(--fab-space-xl);
+  }
+  /* The run-it-twice pair: a board with order='forward' directly followed by one with
+     order='reversed' sits 16 px above it, so the two read as one exhibit, the gap the embed's own
+     pair page uses. The 32 px stays above the first and below the second. */
+  .fab-board-slot:has(> fabrico-board[order='forward']):has(+ .fab-board-slot > fabrico-board[order='reversed']) {
+    margin-bottom: var(--fab-space-md);
+  }
+  .fab-board-slot:has(> fabrico-board[order='forward']) + .fab-board-slot:has(> fabrico-board[order='reversed']) {
+    margin-top: var(--fab-space-md);
   }
   /* The fault line: Martian Mono 12/400 in ink. The slot is not-content, so the inline-code look
      is written here. */
