@@ -30,6 +30,9 @@
 // helper outside it. `env` is the unit test's fake page (`src/gates/frameCapture.test.ts`); absent,
 // the page's own globals are used and the store lives on `window.__fabGrowthCapture`.
 
+import type { Page } from '@playwright/test';
+import { isDotInk } from './canvasDots';
+
 /** How the canvas is read: synchronously in the callback, or through a WebGL2 pack buffer. */
 export type CaptureMode = 'pbo' | 'sync';
 
@@ -343,4 +346,116 @@ export function captureFrameInPage(args: CaptureArgs, env?: CaptureEnv): Promise
       }
     });
   });
+}
+
+// ===========================================================================
+// FRAMES ACROSS A WINDOW
+// ===========================================================================
+//
+// Something on screen for less than a second, such as the reply comet sweeping home along a cable
+// in about 0.45 s, can fall between two reads a test makes on its own schedule. This reads frames
+// back to back with `captureFrameInPage` in `sync` mode, each one the frame Pixi just drew, until a
+// window has passed. One read covers the box around every rect, so the rects of one sample are the
+// same frame's; each rect is then cut out of it here, in Node.
+
+/** One rect cut out of a sampled frame: its RGBA bytes, top-down rows, and its dot-ink count. */
+export interface SampledRect {
+  w: number;
+  h: number;
+  rgba: Uint8Array;
+  /** Pixels whose red exceeds blue by more than 40, the item accent's ink (`canvasDots.ts` `isDotInk`). */
+  warm: number;
+}
+
+/** One frame of the window: the tick it was drawn at and each rect's pixels. */
+export interface SampledFrame {
+  tick: number;
+  drawnAtTick: number | null;
+  /** The whole box read as one RGBA value, a cleared buffer: its rects tell nothing. */
+  flat: boolean;
+  /** Ms from the window's start to this frame's read. */
+  atMs: number;
+  rects: SampledRect[];
+}
+
+export interface SampleArgs {
+  /** Screen rects in CSS px. The box around them is read, so its top-left corner must be on the canvas. */
+  rects: readonly CaptureRect[];
+  /** Read at least this long from the start. */
+  windowMs: number;
+  /** Stop at this many frames, whatever the window says. */
+  maxFrames: number;
+  /** When given, also read until `afterMs` has passed since it settled. */
+  until?: Promise<unknown>;
+  afterMs?: number;
+}
+
+/** How many pixels differ between two cuts of the same rect by more than `min` on any channel. */
+export function changedPixels(a: SampledRect, b: SampledRect, min: number): number {
+  if (a.w !== b.w || a.h !== b.h) throw new Error(`changedPixels: rects of ${a.w}x${a.h} and ${b.w}x${b.h} px`);
+  let n = 0;
+  for (let i = 0; i < a.rgba.length; i += 4) {
+    if (
+      Math.abs(a.rgba[i] - b.rgba[i]) > min ||
+      Math.abs(a.rgba[i + 1] - b.rgba[i + 1]) > min ||
+      Math.abs(a.rgba[i + 2] - b.rgba[i + 2]) > min
+    ) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/**
+ * Read frames back to back on `rects` until `windowMs` has passed and, when `until` is given, until
+ * `afterMs` has passed since it settled; or until `maxFrames` frames. Returns every frame in order.
+ */
+export async function sampleFramesInPage(page: Page, args: SampleArgs): Promise<SampledFrame[]> {
+  const { rects, windowMs, maxFrames, until, afterMs = 0 } = args;
+  if (rects.length === 0) throw new Error('sampleFramesInPage: no rects to read');
+  const box: CaptureRect = {
+    x0: Math.min(...rects.map((r) => r.x0)),
+    y0: Math.min(...rects.map((r) => r.y0)),
+    x1: Math.max(...rects.map((r) => r.x1)),
+    y1: Math.max(...rects.map((r) => r.y1)),
+  };
+  let settledAt: number | null = null;
+  until?.then(
+    () => {
+      settledAt = Date.now();
+    },
+    () => {
+      settledAt = Date.now();
+    },
+  );
+  const frames: SampledFrame[] = [];
+  const start = Date.now();
+  const open = (): boolean => {
+    const now = Date.now();
+    if (now - start < windowMs) return true;
+    if (until === undefined) return false;
+    return settledAt === null || now - settledAt < afterMs;
+  };
+  while (frames.length < maxFrames && (frames.length === 0 || open())) {
+    const reply = await page.evaluate(captureFrameInPage, { rect: box, mode: 'sync' as const, issue: true, readbackFramesMax: 0 });
+    const shot = reply.captures[0];
+    if (shot === undefined) throw new Error('sampleFramesInPage: a sync read returned no capture');
+    const whole = Buffer.from(shot.b64, 'base64');
+    const cut = rects.map((r): SampledRect => {
+      const x = Math.round((r.x0 - box.x0) * shot.k);
+      const y = Math.round((r.y0 - box.y0) * shot.k);
+      const w = Math.min(Math.round((r.x1 - r.x0) * shot.k), shot.w - x);
+      const h = Math.min(Math.round((r.y1 - r.y0) * shot.k), shot.h - y);
+      const rgba = new Uint8Array(w * h * 4);
+      let warm = 0;
+      for (let row = 0; row < h; row++) {
+        const from = ((y + row) * shot.w + x) * 4;
+        rgba.set(whole.subarray(from, from + w * 4), row * w * 4);
+      }
+      for (let i = 0; i < rgba.length; i += 4) if (isDotInk(rgba, i)) warm += 1;
+      return { w, h, rgba, warm };
+    });
+    frames.push({ tick: shot.tick, drawnAtTick: shot.drawnAtTick, flat: shot.flat, atMs: Date.now() - start, rects: cut });
+  }
+  return frames;
 }

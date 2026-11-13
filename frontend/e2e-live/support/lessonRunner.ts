@@ -33,6 +33,7 @@ import {
   webhookUrl,
 } from './oracle';
 import { decodePngRows } from './pngRows';
+import { changedPixels, sampleFramesInPage, type CaptureRect } from './frameCapture';
 
 // lessonRunner.ts - walks a lesson from its data, through the hint.
 //
@@ -71,6 +72,24 @@ const CARD_NOTE_FRAMES = 20;
 const HANDLER_PRESET_BODY = 'hello from fabrico';
 /** How long the walk's request may take, the `curl --max-time` a user's terminal would give it. */
 const REQUEST_TIMEOUT_MS = 20_000;
+/** The pulse read's window: at least this long from just before the POST. */
+const PULSE_WINDOW_MS = 1_500;
+/** And at least this long after the answer, which comes back as the reply sets off home. */
+const PULSE_AFTER_MS = 1_000;
+/** A ceiling on frames, far above what 2.5 s of back-to-back reads yields at 60 frames a second. */
+const PULSE_MAX_FRAMES = 400;
+/** Whole cells kept between a read tile and either machine's footprint. */
+const PULSE_CLEAR_CELLS = 1;
+/** The read rect sits this far inside each cell. */
+const PULSE_INSET_PX = 2;
+/** A channel must move by more than this for a pixel to count as changed. */
+const PULSE_CHANNEL_MIN = 24;
+/**
+ * A frame differs from the one before the POST when more than this many pixels changed. Six measuring
+ * runs on lesson 5's four read tiles: a drawn comet changed 134 to 137 pixels in 10 frames each (about
+ * 106 of them amber), and a request with no comet drawn changed 0 pixels in every one of 89 to 91 frames.
+ */
+const PULSE_DELTA_MIN = 20;
 /** Drawn frames for the Lessons list to show a row's buttons after it opens. */
 const ROW_FRAMES = 20;
 /**
@@ -1454,7 +1473,31 @@ async function walkRequest(page: Page, lesson: Lesson, stepIndex: number, label:
   // so the card says `curl.exe` there. The walk makes that call itself rather than asking the app's rule.
   const userAgent = await page.evaluate(() => navigator.userAgent);
   const word = /\bWindows NT\b/.test(userAgent) ? 'curl.exe' : 'curl';
-  const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false });
+  // The reply comet is drawn along the return cable for about half a second, so its tiles are read in
+  // frames back to back from just before the POST until a while after the answer, against one frame
+  // taken before. The rects, the baseline and the page-error listener are all set up first.
+  const pulse = await returnCableRects(page, label, bound);
+  const [baseline] = await sampleFramesInPage(page, { rects: pulse.rects, windowMs: 0, maxFrames: 1 });
+  expect(baseline?.flat, `${label}: the frame before the POST holds the board, not a cleared buffer`).toBe(false);
+  const pageErrors: string[] = [];
+  const onPageError = (e: Error): void => {
+    pageErrors.push(e.message);
+  };
+  page.on('pageerror', onPageError);
+  let answered!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    answered = resolve;
+  });
+  const sampling = sampleFramesInPage(page, {
+    rects: pulse.rects,
+    windowMs: PULSE_WINDOW_MS,
+    maxFrames: PULSE_MAX_FRAMES,
+    until: settled,
+    afterMs: PULSE_AFTER_MS,
+  });
+  const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false }).finally(answered);
+  const frames = await sampling;
+  page.off('pageerror', onPageError);
   const status = resp.status();
   const body = await resp.text();
   console.log(`REQUEST ${lesson.id} url=${url} status=${status} body=${body} card=${card}`);
@@ -1471,6 +1514,71 @@ async function walkRequest(page: Page, lesson: Lesson, stepIndex: number, label:
       { message: `${label}: the reply came back and the step was marked done`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
     )
     .toBe('done');
+  // The step finished on the model's reply count. What follows is a separate read of the screen, so a
+  // canvas that drew no reply fails here even though the model says the reply came back.
+  const done = await readProbe(page);
+  const returnWire = (await readScene(page)).wires.find((w) => w.from.node === bound.handler && w.to.node === bound.route);
+  console.log(`REPLY-LATCH ${lesson.id} card=${done.card} index=${done.stepIndex} replyPulsesSeen=${returnWire?.replyPulsesSeen ?? 'no return wire'}`);
+  const read = frames.map((f) => ({
+    flat: f.flat,
+    tick: f.tick,
+    warm: f.rects.reduce((n, r) => n + r.warm, 0),
+    delta: f.flat ? 0 : f.rects.reduce((n, r, i) => n + changedPixels(r, baseline!.rects[i]!, PULSE_CHANNEL_MIN), 0),
+  }));
+  const changed = read.filter((f) => f.delta > PULSE_DELTA_MIN).length;
+  const maxDelta = Math.max(0, ...read.map((f) => f.delta));
+  const maxWarm = Math.max(0, ...read.map((f) => f.warm));
+  const flat = read.filter((f) => f.flat).length;
+  const ticks = frames.length === 0 ? 'none' : `${frames[0]!.tick}-${frames[frames.length - 1]!.tick}`;
+  console.log(
+    `MEASURE pulse frames=${frames.length} changed=${changed} max_delta=${maxDelta} threshold=${PULSE_DELTA_MIN} ticks=${ticks} flat=${flat} max_warm=${maxWarm} baseline_warm=${baseline!.rects.reduce((n, r) => n + r.warm, 0)}`,
+  );
+  console.log(`PULSE-FRAMES delta/warm=${read.map((f) => (f.flat ? 'flat' : `${f.delta}/${f.warm}`)).join(' ')}`);
+  expect(
+    changed,
+    `${label}: a frame read on the return cable while the reply came home differs from the frame before the POST by more than ${PULSE_DELTA_MIN} pixels (${frames.length} frames, largest change ${maxDelta}, ${flat} cleared)`,
+  ).toBeGreaterThan(0);
+  await expectRenderLoopAlive(page, `after the reply pulse read at ${label}`);
+  expect(pageErrors, `${label}: no uncaught page error while the request was answered`).toEqual([]);
+}
+
+/**
+ * The return cable's tiles at least one cell clear of both machines (Chebyshev distance 2 or more
+ * from every footprint cell, so no tile touches either machine), as screen rects 2 px inside each
+ * cell. The cable is found by its two machines, Handler to Route. The nubs and the Route's selection
+ * outline sit on or against the machines, so these tiles show only the cable and what rides it.
+ */
+async function returnCableRects(
+  page: Page,
+  label: string,
+  bound: Readonly<Record<string, number>>,
+): Promise<{ rects: CaptureRect[]; cells: Array<readonly [number, number]> }> {
+  const scene = await readScene(page);
+  const route = scene.nodes.find((n) => n.id === bound.route);
+  const handler = scene.nodes.find((n) => n.id === bound.handler);
+  if (route === undefined || handler === undefined) throw new Error(`${label}: the bound Route and HTTP Handler aren't both on the board`);
+  const wire = scene.wires.find((w) => w.from.node === handler.id && w.to.node === route.id);
+  if (wire === undefined) {
+    throw new Error(`${label}: no wire runs from the HTTP Handler to the Route (wires: ${JSON.stringify(scene.wires.map((w) => ({ from: w.from, to: w.to })))})`);
+  }
+  const footprint = [...route.cells, ...handler.cells];
+  const clear = wire.path.filter((t) => footprint.every(([fx, fy]) => Math.max(Math.abs(fx - t.cell_x), Math.abs(fy - t.cell_y)) >= PULSE_CLEAR_CELLS + 1));
+  const cells = clear.map((t) => [t.cell_x, t.cell_y] as const);
+  const path = wire.path.map((t) => `${t.cell_x},${t.cell_y}`).join(' ');
+  console.log(
+    `PULSE-CELLS route=${JSON.stringify(route.cells)} handler=${JSON.stringify(handler.cells)} path=${path} read=${cells.map((c) => c.join(',')).join(' ')}`,
+  );
+  if (cells.length === 0) throw new Error(`${label}: no tile of the return cable is a cell clear of both machines (path ${path})`);
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const rects = cells.map(([x, y]) => ({
+    x0: x * size + cam.x + PULSE_INSET_PX,
+    y0: y * size + cam.y + PULSE_INSET_PX,
+    x1: (x + 1) * size + cam.x - PULSE_INSET_PX,
+    y1: (y + 1) * size + cam.y - PULSE_INSET_PX,
+  }));
+  await expectOnTheBoard(page, label, 'the return cable tiles the pulse read samples are', rects.map((r) => ({ x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2 })));
+  return { rects, cells };
 }
 
 /**
