@@ -12233,35 +12233,24 @@ describe('the doorstep press target (74.1, CORNER-01..05)', () => {
   // Error states (UI-SPEC 3.2 items 1 and 2): ordinary presses on occupied tiles
   // -------------------------------------------------------------------------
 
-  it('a press on a belt\'s OWN last tile (the old ring location) previews red and is sent to be refused', () => {
-    // UI-SPEC 3.2 item 1, a NAMED changed outcome: before 74.1 this was the ring and a
-    // join start; now it is an ordinary press on an occupied tile. Since plan 89-09 (D-13,
-    // FAIL-02) the red draw is sent with no claim, so the host says the space is taken, and
-    // the flash is on the pressed tile; still no Dock.
+  it('a press on a belt\'s OWN last tile (the old ring location) names the ring and sends nothing (BeltEndTile)', () => {
+    // UI-SPEC 3.2 item 1, a NAMED changed outcome, changed twice. Before 74.1 this was the ring
+    // and a join start. From 74.1 it was an ordinary press on an occupied tile, and from plan
+    // 89-09 (D-13) that red draw was sent, so the host said the space was taken. Now the ring
+    // is on screen one cell past this tile, so the press seeds nothing and names the ring
+    // (`BeltEndTile`): one flash on the pressed tile, no corridor on a perpendicular drag, and
+    // no DrawBelt and no Dock on the release.
     rig = setupRigWith({ cellsFromWorld: true });
     rig.scene.belts.set(21, eastBelt());
     rig.armBelt();
+    const previewsBefore = rig.overlay.beltCalls.length;
     press(rig, centre(3, 0));
     move(rig, centre(3, -1));
-    expect(cellsOf(lastPreview(rig)?.tiles)[0], 'NON-VACUITY: seeded on the pressed end tile').toEqual([3, 0]);
-    expect(lastPreview(rig)?.valid).toBe(false);
+    expect(rig.overlay.beltCalls.length, 'no corridor: nothing was seeded').toBe(previewsBefore);
     release(rig, centre(3, -1));
-    const frame = expectIllegalDrawSent(rig, 'the press on the belt end tile');
-    expect([...frame]).toEqual([
-      ...encodeGridCommand({
-        kind: 'DrawBelt',
-        cells: [
-          [3, 0],
-          [3, -1],
-        ],
-      }),
-    ]);
+    expect(rig.sent, 'nothing sent').toEqual([]);
+    expect(rig.clientRefusals, 'the press names the ring').toEqual(['BeltEndTile']);
     expect(rig.overlay.rejectFlashCalls.map((c) => c.cell), 'ONE flash, on the pressed tile').toEqual([{ cx: 3, cy: 0 }]);
-    echo(rig, [
-      [3, 0],
-      [3, -1],
-    ]);
-    expect(rig.sent.filter((f) => f[0] === 4), 'no Dock').toEqual([]);
   });
 
   it('a press on the MACHINE-SIDE half of an Out nub previews red and is sent to be refused (D-06, D-13)', () => {
@@ -13181,6 +13170,44 @@ describe('the doorstep press target (74.1, CORNER-01..05)', () => {
     r.destroy();
     expect(r.overlay.heldBelts.pictures).toEqual([]);
     expect(pendingSeamsRecords()).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // A press on a belt's own last tile points to the ring (BeltEndTile)
+  // -------------------------------------------------------------------------
+  //
+  // With the Belt tool armed, the ring for drawing on from a free Head sits one cell past
+  // the Head, and a user who presses the Head tile itself meant that ring. The press flashes
+  // the tile, names `BeltEndTile` and seeds no draw, so the release sends nothing and the
+  // host's "That space is taken" never replaces the client's sentence.
+  describe("a Belt press on a belt's own last tile points to the ring (BeltEndTile)", () => {
+    /** Off the tile centre, inside a quarter cell of it, the way a hand lands. */
+    const offCentre = (cx: number, cy: number): Pt => ({ x: cx * CELL + CELL / 2 + 5, y: cy * CELL + CELL / 2 + 3 });
+    const CELL_1x1 = { w: 1, h: 1, rot: 0 };
+
+    it('BeltEndTile: a press on a free Head tile whose doorstep wears the ring flashes once, names the ring, and sends nothing through a drag and release', () => {
+      rig = setupRigWith({ cellsFromWorld: true });
+      rig.scene.belts.set(21, eastBelt());
+      rig.armBelt();
+      expect(rig.overlay.dockTargetCalls.at(-1), 'NON-VACUITY: the Head doorstep (4,0) wears the start ring').toEqual([
+        { ...centre(4, 0), filled: false },
+      ]);
+      const previewsBefore = rig.overlay.beltCalls.length;
+      press(rig, offCentre(3, 0));
+      expect(rig.clientRefusals, 'the press names the ring').toEqual(['BeltEndTile']);
+      expect(rig.overlay.rejectFlashCalls, 'one flash, on the pressed Head tile').toEqual([
+        { cell: { cx: 3, cy: 0 }, dims: CELL_1x1 },
+      ]);
+      move(rig, centre(4, 0));
+      move(rig, centre(5, 0));
+      move(rig, centre(6, 0));
+      release(rig, centre(6, 0));
+      expect(rig.sent, 'no DrawBelt and no Dock: the press seeded no draw').toEqual([]);
+      expect(rig.overlay.beltCalls.length, 'and the drag drew no corridor').toBe(previewsBefore);
+      expect(rig.clientRefusals, 'the release adds no sentence').toEqual(['BeltEndTile']);
+      expect(rig.overlay.rejectFlashCalls, 'and no second flash').toHaveLength(1);
+      expect(rig.cursor(), 'the Belt tool stays armed').toBe('crosshair');
+    });
   });
 });
 

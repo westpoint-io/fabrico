@@ -2,13 +2,17 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   DEMO_NODE_COUNT,
   cameraOf,
+  captureRefusalText,
   expectRenderLoopAlive,
+  latchRejectFlashCells,
   newBoard,
   pollScene,
   readScene,
+  rejectFlashCellsSeen,
   resetToDemo,
   resetZoomToActualSize,
   screenCellCentre,
+  stopRejectFlashLatch,
   waitForAppReady,
   waitForCameraSettle,
   watchPageErrors,
@@ -76,9 +80,15 @@ import { CELL } from '../shared/geometry';
 // floor tile it faces, (8,6) on this board, and the press resolves BY CELL there
 // (`doorstepPressHit`), so the cell pressed IS the seed cell. That deleted the 74-13
 // accumulator condition (branch (c)), and it moved this file's press point from the head
-// tile (7,6) to the doorstep (8,6). A press on (7,6) is now an ordinary press on an
-// occupied tile: red, nothing sent (UI-SPEC 3.2 item 1). The sub-cell sample below now
-// lands a quarter cell east of the doorstep centre, which is still inside the seed cell.
+// tile (7,6) to the doorstep (8,6). The sub-cell sample below now lands a quarter cell
+// east of the doorstep centre, which is still inside the seed cell.
+//
+// A PRESS ON THE HEAD TILE (7,6) ITSELF seeds nothing. For a while it was an ordinary
+// press on an occupied tile, and once every release with cells was sent, the host
+// refused it as "That space is taken". The user meant the ring one cell further on, so
+// the press now flashes the Head tile, the refusal band reads "Start from the ring past
+// the belt's end.", and nothing is sent. The third case below reads that on the real
+// host, including the band 600 ms later, when a host refusal would have replaced it.
 //
 // ---------------------------------------------------------------------------
 // THE TWO CASES BELOW ARE A DISCRIMINATOR, NOT A PAIR OF SAMPLES
@@ -120,6 +130,9 @@ const SECOND_END: readonly [number, number] = [11, 6];
  * `resetZoomToActualSize` pins and the assertion below re-reads rather than assumes.
  */
 const SUB_CELL_PX = CELL / 4;
+
+/** The client's sentence for a press on the Head tile, transcribed, not imported (`CLIENT_REFUSAL_COPY.BeltEndTile`). */
+const BELT_END_TILE_COPY = "Start from the ring past the belt's end.";
 
 function beltAt(scene: SceneFacts, cell: readonly [number, number]) {
   return scene.belts.find((b) => b.tiles.some((t) => t.cell_x === cell[0] && t.cell_y === cell[1]));
@@ -260,5 +273,54 @@ test.describe('LINK-10 on the real host: press a free belt end and draw on', () 
 
     await expectRenderLoopAlive(page, 'after a hand-driven press-on-end join');
     errs.assertNone('the hand-driven LINK-10 leg');
+  });
+
+  test('a press on the Head tile itself names the ring and sends nothing', async ({ page }) => {
+    const errs = watchPageErrors(page);
+    await page.goto('/');
+    await waitForAppReady(page);
+    await boardWithOneBelt(page);
+    const before = await readScene(page);
+    const tilesBefore = before.belts[0].tiles.map((t) => [t.cell_x, t.cell_y]);
+
+    await latchRejectFlashCells(page);
+    // Off the Head tile's centre and inside a quarter cell of it, the way a hand lands, with
+    // the Belt tool still armed from the first draw. Then a drag east across the ringed
+    // doorstep and two more cells, and the release: a press that seeded a draw would send
+    // this path, and the host would refuse it as FootprintCollision.
+    const head = await screenCellCentre(page, HEAD_CELL[0], HEAD_CELL[1]);
+    const press = { x: head.x + 5, y: head.y + 3 };
+    expect(Math.abs(press.x - head.x) < SUB_CELL_PX && Math.abs(press.y - head.y) < SUB_CELL_PX).toBe(true);
+    await page.mouse.move(press.x, press.y);
+    await page.mouse.down();
+    for (let cx = DOORSTEP_CELL[0]; cx <= DOORSTEP_CELL[0] + 2; cx++) {
+      const pt = await screenCellCentre(page, cx, 6);
+      await page.mouse.move(pt.x, pt.y);
+    }
+    await page.mouse.up();
+
+    const said = await captureRefusalText(page, 'the press on the Head tile put a sentence in the refusal band');
+    expect(said, "the band names the ring past the belt's end").toBe(BELT_END_TILE_COPY);
+    await expect
+      .poll(() => rejectFlashCellsSeen(page), { message: 'the Head tile flashed once', timeout: 5_000 })
+      .toEqual([{ cx: HEAD_CELL[0], cy: HEAD_CELL[1] }]);
+
+    // Long enough for a sent command's refusal to come back from the host and replace the
+    // client's sentence, well inside the band's hold.
+    await page.waitForTimeout(600);
+    expect(
+      ((await page.locator('#fab-refusal').textContent()) ?? '').trim(),
+      "600 ms later the band still holds the client's sentence: no host refusal arrived",
+    ).toBe(BELT_END_TILE_COPY);
+    expect(await rejectFlashCellsSeen(page), 'and no second flash').toEqual([{ cx: HEAD_CELL[0], cy: HEAD_CELL[1] }]);
+    await stopRejectFlashLatch(page);
+
+    const after = await readScene(page);
+    expect(after.belts, 'still one belt').toHaveLength(1);
+    expect(after.nodes, 'and no machine').toHaveLength(0);
+    expect(after.belts[0].tiles.map((t) => [t.cell_x, t.cell_y]), 'the belt kept its tiles').toEqual(tilesBefore);
+
+    await expectRenderLoopAlive(page, 'after a press on the Head tile');
+    errs.assertNone('the Head-tile press');
   });
 });

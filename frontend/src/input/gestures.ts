@@ -3056,7 +3056,10 @@ export function createGestureController(deps: GestureDeps): GestureController {
    *   - OCCUPANCY (74.1-04, UI-SPEC 3.2 item 3): the doorstep holds no machine and no
    *     belt tile ({@link doorstepOccupied}, the pair the ring set reads). A press on an
    *     occupied doorstep falls through to the plain seed on that occupied cell, which is
-   *     exactly a press on the occupant: red preview, nothing sent. The term moves ONE
+   *     exactly a press on the occupant: a red preview, and a release that is sent so the
+   *     host refuses it in words. The one occupant answered at the press instead is a free
+   *     belt end's own last tile while its ring is painted ({@link ringedHeadTileAt}): it
+   *     seeds nothing and names the ring. The term moves ONE
    *     observable thing, the armed ring (without it the press paints an armed ring on a
    *     doorstep that wears no resting ring), so its case asserts `nubRingCalls`, not
    *     `sent` (Pitfall 5).
@@ -3157,6 +3160,36 @@ export function createGestureController(deps: GestureDeps): GestureController {
         if (freeInDoorstep(scene, node.id, port)) {
           return { node, handle: node.id, port, x: cx * CELL + CELL / 2, y: cy * CELL + CELL / 2, d2: 0 };
         }
+      }
+    }
+    return null;
+  };
+
+  /**
+   * THE RINGED HEAD TILE: the belt whose Head END TILE is the pressed cell, when that belt has
+   * two or more tiles and the cell past its Head resolves through {@link doorstepPressHit} to
+   * that same belt, or null. That last term carries the rest: the Head carries no Head dock
+   * ({@link headTaken}), its doorstep holds no machine, belt tile or queued claim, and no
+   * machine port claims the doorstep first. Those are the ring set's own terms, so this answers
+   * non-null exactly where the Belt-armed ring is painted one cell past the pressed tile, and
+   * the `BeltEndTile` sentence, which tells the user to start from that ring, is true wherever
+   * it shows. A one-tile belt has no direction and no ring (`beltEndPort` answers null), so a
+   * press on it, on a middle tile, or on a Head whose doorstep is blocked keeps the plain seed.
+   */
+  const ringedHeadTileAt = (pressCell: CellCoord): BeltView | null => {
+    const scene = getScene();
+    for (const belt of scene.belts.values()) {
+      if (belt.tiles.length < 2) {
+        continue;
+      }
+      const port = beltEndPort(belt.tiles, 'Head');
+      if (!port || port.cell_x !== pressCell.cx || port.cell_y !== pressCell.cy) {
+        continue;
+      }
+      const [dx, dy] = doorstepCell(port);
+      const door = doorstepPressHit({ cx: dx, cy: dy });
+      if (door !== null && door.node === null && door.handle === belt.id) {
+        return belt;
       }
     }
     return null;
@@ -4587,8 +4620,11 @@ export function createGestureController(deps: GestureDeps): GestureController {
       // doorstep, so the press cell IS the seed cell at every zoom, by construction: the
       // lookup reads `cam.screenToCell`, the accessor the plain seed below and the walk
       // read. A press on a free Mechanical In's doorstep starts the REVERSED draw below
-      // (phase 89, D-02). A press anywhere else, including a belt's own last tile or a
-      // machine's own cell, falls through to the plain cell seed with no dock.
+      // (phase 89, D-02). A press on a free belt end's own last tile, while its ring is
+      // painted on the cell past it, seeds nothing and names the ring (`BeltEndTile`, below).
+      // A press anywhere else, a machine's own cell or any other occupied tile included, falls
+      // through to the plain cell seed with no dock: its preview is red and its release is sent,
+      // so the host refuses it in words.
       // The armed ring marks the committed source, concentric with its resting ring.
       //
       // Before 74.1 this was the nearest nub inside a hit disc (`nubsInRadius` over
@@ -4638,6 +4674,19 @@ export function createGestureController(deps: GestureDeps): GestureController {
         return;
       }
       const cell = cam.screenToCell(p.x, p.y);
+      // A PRESS ON A FREE BELT END'S OWN LAST TILE, while its ring is painted one cell further
+      // on ({@link ringedHeadTileAt}). The user meant the ring. Seeding here would draw from an
+      // occupied cell, and since every release with cells is sent, the host would refuse it as
+      // FootprintCollision. No command can be accepted from this press, so it forms none, the
+      // same rule the Wire tool's BeltOnlyPort press follows: the flash over the pressed tile
+      // says where, `onClientRefusal('BeltEndTile')` says to start from the ring, and nothing is
+      // seeded, so the drag draws no corridor and the release sends nothing. No host sentence
+      // can follow and replace the client's.
+      if (ringedHeadTileAt(cell) !== null) {
+        overlay.showRejectFlash({ cx: cell.cx, cy: cell.cy }, { w: 1, h: 1, rot: 0 });
+        deps.onClientRefusal?.('BeltEndTile');
+        return;
+      }
       drawnCells = [[cell.cx, cell.cy]];
       drawnFrom = p;
       beltPointer = cam.screenToWorld(p.x, p.y);

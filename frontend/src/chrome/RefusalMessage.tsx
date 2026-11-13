@@ -404,16 +404,18 @@ export const REFUSAL_COPY: Record<RefusalTag, string> = {
 };
 
 /**
- * The closed set of refusals the CLIENT words itself (plan 75-07, D-12; plan 89-09, D-14). Two
- * tags: `BeltOnlyPort` (a Wire-tool press on a belt-only port forms no command) and `DockNotSent`
- * (a follow-up Dock a drawn belt was owed was never sent, so no command exists to refuse).
+ * The closed set of refusals the CLIENT words itself (plan 75-07, D-12; plan 89-09, D-14). Three
+ * tags: `BeltOnlyPort` (a Wire-tool press on a belt-only port forms no command), `BeltEndTile` (a
+ * Belt-tool press on a free belt end's own last tile, whose ring is one cell further on, forms no
+ * command) and `DockNotSent` (a follow-up Dock a drawn belt was owed was never sent, so no command
+ * exists to refuse).
  *
  * Deliberately NOT a member of the host `RefusalTag` union. That union is the host's: every
  * member is a `CommandError` variant a verdict can carry, and `RefusalMessage.test.ts` pins
  * one table entry per host tag. A client tag in it would claim the host can say something it
  * cannot.
  */
-export type ClientRefusalTag = 'BeltOnlyPort' | 'DockNotSent';
+export type ClientRefusalTag = 'BeltOnlyPort' | 'BeltEndTile' | 'DockNotSent';
 
 /**
  * The sentences the client authors, for the one place plan 66-09's rule allows it: "emit
@@ -435,6 +437,14 @@ export type ClientRefusalTag = 'BeltOnlyPort' | 'DockNotSent';
  */
 export const CLIENT_REFUSAL_COPY: Record<ClientRefusalTag, string> = {
   BeltOnlyPort: 'That port takes belts, not wires.',
+  // A Belt-tool press on the last tile of a belt of two or more tiles whose Head carries no Head
+  // dock, while the ring for drawing on is painted on the cell past that Head. The user meant the
+  // ring; a press on the tile itself would seed a draw on an occupied cell that the host refuses
+  // as FootprintCollision, so the press seeds nothing and the client says where to start instead.
+  // 40 characters by `python3 len()`. ITS RECOVERY CLAUSE IS ALWAYS TRUE: `gestures.ts` fires it
+  // only when the press lookup resolves the cell past that Head to the same belt, which is
+  // exactly where the ring is painted, so the ring it names is on screen.
+  BeltEndTile: "Start from the ring past the belt's end.",
   // Phase 89, plan 89-09 (D-14, WINDOWS 254, UI-SPEC 6.4, A6, A7): a belt the user drew landed,
   // but a Dock it was owed was never sent (its target could not be named again after the board
   // changed, its DrawBelt's verdict was lost, or the accept named no belt). No command exists for

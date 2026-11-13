@@ -152,6 +152,9 @@ const ENTRIES = Object.entries(REFUSAL_COPY) as [RefusalTag, string][];
  */
 const CLIENT_COPY_CONTRACT: Record<ClientRefusalTag, string> = {
   BeltOnlyPort: 'That port takes belts, not wires.',
+  // A Belt-tool press on a free belt end's own last tile, transcribed from the owner's ruling
+  // of 2026-11-13: 40 characters by `python3 len()`.
+  BeltEndTile: "Start from the ring past the belt's end.",
   // Plan 89-09 (D-14), transcribed from 89-UI-SPEC's Copywriting Contract: 40 characters.
   DockNotSent: 'A belt you drew is missing a connection.',
 };
@@ -340,8 +343,8 @@ describe('REFUSAL_COPY - the closed, exhaustive refusal copy table (ERR-02)', ()
 });
 
 describe('CLIENT_REFUSAL_COPY - the closed client refusal table (plan 75-07, D-12)', () => {
-  it('holds exactly the D-12 tag and the 89-09 D-14 tag, and none of its keys is a host tag', () => {
-    expect(Object.keys(CLIENT_REFUSAL_COPY).sort(), 'the client table key set').toEqual(['BeltOnlyPort', 'DockNotSent']);
+  it('holds exactly the D-12 tag, the Belt-end-tile tag and the 89-09 D-14 tag, and none of its keys is a host tag', () => {
+    expect(Object.keys(CLIENT_REFUSAL_COPY).sort(), 'the client table key set').toEqual(['BeltEndTile', 'BeltOnlyPort', 'DockNotSent']);
     // The two unions share no member: a client tag inside the host table would claim the
     // host can say something it cannot, and App's shown-tag bookkeeping relies on it.
     for (const tag of Object.keys(CLIENT_REFUSAL_COPY)) {
@@ -364,6 +367,13 @@ describe('CLIENT_REFUSAL_COPY - the closed client refusal table (plan 75-07, D-1
     expect(CLIENT_REFUSAL_COPY.DockNotSent.length, 'inside the 50-character line budget').toBeLessThanOrEqual(WRAP_BUDGET_CHARS);
     // A6: no recovery clause, because connecting by hand is not always possible when the target is gone.
     expect(/connect it|try again|draw it again|reconnect/i.test(CLIENT_REFUSAL_COPY.DockNotSent), 'no recovery clause').toBe(false);
+  });
+
+  it("BeltEndTile is the ruling's sentence, 40 characters, inside the 50-character line", () => {
+    expect(CLIENT_REFUSAL_COPY.BeltEndTile, 'the BeltEndTile sentence').toBe("Start from the ring past the belt's end.");
+    // 40 by `python3 len()`, not read back from the module under test.
+    expect(CLIENT_REFUSAL_COPY.BeltEndTile.length, 'BeltEndTile is 40 characters').toBe(40);
+    expect(CLIENT_REFUSAL_COPY.BeltEndTile.length, 'inside the 50-character line budget').toBeLessThanOrEqual(WRAP_BUDGET_CHARS);
   });
 
   it('is in sentence case and carries no recovery clause', () => {
