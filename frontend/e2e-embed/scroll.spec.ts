@@ -29,15 +29,22 @@ import {
 //   region changes;
 // - each stage has the size it had before its board first loaded.
 //
-// Two of these boards go quiet for most of their run (order_processing after tick 256, the
-// arrival-order board after its two webhooks), and a quiet board draws the same picture every
-// frame, and the probe's belt region is the board's longest belt, which on the script-outcomes
-// board carries one item, on tick 60. So just before a row leaves, the test presses Restart on
-// each of its boards and waits 10 ticks: each board then leaves early in its run and comes back
-// with items still to move on that belt. Ten ticks past the boot tick also tells a board that
-// resumed apart from one that booted again. Each board also runs at 0.25x from its first mount,
-// so the 23 ticks the script-outcomes item spends on that belt last 1.5 s rather than 0.4 s. The
-// speed survives every unmount, which the test checks too.
+// The drawing check passes once a screenshot of the board's belt tiles differs from the first one.
+// The probe samples only the belt cells no machine draws over, which on a short belt is its middle
+// cell, and an item crosses a middle cell in about 7 ticks. On a slow page a screenshot takes about
+// a second, so on a board whose items come rarely no screenshot in a whole 10 s check may catch one.
+// So the bottom row's first board is the docking board, which has an item on a middle cell on 344
+// of the 354 ticks from its boot to its end on tick 360, moving one slot every 2 ticks, rather than
+// the script-outcomes board, whose belts go up to 78 ticks with nothing on them. And just before
+// each board's drawing check the test presses Restart on it, so the check starts at the beginning
+// of the board's motion however long the checks before it took: order_processing has nothing
+// moving after tick 256, and the arrival-order board nothing after tick 220.
+//
+// Just before a row leaves, the test presses Restart on each of its boards again and waits 10
+// ticks: each board then leaves early in its run and comes back with items still to move. Ten
+// ticks past the boot tick also tells a board that resumed apart from one that booted again. Each
+// board runs at 0.25x from its first mount, so an item stays on a middle cell for about 0.5 s
+// rather than 0.1 s. The speed survives every unmount, which the test checks too.
 
 const PAGE = pageUrl('scroll.html');
 const TOP = ['top-0', 'top-1', 'top-2'] as const;
@@ -229,7 +236,10 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
       expect(Math.abs(size.height - want.height), `${context}: ${slot} (${p.id}) stage height`).toBeLessThanOrEqual(0.5);
     }
 
+    // Restart each board right before its drawing check, so the check starts where its belts move.
+    // The tick and picture checks above are done, and leave() restarts again before the scroll.
     for (const slot of inView) {
+      await page.locator(sel(slot)).locator('button[data-control="restart"]').click();
       const p = await readProbeAt(page, sel(slot));
       await expectBoardDrawingAt(page, sel(slot), context, `${slot} (${p.id})`);
     }
