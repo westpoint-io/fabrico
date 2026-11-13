@@ -1569,15 +1569,14 @@ async function toolbarTickAfterFrames(page: Page, frames: number): Promise<numbe
 }
 
 /**
- * Two requests the board must turn away, made the first time through a request step whose step has a
- * paused stage. Pause from the toolbar, wait until the tick holds still (the app shows Paused a tick
- * before the host stops), POST and read 503 overloaded with the step held and the card on its paused
- * stage, ringing Play. Then a GET, which the router refuses with 405. Then Play through its ring, and
- * two tick rises so the host is playing again before the POST that finishes the step.
+ * Two requests the board must turn away, made in every request step before the POST that finishes it.
+ * Pause from the toolbar, wait until the tick holds still (the app shows Paused a tick before the host
+ * stops), POST and read 503 overloaded with the step held and the card on a paused stage, ringing Play.
+ * Then a GET, which the router refuses with 405. Then Play through its ring, and two tick rises so the
+ * host is playing again before the POST that finishes the step. The paused stage is the one the card
+ * shows, graded against the lesson data, so a step without one fails on the card and isn't skipped.
  */
 async function walkTurnedAway(page: Page, lesson: Lesson, state: WalkState, stepIndex: number, label: string, url: string): Promise<void> {
-  const paused = lesson.steps[stepIndex]?.stages.find((s) => s.when.is === 'paused');
-  if (paused === undefined) return;
   const sendStage = (await readProbe(page)).stageId;
   const toggle = page.getByRole('button', { name: /^(Play|Pause)$/ });
   await expect(toggle, `${label}: the board is playing before the walk pauses it`).toHaveAttribute('aria-label', 'Pause');
@@ -1606,11 +1605,14 @@ async function walkTurnedAway(page: Page, lesson: Lesson, state: WalkState, step
     .poll(
       async () => {
         probe = await readProbe(page);
-        return `${probe.card} index ${probe.stepIndex} stage ${probe.stageId ?? 'none'}`;
+        const shown = stageOf(lesson, probe.stepIndex, probe.stageId);
+        return `${probe.card} index ${probe.stepIndex} stage ${probe.stageId ?? 'none'} (when ${shown?.when.is ?? 'unknown'})`;
       },
-      { message: `${label}: the step stays on its paused stage after a request on a paused board`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
+      { message: `${label}: the step holds and the card shows a paused stage after a request on a paused board`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
     )
-    .toBe(`running index ${stepIndex} stage ${paused.id}`);
+    .toMatch(new RegExp(`^running index ${stepIndex} stage \\S+ \\(when paused\\)$`));
+  const paused = stageOf(lesson, stepIndex, probe.stageId);
+  if (paused === undefined) throw new Error(`${label}: the card's stage ${probe.stageId ?? 'none'} isn't in the lesson data`);
   console.log(`REQUEST-PAUSED ${lesson.id} status=${status} body=${body} stage=${probe.stageId ?? 'none'} tick=${held}`);
   expect(status, `${label}: a paused board turns the request away`).toBe(PAUSED_STATUS);
   expect(body, `${label}: with the host's overloaded body`).toBe(PAUSED_BODY);
