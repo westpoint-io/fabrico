@@ -7,7 +7,7 @@
 import type { ShortcutId } from '../input/shortcuts';
 import type { MachineConfig } from '../protocol/decode';
 
-export type LessonId = 'your-first-line' | 'delete-and-undo' | 'a-factory-with-two-outputs' | 'answer-a-web-request';
+export type LessonId = 'your-first-line' | 'belts-that-join' | 'delete-and-undo' | 'a-factory-with-two-outputs' | 'answer-a-web-request';
 /**
  * A prepared board a lesson starts on, by the exact id the host's lesson board list parses. The id lives
  * here and not in the transport, because the purity gate keeps every transport import out of this folder;

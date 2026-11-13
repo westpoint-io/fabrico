@@ -37,7 +37,8 @@ export interface LessonWalk {
   reverseDrags?: boolean;
   /**
    * Where the refused press lands, in screen pixels: from the centre of the bound machine's whole
-   * footprint for a press on a machine, or from the port's dot for a press on a port. Left out, the press
+   * footprint for a press on a machine, from the port's dot for a press on a port, or from the centre of
+   * the line's last tile for a press on a line's end. Left out, the press
    * uses `pressOffset`. A 3 by 3 machine needs a bigger offset than a 1 by 1 one for the press to land off
    * its centre cell; a port press stays within half the Wire tool's 22 px reach of the dot.
    */
@@ -51,6 +52,17 @@ export const LESSON_WALKS: Record<LessonId, LessonWalk> = {
     dragFrom: { dx: 3, dy: -2 },
     dragTo: { dx: -2, dy: 3 },
     refusedCardNote: "That cell is taken, so the Sink wasn't placed. Click a free cell, like the one in the ring.",
+  },
+  'belts-that-join': {
+    pressOffset: { dx: -5, dy: 3 },
+    floorOffset: { dx: 3, dy: -5 },
+    // From the ring cell's centre down into the Sink's input disc, both inside the 28 px disc's reach.
+    dragFrom: { dx: 4, dy: 5 },
+    dragTo: { dx: -3, dy: 4 },
+    refusedCardNote: "The ring is one cell past the Belt's last tile. Press there and drag down to the Sink.",
+    // From the stub's Head tile centre, 6.4 px away at zoom 1: on that tile, and 25 px or more from the
+    // ring cell past it, so the press can't start the carry-on draw instead.
+    refusedOffset: { dx: 5, dy: -4 },
   },
   'delete-and-undo': {
     pressOffset: { dx: -4, dy: 5 },

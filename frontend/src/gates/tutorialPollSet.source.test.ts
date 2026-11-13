@@ -69,7 +69,7 @@ describe('TutorialLayer polls the set boundMachineHandles names', () => {
       "boundMachineHandles(s.bindings).join(',')",
       "Object.values(s.bindings).map((b) => b.id).join(',')",
     ],
-    ['the import dropped', "import { boundMachineHandles } from '../../tutorial/check';", ''],
+    ['the import dropped', "import { boundMachineHandles, lineDoorstep } from '../../tutorial/check';", "import { lineDoorstep } from '../../tutorial/check';"],
     ['the poll reading another set', 'const boundIds = boundMachineIds(state);', "const boundIds = '1,2';"],
     ['the poll asking about extra ids', 'ids.map(ask)', '[...ids, 0].map(ask)'],
     [

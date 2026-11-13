@@ -350,7 +350,7 @@ describe('every lesson has a walk', () => {
     });
 
     it('a file under lessons/ that index.ts imports and leaves out of LESSONS', () => {
-      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST]', '[DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST]');
+      const indexSource = REAL.indexSource.replace('[YOUR_FIRST_LINE, BELTS_THAT_JOIN, DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST]', '[BELTS_THAT_JOIN, DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST]');
       expect(indexSource, 'the substitution landed').not.toBe(REAL.indexSource);
       expect(audit({ indexSource })).toMatch(/yourFirstLine\.ts: lessons\/index\.ts imports this file and leaves it out/);
     });

@@ -6,7 +6,7 @@ import type { HintRect, TutorialProbe } from '../../src/chrome/tutorial/Tutorial
 import { SHORTCUTS, type ShortcutId } from '../../src/input/shortcuts';
 import { MEDIUM_ELECTRICAL, NUB_RING_R, NUB_RING_STROKE, PORT_ROLE, doorstepCell, nubAnchor } from '../../src/protocol/ports';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
-import { BELT_ENDS, beltJoining, lineDoorstep, nodeKey, watchedNames } from '../../src/tutorial/check';
+import { BELT_ENDS, beltJoining, lineDoorstep, lineEndTile, nodeKey, watchedNames } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { BindingName, Lesson, Stage, Step } from '../../src/tutorial/types';
 import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
@@ -734,40 +734,55 @@ export async function expectDotsRideBelt(page: Page, ctx: { label: string; sinks
     const [sinkX, sinkY] = pair.sink.cells[0] as readonly [number, number];
     await expectOnTheBoard(page, label, `the ${pair.sinkName} the user is told to watch is`, [await screenCellCentre(page, sinkX, sinkY)]);
   }
-  // Each belt on one row, and a control row with nothing on it across all of their columns, read from the
-  // model first. Ink there means the read is counting something that isn't a dot.
-  for (const pair of pairs) {
-    const rows = new Set(pair.tiles.map(([, y]) => y));
-    expect(rows.size, `${label}: the walk reads a belt on one row, and the ${pair.beltName} sits on ${rows.size}`).toBe(1);
-  }
-  const allXs = pairs.flatMap((p) => p.tiles.map(([x]) => x));
-  const columns = [Math.min(...allXs), Math.max(...allXs)] as const;
-  const control = controlRow(scene, pairs.map((p) => p.lastTile[1]), columns);
-  if (control === null) throw new Error(`${label}: no row near the watched belts is empty across columns ${columns[0]} to ${columns[1]}, so there is no control strip`);
+  // Each belt on one row, or each on one column, and a control strip beside them with nothing on it across
+  // their whole span, read from the model first. Ink there means the read is counting something that isn't
+  // a dot. A column is read as a row with x and y swapped, so both use one rule.
+  const flat = pairs.map((p) => ({ rows: new Set(p.tiles.map(([, y]) => y)).size, columns: new Set(p.tiles.map(([x]) => x)).size }));
+  const upright = flat.every((f) => f.columns === 1 && f.rows > 1);
+  pairs.forEach((pair, i) => {
+    const f = flat[i]!;
+    expect(
+      upright ? f.columns : f.rows,
+      `${label}: the walk reads every watched belt on one row, or every one on one column, and the ${pair.beltName} sits on ${f.rows} rows and ${f.columns} columns`,
+    ).toBe(1);
+  });
+  /** A cell as the read sees it: (along the belt, across it). */
+  const lay = (c: readonly [number, number]): readonly [number, number] => (upright ? [c[1], c[0]] : c);
+  const laidScene = upright
+    ? {
+        nodes: scene.nodes.map((n) => ({ cells: n.cells.map((c) => [c[1] as number, c[0] as number] as const) })),
+        belts: scene.belts.map((b) => ({ tiles: b.tiles.map((t) => ({ cell_x: t.cell_y, cell_y: t.cell_x })) })),
+      }
+    : scene;
+  const allAlong = pairs.flatMap((p) => p.tiles.map((t) => lay(t)[0]));
+  const span = [Math.min(...allAlong), Math.max(...allAlong)] as const;
+  const control = controlRow(laidScene, pairs.map((p) => lay(p.lastTile)[1]), span);
+  const strips = upright ? 'column' : 'row';
+  if (control === null) throw new Error(`${label}: no ${strips} near the watched belts is empty across ${span[0]} to ${span[1]}, so there is no control strip`);
 
   for (const pair of pairs) {
     const what = `${label} ${pair.beltName}`;
     await expectDotsOnOneBelt(page, what, pair);
     const cam = await cameraOf(page);
     const size = CELL * cam.scale;
-    const xs = pair.tiles.map(([x]) => x);
-    const rowClip = (y: number) => ({
-      x: Math.min(...xs) * size + cam.x,
-      y: y * size + cam.y,
-      width: (Math.max(...xs) - Math.min(...xs) + 1) * size,
-      height: size,
-    });
-    const strip = { x: columns[0] * size + cam.x, y: control * size + cam.y, width: (columns[1] - columns[0] + 1) * size, height: size };
+    /** The screen rect of cells `from` to `to` along, on line `across`, laid back the way the board has them. */
+    const clipOf = (across: number, from: number, to: number) =>
+      upright
+        ? { x: across * size + cam.x, y: from * size + cam.y, width: size, height: (to - from + 1) * size }
+        : { x: from * size + cam.x, y: across * size + cam.y, width: (to - from + 1) * size, height: size };
+    const along = pair.tiles.map((t) => lay(t)[0]);
+    const lineClip = clipOf(lay(pair.lastTile)[1], Math.min(...along), Math.max(...along));
+    const strip = clipOf(control, span[0], span[1]);
     await expect
       .poll(
         async () => {
           const below = await dotInkIn(page, strip);
-          expect(below.ink, `${what}: the control row ${control}, empty on the board, holds no dot ink`).toBe(0);
-          const row = await dotInkIn(page, rowClip(pair.lastTile[1]));
-          return row.ink >= DOT_INK_MIN * row.dpr * row.dpr ? 'ink' : `${row.ink} ink pixels on the ${pair.beltName}'s row`;
+          expect(below.ink, `${what}: the control ${strips} ${control}, empty on the board, holds no dot ink`).toBe(0);
+          const row = await dotInkIn(page, lineClip);
+          return row.ink >= DOT_INK_MIN * row.dpr * row.dpr ? 'ink' : `${row.ink} ink pixels on the ${pair.beltName}'s ${strips}`;
         },
         {
-          message: `${what}: a capture of the ${pair.beltName}'s row holds dot ink`,
+          message: `${what}: a capture of the ${pair.beltName}'s ${strips} holds dot ink`,
           timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), `the dots read on the ${pair.beltName}: ink in a capture`),
         },
       )
@@ -1011,30 +1026,38 @@ function checkRefusalReached(lesson: Lesson, state: WalkState, stepIndex: number
 async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepIndex: number): Promise<boolean> {
   const { atStage, press, tag } = lesson.refused;
   const label = refusalLabel(lesson, stepIndex);
-  // No shipped lesson presses a line's end yet. The press that finds its tile through `lineEndTile`
-  // comes with the first lesson that uses it, and until then a lesson naming it fails here by name.
-  if (press.on === 'lineEnd') throw new Error(`${label}: the walk has no press on the end of the line from ${press.from} yet`);
   const probe = await probeAtStage(page, stepIndex, atStage);
   if (probe === null) return false;
   const sentenceWanted = REFUSED_SENTENCES[tag];
   if (sentenceWanted === undefined) throw new Error(`${label}: the walk holds no band sentence for the tag ${tag}`);
   const lengthBefore = (await readRecord(page)).length;
   const before = await readScene(page);
-  const boundId = probe.bound[press.of];
+  const pressed = press.on === 'lineEnd' ? press.from : press.of;
+  const boundId = probe.bound[pressed];
   const node = before.nodes.find((n) => n.id === boundId);
   const cells = node?.cells;
   if (node === undefined || cells === undefined || cells.length === 0) {
-    throw new Error(`${label}: the bound ${press.of} (${String(boundId)}) isn't on the board`);
+    throw new Error(`${label}: the bound ${pressed} (${String(boundId)}) isn't on the board`);
   }
   const cam = await cameraOf(page);
   const size = CELL * cam.scale;
   const offset = fromOffset(state.walk.refusedOffset ?? state.walk.pressOffset);
   let point: { x: number; y: number };
   // The cell the app flashes. A press on a machine flashes the cell under the press; a press on a port
-  // flashes the port's own cell, wherever in the hit circle the press landed.
+  // flashes the port's own cell, wherever in the hit circle the press landed; a press on a line's end
+  // flashes that end tile.
   let cx: number;
   let cy: number;
-  if (press.on === 'port') {
+  if (press.on === 'lineEnd') {
+    // The belt isn't bound until the join, so the tile is found through the line leaving the machine,
+    // the same helper the lesson's own refused press names.
+    const end = lineEndTile(before, node.id);
+    if (end === undefined) throw new Error(`${label}: no line leaves the bound ${press.from}, so there is no end tile to press`);
+    cx = end.tile.cell_x;
+    cy = end.tile.cell_y;
+    point = { x: (cx + 0.5) * size + cam.x + offset.x, y: (cy + 0.5) * size + cam.y + offset.y };
+    console.log(`REFUSAL-PRESS ${label}: (${offset.x},${offset.y}) px from the centre of belt ${end.belt.id}'s end tile (${cx},${cy}), the line from the ${press.from}`);
+  } else if (press.on === 'port') {
     const port = node.ports.find((p) => p.role === PORT_ROLE.FAULT);
     if (port === undefined) throw new Error(`${label}: the bound ${press.of} has no Fault port to press`);
     const dot = nubAnchor(port.cell_x, port.cell_y, port.side);
@@ -1101,7 +1124,8 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   await page.waitForTimeout(addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES * 2), `${label}: the second-flash window`));
   const flashes = await rejectFlashCellsSeen(page);
   await stopRejectFlashLatch(page);
-  expect(flashes, `${label}: one flash, on the ${press.on === 'port' ? 'pressed port\'s own cell' : 'cell under the press'} of the bound ${press.of}`).toEqual([{ cx, cy }]);
+  const flashed = press.on === 'lineEnd' ? `end tile of the line from the bound ${press.from}` : press.on === 'port' ? `pressed port's own cell of the bound ${press.of}` : `cell under the press of the bound ${press.of}`;
+  expect(flashes, `${label}: one flash, on the ${flashed}`).toEqual([{ cx, cy }]);
 
   const after = await readProbe(page);
   expect(after.stepIndex, `${label}: the refusal moved the step on`).toBe(stepIndex);
@@ -1110,6 +1134,7 @@ async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepInd
   const afterScene = await readScene(page);
   expect(afterScene.nodes.length, `${label}: the refused press placed a machine`).toBe(before.nodes.length);
   expect(afterScene.wires.length, `${label}: the refused press laid a wire`).toBe(before.wires.length);
+  expect(afterScene.belts.length, `${label}: the refused press drew or took away a belt`).toBe(before.belts.length);
   return true;
 }
 
@@ -1326,8 +1351,10 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   // Steps 3 and 5 change no board cell, so no byte compare can grade them. What a person sees is the
   // pressed segment and the clock still moving, so that's what these read.
   if (step.done.is === 'triggerApplied' || step.done.is === 'tickRose') {
-    if (!state.undone) {
-      const asked = lesson.steps.flatMap((s) => (s.done.is === 'triggerApplied' ? [s.done.trigger] : []));
+    const asked = lesson.steps.flatMap((s) => (s.done.is === 'triggerApplied' ? [s.done.trigger] : []));
+    // A lesson on a prepared board has no trigger step: its Source comes with a Timer and the user never
+    // selects it, so no inspector is open to read, and only the clock says the play step worked.
+    if (!state.undone && (step.done.is === 'triggerApplied' || asked.length > 0)) {
       const pressed = await page
         .locator('[role="group"][aria-label="Trigger"] button[aria-pressed="true"]')
         .textContent({ timeout: frameBudgetMs(MOVE_ON_FRAMES) });

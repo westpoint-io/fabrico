@@ -301,8 +301,8 @@ test.describe('Progress after a close and reopen', () => {
   });
 });
 
-// The list holds every lesson in teaching order (UI-SPEC "Lessons panel with four rows"). The accent goes
-// on the first row that isn't Done, so a user who finished lesson 1 sees the blue Start on the next lesson.
+// The list holds every lesson in teaching order. The accent goes on the first row that isn't Done, so a
+// user who finished lesson 1 sees the blue Start on the next lesson.
 interface ListRow {
   id: string;
   title: string;
@@ -326,22 +326,22 @@ async function readRows(page: Page): Promise<ListRow[]> {
   );
 }
 
-test.describe('Four lessons in the list', () => {
+test.describe('Five lessons in the list', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  const TITLES = ['Your first line', 'Delete and Undo', 'A Factory with two outputs', 'Answer a web request'];
+  const TITLES = ['Your first line', 'Belts that join', 'Delete and Undo', 'A Factory with two outputs', 'Answer a web request'];
 
   test('the lessons ship in teaching order', () => {
     expect(LESSONS.map((l) => l.title)).toEqual(TITLES);
   });
 
-  test('with no saved progress all four read Not started with Start, and the accent is on the first', async ({ page }) => {
+  test('with no saved progress all five read Not started with Start, and the accent is on the first', async ({ page }) => {
     await boot(page);
     expect(await stored(page), 'nothing saved').toBeNull();
     await openLessons(page);
     const rows = await readRows(page);
     console.log(`MEASURE list-rows empty ${JSON.stringify(rows)}`);
-    expect(rows.map((r) => r.title), 'four rows in teaching order, titles read from the DOM').toEqual(TITLES);
+    expect(rows.map((r) => r.title), 'five rows in teaching order, titles read from the DOM').toEqual(TITLES);
     expect(rows.map((r) => r.id)).toEqual(LESSONS.map((l) => l.id));
     for (const row of rows) {
       expect(row.status, row.title).toBe('Not started');
@@ -350,30 +350,30 @@ test.describe('Four lessons in the list', () => {
     expect(rows.flatMap((r) => r.accent), 'the accent on one button, the first row').toEqual(['Start Your first line']);
   });
 
-  test('with lesson 1 Done, the accent is Start Delete and Undo and on no other button', async ({ page }) => {
+  test('with lesson 1 Done, the accent is Start Belts that join and on no other button', async ({ page }) => {
     await seed(page, DONE_VALUE);
     await boot(page);
     await openLessons(page);
     const rows = await readRows(page);
     console.log(`MEASURE list-rows lesson1-done ${JSON.stringify(rows)}`);
-    expect(rows.map((r) => r.title), 'four rows in teaching order, titles read from the DOM').toEqual(TITLES);
-    expect(rows.map((r) => r.status)).toEqual(['Done', 'Not started', 'Not started', 'Not started']);
-    expect(rows.map((r) => r.buttons)).toEqual([['Restart Your first line'], ['Start Delete and Undo'], ['Start A Factory with two outputs'], ['Start Answer a web request']]);
-    expect(rows.flatMap((r) => r.accent), 'the accent on the next lesson only').toEqual(['Start Delete and Undo']);
-    const named = page.locator(PANEL).getByRole('button', { name: 'Start Delete and Undo', exact: true });
+    expect(rows.map((r) => r.title), 'five rows in teaching order, titles read from the DOM').toEqual(TITLES);
+    expect(rows.map((r) => r.status)).toEqual(['Done', 'Not started', 'Not started', 'Not started', 'Not started']);
+    expect(rows.map((r) => r.buttons)).toEqual([['Restart Your first line'], ['Start Belts that join'], ['Start Delete and Undo'], ['Start A Factory with two outputs'], ['Start Answer a web request']]);
+    expect(rows.flatMap((r) => r.accent), 'the accent on the next lesson only').toEqual(['Start Belts that join']);
+    const named = page.locator(PANEL).getByRole('button', { name: 'Start Belts that join', exact: true });
     await expect(named, 'the accessible name reaches the button').toHaveClass(/\bfab-cta\b/);
     await expect(page.locator(`${PANEL} .fab-cta`)).toHaveCount(1);
   });
 
-  test('with lessons 1, 3 and 4 Done, the accent is Start Answer a web request and on no other button', async ({ page }) => {
-    const done = { 'your-first-line': 'done', 'delete-and-undo': 'done', 'a-factory-with-two-outputs': 'done' };
+  test('with lessons 1 to 4 Done, the accent is Start Answer a web request and on no other button', async ({ page }) => {
+    const done = { 'your-first-line': 'done', 'belts-that-join': 'done', 'delete-and-undo': 'done', 'a-factory-with-two-outputs': 'done' };
     await seed(page, JSON.stringify({ version: 1, lessons: done }));
     await boot(page);
     await openLessons(page);
     const rows = await readRows(page);
-    console.log(`MEASURE list-rows lessons-1-3-4-done ${JSON.stringify(rows)}`);
-    expect(rows.map((r) => r.title), 'four rows in teaching order, titles read from the DOM').toEqual(TITLES);
-    expect(rows.map((r) => r.status)).toEqual(['Done', 'Done', 'Done', 'Not started']);
+    console.log(`MEASURE list-rows lessons-1-to-4-done ${JSON.stringify(rows)}`);
+    expect(rows.map((r) => r.title), 'five rows in teaching order, titles read from the DOM').toEqual(TITLES);
+    expect(rows.map((r) => r.status)).toEqual(['Done', 'Done', 'Done', 'Done', 'Not started']);
     expect(rows.flatMap((r) => r.accent), 'the accent on lesson 5 only').toEqual(['Start Answer a web request']);
     const named = page.locator(PANEL).getByRole('button', { name: 'Start Answer a web request', exact: true });
     await expect(named, 'the accessible name reaches the button').toHaveClass(/\bfab-cta\b/);

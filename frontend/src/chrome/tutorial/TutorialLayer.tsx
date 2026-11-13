@@ -9,7 +9,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, ty
 import { MIN_ZOOM } from '../../render/camera';
 import type { SceneHandle } from '../../render/pixiApp';
 import { sceneSnapshot } from '../../render/sceneState';
-import { boundMachineHandles } from '../../tutorial/check';
+import { CELL } from '../../../shared/geometry';
+import { boundMachineHandles, lineDoorstep } from '../../tutorial/check';
 import { LESSONS } from '../../tutorial/lessons';
 import { IDLE, currentStage, noteTokens, reduce, rowViews, stageKey, viewKey, type Card, type RowAction, type TutorialEvent, type TutorialState } from '../../tutorial/machine';
 import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
@@ -225,6 +226,32 @@ function readFreeArea(): ChromeFacts['view']['freeArea'] {
     top: FREE_AREA_TOP_PX,
     bottom: Math.min(card === null ? window.innerHeight : card.getBoundingClientRect().top, legendTop),
   };
+}
+
+/**
+ * The world box a prepared board is framed on when its lesson starts: the declared machines' footprints,
+ * every belt tile, and the cell past each line's free end, which the app rings while the Belt tool is
+ * armed and where the lesson's drag starts. Null when the lesson has no board, or nothing to frame.
+ */
+function preparedBoardBox(s: TutorialState, board: BoardFacts): { x: number; y: number; w: number; h: number } | null {
+  const lesson = LESSONS.find((l) => l.id === s.lessonId);
+  if (lesson?.board === undefined) return null;
+  const cells: Array<readonly [number, number]> = [];
+  for (const { bind } of lesson.board.machines) {
+    const id = s.bindings[bind]?.id;
+    const node = board.nodes.find((n) => n.id === id);
+    if (node === undefined) continue;
+    for (const c of node.cells) cells.push([c[0] as number, c[1] as number]);
+    const ring = lineDoorstep(board, node.id);
+    if (ring !== null) cells.push(ring);
+  }
+  for (const belt of board.belts) for (const t of belt.tiles) cells.push([t.cell_x, t.cell_y]);
+  if (cells.length === 0) return null;
+  const xs = cells.map((c) => c[0]);
+  const ys = cells.map((c) => c[1]);
+  const x = Math.min(...xs) * CELL;
+  const y = Math.min(...ys) * CELL;
+  return { x, y, w: (Math.max(...xs) + 1) * CELL - x, h: (Math.max(...ys) + 1) * CELL - y };
 }
 
 /** The gap between the card's right edge and the open inspector's left edge. */
@@ -646,6 +673,15 @@ export function TutorialLayer({
         }
         const next = reduce(stateRef.current, { type: 'frame', board, chrome }, LESSONS);
         factsRef.current = { board, chrome };
+        // A prepared board is framed once, on the pass its lesson leaves starting, which only a Start or
+        // a Restart leads to. The App's fit for the load ran when the board's keyframe arrived, before
+        // this pass, and it fits the whole window under no card at whatever zoom that takes; every ring
+        // and walk offset is sized at zoom 1, so this puts the board in the free area at zoom 1. One
+        // camera write, and nothing goes to the host.
+        if (stateRef.current.card === 'starting' && next.card === 'running') {
+          const box = preparedBoardBox(next, board);
+          if (box !== null) moveCamera(handle, frameTarget(box, readFreeArea(), { ...camera, scale: 1 }, MIN_ZOOM));
+        }
         if (next.card === 'finished' && stateRef.current.card !== 'finished' && next.lessonId !== null) {
           progress.write(withLessonDone(progress.read(), next.lessonId));
         }

@@ -6,8 +6,9 @@
 
 import type { Lesson } from '../types';
 import { ANSWER_A_WEB_REQUEST } from './answerAWebRequest';
+import { BELTS_THAT_JOIN } from './beltsThatJoin';
 import { DELETE_AND_UNDO } from './deleteAndUndo';
 import { TWO_OUTPUTS } from './twoOutputs';
 import { YOUR_FIRST_LINE } from './yourFirstLine';
 
-export const LESSONS: readonly Lesson[] = [YOUR_FIRST_LINE, DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST];
+export const LESSONS: readonly Lesson[] = [YOUR_FIRST_LINE, BELTS_THAT_JOIN, DELETE_AND_UNDO, TWO_OUTPUTS, ANSWER_A_WEB_REQUEST];
