@@ -22,12 +22,13 @@ import { DRIVABLE_GESTURES, LESSON_WALKS, REFUSED_SENTENCES } from '../../e2e-li
 import { ROUTE_URL_LABEL, WIRE_TOOL_LABEL } from '../chrome/controlLabels.ts';
 import { ADD_OUTPUT_LABEL } from '../chrome/PortsSection.tsx';
 import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../chrome/RefusalMessage.tsx';
-import { COPY_LABELS } from '../chrome/WebhookUrlRow.tsx';
+import { COPY_LABELS, URL_NOT_READY_TEXT } from '../chrome/WebhookUrlRow.tsx';
 import { SHORTCUTS } from '../input/shortcuts.ts';
 import { LESSONS } from '../tutorial/lessons/index.ts';
-import { ANSWER_A_WEB_REQUEST, COPY_WORD, ROUTE_URL_WORDS, WIRE_WORDS } from '../tutorial/lessons/answerAWebRequest.ts';
+import { ANSWER_A_WEB_REQUEST, COPY_WORD, ROUTE_URL_WORDS, URL_NOT_READY_WORDS, WIRE_WORDS } from '../tutorial/lessons/answerAWebRequest.ts';
 import { ADD_OUTPUT_WORDS } from '../tutorial/lessons/twoOutputs.ts';
-import { MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
+import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
+import { PORT_ZERO_WORDS, acceptRouteUrl } from '../tutorial/request.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
 import { stripComments } from './walkSpecSource';
 
@@ -291,6 +292,17 @@ describe('every lesson has a walk', () => {
   it("holds lesson 5's typed POST URL to the URL row's label", () => {
     expect(ROUTE_URL_WORDS).toBe(ROUTE_URL_LABEL);
     expect(wordsOf(ANSWER_A_WEB_REQUEST, 'answer', 'select-route'), 'the select stage says the row it points to').toContain(ROUTE_URL_LABEL);
+  });
+
+  // The waiting stage covers two screens: the row's not-ready words, and a port 0 URL the card refuses.
+  // Its restart advice names what the row shows in each, so a user looking at either finds it on the card.
+  it("holds lesson 5's waiting stage to the words the POST URL row shows when the card can't use it", () => {
+    expect(URL_NOT_READY_WORDS).toBe(URL_NOT_READY_TEXT);
+    const words = wordsOf(ANSWER_A_WEB_REQUEST, 'answer', 'url-pending');
+    expect(words, 'the waiting stage names the row\'s not-ready words').toContain(URL_NOT_READY_TEXT);
+    expect(words, 'the waiting stage names what a port 0 URL shows').toContain(PORT_ZERO_WORDS);
+    expect(acceptRouteUrl(`http://${PORT_ZERO_WORDS}/endpoint/route-1`), 'the card refuses the URL those words come from').toBeNull();
+    expect(words.length, 'and fits one instruction').toBeLessThanOrEqual(MAX_INSTRUCTION_CHARS);
   });
 
   it("holds lesson 5's typed Wire to the palette's Wire tool word", () => {

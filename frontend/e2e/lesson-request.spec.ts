@@ -2,7 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { ANSWER_A_WEB_REQUEST } from '../src/tutorial/lessons/answerAWebRequest';
 import { phrasePlain } from '../src/tutorial/phrase';
 import { wireNubHitRadiusWorld } from '../src/protocol/ports';
-import { COPY_LABELS } from '../src/chrome/WebhookUrlRow';
+import { COPY_LABELS, URL_NOT_READY_TEXT } from '../src/chrome/WebhookUrlRow';
+import { PORT_ZERO_WORDS } from '../src/tutorial/request';
 import { CMD, buildPacket, type Harness } from './support/wire';
 import {
   CARD,
@@ -176,9 +177,12 @@ test.describe('Answer a web request on a mock host', () => {
     await expect(card.getByRole('heading', { name: 'Lesson done' })).toBeVisible();
   });
 
-  for (const [what, answer, row] of [
-    ['the host has no bound URL, so the row reads Webhook not ready', null, 'Webhook not ready'],
-    ['the host answers a port 0 URL, which a failed bind leaves', 'http://127.0.0.1:0/endpoint/route-1', 'http://127.0.0.1:0/endpoint/route-1'],
+  // Each screen asserts the words the card gives for it: the row's own not-ready text, or the host and
+  // port the row prints at the front of a port 0 URL. Both come from the constants the row and the
+  // request reader use, so a rename of either reaches this spec.
+  for (const [what, answer, row, cardWords] of [
+    ['the host has no bound URL, so the row reads Webhook not ready', null, URL_NOT_READY_TEXT, URL_NOT_READY_TEXT],
+    ['the host answers a port 0 URL, which a failed bind leaves', `http://${PORT_ZERO_WORDS}/endpoint/route-1`, `http://${PORT_ZERO_WORDS}/endpoint/route-1`, PORT_ZERO_WORDS],
   ] as const) {
     test(`stays on the waiting stage with its next action when ${what}`, async ({ page }) => {
       const { h } = await toAnswerStep(page, requestHost(answer));
@@ -190,9 +194,8 @@ test.describe('Answer a web request on a mock host', () => {
       await expectAt(page, STEP.answer, STAGE.urlPending, 'with no URL the card can use, it waits for one');
       await staysOn(page, STAGE.urlPending, 2000, what);
       const card = page.locator(CARD);
-      await expect(card, 'the waiting stage tells the user to restart Fabrico if the webhook stays not ready').toContainText(
-        "If the panel says the webhook isn't ready, restart Fabrico.",
-      );
+      await expect(card, 'the waiting stage names what the row shows on this screen').toContainText(cardWords);
+      await expect(card, 'and says to restart Fabrico').toContainText('restart Fabrico');
       await expect(card).toContainText(wordsOf(STEP.answer, STAGE.urlPending));
       await expect(page.locator(`${CARD} [data-fab-request-line]`), 'no request line without a URL in the endpoint shape').toHaveCount(0);
       expect(sentCount(h, CMD.DrawWire), 'the waiting stage sent nothing').toBe(1);

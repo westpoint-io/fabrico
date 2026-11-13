@@ -20,6 +20,13 @@ export function curlWordFor(userAgent: string): CurlWord {
  */
 export const ROUTE_URL_SHAPE = /^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}\/endpoint\/[A-Za-z0-9._~/-]+$/;
 
+/**
+ * What the row shows for a failed bind: the host and its port 0, at the front of the URL the row prints
+ * (`http://127.0.0.1:0/endpoint/...`). `acceptRouteUrl` refuses that URL, so lesson 5's waiting stage
+ * names these words for the user to look for.
+ */
+export const PORT_ZERO_WORDS = '127.0.0.1:0';
+
 /** The highest TCP port. The shape allows five digits, so a port above this is refused here. */
 const MAX_PORT = 65535;
 

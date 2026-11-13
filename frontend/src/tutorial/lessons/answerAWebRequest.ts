@@ -8,6 +8,7 @@
 // Copy, POST URL and Wire are typed, each pinned to its control's constant by `lessonCoverage.source.test.ts`.
 
 import { BOARD_PAUSED, HANDLER_KIND, PLACE_BY_TOP_LEFT, PLACE_ON_THE_FLOOR, ROUTE_KIND, TOOL_DOWN } from '../commonStages';
+import { PORT_ZERO_WORDS } from '../request';
 import type { Lesson } from '../types';
 
 /**
@@ -27,6 +28,12 @@ export const ROUTE_URL_WORDS = 'POST URL';
  * `WIRE_TOOL_LABEL` in `controlLabels.ts`.
  */
 export const WIRE_WORDS = 'Wire';
+
+/**
+ * What the POST URL row reads with no bound URL, typed for the same reason. `lessonCoverage.source.test.ts`
+ * pins it to `URL_NOT_READY_TEXT` in `WebhookUrlRow.tsx`.
+ */
+export const URL_NOT_READY_WORDS = 'Webhook not ready';
 
 export const ANSWER_A_WEB_REQUEST: Lesson = {
   id: 'answer-a-web-request',
@@ -133,7 +140,9 @@ export const ANSWER_A_WEB_REQUEST: Lesson = {
           when: { is: 'urlNotRead', of: 'route' },
           hint: null,
           gesture: { do: 'none' },
-          text: ['Waiting for the ' + ROUTE_URL_WORDS + " to show in the panel. If the panel says the webhook isn't ready, restart Fabrico."],
+          // Two screens land here: the row's not-ready words, and a port 0 URL from a failed bind, which
+          // the card refuses. The advice names what the row shows in each.
+          text: ['Waiting for the ' + ROUTE_URL_WORDS + ' to show in the panel. If it says ' + URL_NOT_READY_WORDS + ' or shows ' + PORT_ZERO_WORDS + ', restart Fabrico.'],
         },
         {
           id: 'send-request',

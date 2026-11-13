@@ -59,6 +59,10 @@ export const COPY_LABELS: Record<CopyState, string> = {
  *  make the URL slot beside it jump. Deriving it is the whole point: a future
  *  copy change moves the reservation with it instead of silently reintroducing
  *  the layout shift the maintainer ruled out. */
+/** What the value well reads when no bound URL is available. Lesson 5's waiting stage names it, and
+ *  `lessonCoverage.source.test.ts` pins the lesson's typed copy to this constant. */
+export const URL_NOT_READY_TEXT = 'Webhook not ready';
+
 export const COPY_LABEL_MAX_CH = Math.max(...Object.values(COPY_LABELS).map((l) => l.length));
 
 export interface WebhookUrlRowViewProps {
@@ -108,7 +112,7 @@ export function WebhookUrlRowView({ url, copyState, onCopy, label = 'Webhook URL
               filter: 'saturate(0) brightness(0.8)',
             }}
           >
-            Webhook not ready
+            {URL_NOT_READY_TEXT}
           </span>
         )}
         {/*
