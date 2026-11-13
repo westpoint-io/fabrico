@@ -268,8 +268,11 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  *
  * 57 -> 58 with controlLabels.ts, the POST URL and Wire labels the inspector, the palette and the
  * tutorial read: one more plain addition.
+ *
+ * 58 -> 59 with routeUrlRead.ts, the tutorial's pure read of the Route URL off the POST URL row's
+ * text: one more plain addition.
  */
-const EXPECTED_CHROME_SOURCE_FILES = 58;
+const EXPECTED_CHROME_SOURCE_FILES = 59;
 
 describe('the bit-matrix icon idiom is GONE from frontend/src/chrome, not dormant', () => {
   const files = chromeSourceFiles();
