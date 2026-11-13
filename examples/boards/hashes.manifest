@@ -35,4 +35,5 @@ examples/boards/docs/rules-machine-states.board.ron 260 44124ce6ae6fd32adf0e0295
 examples/boards/docs/rules-ports.board.ron 240 da2e3fce9b232146abecc1046ef67d7366ab7668b913d7a8a58629ba86a9ada8
 examples/boards/docs/rules-undo-redo.board.ron 380 56a5d3bfa169b4cb8dc202d4e78c1a1e919d07a35ee81653cdd799ddfa46621b
 examples/boards/docs/script-outcomes.board.ron 1000 36c72035162febc3f5b1a9e2dd850a1bc386e34bcb5c0a9f7d1f6b1427dc20ef
+examples/boards/lessons/belts-that-join.board.ron 360 8214579d11c769d64559ed9136b9d6b2c5fdf382ca4f9f5a35c105d2011b31ee
 examples/boards/order_processing.board.ron 1200 668d0400451aafaa4d4749650c0165727c3f67d66f631c9a46a68863cb9c0830

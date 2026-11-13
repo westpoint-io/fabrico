@@ -147,9 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board that uses the Factory JavaScript API
-# (examples/boards/docs/code-factory-api.board.ron). The twenty-nine older lines are unchanged.
-examples/boards/hashes.manifest daed6acb3fc87bb0638bf0c2f9e7fefee91be8abdc515abb548b0d85c7a73fb1
+# One new line, written by the generator, for the board a lesson starts on
+# (examples/boards/lessons/belts-that-join.board.ron). The thirty older lines are unchanged.
+examples/boards/hashes.manifest 3a48a2f19d2d90201f96daf1a87aad97810bbecbb4eba15534635b89cd08edc5
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

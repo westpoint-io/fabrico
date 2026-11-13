@@ -53,7 +53,7 @@ use fabrico_core::event::{LogHeader, SCHEMA_VERSION};
 use fabrico_core::persist::{MAX_RECORD_BYTES, RedbStore};
 use fabrico_host::config::HostConfig;
 use fabrico_host::config_view::ConfigView;
-use fabrico_host::demo_scene::{DEMO_GENESIS_SEED, SceneId, boot_scene};
+use fabrico_host::demo_scene::{DEMO_GENESIS_SEED, LessonBoard, SceneId, boot_scene};
 use fabrico_host::driver::Host;
 use fabrico_host::ingress::endpoint::{ENDPOINT_INGRESS_CAPACITY, EndpointIngress};
 use fabrico_host::ingress::seen_set::SeenSet;
@@ -662,6 +662,28 @@ fn load_example(scene_id: String, state: State<'_, AppState>) -> Result<(), Stri
     }
 }
 
+/// Parse a lesson board's wire id through [`LessonBoard::parse`], the same closed boundary the
+/// dev-WS `load_lesson_board` verb uses. Ids only, never a path.
+///
+/// # Errors
+/// `"unknown lesson board: <id>"` for anything but `belts_that_join`.
+fn parse_lesson_board(board_id: &str) -> Result<LessonBoard, String> {
+    LessonBoard::parse(board_id).ok_or_else(|| format!("unknown lesson board: {board_id}"))
+}
+
+/// Load the board a lesson starts on, by wire id. It goes through the same swap as an example
+/// load, and the toolbar's example badge stays empty. (The JS side calls
+/// `invoke('load_lesson_board', { boardId })`; Tauri maps camelCase to this param.)
+///
+/// # Errors
+/// `"unknown lesson board: <id>"` for an id that names no lesson board; `"sim unavailable"` if
+/// the control receiver is gone.
+#[tauri::command]
+fn load_lesson_board(board_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let board = parse_lesson_board(&board_id)?;
+    enqueue_control(&state, ControlMsg::LoadLessonBoard(board))
+}
+
 /// Read a selected node's CURRENT config (CFG-01/03): send a
 /// [`ControlMsg::QueryConfig`] carrying the node's dense render handle and AWAIT the
 /// tick-boundary oneshot reply. Config rides the LOW-frequency control channel,
@@ -1100,6 +1122,7 @@ pub fn run() {
         load_project_cmd,
         load_demo,
         load_example,
+        load_lesson_board,
         ctrl_new,
         machine_config,
         webhook_url,
@@ -1974,6 +1997,44 @@ mod tests {
              never open the channel and every refused load is silent in the shipped \
              binary.\n  list: {list}",
         );
+    }
+
+    /// `load_lesson_board` is REGISTERED in the one command surface, not merely defined: a
+    /// command left out of the list is one the webview can never call.
+    #[test]
+    fn load_lesson_board_is_in_the_registered_command_surface() {
+        const LIB_RS: &str = include_str!("lib.rs");
+        let handler_start = LIB_RS
+            .find("tauri::generate_handler![")
+            .expect("the one command surface must be findable");
+        let handler_end = LIB_RS[handler_start..]
+            .find(']')
+            .expect("the handler list must close")
+            + handler_start;
+        let list = &LIB_RS[handler_start..handler_end];
+        assert!(
+            list.contains("load_example"),
+            "parser control: the handler list was found and carries its known members",
+        );
+        assert!(
+            list.lines().any(|l| l.trim().trim_end_matches(',') == "load_lesson_board"),
+            "load_lesson_board is defined but NOT registered, so the webview can never load \
+             a lesson's board.\n  list: {list}",
+        );
+    }
+
+    /// The command's parse accepts the one lesson board id and answers anything else with a
+    /// typed error naming the id.
+    #[test]
+    fn load_lesson_board_parses_only_its_one_id() {
+        assert_eq!(parse_lesson_board("belts_that_join"), Ok(LessonBoard::BeltsThatJoin));
+        for bad in ["bogus", "", "demo_scene", "lessons/belts-that-join.board.ron"] {
+            assert_eq!(
+                parse_lesson_board(bad),
+                Err(format!("unknown lesson board: {bad}")),
+                "{bad:?} is refused with its id named"
+            );
+        }
     }
 
     // ---- FAIL-01 (phase 90, D-11): the held fatal reason --------------------------
