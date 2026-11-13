@@ -72,6 +72,13 @@ const CARD_NOTE_FRAMES = 20;
 const HANDLER_PRESET_BODY = 'hello from fabrico';
 /** How long the walk's request may take, the `curl --max-time` a user's terminal would give it. */
 const REQUEST_TIMEOUT_MS = 20_000;
+/** Drawn frames the toolbar's tick must read the same across before the board counts as stopped. */
+const TICK_HOLD_FRAMES = 12;
+/** The host's answer to a request on a paused board: it queues nothing (`ingress/endpoint.rs`). */
+const PAUSED_STATUS = 503;
+const PAUSED_BODY = '{"error":"overloaded"}';
+/** The endpoint is mounted for POST only, so the router turns any other method away. */
+const WRONG_METHOD_STATUS = 405;
 /** The pulse read's window: at least this long from just before the POST. */
 const PULSE_WINDOW_MS = 1_500;
 /** And at least this long after the answer, which comes back as the reply sets off home. */
@@ -1233,7 +1240,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
       }
     } else if (gesture.do === 'request') {
       if ((await probeAtStage(page, stepIndex, stage.id)) !== null) {
-        await walkRequest(page, lesson, stepIndex, label);
+        await walkRequest(page, lesson, state, stepIndex, label);
         actedOn.add(stageKey(stepIndex, stage.id));
       }
     } else if (gesture.do === 'key') {
@@ -1458,13 +1465,14 @@ async function expectWiresJoin(page: Page, label: string, a: BindingName, b: Bin
  * request goes from the test process with no body, as the card's line has none, and the step must then be
  * marked done by the reply coming back along the return wire.
  */
-async function walkRequest(page: Page, lesson: Lesson, stepIndex: number, label: string): Promise<void> {
+async function walkRequest(page: Page, lesson: Lesson, state: WalkState, stepIndex: number, label: string): Promise<void> {
   const { bound } = await readProbe(page);
   const route = bound.route;
   if (route === undefined) throw new Error(`${label}: no Route is bound to send the request to`);
   const url = await readPanelUrl(page);
   expect(url, `${label}: the POST URL row shows a loopback endpoint URL`).toMatch(ENDPOINT_URL_SHAPE);
   expect(url, `${label}: the panel's URL is the host's URL for the bound Route`).toBe(await webhookUrl(page, route));
+  await walkTurnedAway(page, lesson, state, stepIndex, label, url);
   const line = page.locator('[data-fab-step-card] [data-fab-request-line]');
   await expect(line, `${label}: the card shows a request line`).toHaveCount(1);
   const card = ((await line.textContent()) ?? '').trim();
@@ -1540,6 +1548,108 @@ async function walkRequest(page: Page, lesson: Lesson, stepIndex: number, label:
   ).toBeGreaterThan(0);
   await expectRenderLoopAlive(page, `after the reply pulse read at ${label}`);
   expect(pageErrors, `${label}: no uncaught page error while the request was answered`).toEqual([]);
+}
+
+/** The toolbar's tick, read again after `frames` drawn frames. */
+async function toolbarTickAfterFrames(page: Page, frames: number): Promise<number> {
+  await page.evaluate(
+    (n) =>
+      new Promise<void>((done) => {
+        let left = n;
+        const step = (): void => {
+          left -= 1;
+          if (left > 0) requestAnimationFrame(step);
+          else done();
+        };
+        requestAnimationFrame(step);
+      }),
+    frames,
+  );
+  return toolbarTick(page);
+}
+
+/**
+ * Two requests the board must turn away, made the first time through a request step whose step has a
+ * paused stage. Pause from the toolbar, wait until the tick holds still (the app shows Paused a tick
+ * before the host stops), POST and read 503 overloaded with the step held and the card on its paused
+ * stage, ringing Play. Then a GET, which the router refuses with 405. Then Play through its ring, and
+ * two tick rises so the host is playing again before the POST that finishes the step.
+ */
+async function walkTurnedAway(page: Page, lesson: Lesson, state: WalkState, stepIndex: number, label: string, url: string): Promise<void> {
+  const paused = lesson.steps[stepIndex]?.stages.find((s) => s.when.is === 'paused');
+  if (paused === undefined) return;
+  const sendStage = (await readProbe(page)).stageId;
+  const toggle = page.getByRole('button', { name: /^(Play|Pause)$/ });
+  await expect(toggle, `${label}: the board is playing before the walk pauses it`).toHaveAttribute('aria-label', 'Pause');
+  const pauseBox = await toggle.boundingBox();
+  if (pauseBox === null) throw new Error(`${label}: the toolbar's Pause button has no box`);
+  await pressPointByHand(page, { x: pauseBox.x + pauseBox.width / 2, y: pauseBox.y + pauseBox.height / 2 });
+  await expect(toggle, `${label}: Pause took (the toggle offers Play)`).toHaveAttribute('aria-label', 'Play');
+  let held = -1;
+  await expect
+    .poll(
+      async () => {
+        const before = await toolbarTick(page);
+        const after = await toolbarTickAfterFrames(page, TICK_HOLD_FRAMES);
+        held = after;
+        return before === after;
+      },
+      { message: `${label}: the toolbar's tick holds still across ${TICK_HOLD_FRAMES} frames after Pause`, timeout: frameBudgetMs(TICK_HOLD_FRAMES * 10) },
+    )
+    .toBe(true);
+
+  const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false });
+  const status = resp.status();
+  const body = await resp.text();
+  let probe = await readProbe(page);
+  await expect
+    .poll(
+      async () => {
+        probe = await readProbe(page);
+        return `${probe.card} index ${probe.stepIndex} stage ${probe.stageId ?? 'none'}`;
+      },
+      { message: `${label}: the step stays on its paused stage after a request on a paused board`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
+    )
+    .toBe(`running index ${stepIndex} stage ${paused.id}`);
+  console.log(`REQUEST-PAUSED ${lesson.id} status=${status} body=${body} stage=${probe.stageId ?? 'none'} tick=${held}`);
+  expect(status, `${label}: a paused board turns the request away`).toBe(PAUSED_STATUS);
+  expect(body, `${label}: with the host's overloaded body`).toBe(PAUSED_BODY);
+  const playBox = await toggle.boundingBox();
+  if (playBox === null) throw new Error(`${label}: the toolbar's Play button has no box`);
+  const ring = probe.hint;
+  if (ring === null) throw new Error(`${label}: the paused stage reports no ring`);
+  const playCentre = { x: playBox.x + playBox.width / 2, y: playBox.y + playBox.height / 2 };
+  const ringCentre = { x: ring.x + ring.width / 2, y: ring.y + ring.height / 2 };
+  console.log(
+    `REQUEST-PAUSED-RING ${lesson.id} ring=${Math.round(ring.x)},${Math.round(ring.y)} ${Math.round(ring.width)}x${Math.round(ring.height)} play=${Math.round(playBox.x)},${Math.round(playBox.y)} ${Math.round(playBox.width)}x${Math.round(playBox.height)}`,
+  );
+  expect(
+    Math.abs(ringCentre.x - playCentre.x) <= SAME_RECT_PX && Math.abs(ringCentre.y - playCentre.y) <= SAME_RECT_PX,
+    `${label}: the paused stage's ring sits on the Play button (ring centre ${ringCentre.x},${ringCentre.y}, Play centre ${playCentre.x},${playCentre.y})`,
+  ).toBe(true);
+
+  const get = await page.request.get(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false });
+  const afterGet = await readProbe(page);
+  console.log(`REQUEST-GET ${lesson.id} status=${get.status()} stage=${afterGet.stageId ?? 'none'}`);
+  expect(get.status(), `${label}: a GET to the endpoint is refused`).toBe(WRONG_METHOD_STATUS);
+  expect(`${afterGet.card} index ${afterGet.stepIndex}`, `${label}: the GET leaves the step where it was`).toBe(`running index ${stepIndex}`);
+
+  const rects = await hintsForStage(page, lesson, stepIndex, paused);
+  if (rects === null) throw new Error(`${label}: the paused stage left before the walk pressed Play`);
+  await expectRingPainted(page, state, label, stepIndex, paused, [rects.hint]);
+  if (!(await pressHintRect(page, lesson, stepIndex, paused, rects.hint, fromOffset(state.walk.pressOffset)))) {
+    throw new Error(`${label}: the paused stage left as the hand reached Play`);
+  }
+  state.actedOn.add(stageKey(stepIndex, paused.id));
+  await expect(toggle, `${label}: Play took (the toggle offers Pause)`).toHaveAttribute('aria-label', 'Pause');
+  await expectToolbarTickRises(page, `${label} after Play, first rise`);
+  await expectToolbarTickRises(page, `${label} after Play, second rise`);
+  await expect
+    .poll(async () => (await readProbe(page)).stageId, {
+      message: `${label}: the card returns to the stage the request is sent from once the board plays`,
+      timeout: frameBudgetMs(MOVE_ON_FRAMES),
+    })
+    .toBe(sendStage);
 }
 
 /**
