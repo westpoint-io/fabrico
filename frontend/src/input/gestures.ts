@@ -297,6 +297,9 @@ export interface StrandedRing {
   pt: { x: number; y: number };
 }
 
+/** Which tool holds a board gesture: a belt, a wire, or the selection's turn handle. */
+export type HeldGesture = 'belt' | 'wire' | 'turn';
+
 export interface GestureController {
   /** Arm placement of `kind` (a MachineKind u8): a palette click picks it, a floor click places it. */
   beginPlacement(kind: number): void;
@@ -461,12 +464,14 @@ export interface GestureController {
    */
   waiting(): { placements: number; belts: number; docks: number };
   /**
-   * Is a board gesture held: a belt path, an output-dot press or drag, a belt-end or handle press or
-   * drag, a pressed wire source with the Wire tool armed, or a rotate-handle press? It covers every
-   * held board gesture Show me must wait for, the same holds Escape treats as the board's. A read with
-   * no effect. The lesson card disables Show me with it, so the camera can't move under a held gesture.
+   * Which board gesture is held, by the tool holding it: 'belt' for a belt path, an output-dot press or
+   * drag, or a belt-end or handle press or drag; 'wire' for a pressed wire source with the Wire tool
+   * armed; 'turn' for a rotate-handle press; null with none held. It covers every held board gesture
+   * Show me must wait for, the same holds Escape treats as the board's. A read with no effect. The
+   * lesson card disables Show me with it, so the camera can't move under a held gesture, and names the
+   * tool in its sentence.
    */
-  beltDrawInFlight(): boolean;
+  heldGesture(): HeldGesture | null;
   /** Detach all listeners + clear affordances. */
   destroy(): void;
 }
@@ -6442,14 +6447,12 @@ export function createGestureController(deps: GestureDeps): GestureController {
     onResume,
     onSwap,
     waiting: () => ({ placements: pendingPlacements.length, belts: beltFollowUps.length, docks: dockOwners.size }),
-    beltDrawInFlight: () =>
-      drawnCells !== null ||
-      outPress !== null ||
-      outDrag !== null ||
-      endPress !== null ||
-      handleDrag !== null ||
-      (wireArmed && wireSource !== null) ||
-      rotatePress !== null,
+    heldGesture: () => {
+      if (wireArmed && wireSource !== null) return 'wire';
+      if (rotatePress !== null) return 'turn';
+      if (drawnCells !== null || outPress !== null || outDrag !== null || endPress !== null || handleDrag !== null) return 'belt';
+      return null;
+    },
     beginRouterPreset,
     armBeltDraw,
     armWireDraw,

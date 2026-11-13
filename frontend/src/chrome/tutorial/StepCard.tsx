@@ -38,8 +38,11 @@ export type StepCardView =
       text: readonly PhraseToken[];
       /** Is the stage's ring out of the free area? The off-screen row shows only then. */
       offScreen: boolean;
-      /** Is a belt draw held? Show me waits for it to end, because a camera move under a draw would move its path. */
-      drawing: boolean;
+      /**
+       * The board gesture held, by the tool holding it, or null with none. Show me waits for it to end,
+       * because a camera move under a press would move what it draws, and its line names the tool.
+       */
+      held: HeldGesture | null;
     }
   | { state: 'finished'; text: readonly PhraseToken[] };
 
@@ -70,8 +73,18 @@ export interface StepCardProps {
 /** The most lines the request line shows. A longer one ends in an ellipsis. */
 export const REQUEST_LINE_MAX_LINES = 3;
 
-/** Show me's title, and the off-screen line, while a belt draw is held. */
-export const SHOW_ME_DRAWING_TITLE = 'Finish or cancel the belt first.';
+/**
+ * Show me's title, and the off-screen line, while the board holds a gesture, by the tool in hand: a belt
+ * path or a belt end, a pressed wire source, or a press on the selection's turn handle.
+ */
+export const SHOW_ME_HELD_TITLE = {
+  belt: 'Finish or cancel the belt first.',
+  wire: 'Finish or cancel the wire first.',
+  turn: 'Let go of the turn handle first.',
+} as const;
+
+/** Which tool holds a board gesture, the key of `SHOW_ME_HELD_TITLE`. */
+export type HeldGesture = keyof typeof SHOW_ME_HELD_TITLE;
 /** The off-screen line while no draw is held. */
 export const OFFSCREEN_LINE = 'The ring is out of view.';
 
@@ -229,7 +242,8 @@ function Buttons({ view, onLeave, onBackToLessons, onKeepBuilding, onRestart, si
  * the tab order and the accessibility tree. It sits outside the live region, so the flag flipping
  * doesn't read the whole step out again.
  */
-function OffScreenRow({ offScreen, drawing, onShowMe }: { offScreen: boolean; drawing: boolean; onShowMe?: () => void }): JSX.Element {
+function OffScreenRow({ offScreen, held, onShowMe }: { offScreen: boolean; held: HeldGesture | null; onShowMe?: () => void }): JSX.Element {
+  const heldTitle = held === null ? null : SHOW_ME_HELD_TITLE[held];
   return (
     <div
       data-fab-offscreen-row=""
@@ -241,17 +255,17 @@ function OffScreenRow({ offScreen, drawing, onShowMe }: { offScreen: boolean; dr
         ...(offScreen ? {} : { visibility: 'hidden' }),
       }}
     >
-      {/* Show me's aria-describedby target, so a screen reader hears why the button is disabled while a draw is held. */}
+      {/* Show me's aria-describedby target, so a screen reader hears why the button is disabled while a gesture is held. */}
       <p id="fab-offscreen-line" style={textStyle}>
-        {drawing ? SHOW_ME_DRAWING_TITLE : OFFSCREEN_LINE}
+        {heldTitle ?? OFFSCREEN_LINE}
       </p>
       <button
         type="button"
         className="fab-tool-btn fab-tool-btn--labeled"
         style={{ pointerEvents: 'auto' }}
         aria-describedby="fab-offscreen-line"
-        disabled={drawing}
-        {...(drawing ? { title: SHOW_ME_DRAWING_TITLE } : {})}
+        disabled={heldTitle !== null}
+        {...(heldTitle === null ? {} : { title: heldTitle })}
         onMouseDown={keepFocusOff}
         onClick={onShowMe}
       >
@@ -333,7 +347,7 @@ export function StepCard(props: StepCardProps): JSX.Element {
           )}
         </div>
         {view.state === 'running' && (
-          <OffScreenRow offScreen={view.offScreen} drawing={view.drawing} {...(props.onShowMe === undefined ? {} : { onShowMe: props.onShowMe })} />
+          <OffScreenRow offScreen={view.offScreen} held={view.held} {...(props.onShowMe === undefined ? {} : { onShowMe: props.onShowMe })} />
         )}
       </div>
       <Buttons {...props} />

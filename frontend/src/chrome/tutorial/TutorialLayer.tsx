@@ -25,7 +25,7 @@ import { CLIENT_REFUSAL_COPY, REFUSAL_COPY } from '../RefusalMessage';
 import { moveCamera, readCamera } from './cameraRead';
 import { HintPointer, readCodeText, type HintTarget } from './HintPointer';
 import { LESSONS_PANEL_ID, LessonPanel, focusListClose, type ResetFooter } from './LessonPanel';
-import { StepCard, type StepCardView } from './StepCard';
+import { StepCard, type HeldGesture, type StepCardView } from './StepCard';
 import { NO_ROUTE_URL, heldRouteUrl, readRouteUrl, type RouteUrlHeld } from './routeUrlRead';
 import { readAppliedConfig } from './triggerRead';
 
@@ -324,7 +324,7 @@ function cardViewOf(
   stage: Stage | null,
   refusal: RefusalRecord | null,
   offScreen: boolean,
-  drawing: boolean,
+  held: HeldGesture | null,
 ): StepCardView | null {
   if (s.card === 'starting') return { state: 'starting' };
   if (s.card === 'swapped') return { state: 'swapped' };
@@ -333,7 +333,7 @@ function cardViewOf(
   if (s.card !== 'running' || stage === null) return null;
   const running = { state: 'running', stepNumber: s.stepIndex + 1, stepCount: lesson?.steps.length ?? 0, text: stage.text } as const;
   const { slot, row } = noteViewOf(s, stage, refusal, offScreen);
-  const flags = { offScreen: row, drawing };
+  const flags = { offScreen: row, held };
   if (slot === null) return { ...running, ...flags, note: null, noteKind: '', noteHidden: false };
   return { ...running, ...flags, note: slot.tokens, noteKind: slot.kind, noteHidden: slot.hidden };
 }
@@ -451,8 +451,8 @@ export interface TutorialLayerProps {
   simStopped: boolean;
   /** Has the app sent a draw or a dock the board doesn't show yet, or does it still owe one? */
   readEditsInFlight: () => boolean;
-  /** Is a belt draw held? Show me waits for it to end. A read with no effect. */
-  readBeltDrawInFlight: () => boolean;
+  /** Which board gesture is held, by the tool holding it, or null. Show me waits for it to end and names the tool. A read with no effect. */
+  readHeldGesture: () => HeldGesture | null;
 }
 
 export function TutorialLayer({
@@ -471,7 +471,7 @@ export function TutorialLayer({
   boardLive,
   simStopped,
   readEditsInFlight,
-  readBeltDrawInFlight,
+  readHeldGesture,
 }: TutorialLayerProps): JSX.Element {
   // The ref is the truth, and the probe reads it, so a test sees every value `reduce` returns.
   // React state follows only so the panel and the ring can mount and unmount.
@@ -489,8 +489,8 @@ export function TutorialLayer({
   const offScreenRef = useRef(false);
   const [offScreen, setOffScreen] = useState(false);
   // Is a belt draw held? The same pattern: read each frame, state only on a flip.
-  const drawingRef = useRef(false);
-  const [drawing, setDrawing] = useState(false);
+  const heldRef = useRef<HeldGesture | null>(null);
+  const [held, setHeld] = useState<HeldGesture | null>(null);
   // The card's left edge while the open inspector meets its centred place. The same pattern again.
   const cardLeftRef = useRef<number | null>(null);
   const [cardLeft, setCardLeft] = useState<number | null>(null);
@@ -512,8 +512,8 @@ export function TutorialLayer({
   chromeRef.current = { armed, selectedNode, selectedBelt, playing };
   const readEditsInFlightRef = useRef(readEditsInFlight);
   readEditsInFlightRef.current = readEditsInFlight;
-  const readBeltDrawInFlightRef = useRef(readBeltDrawInFlight);
-  readBeltDrawInFlightRef.current = readBeltDrawInFlight;
+  const readHeldGestureRef = useRef(readHeldGesture);
+  readHeldGestureRef.current = readHeldGesture;
   const boardLiveRef = useRef(boardLive);
   boardLiveRef.current = boardLive;
   const progressRef = useRef<ProgressStore | null>(null);
@@ -676,10 +676,10 @@ export function TutorialLayer({
           const focused = document.activeElement;
           if (!out && focused instanceof HTMLElement && focused.closest('[data-fab-offscreen-row]') !== null) focused.blur();
         }
-        const drawNow = readBeltDrawInFlightRef.current();
-        if (drawNow !== drawingRef.current) {
-          drawingRef.current = drawNow;
-          setDrawing(drawNow);
+        const heldNow = readHeldGestureRef.current();
+        if (heldNow !== heldRef.current) {
+          heldRef.current = heldNow;
+          setHeld(heldNow);
         }
         const leftNow = readCardLeft();
         if (leftNow !== cardLeftRef.current) {
@@ -702,7 +702,7 @@ export function TutorialLayer({
     const s = stateRef.current;
     const facts = factsRef.current;
     const camera = readCamera();
-    if (s.card !== 'running' || facts === null || camera === null || drawingRef.current) return;
+    if (s.card !== 'running' || facts === null || camera === null || heldRef.current !== null) return;
     const shown = currentStage(s, facts.board, facts.chrome, LESSONS);
     if (shown === null) return;
     const rects = boardRingRects(shown, stageKey(s.stepIndex, shown.id));
@@ -832,7 +832,7 @@ export function TutorialLayer({
     [resume, start],
   );
 
-  const view = cardViewOf(state, stage, refusal, offScreen, drawing);
+  const view = cardViewOf(state, stage, refusal, offScreen, held);
   // Read at render, which App's 10 Hz re-render keeps fresh enough for a list a person is reading.
   const rows = lessonsOpen
     ? rowViews({

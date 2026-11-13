@@ -4,18 +4,25 @@ import { MIN_ZOOM } from '../src/render/camera';
 import { CELL, buildPacket, cameraOf, type CameraSnapshot, type Harness } from './support/wire';
 import {
   CARD,
+  REQUEST_STAGE,
+  REQUEST_URL,
   armSourceForFloor,
   boot,
   boxOf,
+  centreOf,
   configuredHost,
   placeBoth,
+  placeRouteAndHandler,
   pressRing,
   pressTimer,
   readProbe,
+  requestHost,
   ringAt,
   sourceAt,
   startLesson,
+  startRequestLesson,
   toBeltDraw,
+  wireDiscs,
   zoomInto,
   type Box,
 } from './support/lessonMock';
@@ -492,6 +499,34 @@ test.describe('show me', () => {
     await expect(button, 'with no title').not.toHaveAttribute('title', /./);
     await expect(line, 'the line after the draw').toHaveText('The ring is out of view.');
     await expect(button).toHaveAccessibleDescription('The ring is out of view.');
+    await page.mouse.up();
+  });
+
+  test("Show me names the wire, not the belt, while lesson 5's wire source is held; both go back after Escape", async ({ page }) => {
+    test.slow();
+    const host = requestHost(REQUEST_URL);
+    const { h } = await startRequestLesson(page, host);
+    await placeRouteAndHandler(page, h, host);
+    await pressRing(page, await ringAt(page, REQUEST_STAGE.wireTool));
+    await wireDiscs(page);
+    // The Handler's input dot goes just past the free area's edge, and the Route's output dot stays in view.
+    await pushFarRingOut(page);
+    await expectFlag(page, true, "with the Handler's input dot out of view");
+    const button = page.locator(SHOW_ME);
+    await expect(button, 'enabled before the press').toBeEnabled();
+    const from = (await readProbe(page)).hint!;
+    const at = from.hitCentre ?? centreOf(from);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + CELL / 4, at.y + CELL / 4, { steps: 3 });
+    await expect(button, 'disabled while the wire source is held').toBeDisabled();
+    await expect(button).toHaveAttribute('title', 'Finish or cancel the wire first.');
+    const line = page.locator('#fab-offscreen-line');
+    await expect(line, 'the line while the wire source is held').toHaveText('Finish or cancel the wire first.');
+    await expect(button, 'its description is the line').toHaveAccessibleDescription('Finish or cancel the wire first.');
+    await page.keyboard.press('Escape');
+    await expect(button, 'enabled once Escape let the wire source go').toBeEnabled();
+    await expect(line, 'the line after the press').toHaveText('The ring is out of view.');
     await page.mouse.up();
   });
 

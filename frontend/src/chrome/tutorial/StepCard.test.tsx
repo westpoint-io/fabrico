@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { noteTokens } from '../../tutorial/machine.ts';
 import { MAX_NOTE_CHARS } from '../../tutorial/phrase.ts';
 import { requestLineText } from '../../tutorial/request.ts';
-import { OFFSCREEN_LINE, REQUEST_LINE_CHARS, REQUEST_LINE_MAX_LINES, SHOW_ME_DRAWING_TITLE, StepCard, type StepCardView } from './StepCard.tsx';
+import { OFFSCREEN_LINE, REQUEST_LINE_CHARS, REQUEST_LINE_MAX_LINES, SHOW_ME_HELD_TITLE, StepCard, type HeldGesture, type StepCardView } from './StepCard.tsx';
 
 // The vitest env is `node`, with no DOM, so the component is called directly and its element tree is
 // walked, as `WelcomeCard.test.tsx` does. `Words` is a component the tree holds unexpanded, so the walk
@@ -45,7 +45,7 @@ const RUNNING: StepCardView = {
   noteHidden: false,
   text: ['A ', { kind: 0 }, ' makes items.'],
   offScreen: false,
-  drawing: false,
+  held: null,
 };
 
 const NOOPS = { onLeave: () => {}, onBackToLessons: () => {}, onKeepBuilding: () => {} };
@@ -167,25 +167,35 @@ describe('StepCard', () => {
     });
 
     it('disables Show me with its title while a belt draw is held', () => {
-      const button = showMeOf(render({ ...RUNNING, offScreen: true, drawing: true }));
+      const button = showMeOf(render({ ...RUNNING, offScreen: true, held: 'belt' }));
       expect(button?.props.disabled).toBe(true);
-      expect(button?.props.title).toBe(SHOW_ME_DRAWING_TITLE);
-      expect(SHOW_ME_DRAWING_TITLE).toBe('Finish or cancel the belt first.');
+      expect(button?.props.title).toBe(SHOW_ME_HELD_TITLE.belt);
+      expect(SHOW_ME_HELD_TITLE.belt).toBe('Finish or cancel the belt first.');
     });
 
-    it('says to finish the belt in the line while a draw is held, and that the ring is out of view otherwise', () => {
-      const lineOf = (view: StepCardView): El | undefined => elements(rowOf(view)[0]!.props.children).find((el) => el.type === 'p');
-      const held = lineOf({ ...RUNNING, offScreen: true, drawing: true });
-      expect(textOf(held)).toBe('Finish or cancel the belt first.');
-      expect(held?.props.id, 'the line keeps its id').toBe('fab-offscreen-line');
-      const button = showMeOf(render({ ...RUNNING, offScreen: true, drawing: true }));
-      expect(button?.props['aria-describedby'], "the line is still Show me's description").toBe('fab-offscreen-line');
-      expect(button?.props.disabled).toBe(true);
-      expect(button?.props.title, 'the title is the same sentence').toBe(SHOW_ME_DRAWING_TITLE);
-      const free = lineOf({ ...RUNNING, offScreen: true, drawing: false });
-      expect(textOf(free)).toBe('The ring is out of view.');
-      expect(OFFSCREEN_LINE).toBe('The ring is out of view.');
-    });
+    // Each held gesture names the tool in hand, in the line and in Show me's title: a held wire says
+    // "the wire", never "the belt", and a turn-handle press says to let go of the handle.
+    const HELD_SENTENCES: readonly (readonly [HeldGesture, string])[] = [
+      ['belt', 'Finish or cancel the belt first.'],
+      ['wire', 'Finish or cancel the wire first.'],
+      ['turn', 'Let go of the turn handle first.'],
+    ];
+    for (const [held, sentence] of HELD_SENTENCES) {
+      it(`names the ${held} in the line and the title while that gesture is held, and that the ring is out of view otherwise`, () => {
+        const lineOf = (view: StepCardView): El | undefined => elements(rowOf(view)[0]!.props.children).find((el) => el.type === 'p');
+        const line = lineOf({ ...RUNNING, offScreen: true, held });
+        expect(textOf(line)).toBe(sentence);
+        expect(line?.props.id, 'the line keeps its id').toBe('fab-offscreen-line');
+        const button = showMeOf(render({ ...RUNNING, offScreen: true, held }));
+        expect(button?.props['aria-describedby'], "the line is still Show me's description").toBe('fab-offscreen-line');
+        expect(button?.props.disabled).toBe(true);
+        expect(button?.props.title, 'the title is the same sentence').toBe(sentence);
+        expect(sentence.length, 'inside the note budget').toBeLessThanOrEqual(MAX_NOTE_CHARS);
+        const free = lineOf({ ...RUNNING, offScreen: true, held: null });
+        expect(textOf(free)).toBe('The ring is out of view.');
+        expect(OFFSCREEN_LINE).toBe('The ring is out of view.');
+      });
+    }
 
     it('calls onShowMe when Show me is pressed', () => {
       let shown = 0;

@@ -24,6 +24,7 @@ import {
   createGestureController,
   routerPresetSeedCommands,
   type GestureController,
+  type HeldGesture,
   type StrandedRing,
 } from './gestures.ts';
 import { MIN_ZOOM } from '../render/camera.ts';
@@ -586,7 +587,7 @@ interface Rig {
   /** What the controller is still waiting on (phase 88 review, IN-05). */
   waiting: () => { placements: number; belts: number; docks: number };
   /** The controller's held-gesture read, the one Show me follows. */
-  beltDrawInFlight: () => boolean;
+  heldGesture: () => HeldGesture | null;
   /** Drive the echo selection-refresh path (App calls this on diff packets, WR-01/WR-02). */
   refreshSel: (placedNodeIds: number[], emittedBeltIds?: number[]) => void;
   /** Drive the CONNECT-02 stranded-ring channel (App calls this from the packet handler). */
@@ -882,7 +883,7 @@ function setupRigWith(opts: RigOpts, ...nodes: NodeView[]): Rig {
     // without the hook.
     swap: () => (ctrl as Partial<GestureController>).onSwap?.(),
     waiting: () => ctrl.waiting(),
-    beltDrawInFlight: () => ctrl.beltDrawInFlight(),
+    heldGesture: () => ctrl.heldGesture(),
     refreshSel: (placedNodeIds, emittedBeltIds = []) =>
       ctrl.refreshSelection(placedNodeIds, emittedBeltIds),
     setStrandedRings: (rings) => ctrl.setStrandedRings(rings),
@@ -14208,20 +14209,20 @@ describe('every shortcut table entry the controller owns reaches its action (CHR
   });
 });
 
-// Show me reads `beltDrawInFlight` (App.tsx passes it to the lesson card as `readBeltDrawInFlight`),
-// and the card disables the button while the board holds a gesture, so the camera can't move under a
-// press. A pressed wire source and a held rotate-handle press are both holds that Escape already
-// treats as the board's (`boardOwnsEscape`), and the read missed both (103 review IN-02). Lesson 5
-// arms the Wire tool, which is what made the first one reachable.
-describe('beltDrawInFlight covers every held board gesture Show me waits for', () => {
-  it('reads false with nothing held and with the Wire tool armed but nothing pressed', () => {
+// Show me reads `heldGesture` (App.tsx passes it to the lesson card as `readHeldGesture`), and the card
+// disables the button while the board holds a gesture, so the camera can't move under a press. A
+// pressed wire source and a held rotate-handle press are both holds that Escape already treats as the
+// board's (`boardOwnsEscape`). The read names which tool holds the press, so the card's sentence can say
+// "the wire" for a held wire rather than "the belt"; lesson 5 arms the Wire tool, which made that reachable.
+describe('heldGesture names every held board gesture Show me waits for', () => {
+  it('reads null with nothing held and with the Wire tool armed but nothing pressed', () => {
     rig = setupRig(node({ id: 7, kind: machine_kind.ROUTER, cell_x: 10, cell_y: 10, w: 2, h: 3 }));
-    expect(rig.beltDrawInFlight(), 'nothing armed, nothing pressed').toBe(false);
+    expect(rig.heldGesture(), 'nothing armed, nothing pressed').toBeNull();
     rig.armWire();
-    expect(rig.beltDrawInFlight(), 'the Wire tool armed, nothing pressed').toBe(false);
+    expect(rig.heldGesture(), 'the Wire tool armed, nothing pressed').toBeNull();
   });
 
-  it('reads true while the Wire tool holds a pressed electrical Out, and false after the release', () => {
+  it("reads 'wire' while the Wire tool holds a pressed electrical Out, and null after the release", () => {
     const out = node({
       id: 1,
       kind: machine_kind.ROUTER,
@@ -14237,12 +14238,12 @@ describe('beltDrawInFlight covers every held board gesture Show me waits for', (
     // The press took the nub as the wire's source: the grabbed nub is painted filled.
     const targets = rig.overlay.wireTargetCalls[rig.overlay.wireTargetCalls.length - 1];
     expect(targets, 'the press held the Out as the wire source').toContainEqual({ ...nub, filled: true });
-    expect(rig.beltDrawInFlight(), 'a wire source is held').toBe(true);
+    expect(rig.heldGesture(), 'a wire source is held').toBe('wire');
     rig.win.fire('pointerup', { button: 0, target: rig.canvas, clientX: 300, clientY: 300 });
-    expect(rig.beltDrawInFlight(), 'released on empty floor, nothing is held').toBe(false);
+    expect(rig.heldGesture(), 'released on empty floor, nothing is held').toBeNull();
   });
 
-  it('reads true while a rotate-handle press is held, and false after the release', () => {
+  it("reads 'turn' while a rotate-handle press is held, and null after the release", () => {
     rig = setupRig(node({ id: 7, kind: machine_kind.ROUTER, cell_x: 10, cell_y: 10, w: 2, h: 3 }));
     rig.canvas.fire('pointerdown', { button: 0, target: rig.canvas, ...at(10, 10) });
     rig.win.fire('pointerup', { button: 0, target: rig.canvas, ...at(10, 10) });
@@ -14250,9 +14251,20 @@ describe('beltDrawInFlight covers every held board gesture Show me waits for', (
     const handle: Pt = { x: 400, y: 300 };
     rig.overlay.rotateCenter.pt = handle;
     rig.canvas.fire('pointerdown', { button: 0, target: rig.canvas, clientX: handle.x + 4, clientY: handle.y });
-    expect(rig.beltDrawInFlight(), 'a rotate-handle press is held').toBe(true);
+    expect(rig.heldGesture(), 'a rotate-handle press is held').toBe('turn');
     rig.win.fire('pointerup', { button: 0, target: rig.canvas, clientX: handle.x + 4, clientY: handle.y });
     expect(rig.sent, 'the release sent its Rotate').toHaveLength(1);
-    expect(rig.beltDrawInFlight(), 'after the release nothing is held').toBe(false);
+    expect(rig.heldGesture(), 'after the release nothing is held').toBeNull();
+  });
+
+  it("reads 'belt' while a belt path is held, and null after the release", () => {
+    rig = setupRig();
+    rig.armBelt();
+    expect(rig.heldGesture(), 'the Belt tool armed, nothing pressed').toBeNull();
+    rig.canvas.fire('pointerdown', { button: 0, target: rig.canvas, ...at(2, 2) });
+    rig.win.fire('pointermove', { target: rig.canvas, ...at(3, 2) });
+    expect(rig.heldGesture(), 'a belt path is held').toBe('belt');
+    rig.win.fire('pointerup', { button: 0, target: rig.canvas, ...at(3, 2) });
+    expect(rig.heldGesture(), 'after the release nothing is held').toBeNull();
   });
 });
