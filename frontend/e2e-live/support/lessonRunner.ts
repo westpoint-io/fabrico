@@ -97,6 +97,14 @@ const PULSE_CHANNEL_MIN = 24;
  * 106 of them amber), and a request with no comet drawn changed 0 pixels in every one of 89 to 91 frames.
  */
 const PULSE_DELTA_MIN = 20;
+/**
+ * A changed frame must also hold more than this many amber pixels above the frame before the POST, so the
+ * change on the return cable is the reply comet's ink and not a forward spark, a hover mark or an outline
+ * that a later routing or floor change put on a read tile. Measured on lesson 5 at `ffa6fd9` (seven runs)
+ * and `df60bec` (three walks): the changed frames held 57 to 107 amber pixels, at least five frames per
+ * request above 50, and the baseline held 0.
+ */
+const PULSE_WARM_MIN = 50;
 /** Drawn frames for the Lessons list to show a row's buttons after it opens. */
 const ROW_FRAMES = 20;
 /**
@@ -1533,18 +1541,24 @@ async function walkRequest(page: Page, lesson: Lesson, state: WalkState, stepInd
     warm: f.rects.reduce((n, r) => n + r.warm, 0),
     delta: f.flat ? 0 : f.rects.reduce((n, r, i) => n + changedPixels(r, baseline!.rects[i]!, PULSE_CHANNEL_MIN), 0),
   }));
+  const baselineWarm = baseline!.rects.reduce((n, r) => n + r.warm, 0);
   const changed = read.filter((f) => f.delta > PULSE_DELTA_MIN).length;
+  const amber = read.filter((f) => f.delta > PULSE_DELTA_MIN && f.warm > baselineWarm + PULSE_WARM_MIN).length;
   const maxDelta = Math.max(0, ...read.map((f) => f.delta));
   const maxWarm = Math.max(0, ...read.map((f) => f.warm));
   const flat = read.filter((f) => f.flat).length;
   const ticks = frames.length === 0 ? 'none' : `${frames[0]!.tick}-${frames[frames.length - 1]!.tick}`;
   console.log(
-    `MEASURE pulse frames=${frames.length} changed=${changed} max_delta=${maxDelta} threshold=${PULSE_DELTA_MIN} ticks=${ticks} flat=${flat} max_warm=${maxWarm} baseline_warm=${baseline!.rects.reduce((n, r) => n + r.warm, 0)}`,
+    `MEASURE pulse frames=${frames.length} changed=${changed} amber=${amber} max_delta=${maxDelta} threshold=${PULSE_DELTA_MIN} warm_min=${PULSE_WARM_MIN} ticks=${ticks} flat=${flat} max_warm=${maxWarm} baseline_warm=${baselineWarm}`,
   );
   console.log(`PULSE-FRAMES delta/warm=${read.map((f) => (f.flat ? 'flat' : `${f.delta}/${f.warm}`)).join(' ')}`);
   expect(
     changed,
     `${label}: a frame read on the return cable while the reply came home differs from the frame before the POST by more than ${PULSE_DELTA_MIN} pixels (${frames.length} frames, largest change ${maxDelta}, ${flat} cleared)`,
+  ).toBeGreaterThan(0);
+  expect(
+    amber,
+    `${label}: a changed frame on the return cable holds more than ${PULSE_WARM_MIN} amber pixels above the frame before the POST, the reply comet's ink (${changed} changed frames, most amber ${maxWarm}, before the POST ${baselineWarm})`,
   ).toBeGreaterThan(0);
   await expectRenderLoopAlive(page, `after the reply pulse read at ${label}`);
   expect(pageErrors, `${label}: no uncaught page error while the request was answered`).toEqual([]);
