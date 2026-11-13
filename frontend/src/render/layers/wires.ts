@@ -495,6 +495,14 @@ export function createWireLayer(
   // Pure local render state: never written back to decode.ts / a GridCommand / scene.tick.
   const retiredHwm = new Map<number, Map<number, number>>();
 
+  // THE REPLY COUNT LATCH: wire id -> the reply count (`SceneState.wireReplyPulses`) this layer
+  // last drew against. A reply pulse rides ONE packet, so when two packets land between two
+  // draws no draw finds it in `wire.pulses` and the latch below never starts its comet, though
+  // the packet path counted it. A count that rose with no reply pulse in view starts the comet
+  // here instead. A wire seen for the first time takes its count as already drawn, so a layer
+  // built late replays nothing. A keyframe clears it with the comet latches. Read only.
+  const replyDrawn = new Map<number, number>();
+
   // Rewind guard: the WR-03 high-water-mark premise ("entry_tick is monotonic per
   // wire") holds ONLY while sim ticks move forward. On a rewind (load-snapshot,
   // replay-from-history, time-travel scrubbing) the scene maps can be repopulated
@@ -548,6 +556,7 @@ export function createWireLayer(
     if (keyframes !== lastKeyframes) {
       latches.clear();
       retiredHwm.clear();
+      replyDrawn.clear();
     }
     lastKeyframes = keyframes;
     if (scene.tick < lastSceneTick) {
@@ -571,6 +580,12 @@ export function createWireLayer(
     for (const wireId of retiredHwm.keys()) {
       if (!scene.wires.has(wireId)) retiredHwm.delete(wireId);
     }
+    for (const wireId of replyDrawn.keys()) {
+      if (!scene.wires.has(wireId)) replyDrawn.delete(wireId);
+    }
+    // Read defensively (Pitfall 7): a fixture scene carries no counts, so no count ever rises.
+    const replyCounts = (scene as { wireReplyPulses?: ReadonlyMap<number, number> })
+      .wireReplyPulses;
     for (const wireId of markLatch.keys()) {
       if (!scene.wires.has(wireId) || !reroutes?.has(wireId)) markLatch.delete(wireId);
     }
@@ -749,6 +764,18 @@ export function createWireLayer(
             entryTick: pulse.entry_tick,
           });
         }
+      }
+      const replyCount = replyCounts?.get(wire.id) ?? 0;
+      const drawnCount = replyDrawn.get(wire.id) ?? replyCount;
+      replyDrawn.set(wire.id, replyCount);
+      if (replyCount > drawnCount && !wire.pulses.some((p) => p.direction === DIR_REPLY)) {
+        // `scene.tick` is at or past the unseen pulse's entry tick, so the retired mark it
+        // leaves suppresses only that pulse, never a later one.
+        wl.set(`count|${replyCount}`, {
+          entryClock: effectiveClock,
+          direction: DIR_REPLY,
+          entryTick: scene.tick,
+        });
       }
       for (const [k, l] of wl) {
         const raw = (effectiveClock - l.entryClock) / VISUAL_HOP_TICKS;

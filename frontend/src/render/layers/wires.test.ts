@@ -608,6 +608,109 @@ describe('wires - a keyframe that remints a wire handle (CR-01, plan 76-14)', ()
   });
 });
 
+// A reply pulse rides ONE packet. The comet latch above was set only for a pulse a draw saw in
+// `wire.pulses`, so when two packets landed between two draws (the reply's, then the one that
+// re-sends the wire without it) no comet was drawn, although `wireReplyPulses` counted the reply.
+// On the real host that was 3 of 6 requests in lesson 5. Both scenes run through the real
+// createSceneState and applyPacket, so the count the layer reads is the one the packet path keeps.
+// RED BEFORE THE FIX: "the reply the model counted is drawn as a comet: expected undefined to be
+// defined"; the one-comet and keyframe cases passed.
+describe('wires - a reply that lands and leaves between two draws still draws its comet', () => {
+  const { createSceneState, applyPacket } = sceneStateModule;
+  type RenderPacketT = import('../../protocol/decode.ts').RenderPacket;
+
+  const packet = (p: Partial<RenderPacketT>): RenderPacketT => ({
+    tick: 0,
+    full: false,
+    placed: [],
+    removed: [],
+    belts: [],
+    can_undo: false,
+    can_redo: false,
+    wires: [],
+    resync: false,
+    generation: 0,
+    swap_floor: 0,
+    ...p,
+  });
+
+  /** The four-tile straight cable on row 5, on wire handle 5. */
+  const cable = (pulses: WirePulseViewT[]): WireViewT => ({
+    id: 5,
+    from: { node: 10, port: 0 },
+    to: { node: 11, port: 0 },
+    path: [straight(2, 5), straight(3, 5), straight(4, 5), straight(5, 5)],
+    pulses,
+  });
+  const reply = (tick: number): WirePulseViewT[] =>
+    [{ entry_tick: tick, hop_ticks: 1, direction: REPLY }] as WirePulseViewT[];
+  const heads = (layer: SplitLayer): Filled[] =>
+    circlesOf(gfx(layer), LOCKED_SKIN.palette.accents.item).filter((c) => c.r === 3 && c.alpha > 0.9);
+
+  const T = 50;
+
+  it('a_reply_no_draw_saw_still_sweeps_home', () => {
+    const layer = createWireLayer(LOCKED_SKIN);
+    const scene = createSceneState();
+    applyPacket(scene, packet({ tick: T, full: true, wires: [cable([])] }));
+    layer.draw(scene, 100, 100);
+    expect(heads(layer), 'CONTROL: an idle cable draws no comet').toEqual([]);
+
+    // Two packets between two draws: the reply rides the first, the second re-sends the wire
+    // with the pulse gone, so the next draw finds `pulses` empty.
+    applyPacket(scene, packet({ tick: T + 1, wires: [cable(reply(T + 1))] }));
+    applyPacket(scene, packet({ tick: T + 2, wires: [cable([])] }));
+    expect(scene.wireReplyPulses.get(5), 'the model counted the reply').toBe(1);
+    expect(scene.wires.get(5)?.pulses, 'and no draw can see the pulse any more').toEqual([]);
+
+    layer.draw(scene, 102, 102);
+    const h0 = heads(layer)[0];
+    expect(h0, 'the reply the model counted is drawn as a comet').toBeDefined();
+    expect(h0!.x, 'it starts at the origin end').toBeCloseTo(2.5 * CELL, 0);
+    layer.draw(scene, 116, 116);
+    expect(heads(layer)[0]?.x, 'and sweeps on to mid-cable').toBeCloseTo(4 * CELL, 0);
+    layer.draw(scene, 130, 130);
+    expect(heads(layer)[0]?.x, 'and reaches home').toBeCloseTo(5.5 * CELL, 0);
+    layer.draw(scene, 132, 132);
+    expect(heads(layer), 'then retires, with no second sweep').toEqual([]);
+  });
+
+  it('a_reply_a_draw_saw_is_one_comet_not_two', () => {
+    const layer = createWireLayer(LOCKED_SKIN);
+    const scene = createSceneState();
+    applyPacket(scene, packet({ tick: T, full: true, wires: [cable([])] }));
+    layer.draw(scene, 100, 100);
+    applyPacket(scene, packet({ tick: T + 1, wires: [cable(reply(T + 1))] }));
+    layer.draw(scene, 101, 101);
+    expect(heads(layer), 'the draw that sees the pulse and the count rise draws one head').toHaveLength(1);
+    applyPacket(scene, packet({ tick: T + 2, wires: [cable([])] }));
+    layer.draw(scene, 115, 115);
+    expect(heads(layer), 'one head while it sweeps').toHaveLength(1);
+    layer.draw(scene, 129, 129);
+    expect(heads(layer), 'one head as it reaches home').toHaveLength(1);
+    layer.draw(scene, 131, 131);
+    expect(heads(layer), 'none once it is home').toEqual([]);
+  });
+
+  it('a_keyframe_replays_no_counted_reply', () => {
+    const layer = createWireLayer(LOCKED_SKIN);
+    const scene = createSceneState();
+    applyPacket(scene, packet({ tick: T, full: true, wires: [cable(reply(T))] }));
+    layer.draw(scene, 100, 100);
+    expect(heads(layer), 'CONTROL: the keyframe that carries a reply draws it').toHaveLength(1);
+    layer.draw(scene, 130, 130);
+    layer.draw(scene, 131, 131);
+    expect(heads(layer), 'it retired').toEqual([]);
+    // An Undo keyframe re-sends the same cable with no pulse; the count it cleared must not
+    // read as a new reply, and neither may the next idle diff.
+    applyPacket(scene, packet({ tick: T + 1, full: true, wires: [cable([])] }));
+    layer.draw(scene, 140, 140);
+    applyPacket(scene, packet({ tick: T + 2, wires: [cable([])] }));
+    layer.draw(scene, 141, 141);
+    expect(heads(layer), 'no comet after a keyframe on a quiet cable').toEqual([]);
+  });
+});
+
 describe('wires - forward vs reply distinctness (WUI-01, LOCKED Phase-40 visuals fed via the latch)', () => {
   it('a FORWARD pulse is a cyan compact spark; a REPLY pulse an amber ~1.5-CELL comet', () => {
     // Drive both to mid-sweep (frac ~0.5) THROUGH the latch (register, then advance).
