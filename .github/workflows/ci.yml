@@ -1601,6 +1601,26 @@ jobs:
         working-directory: frontend
         run: bash ../scripts/check-live-red-set.sh --shard ${{ matrix.shard }}/4 test-results/live-report.json
 
+      # The docs tour's pictures (site/src/assets/tour/), taken again from the real app once per
+      # run, on shard 1 only. The script starts its own host and Vite now that the suite has freed
+      # 8787 and 5173, and fails when a picture comes out blank, the wrong size, or with a page
+      # error or a stopped render loop. It doesn't compare them with the committed pictures. It
+      # runs even when this shard's checker went red, since the two checks don't depend on each
+      # other.
+      - name: Retake the app tour pictures and check their size and blankness
+        if: ${{ !cancelled() && matrix.shard == 1 }}
+        working-directory: frontend
+        run: npm run capture:tour
+
+      # The new pictures, so a reviewer can look at what CI took.
+      - name: Keep the retaken tour pictures
+        if: ${{ !cancelled() && matrix.shard == 1 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tour-pictures
+          path: site/src/assets/tour/
+          retention-days: 14
+
       # The verdict job grades all four reports together. A red shard's report is uploaded too,
       # and a leg with no report fails here.
       - name: Keep this shard's report for the verdict job

@@ -1923,6 +1923,195 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
     );
 }
 
+/// The docs tour's capture script (`frontend/scripts/capture-tour.ts`) as its whole `run:` line.
+/// One leg of the live job runs it, so CI takes the tour pictures again on every run that touches
+/// the app.
+const TOUR_CAPTURE: &str = "run: npm run capture:tour";
+/// The capture step's folder, where the npm script lives.
+const TOUR_CAPTURE_DIR: &str = "working-directory: frontend";
+/// The two parts the capture step's condition must hold: run on one leg only, and run even when
+/// that leg's checker went red, since the capture's check doesn't depend on the suite's.
+const TOUR_CAPTURE_SHARD: &str = "matrix.shard == 1";
+const TOUR_CAPTURE_NOT_CANCELLED: &str = "!cancelled()";
+
+/// Everything wrong with how `yml` runs the tour capture. Empty means right.
+fn tour_capture_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let homes: Vec<&str> = blocks
+        .iter()
+        .flat_map(|(id, lines)| {
+            lines
+                .iter()
+                .filter(move |l| step_key(l) == TOUR_CAPTURE)
+                .map(move |_| *id)
+        })
+        .collect();
+    if homes != [LIVE_JOB] {
+        wrong.push(format!(
+            "the tour capture's run line `{TOUR_CAPTURE}` is in job(s) {homes:?}, expected exactly \
+             once, in [\"{LIVE_JOB}\"]. Without it CI never takes the tour pictures again, so a \
+             blank or wrong-size picture would go unseen."
+        ));
+    }
+    let Some((_, job)) = blocks.iter().find(|(id, _)| *id == LIVE_JOB) else {
+        wrong.push(format!("there is no job `{LIVE_JOB}` under `jobs:`."));
+        return wrong;
+    };
+    let Some(at) = job.iter().position(|l| step_key(l) == TOUR_CAPTURE) else {
+        return wrong;
+    };
+    let step = step_around(job, at);
+    if !step.iter().any(|l| step_key(l) == TOUR_CAPTURE_DIR) {
+        wrong.push(format!(
+            "the tour capture's step in job `{LIVE_JOB}` has no `{TOUR_CAPTURE_DIR}` line, so npm \
+             would look for the script outside frontend/."
+        ));
+    }
+    let conditions: Vec<&str> = step
+        .iter()
+        .map(|l| step_key(l))
+        .filter(|l| l.starts_with("if:"))
+        .collect();
+    let right = matches!(
+        conditions.as_slice(),
+        [c] if c.contains(TOUR_CAPTURE_SHARD) && c.contains(TOUR_CAPTURE_NOT_CANCELLED)
+    );
+    if !right {
+        wrong.push(format!(
+            "the tour capture's step in job `{LIVE_JOB}` has the condition(s) {conditions:?}. It \
+             needs one `if:` holding `{TOUR_CAPTURE_SHARD}`, so it runs once per CI run rather than \
+             on every leg, and `{TOUR_CAPTURE_NOT_CANCELLED}`, so a red checker before it doesn't \
+             skip it."
+        ));
+    }
+    let checker = live_run_lines().checker;
+    if let Some(c) = job.iter().position(|l| step_key(l) == checker)
+        && c > at
+    {
+        wrong.push(format!(
+            "the tour capture runs before the shard checker in job `{LIVE_JOB}`. It starts its own \
+             host and Vite on 8787 and 5173, which the suite holds until it ends, and the checker \
+             must stay the run: line straight after the suite."
+        ));
+    }
+    wrong
+}
+
+/// One leg of the live job takes the docs tour's pictures again, after the suite.
+///
+/// # Why
+///
+/// The tour page's pictures are committed, and the capture script fails when one comes out blank,
+/// the wrong size, or with a page error or a stopped render loop. That check only means something
+/// if CI keeps running it, and a step that was deleted, moved, or given a condition that skips it
+/// would leave every run green with no red line anywhere. So the step is pinned here.
+#[test]
+fn the_live_job_retakes_the_tour_pictures_once_per_run() {
+    let wrong = tour_capture_wrong(CI_YML);
+    assert!(
+        wrong.is_empty(),
+        "the tour capture isn't wired as it has to be:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// `tour_capture_wrong` can fail: each break below is planted in a copy of the real workflow, and
+/// the check has to name it.
+#[test]
+fn the_tour_capture_check_names_each_way_of_switching_it_off() {
+    const CAPTURE_STEP: &str =
+        "      - name: Retake the app tour pictures and check their size and blankness\n";
+    const CAPTURE_IF: &str = "        if: ${{ !cancelled() && matrix.shard == 1 }}\n";
+    const CAPTURE_DIR: &str = "        working-directory: frontend\n        run: npm run capture:tour\n";
+    const SUITE_STEP: &str = "      - name: Run this live shard (the JSON report is the input; the next step is the verdict)\n";
+    const MERGE_STEP: &str =
+        "      - name: The live red set over all shards is exactly the declared CUTs\n";
+
+    // The capture step's own text, header to its last line, so a plant can move it whole.
+    let step_text: String = {
+        let start = CI_YML.find(CAPTURE_STEP).expect("the capture step is in ci.yml");
+        let mut text = String::new();
+        for (n, line) in CI_YML[start..].split_inclusive('\n').enumerate() {
+            let indent = line.len() - line.trim_start().len();
+            if n > 0 && (line.trim().is_empty() || line.starts_with("      - ") || indent < 8) {
+                break;
+            }
+            text.push_str(line);
+        }
+        text
+    };
+    let without = without_step(CI_YML, CAPTURE_STEP);
+
+    type WorkflowCheck = fn(&str) -> Vec<String>;
+    let plants: Vec<(&str, String, WorkflowCheck, String)> = vec![
+        (
+            "the capture step deleted",
+            without.clone(),
+            tour_capture_wrong,
+            format!("the tour capture's run line `{TOUR_CAPTURE}` is in job(s) []"),
+        ),
+        (
+            "the capture step moved to the verdict job",
+            without.replace(MERGE_STEP, &format!("{step_text}{MERGE_STEP}")),
+            tour_capture_wrong,
+            format!("is in job(s) [\"{LIVE_VERDICT_JOB}\"]"),
+        ),
+        (
+            "the capture step put before the suite and its checker",
+            without.replace(SUITE_STEP, &format!("{step_text}{SUITE_STEP}")),
+            tour_capture_wrong,
+            "the tour capture runs before the shard checker".to_string(),
+        ),
+        (
+            "the capture step's condition removed",
+            CI_YML.replace(&format!("{CAPTURE_STEP}{CAPTURE_IF}"), CAPTURE_STEP),
+            tour_capture_wrong,
+            "has the condition(s) []".to_string(),
+        ),
+        (
+            "the condition without the shard",
+            CI_YML.replace(
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}"),
+                &format!("{CAPTURE_STEP}        if: ${{{{ !cancelled() }}}}\n"),
+            ),
+            tour_capture_wrong,
+            format!("needs one `if:` holding `{TOUR_CAPTURE_SHARD}`"),
+        ),
+        (
+            "the condition without !cancelled()",
+            CI_YML.replace(
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}"),
+                &format!("{CAPTURE_STEP}        if: ${{{{ matrix.shard == 1 }}}}\n"),
+            ),
+            tour_capture_wrong,
+            "has the condition(s) [\"if: ${{ matrix.shard == 1 }}\"]".to_string(),
+        ),
+        (
+            "the working directory removed",
+            CI_YML.replace(CAPTURE_DIR, "        run: npm run capture:tour\n"),
+            tour_capture_wrong,
+            format!("has no `{TOUR_CAPTURE_DIR}` line"),
+        ),
+    ];
+    assert_eq!(plants.len(), 7, "seven ways of switching the tour capture off");
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, check, must_name) in &plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = check(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the tour capture went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
 /// The job that runs the lesson walk, one leg per shard.
 const WALK_JOB: &str = "e2e-walk";
 /// The job that merges the walk's shards and grades the merged report.
