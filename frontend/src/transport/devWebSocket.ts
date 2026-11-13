@@ -54,6 +54,9 @@ export function encodeControl(kind: ControlKind, arg?: string): string {
       // The arg is the typed SceneWireId (compile-time closed set at every call
       // site); the host's SceneId::parse is the runtime boundary (T-55-04).
       return `load_example\n${arg ?? ''}`;
+    case 'loadLessonBoard':
+      // The arg is the typed LessonBoardId; the host parses it against its closed set.
+      return `load_lesson_board\n${arg ?? ''}`;
   }
 }
 

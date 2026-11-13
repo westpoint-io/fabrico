@@ -11,6 +11,7 @@
 import { makeDevWebSocketTransport } from './devWebSocket.ts';
 import { makeTauriChannelTransport } from './tauriChannel.ts';
 import type { IPacketSource } from './packetSource.ts';
+import type { LessonBoardId } from '../tutorial/types.ts';
 
 /**
  * The control intents the toolbar / gesture layer drives on the host. These are
@@ -27,6 +28,7 @@ export type ControlKind =
   | 'load'
   | 'loadDemo'
   | 'loadExample'
+  | 'loadLessonBoard'
   | 'new';
 
 /**
@@ -509,7 +511,8 @@ export interface ITransport extends IPacketSource {
    * (the overload makes an unknown id a compile-time error).
    */
   sendControl(kind: 'loadExample', sceneId: SceneWireId): void;
-  sendControl(kind: Exclude<ControlKind, 'loadExample'>, path?: string): void;
+  sendControl(kind: 'loadLessonBoard', board: LessonBoardId): void;
+  sendControl(kind: Exclude<ControlKind, 'loadExample' | 'loadLessonBoard'>, path?: string): void;
   /** Tear the transport down (close socket / drop channel). */
   close(): void;
 }

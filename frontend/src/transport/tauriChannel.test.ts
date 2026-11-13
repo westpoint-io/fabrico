@@ -370,6 +370,13 @@ describe('makeTauriChannelTransport — sendControl routes to capability-scoped 
     await flush();
     expect(tauri.invoke).toHaveBeenCalledWith('load_example', { sceneId: 'order_processing' });
   });
+
+  it('loadLessonBoard carries the board id as the camelCase boardId key', async () => {
+    const transport = await subscribed();
+    transport.sendControl('loadLessonBoard', 'belts_that_join');
+    await flush();
+    expect(tauri.invoke).toHaveBeenCalledWith('load_lesson_board', { boardId: 'belts_that_join' });
+  });
 });
 
 // Phase 90 review WR-A-03: the desktop app's failed Save rides the load-refusal channel under

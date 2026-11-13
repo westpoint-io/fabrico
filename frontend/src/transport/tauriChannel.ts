@@ -195,6 +195,9 @@ export function makeTauriChannelTransport(): ITransport {
             // param, which re-parses through the SAME SceneId boundary
             // (T-55-04 — an unknown id is a typed Err, never a demo load).
             return invoke('load_example', { sceneId: arg });
+          case 'loadLessonBoard':
+            // Tauri maps the camelCase `boardId` key onto the command's `board_id` param.
+            return invoke('load_lesson_board', { boardId: arg });
           case 'new':
             return invoke('ctrl_new');
         }

@@ -38,6 +38,13 @@ describe('encodeControl — the dev-server line grammar (18-04)', () => {
     );
     expect(encodeControl('loadExample', 'advanced')).toBe('load_example\nadvanced');
   });
+
+  it('encodes loadLessonBoard as `load_lesson_board\\n<board-id>`', () => {
+    // The host's dev decoder reads the lesson board id after the newline.
+    expect(encodeControl('loadLessonBoard', 'belts_that_join')).toBe(
+      'load_lesson_board\nbelts_that_join',
+    );
+  });
 });
 
 // ---- dev WebSocket control framing --------------------------------------

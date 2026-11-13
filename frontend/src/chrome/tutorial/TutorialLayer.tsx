@@ -1,8 +1,8 @@
 // TutorialLayer.tsx - the React side of the lesson engine.
 //
 // It reads the board and the chrome once a frame and hands them to the pure reducer. Its one way
-// of changing the board is the `doNewThen` prop: the tutorial asks the host for a new board and
-// never holds the transport, so it can't place a machine or finish a step for the user. Progress goes
+// of changing the board is the `doNewThen` prop: the tutorial asks the host for a new board or its
+// lesson's prepared board and never holds the transport, so it can't place a machine or finish a step for the user. Progress goes
 // through a `ProgressStore` and stays on this machine.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react';
@@ -16,7 +16,7 @@ import { coachLine, noteFor, type NoteView } from '../../tutorial/note';
 import { phrasePlain } from '../../tutorial/phrase';
 import { localStorageProgress, withLessonDone, withLessonStarted, type ProgressStore } from '../../tutorial/progress';
 import { curlWordFor } from '../../tutorial/request';
-import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonId, PhraseToken, Stage } from '../../tutorial/types';
+import type { AppliedConfig, BindingName, BoardFacts, ChromeFacts, LessonBoardId, LessonId, PhraseToken, Stage } from '../../tutorial/types';
 import { frameTarget, offScreenFlag } from '../../tutorial/view';
 import type { ArmedTool } from '../Palette';
 import { CONFIG_NOT_APPLIED_MARKER } from '../configCopy';
@@ -429,8 +429,11 @@ export interface TutorialLayerProps {
   playing: boolean;
   lessonsOpen: boolean;
   onLessonsOpenChange: (open: boolean) => void;
-  /** New, behind the same unsaved-work question. `onSent` runs only if New really went out. */
-  doNewThen: (onSent?: () => void) => void;
+  /**
+   * New, or with `board` that lesson board's load, behind the same unsaved-work question. `onSent`
+   * runs only if the request really went out.
+   */
+  doNewThen: (onSent?: () => void, board?: LessonBoardId) => void;
   probeRef: MutableRefObject<() => TutorialProbe>;
   /**
    * App calls this with the tag of each host or client refusal it shows, so the card can say why the gesture was
@@ -737,6 +740,8 @@ export function TutorialLayer({
 
   const start = useCallback(
     (lessonId: LessonId): void => {
+      // A lesson with a prepared board asks for that board; the rest ask for an empty one.
+      const lesson = LESSONS.find((l) => l.id === lessonId);
       // Everything happens in the callback, so a Cancel in the unsaved-work question leaves the
       // lesson state and the open panel as they were.
       doNewThen(() => {
@@ -748,7 +753,7 @@ export function TutorialLayer({
         routeUrlRef.current = NO_ROUTE_URL;
         setStage(null);
         onLessonsOpenChange(false);
-      });
+      }, lesson?.board?.id);
     },
     [dispatch, doNewThen, handleRef, onLessonsOpenChange, progress],
   );

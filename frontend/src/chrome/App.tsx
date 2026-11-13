@@ -78,6 +78,7 @@ import { createSelectionEpoch } from './selectionEpoch';
 import { HelpPanel, HELP_PANEL_ID, HELP_SCROLL_ATTR } from './HelpPanel';
 import { WelcomeCard } from './WelcomeCard';
 import { TutorialLayer, handFocusBackFromList, idleTutorialProbe, type TutorialProbe } from './tutorial/TutorialLayer';
+import type { LessonBoardId } from '../tutorial/types';
 import {
   CLIENT_REFUSAL_COPY,
   type ClientRefusalTag,
@@ -1739,14 +1740,21 @@ export function App() {
   // when the board is dirty, open the 3-choice discard guard FIRST (no swap until a
   // choice); a clean board proceeds directly. A stray New must never silently
   // destroy an in-progress factory (the milestone done-test builds from empty).
-  const doNewThen = useCallback((onSent?: () => void): void => {
+  const doNewThen = useCallback((onSent?: () => void, board?: LessonBoardId): void => {
     if (simStoppedRef.current) return;
     const proceed = (): void => {
       supersedeLoadInFlightRef.current?.();
       // Plan 74.1-35: the swap discards the edits queued on this board; the hold ends on
       // the swap's own keyframe, never here.
       requestSwapDiscard();
-      transportRef.current?.sendControl('new');
+      if (board) {
+        // A lesson's prepared board is framed by its own keyframe, as an example is.
+        fitPendingRef.current = true;
+        fitIsBootRef.current = false;
+        transportRef.current?.sendControl('loadLessonBoard', board);
+      } else {
+        transportRef.current?.sendControl('new');
+      }
       // Review WR-B-02: the host installs the empty board in silence.
       if (playingRef.current) hostWorkRef.current?.begin('swap');
       // D-03 (phase 90): an answer to an edit sent before this swap belongs to the board it
