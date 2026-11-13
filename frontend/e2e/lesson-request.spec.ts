@@ -309,8 +309,8 @@ test.describe('Answer a web request on a mock host', () => {
     await ringAt(page, STAGE.sendRequest);
     const button = copyButton(page);
 
-    // The button changes width with its word (88, 92 and 132 px here), and the ring paints from the frame
-    // before, so the read polls until the ring has caught up. The Copied word holds 1.5 s, so a ring that
+    // The ring paints from the frame before, so the read polls until the ring has caught up with any
+    // change of the button's box. The Copied word holds 1.5 s, so a ring that
     // dropped or stuck fails inside it.
     const readAt = async (word: string): Promise<void> => {
       await expect(button, `the button reads ${word}`).toHaveText(word);
@@ -358,6 +358,98 @@ test.describe('Answer a web request on a mock host', () => {
     at = await centre();
     await page.mouse.click(at.x, at.y);
     await readAt(COPY_LABELS.failed);
+  });
+
+  test("the Copy button keeps one width through Copy, Copied and Copy failed, and the URL's port and path stay in view, at 1280x720 and 1024x768", async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __clipFail?: boolean };
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: (): Promise<void> => (w.__clipFail === true ? Promise.reject(new Error('the clipboard refused the write')) : Promise.resolve()),
+        },
+      });
+    });
+    await toAnswerStep(page);
+    await selectRoute(page);
+    await ringAt(page, STAGE.sendRequest);
+    const button = copyButton(page);
+    // The port's first digit onward: what a user checks against the listener.
+    const portAndPath = ROUTE_URL.slice(ROUTE_URL.lastIndexOf(':') + 1);
+
+    /**
+     * The button's width, and whether the URL's last character and the first character of its port and
+     * path sit inside the field's content box. A character past the box is clipped, so the user can't
+     * read it, whatever the browser paints in its place.
+     */
+    const readRow = (): Promise<{ width: number; endVisible: boolean; portVisible: boolean; inOrder: boolean }> =>
+      page.evaluate((tail) => {
+        const row = [...document.querySelectorAll('aside[aria-labelledby="fab-config-heading"] label')].find((l) => l.textContent?.trim() === 'POST URL')?.parentElement;
+        const btn = row?.querySelector('button');
+        const field = row?.querySelector('span.fab-field');
+        if (btn == null || field == null) throw new Error('no POST URL row');
+        const walker = document.createTreeWalker(field, NodeFilter.SHOW_TEXT);
+        const text = walker.nextNode() as Text | null;
+        if (text === null) throw new Error('the field holds no text');
+        const box = field.getBoundingClientRect();
+        const cs = getComputedStyle(field);
+        const left = box.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+        const right = box.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
+        const charBox = (i: number): DOMRect => {
+          const range = document.createRange();
+          range.setStart(text, i);
+          range.setEnd(text, i + 1);
+          return range.getBoundingClientRect();
+        };
+        const inside = (r: DOMRect): boolean => r.left >= left - 0.5 && r.right <= right + 0.5;
+        const len = text.data.length;
+        // Each character sits right of the one before it, so the URL reads in its own order.
+        let inOrder = true;
+        for (let i = 1; i < len; i++) if (charBox(i).left < charBox(i - 1).left) inOrder = false;
+        return {
+          inOrder,
+          width: btn.getBoundingClientRect().width,
+          endVisible: inside(charBox(len - 1)),
+          portVisible: inside(charBox(text.data.lastIndexOf(tail))),
+        };
+      }, portAndPath);
+
+    for (const size of [
+      { width: 1280, height: 720 },
+      { width: 1024, height: 768 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.evaluate(() => {
+        (window as unknown as { __clipFail: boolean }).__clipFail = false;
+      });
+      await expect(button, 'the button rests on Copy').toHaveText(COPY_LABELS.idle, { timeout: 5000 });
+      const idle = await readRow();
+      await button.click();
+      await expect(button).toHaveText(COPY_LABELS.copied);
+      const copied = await readRow();
+      await expect(button, 'the button goes back to Copy').toHaveText(COPY_LABELS.idle, { timeout: 5000 });
+      await page.evaluate(() => {
+        (window as unknown as { __clipFail: boolean }).__clipFail = true;
+      });
+      await button.click();
+      await expect(button).toHaveText(COPY_LABELS.failed);
+      const failed = await readRow();
+      const at = `${size.width}x${size.height}`;
+      console.log(
+        `MEASURE copy-width size=${at} copy=${idle.width} copied=${copied.width} failed=${failed.width} url_end_visible=${idle.endVisible}/${copied.endVisible}/${failed.endVisible} port_visible=${idle.portVisible}/${copied.portVisible}/${failed.portVisible}`,
+      );
+      expect.soft(Math.abs(copied.width - idle.width), `${at}: Copied is as wide as Copy (${copied.width} and ${idle.width} px)`).toBeLessThanOrEqual(0.5);
+      expect.soft(Math.abs(failed.width - idle.width), `${at}: Copy failed is as wide as Copy (${failed.width} and ${idle.width} px)`).toBeLessThanOrEqual(0.5);
+      for (const [word, read] of [
+        [COPY_LABELS.idle, idle],
+        [COPY_LABELS.copied, copied],
+        [COPY_LABELS.failed, failed],
+      ] as const) {
+        expect.soft(read.endVisible, `${at}: the URL's last character is inside the field while the button reads ${word}`).toBe(true);
+        expect.soft(read.portVisible, `${at}: the URL's port is inside the field while the button reads ${word}`).toBe(true);
+        expect.soft(read.inOrder, `${at}: the URL reads left to right while the button reads ${word}`).toBe(true);
+      }
+    }
   });
 
   test('at the wire draw the ring layer holds exactly the two wire discs, and nothing on the Fault, at zoom near 1 and near 2', async ({ page }) => {

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { COPY_LABELS, COPY_LABEL_MAX_CH, WebhookUrlRowView } from './WebhookUrlRow.tsx';
+import { COPY_BUTTON_MIN_WIDTH, COPY_LABELS, COPY_LABEL_MAX_CH, WebhookUrlRowView } from './WebhookUrlRow.tsx';
 import type { CopyState } from './clipboardCopy.ts';
 
 // WebhookUrlRowView is the pure presentational half (told url/copyState via props),
@@ -197,7 +197,7 @@ describe('WebhookUrlRowView: the states matrix (52-UI-SPEC)', () => {
     }
   });
 
-  it('reserves the widest label width, DERIVED from the label set rather than written (A8)', () => {
+  it('reserves the widest label width plus the tool button padding, DERIVED from the label set and the padding tokens rather than written (A8)', () => {
     // Recomputed here from COPY_LABELS rather than hardcoded, so the DERIVATION
     // itself is pinned: a future copy change moves both sides together, and a
     // regression to a loose numeric literal fails.
@@ -207,9 +207,28 @@ describe('WebhookUrlRowView: the states matrix (52-UI-SPEC)', () => {
     for (const { url } of CASES) {
       for (const s of COPY_STATES) {
         const style = styleOf(button(view(url, s)));
-        expect(style.minWidth, `${s} @ ${JSON.stringify(url)}`).toBe(`${widest}ch`);
+        // A <button> is border-box, so the padding the tool button sets has to be inside the
+        // reservation, or each label's own width wins and the button changes size with the word.
+        expect(style.minWidth, `${s} @ ${JSON.stringify(url)}`).toBe(`calc(${widest}ch + 2 * (var(--fab-space-md) + var(--fab-bezel-ring)))`);
+        expect(COPY_BUTTON_MIN_WIDTH, 'no pixel literal in the width').not.toMatch(/\dpx/);
         expect(style.whiteSpace, `${s} @ ${JSON.stringify(url)}`).toBe('nowrap');
       }
+    }
+  });
+
+  it('holds the full URL in the field title, and clips a URL too long for the field at its start', () => {
+    const LONG = 'http://127.0.0.1:54321/endpoint/route-1';
+    for (const s of COPY_STATES) {
+      const tree = view(LONG, s);
+      const field = findAll(tree, (el) => el.type === 'span' && el.props.className === 'fab-field')[0];
+      expect(field.props.title, `${s}: the title is the whole URL`).toBe(LONG);
+      expect(textOf(field), `${s}: the field's text is the whole URL`).toBe(LONG);
+      const clip = findAll(field, (el) => el.type === 'span' && styleOf(el).direction === 'rtl')[0];
+      expect(clip, `${s}: a right-to-left box holds the URL`).toBeDefined();
+      expect(styleOf(clip).textAlign, `${s}: a URL that fits stays at the left`).toBe('left');
+      expect(styleOf(clip).overflow).toBe('hidden');
+      const bdi = findAll(clip, (el) => el.type === 'bdi')[0];
+      expect(bdi?.props.dir, `${s}: the URL keeps its own left-to-right order`).toBe('ltr');
     }
   });
 

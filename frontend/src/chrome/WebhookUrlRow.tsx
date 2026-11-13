@@ -53,17 +53,22 @@ export const COPY_LABELS: Record<CopyState, string> = {
   failed: 'Copy failed',
 };
 
-/** The button's reserved width, in `ch`, DERIVED from the label set (52-UI-SPEC
- *  A8) and never written as a number. In Martian Mono one `ch` is exactly one
- *  advance, so the widest word fits and the label swap cannot reflow the row or
- *  make the URL slot beside it jump. Deriving it is the whole point: a future
- *  copy change moves the reservation with it instead of silently reintroducing
- *  the layout shift the maintainer ruled out. */
 /** What the value well reads when no bound URL is available. Lesson 5's waiting stage names it, and
  *  `lessonCoverage.source.test.ts` pins the lesson's typed copy to this constant. */
 export const URL_NOT_READY_TEXT = 'Webhook not ready';
 
+/** The widest label, in `ch`, DERIVED from the label set and never written as a
+ *  number. In Martian Mono one `ch` is exactly one advance. */
 export const COPY_LABEL_MAX_CH = Math.max(...Object.values(COPY_LABELS).map((l) => l.length));
+
+/** The button's reserved width: the widest label plus the `.fab-tool-btn` side
+ *  padding, taken from the same tokens that class pads with. A `<button>` is
+ *  border-box and the tool button's border is 0, so `min-width` has to hold the
+ *  padding too; the label width alone left Copy at 88 px, Copied at 92 and Copy
+ *  failed at 132. With it all three are one width, so the label swap cannot
+ *  reflow the row or make the URL beside it jump, and a copy change moves the
+ *  reservation with it. */
+export const COPY_BUTTON_MIN_WIDTH = `calc(${COPY_LABEL_MAX_CH}ch + 2 * (var(--fab-space-md) + var(--fab-bezel-ring)))`;
 
 export interface WebhookUrlRowViewProps {
   /** The resolved URL, or null when no bound port is available yet. */
@@ -91,15 +96,23 @@ export function WebhookUrlRowView({ url, copyState, onCopy, label = 'Webhook URL
             title={url ?? undefined}
             style={{
               flex: 1,
+              minWidth: 0,
               display: 'inline-flex',
               alignItems: 'center',
               overflow: 'hidden',
               whiteSpace: 'nowrap',
-              textOverflow: 'ellipsis',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {url}
+            {/* A URL longer than the field loses its START, not its end: the port and
+             *  path are what a user checks against the listener, and the full URL is
+             *  in the title and on the clipboard. The right-to-left box starts a line
+             *  that overflows at its right edge and lets it spill left, and
+             *  `text-align: left` keeps a URL that fits where it always sat. The
+             *  ltr bdi keeps the URL's own characters in order. */}
+            <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', direction: 'rtl', textAlign: 'left' }}>
+              <bdi dir="ltr">{url}</bdi>
+            </span>
           </span>
         ) : (
           <span
@@ -159,7 +172,7 @@ export function WebhookUrlRowView({ url, copyState, onCopy, label = 'Webhook URL
           aria-disabled={inFlight ? true : undefined}
           aria-busy={inFlight ? true : undefined}
           aria-live={hasResult ? 'polite' : 'off'}
-          style={{ minWidth: `${COPY_LABEL_MAX_CH}ch`, whiteSpace: 'nowrap' }}
+          style={{ minWidth: COPY_BUTTON_MIN_WIDTH, whiteSpace: 'nowrap' }}
           onClick={onCopy}
         >
           {COPY_LABELS[copyState]}
