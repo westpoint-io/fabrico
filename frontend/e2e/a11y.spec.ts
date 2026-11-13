@@ -91,28 +91,46 @@ test('the lesson card and the Lessons list pass axe with Show me, a refusal note
   await expect(panel.getByRole('button', { name: 'Keep progress', exact: true }), 'Keep progress shows').toBeVisible();
   await expect(panel.getByRole('button', { name: 'Clear progress', exact: true }), 'Clear progress shows').toBeVisible();
 
-  const results = await new AxeBuilder({ page })
-    .include('[data-fab-step-card]')
-    .include('#fab-lessons-panel')
-    .exclude('canvas')
-    .analyze();
-  for (const v of results.violations) {
-    console.log(`AXE ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`);
-  }
-  expect(results.violations.map((v) => v.id)).toEqual([]);
+  expect(await axeLessonScope(page, 'show-me-refusal-reset')).toEqual([]);
 });
 
-/** 103's scope: the step card and the Lessons list, canvas excluded. Logs what it covered and every violation. */
-async function axeLessonScope(page: Page, label: string): Promise<string[]> {
-  const results = await new AxeBuilder({ page })
-    .include('[data-fab-step-card]')
-    .include('#fab-lessons-panel')
-    .exclude('canvas')
-    .analyze();
+/**
+ * 103's scope: the step card and the Lessons list, canvas excluded. Logs what it covered and every violation.
+ *
+ * The card body passes the pointer through (`pointer-events: none`), and axe finds a text's background by
+ * hit-testing the point under it, which skips such elements. So without help axe sees only the canvas under
+ * the card's text and files every card colour-contrast check as incomplete, never as a pass or a violation.
+ * The hint layer, a transparent full-window box over the card, reads to axe as covering it too. For the scan
+ * only, a style tag lets the card take hit tests and takes the hint layer out; the clearance spec holds that
+ * no ring meets the card. The scan then has to have graded some text for contrast (and `mustGrade`, a
+ * target axe names, when given), so a card the check can't see fails here.
+ */
+const SCAN_STYLE = '[data-fab-step-card], [data-fab-step-card] * { pointer-events: auto !important; } [data-fab-hint-layer] { display: none !important; }';
+
+async function axeLessonScope(page: Page, label: string, mustGrade?: string): Promise<string[]> {
+  const style = await page.addStyleTag({ content: SCAN_STYLE });
+  const results = await (async () => {
+    try {
+      return await new AxeBuilder({ page }).include('[data-fab-step-card]').include('#fab-lessons-panel').exclude('canvas').analyze();
+    } finally {
+      await style.evaluate((el) => (el as Element).remove());
+    }
+  })();
   const nodes = results.passes.reduce((n, rule) => n + rule.nodes.length, 0);
-  console.log(`AXE-SCOPE ${label} include=[data-fab-step-card],#fab-lessons-panel exclude=canvas rules-passed=${results.passes.length} nodes-passed=${nodes} violations=${results.violations.length}`);
+  const graded = [...results.passes, ...results.violations]
+    .filter((r) => r.id === 'color-contrast')
+    .flatMap((r) => r.nodes);
+  const unsure = results.incomplete.filter((r) => r.id === 'color-contrast').flatMap((r) => r.nodes);
+  console.log(
+    `AXE-SCOPE ${label} include=[data-fab-step-card],#fab-lessons-panel exclude=canvas rules-passed=${results.passes.length} nodes-passed=${nodes} violations=${results.violations.length} contrast-graded=${graded.length} contrast-incomplete=${unsure.length}`,
+  );
+  for (const n of unsure) console.log(`AXE ${label} color-contrast incomplete ${n.target.join(' ')}: ${n.any.map((a) => a.message).join('; ')}`);
   for (const v of results.violations) {
     console.log(`AXE ${label} ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`);
+  }
+  expect(graded.length, `${label}: axe graded some of the scope's text for colour contrast`).toBeGreaterThan(0);
+  if (mustGrade !== undefined) {
+    expect(graded.map((n) => n.target.join(' ')), `${label}: axe graded ${mustGrade} for colour contrast`).toContain(mustGrade);
   }
   return results.violations.map((v) => v.id);
 }
@@ -153,7 +171,7 @@ test("the lesson card passes axe with lesson 5's send-request stage and its requ
   await expect(line, 'the request line shows').toBeVisible();
   await expect(line, 'the request line holds the default URL').toContainText(REQUEST_URL);
   await expect(page.locator('aside[aria-labelledby="fab-config-heading"]'), "the Route's panel is open").toBeVisible();
-  expect(await axeLessonScope(page, 'lesson-5-send-request')).toEqual([]);
+  expect(await axeLessonScope(page, 'lesson-5-send-request', 'code')).toEqual([]);
 });
 
 // The step card paints over an open Legend at the window's bottom (plan 104-06); axe reads the card there.
