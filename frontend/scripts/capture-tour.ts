@@ -7,8 +7,11 @@
 // device scale of 2, loads the demo board through Examples so the run starts again at tick 0,
 // holds it on a fixed tick with Step, and takes each picture.
 //
-// It writes `site/src/assets/tour/<name>.png` for every picture in SHOTS. The site's
-// <Screenshot> component reads them from there while it builds.
+// It writes eight PNGs to `site/src/assets/tour/`: overview, inspector, palette, toolbar-run and
+// toolbar-file with the first Factory selected, then camera-default with nothing selected, and
+// camera-zoomed and camera-controls after two wheel notches and a drag. The site's <Screenshot>
+// component reads them from there while it builds. Crops are rounded out to whole CSS px first, so
+// their 2x files have even sides.
 //
 // It exits non-zero, naming the file, when:
 // - port 8787 or 5173 already answers (it starts its own servers and won't share them),
@@ -32,7 +35,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, type Page } from '@playwright/test';
+import { chromium, type Locator, type Page } from '@playwright/test';
 import { PNG } from 'playwright-core/lib/utilsBundle';
 
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url));
@@ -64,6 +67,14 @@ const BLANK_PERCENT = 95;
  */
 const TOUR_TICK = 240;
 const HOLD_FROM = 200;
+
+/** The toolbar crops reach this many CSS px past the button they end or start at. */
+const TOOLBAR_MARGIN = 8;
+/** The zoom the camera pictures show: two wheel notches of this deltaY at the window centre. */
+const WHEEL_DELTA = -200;
+const WHEEL_NOTCHES = 2;
+/** The left drag that moves the view for camera-zoomed.png, in CSS px. */
+const PAN = { dx: -240, dy: -80 };
 
 /** The GL arguments every browser check in this repo launches Chromium with. */
 const GL_ARGS = ['--use-gl=angle', '--use-angle=swiftshader'];
@@ -199,6 +210,19 @@ function cellCentre(cam: Camera, cx: number, cy: number): { x: number; y: number
   return { x: cam.x + (cx * CELL + CELL / 2) * cam.scale, y: cam.y + (cy * CELL + CELL / 2) * cam.scale };
 }
 
+/** A box rounded out to whole CSS px, so a 2x picture of it has even sides. */
+function wholePx(b: Box): Box {
+  const x = Math.floor(b.x);
+  const y = Math.floor(b.y);
+  return { x, y, width: Math.ceil(b.x + b.width) - x, height: Math.ceil(b.y + b.height) - y };
+}
+
+async function boxOf(locator: Locator, what: string): Promise<Box> {
+  const b = await locator.boundingBox();
+  if (b === null) return fail(`${what} isn't on screen, so it can't be measured.`);
+  return b;
+}
+
 // --- Health and picture checks ---------------------------------------------
 
 /** Page errors and failed render packets since the page opened (the live suite's watchPageErrors). */
@@ -326,6 +350,81 @@ async function selectFirstFactory(page: Page, scene: SceneRead): Promise<void> {
   await sleep(500);
 }
 
+/** The left edge, in CSS px, of the first toolbar button with visible text after the tick counter. */
+async function firstLabelledButtonAfterTick(page: Page): Promise<number> {
+  const x = await page.evaluate(() => {
+    const counter = document.querySelector('header [title="Current sim tick"]');
+    if (counter === null) return null;
+    const after = counter.getBoundingClientRect().right;
+    const lefts = [...document.querySelectorAll('header button')]
+      .filter((b) => (b.textContent ?? '').trim() !== '')
+      .map((b) => b.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.left >= after)
+      .map((r) => r.left)
+      .sort((a, b) => a - b);
+    return lefts.length > 0 ? lefts[0] : null;
+  });
+  if (x === null) return fail('the toolbar has no tick counter followed by a labelled button, so toolbar-file.png has no left edge.');
+  return x;
+}
+
+/** The cells a machine, belt or wire covers. */
+function occupiedCells(scene: SceneRead): Set<string> {
+  const cells = new Set<string>();
+  for (const n of scene.nodes) for (const [cx, cy] of n.cells) cells.add(`${cx},${cy}`);
+  for (const b of scene.belts) for (const t of b.tiles) cells.add(`${t.cell_x},${t.cell_y}`);
+  for (const w of scene.wires) for (const t of w.path) cells.add(`${t.cell_x},${t.cell_y}`);
+  return cells;
+}
+
+/**
+ * Zoom in at the window centre, then drag the view by PAN from a point on empty floor, and return
+ * the zoom readout. Each step is checked on the camera: the wheel changes the scale, and the drag
+ * moves the view by exactly the drag.
+ */
+async function zoomAndPan(page: Page, scene: SceneRead): Promise<string> {
+  const centre = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
+  await page.mouse.move(centre.x, centre.y);
+  for (let i = 0; i < WHEEL_NOTCHES; i++) {
+    const before = await readCamera(page);
+    await page.mouse.wheel(0, WHEEL_DELTA);
+    await waitUntil(`wheel notch ${i + 1} zooms the camera in`, () => readCamera(page), (c) => c.scale > before.scale);
+    await sleep(300);
+  }
+  // A start point on empty floor: no machine, belt or wire under it, and clear of the panels.
+  const cam = await readCamera(page);
+  const taken = occupiedCells(scene);
+  const panels = await Promise.all(
+    ['aside[data-fab-left-dock]', 'header', '[data-fab-camera-cluster]'].map((sel) => boxOf(page.locator(sel).first(), sel)),
+  );
+  const clear = (x: number, y: number): boolean =>
+    panels.every((p) => x < p.x - 16 || x > p.x + p.width + 16 || y < p.y - 16 || y > p.y + p.height + 16);
+  let start: { x: number; y: number } | null = null;
+  for (let y = VIEWPORT.height - 120; y > 160 && start === null; y -= 40) {
+    for (let x = VIEWPORT.width - 120; x > 280 && start === null; x -= 40) {
+      const end = { x: x + PAN.dx, y: y + PAN.dy };
+      const cx = Math.floor((x - cam.x) / cam.scale / CELL);
+      const cy = Math.floor((y - cam.y) / cam.scale / CELL);
+      if (!taken.has(`${cx},${cy}`) && clear(x, y) && clear(end.x, end.y)) start = { x, y };
+    }
+  }
+  if (start === null) return fail('no empty floor to start the pan for camera-zoomed.png.');
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + PAN.dx, start.y + PAN.dy, { steps: 12 });
+  await page.mouse.up();
+  const after = await waitUntil(
+    'the drag moves the view',
+    () => readCamera(page),
+    (c) => Math.abs(c.x - (cam.x + PAN.dx)) < 0.5 && Math.abs(c.y - (cam.y + PAN.dy)) < 0.5,
+  );
+  if (after.scale !== cam.scale) fail(`the drag changed the zoom from ${cam.scale} to ${after.scale}.`);
+  await sleep(500);
+  const readout = (await page.getByTitle('Reset zoom to 100%').textContent())?.trim() ?? '';
+  if (!/^\d+%$/.test(readout)) fail(`the zoom readout reads "${readout}" after the zoom, not a percentage.`);
+  return readout;
+}
+
 // --- Main -----------------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -351,10 +450,41 @@ async function main(): Promise<void> {
     const tick = scene.tick;
 
     // overview: the whole window with the first Factory selected, so the inspector is open.
+    const fitted = await readCamera(page);
+
+    // overview, inspector, palette and the two toolbar crops, with the first Factory selected.
     await selectFirstFactory(page, scene);
     await take(page, errors, { file: 'overview.png', kind: 'full' }, tick);
+    const inspector = page.locator('[aria-labelledby="fab-config-heading"]');
+    await take(page, errors, { file: 'inspector.png', kind: 'crop', box: wholePx(await boxOf(inspector, 'the inspector')) }, tick);
+    const palette = page.locator('aside[data-fab-left-dock]');
+    await take(page, errors, { file: 'palette.png', kind: 'crop', box: wholePx(await boxOf(palette, 'the palette')) }, tick);
+    const header = await boxOf(page.locator('header').first(), 'the toolbar');
+    const redo = await boxOf(page.locator('button[aria-label="Redo"]'), 'the Redo button');
+    const runBox = { x: header.x, y: header.y, width: redo.x + redo.width + TOOLBAR_MARGIN - header.x, height: header.height };
+    await take(page, errors, { file: 'toolbar-run.png', kind: 'crop', box: wholePx(runBox) }, tick);
+    const firstLabelled = await firstLabelledButtonAfterTick(page);
+    const fileBox = { x: firstLabelled - TOOLBAR_MARGIN, y: header.y, width: header.x + header.width - (firstLabelled - TOOLBAR_MARGIN), height: header.height };
+    await take(page, errors, { file: 'toolbar-file.png', kind: 'crop', box: wholePx(fileBox) }, tick);
 
-    console.log(`CAPTURE_TOUR files=1 tick=${tick} dir=site/src/assets/tour`);
+    // camera-default: nothing selected, the view the board loaded with.
+    await page.keyboard.press('Escape');
+    await page.locator('#fab-config-heading').waitFor({ state: 'detached', timeout: WAIT_TIMEOUT_MS });
+    const now = await readCamera(page);
+    if (now.x !== fitted.x || now.y !== fitted.y || now.scale !== fitted.scale) {
+      fail(`the camera moved before camera-default.png: it read ${JSON.stringify(fitted)} after load and ${JSON.stringify(now)} now.`);
+    }
+    await sleep(500);
+    await take(page, errors, { file: 'camera-default.png', kind: 'full' }, tick);
+
+    // camera-zoomed and camera-controls: two wheel notches at the window centre, then a left drag
+    // on empty floor with no tool armed.
+    const readout = await zoomAndPan(page, await readScene(page));
+    await take(page, errors, { file: 'camera-zoomed.png', kind: 'full' }, tick);
+    const cluster = page.locator('[data-fab-camera-cluster]');
+    await take(page, errors, { file: 'camera-controls.png', kind: 'crop', box: wholePx(await boxOf(cluster, 'the camera cluster')) }, tick);
+
+    console.log(`CAPTURE_TOUR files=8 tick=${tick} readout=${readout} dir=site/src/assets/tour`);
   } finally {
     await browser.close().catch(() => undefined);
     killGroup(vite);

@@ -17,7 +17,7 @@ const URL_PATH = 'get-started/app-tour/';
 const REPO = path.resolve(import.meta.dirname, '../..');
 const TOUR_DIR = path.join(REPO, 'site/src/assets/tour');
 /** The fewest figures the tour page holds: the eight pictures the capture script takes. */
-const MIN_FIGURES = 1;
+const MIN_FIGURES = 8;
 /** The widest the page column gets, in CSS px (site/src/lib/screenshot.ts COLUMN_MAX_CSS). */
 const COLUMN_MAX_CSS = 768;
 const FULL_SIZE_TEXT = 'Open full size';

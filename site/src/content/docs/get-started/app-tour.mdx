@@ -5,13 +5,14 @@ sidebar:
   order: 2
 ---
 
+import Fact from '../../../components/Fact.astro';
 import Screenshot from '../../../components/Screenshot.astro';
 
-This page walks through the four parts of the Fabrico window you use most: the palette, the inspector, the toolbar and the camera. Each section shows a picture of the app and says what you do there.
+This page walks through the four parts of the Fabrico window you use most: the palette, the inspector, the toolbar and the camera. The sections below show a picture of each part and say what you do there.
 
 The pictures on this page show the same frontend and engine the desktop app runs. A script takes them in a browser, so they change when the app does.
 
-Here is the whole window with the demo board open and one Factory selected.
+Here is the whole window with the demo board open and one [Factory](../../reference/files/glossary/#term-factory) selected.
 
 <Screenshot
   name="overview"
@@ -19,7 +20,89 @@ Here is the whole window with the demo board open and one Factory selected.
   caption="The app with the demo board open."
 />
 
+## The palette
+
+The palette runs down the left side of the window. Its buttons place machines and draw the connections between them.
+
+<Screenshot
+  name="palette"
+  alt="The palette: a column headed Machines with a button for each machine kind from Source to Router, then Belt and Wire, then Label, each with an icon and a name."
+  caption="The palette. Click a button, then click the grid to place that machine."
+/>
+
+The first group places machines: a [Source](../../reference/files/glossary/#term-source) brings events in, a Factory runs your code on each one, and a [Sink](../../reference/files/glossary/#term-sink) is where a line ends. The buttons between them split, join and sort the line. Belt and Wire draw the connections: a [belt](../../reference/files/glossary/#term-belt) carries [items](../../reference/files/glossary/#term-item) from one machine to the next, and a [wire](../../reference/files/glossary/#term-wire) joins a Route to an HTTP Handler. Label puts a note on the board.
+
+## The inspector
+
+Click a machine on the board and the inspector, the panel on the right that shows the selected machine's settings, opens on it.
+
+<Screenshot
+  name="inspector"
+  alt="The inspector for a Factory: the heading Factory, a code editor holding the Factory's JavaScript, a list of its inputs and outputs with what each belt is doing and a Disconnect button for each, and Apply and Revert buttons at the bottom."
+  caption="The inspector for a selected Factory."
+/>
+
+For a Factory it shows the code, each input and output with what its belt is doing, and a Disconnect button that takes the belt off that side. Apply sends your code edits to the board and Revert drops them. Select a Source instead and the inspector shows its Webhook URL, with a Copy button, which is where you send a webhook from outside the app.
+
+## The toolbar
+
+The toolbar runs along the top of the window. Its left half runs the board, and the tick counter in the middle shows how many [ticks](../../reference/files/glossary/#term-tick), the engine's steps, the board has run.
+
+<Screenshot
+  name="toolbar-run"
+  alt="The left half of the toolbar: the Fabrico name, then four square buttons with icons for play, step, undo and redo."
+  caption="Running the board: Play, Step, Undo and Redo."
+/>
+
+<Screenshot
+  name="toolbar-file"
+  alt="The right half of the toolbar: seven buttons labelled Legend, Names, a question mark, New, Save, Load and Examples."
+  caption="Files and help: Legend, Names, Help, New, Save, Load and Examples."
+/>
+
+| Button | What it does | Keys |
+|---|---|---|
+| Play | Runs the board. While it runs, the same button reads Pause. | <Fact id="shortcut.playPause" /> |
+| Step | Runs one tick and holds the board there. | <Fact id="shortcut.step" /> |
+| Undo | Takes back your last edit. | <Fact id="shortcut.undo" /> |
+| Redo | Puts back the edit you took back. | <Fact id="shortcut.redo" /> |
+| Legend | Shows what each machine icon, state and connection means. | none |
+| Names | Shows every machine's name on the board. | hold <Fact id="shortcut.names" /> |
+| ? | Help: shows how to place, connect and extend machines. | none |
+| New | Starts an empty board. | <Fact id="shortcut.newBoard" /> |
+| Save | Saves the board to a project file. Hold Shift to save to a new file. | <Fact id="shortcut.save" /> |
+| Load | Opens a project file you saved. | <Fact id="shortcut.open" /> |
+| Examples | Loads one of the boards that ship with the app. | none |
+
+## The camera
+
+The camera is your view of the board. After a board loads, the app fits the whole factory into the window.
+
+<Screenshot
+  name="camera-default"
+  alt="The Fabrico window with the demo board in the middle and nothing selected, the whole board in view."
+  caption="The board after it loads, fitted to the window."
+/>
+
+<Screenshot
+  name="camera-zoomed"
+  alt="The same window after zooming in: the machines and labels are bigger, the board has moved up and to the left, and the zoom readout in the bottom right corner shows a bigger number."
+  caption="The same board zoomed in and moved. The zoom readout shows the new size."
+/>
+
+The two controls in the bottom right corner are Fit and the zoom readout.
+
+<Screenshot
+  name="camera-controls"
+  alt="Two buttons side by side: Fit, with four corner marks, and the zoom readout showing a percentage."
+  caption="Fit and the zoom readout."
+/>
+
+Scroll the mouse wheel over the board to zoom in or out around the pointer. Drag empty floor with the left button to move the view, or drag anywhere with the middle button, which works even while a palette tool is in your hand. Fit, or <Fact id="shortcut.fit" />, brings the whole factory back into the window, and clicking the readout sets the zoom back to 100 percent.
+
 ## Related pages
 
 - [Install Fabrico](../install/): build the app from source and start it.
 - [Keyboard shortcuts](../../reference/files/keyboard-shortcuts/): every key the app answers to.
+- [Reference](../../reference/): a page for each machine kind in the palette.
+- [Glossary](../../reference/files/glossary/): the words this page links, in one place.
