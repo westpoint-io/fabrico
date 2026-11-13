@@ -698,11 +698,28 @@ test.describe('every field fits its column (CHROME-14, D-08)', () => {
           await expectNumericTextField(panel.locator('#fab-route-offset-0'), 'the Router At byte field');
         }
         if (c.name === 'the Source on Webhook') {
+          // A URL too long for its field loses its start, so the part a user checks (the port and
+          // path) stays in view, and the whole URL is in the title. Read where the last character
+          // lands against the field's content box rather than a style name.
           const url = panel.locator(`.fab-field[title="${SOURCE_URL}"]`);
-          expect(
-            await url.evaluate((el) => getComputedStyle(el).textOverflow),
-            'the webhook URL keeps its ellipsis',
-          ).toBe('ellipsis');
+          const read = await url.evaluate((el) => {
+            const text = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode() as Text | null;
+            if (text === null) return { endInside: false, clipsStart: false };
+            const range = document.createRange();
+            range.setStart(text, text.data.length - 1);
+            range.setEnd(text, text.data.length);
+            const end = range.getBoundingClientRect();
+            const box = el.getBoundingClientRect();
+            const cs = getComputedStyle(el);
+            const right = box.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
+            const clip = text.parentElement?.parentElement;
+            return {
+              endInside: end.right <= right + 0.5,
+              clipsStart: clip != null && getComputedStyle(clip).direction === 'rtl' && getComputedStyle(clip).overflow === 'hidden',
+            };
+          });
+          expect(read.endInside, `the webhook URL's last character is inside its field (${line})`).toBe(true);
+          expect(read.clipsStart, 'the webhook URL clips at its start').toBe(true);
         }
       });
     }
