@@ -3,7 +3,17 @@
 // The walk test plays this same data, so a stage added here is walked without touching the test.
 // Machine and key names are tokens, never typed words, and `auditLessonWords` fails on a typed one.
 
-import { BELT_KIND, BOARD_PAUSED, PLACE_ON_THE_FLOOR, SET_TIMER_STAGES, SINK_KIND, SOURCE_KIND, beltStages } from '../commonStages';
+import {
+  BELT_KIND,
+  BOARD_PAUSED,
+  PLACE_ON_THE_FLOOR,
+  PRESS_PLAY_STAGES,
+  SET_TIMER_STAGES,
+  SINK_KIND,
+  SOURCE_KIND,
+  beltStages,
+  watchStage,
+} from '../commonStages';
 import type { Lesson } from '../types';
 
 export const YOUR_FIRST_LINE: Lesson = {
@@ -74,38 +84,12 @@ export const YOUR_FIRST_LINE: Lesson = {
     },
     {
       id: 'press-play',
-      // A running board finishes this on its next higher tick, about one drawn frame, so it needs a
-      // stage of its own for that frame, with nothing to ask for.
-      stages: [
-        {
-          id: 'board-paused',
-          when: { is: 'paused' },
-          hint: { on: 'panel', target: { kind: 'playButton' } },
-          gesture: { do: 'pressHint' },
-          text: ['Press Play in the toolbar, or press ', { key: 'playPause' }, '.'],
-        },
-        {
-          id: 'board-running',
-          when: { is: 'always' },
-          hint: null,
-          gesture: { do: 'none' },
-          text: ['The board is running.'],
-        },
-      ],
+      stages: PRESS_PLAY_STAGES,
       done: { is: 'tickRose' },
     },
     {
       id: 'watch-items',
-      stages: [
-        BOARD_PAUSED,
-        {
-          id: 'watch',
-          when: { is: 'always' },
-          hint: { on: 'machine', of: 'sink' },
-          gesture: { do: 'watch' },
-          text: ['Watch the dots ride the ', { kind: BELT_KIND }, ' into the ', { kind: SINK_KIND }, '.'],
-        },
-      ],
+      stages: [BOARD_PAUSED, watchStage(['Watch the dots ride the ', { kind: BELT_KIND }, ' into the ', { kind: SINK_KIND }, '.'])],
       done: { is: 'itemArrived', at: 'sink' },
     },
   ],

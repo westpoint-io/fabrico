@@ -17,7 +17,7 @@ import {
 } from './machine.ts';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, auditLessonWords, phrasePlain, splitAtBlock, stageTextFindings } from './phrase.ts';
 import { EMPTY_PROGRESS, localStorageProgress, withLessonDone, withLessonStarted, type Progress } from './progress.ts';
-import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId } from './types.ts';
+import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, ChromeFacts, Lesson, LessonId, Stage } from './types.ts';
 import type { FabricoWire } from '../render/sceneState.ts';
 import { KIND_NAMES } from '../../shared/kindNames.ts';
 import * as common from './commonStages.ts';
@@ -2573,5 +2573,126 @@ describe('a lesson on a prepared board', () => {
       expect(s.bindings.source?.nodeKey, 'the prepared machines stay bound').toBe('0@1,2');
       expect(s.baseline?.ringCell).toEqual({ x: 6, y: 2 });
     });
+  });
+});
+
+// The stage for a line that joins without turning at the ring cell, and the stages lesson 1 shares.
+describe('lineNoCorner and the shared stages', () => {
+  const B_SOURCE: BoardNode = node(1, SOURCE, 1, 2);
+  const B_SINK: BoardNode = node(2, SINK, 6, 6);
+  const DECLARED = [B_SOURCE, B_SINK];
+  const CORNER = { Corner: { from: 1, to: 2 } };
+  const STRAIGHT = { Straight: { axis: 0 } };
+  const STUB_TILES: BoardBelt['tiles'] = [2, 3, 4, 5].map((cell_x) => ({ cell_x, cell_y: 2 }));
+  const stub = (head?: number): BoardBelt => ({
+    id: 10,
+    items: 0,
+    occupiedSlots: [],
+    tiles: STUB_TILES,
+    docks: [{ end: 'Tail', node: B_SOURCE.id, port: 0 }, ...(head === undefined ? [] : [{ end: 'Head', node: head, port: 0 }])],
+  });
+  /** The piece from the ring cell down into the Sink, its first tile `ring` (a tile on the ring cell, or one beside it). */
+  const joiner = (ring: BoardBelt['tiles'][number]): BoardBelt => ({
+    id: 11,
+    items: 0,
+    occupiedSlots: [],
+    tiles: [ring, { cell_x: 6, cell_y: 3 }, { cell_x: 6, cell_y: 4 }, { cell_x: 6, cell_y: 5 }],
+    docks: [
+      { end: 'Tail', node: 10, port: 0 },
+      { end: 'Head', node: B_SINK.id, port: 0 },
+    ],
+  });
+  const joinedWith = (kind: unknown): BoardBelt[] => [stub(11), joiner({ cell_x: 6, cell_y: 2, kind })];
+  const NO_CORNER: Stage = {
+    id: 'belt-no-corner',
+    when: { is: 'lineNoCorner', a: 'source', b: 'sink' },
+    hint: { on: 'panel', target: { kind: 'undoButton' } },
+    gesture: { do: 'key', shortcut: 'undo' },
+    text: ['no corner'],
+  };
+  const LESSON_2_SHAPE: Lesson = {
+    id: 'delete-and-undo',
+    title: 'hand-made board lesson',
+    board: {
+      id: 'belts_that_join',
+      machines: [
+        { nodeKey: '0@1,2', bind: 'source' },
+        { nodeKey: '7@6,6', bind: 'sink' },
+      ],
+    },
+    steps: [
+      {
+        id: 'join-belt',
+        stages: [common.BOARD_PAUSED, NO_CORNER, ...common.beltStages({ bind: 'source', kind: SOURCE }, { bind: 'sink', kind: SINK })],
+        done: { is: 'lineTurnsAt', a: 'source', b: 'sink', bind: 'belt' },
+      },
+      { id: 'press-play', stages: common.PRESS_PLAY_STAGES, done: { is: 'tickRose' } },
+    ],
+    closing: [],
+    refused: { atStep: 'join-belt', atStage: 'belt-carry-on', press: { on: 'lineEnd', from: 'source' }, tag: 'BeltEndTile' },
+  };
+  const lessons = [LESSON_2_SHAPE];
+  const atJoin = (): TutorialState => {
+    const sent = reduce(IDLE, { type: 'newSent', lessonId: 'delete-and-undo', floorAtSend: FLOOR }, lessons);
+    return reduce(sent, { type: 'frame', board: board({ nodes: DECLARED, belts: [stub()] }), chrome: chrome() }, lessons);
+  };
+  const BELT_ARMED = { armed: { kind: 'belt' } as const };
+  const stageOn = (belts: readonly BoardBelt[], c: Partial<ChromeFacts> = BELT_ARMED): string | undefined =>
+    currentStage(atJoin(), board({ nodes: DECLARED, belts }), chrome(c), lessons)?.id;
+
+  it('shows the no-corner stage, not belt-draw, on a join with a Straight at the ring cell and the Belt tool armed', () => {
+    expect(atJoin().stepIndex, 'the step is still open on that board').toBe(0);
+    expect(stageOn(joinedWith(STRAIGHT))).toBe('belt-no-corner');
+    expect(stageOn(joinedWith(STRAIGHT), { armed: null }), 'with no tool armed too').toBe('belt-no-corner');
+  });
+
+  it('holds when the line joins with no tile at the ring cell', () => {
+    const around = [stub(11), { ...joiner({ cell_x: 5, cell_y: 3 }), tiles: [{ cell_x: 5, cell_y: 3 }, { cell_x: 5, cell_y: 4 }] }];
+    expect(stageOn(around)).toBe('belt-no-corner');
+  });
+
+  it('does not hold before the join, so the carry-on stage shows', () => {
+    expect(stageOn([stub()])).toBe('belt-carry-on');
+  });
+
+  it('does not hold when the ring cell ships a Corner', () => {
+    expect(stageOn(joinedWith(CORNER))).not.toBe('belt-no-corner');
+  });
+
+  it('gives lesson 1 the shared press-play stages and the shared watch stage, with its words', () => {
+    const steps = YOUR_FIRST_LINE.steps;
+    expect(steps.find((st) => st.id === 'press-play')?.stages).toBe(common.PRESS_PLAY_STAGES);
+    const watch = steps.find((st) => st.id === 'watch-items')?.stages.find((g) => g.id === 'watch');
+    expect(watch).toEqual(common.watchStage(['Watch the dots ride the ', { kind: common.BELT_KIND }, ' into the ', { kind: common.SINK_KIND }, '.']));
+    // The literal words at the base revision, so a word changed in the move turns this red.
+    expect(common.PRESS_PLAY_STAGES.map((g) => [g.id, phrasePlain(g.text, REAL_TABLES)])).toEqual([
+      ['board-paused', 'Press Play in the toolbar, or press Space.'],
+      ['board-running', 'The board is running.'],
+    ]);
+    expect(phrasePlain(watch?.text ?? [], REAL_TABLES)).toBe('Watch the dots ride the Belt into the Sink.');
+    expect(common.watchStage(['round the corner']).hint).toEqual({ on: 'machine', of: 'sink' });
+  });
+
+  it('beltStages uses the tool, undo and carry-on coaching words it is given, and is unchanged without them', () => {
+    const from = { bind: 'source', kind: SOURCE } as const;
+    const to = { bind: 'sink', kind: SINK } as const;
+    const plain = common.beltStages(from, to);
+    expect(plain.map((g) => [g.id, phrasePlain(g.text, REAL_TABLES), g.coach])).toEqual([
+      ['belt-tool', 'A Belt carries items between machines. Click Belt in the palette.', undefined],
+      ['belt-undo', "That Belt can't be carried on. Press Ctrl+Z until it's gone, then draw it again.", undefined],
+      ['belt-carry-on', "That Belt stops before the Sink. Drag from the ring at its end to the Sink's input dot.", undefined],
+      ['belt-draw', "Drag from the Source's output dot to the Sink's input dot.", undefined],
+    ]);
+    expect(common.beltStages(from, to, {})).toEqual(plain);
+    const coach = { BeltEndTile: ['coach line'] };
+    const given = common.beltStages(from, to, { tool: ['tool words'], undo: ['undo words'], carryOnCoach: coach });
+    expect(given.map((g) => [g.id, phrasePlain(g.text, REAL_TABLES)])).toEqual([
+      ['belt-tool', 'tool words'],
+      ['belt-undo', 'undo words'],
+      ['belt-carry-on', "That Belt stops before the Sink. Drag from the ring at its end to the Sink's input dot."],
+      ['belt-draw', "Drag from the Source's output dot to the Sink's input dot."],
+    ]);
+    expect(given.find((g) => g.id === 'belt-carry-on')?.coach).toEqual(coach);
+    expect(given.find((g) => g.id === 'belt-draw')?.coach).toBeUndefined();
   });
 });

@@ -199,7 +199,12 @@ export type StageWhen =
    * No URL has been read off the bound Route's POST URL row at this board generation: `routeUrl` is null,
    * names another handle, or was read before an Undo keyframe re-minted the handles.
    */
-  | { is: 'urlNotRead'; of: BindingName };
+  | { is: 'urlNotRead'; of: BindingName }
+  /**
+   * The line from `a` reaches `b`, and the tile at the ring cell captured when the step began is missing
+   * or doesn't ship as a Corner: the line joined, but turned somewhere else. Never holds with no ring cell.
+   */
+  | { is: 'lineNoCorner'; a: BindingName; b: BindingName };
 
 /** A chrome control a ring can mark. Each resolves by the control's own name or state, so a renamed control fails the walk. */
 export type PanelTarget =
@@ -322,11 +327,13 @@ export interface Lesson {
     atStep: string;
     atStage: string;
     /**
-     * Where the press lands: on a bound machine's body, or on one of its ports. The port form names a
-     * Fault, which no hint can mark (`PortRoleName` has no Fault), so a lesson can point the walk at it
-     * without ever ringing it for the user.
+     * Where the press lands: on a bound machine's body, on one of its ports, or on the last tile of the
+     * line leaving a bound machine. The port form names a Fault, which no hint can mark (`PortRoleName`
+     * has no Fault), so a lesson can point the walk at it without ever ringing it for the user. The line
+     * form finds its tile through `lineEndTile` in `check.ts`, because no binding names a belt that
+     * stops short until it joins.
      */
-    press: { on: 'machine'; of: BindingName } | { on: 'port'; of: BindingName; role: 'fault' };
+    press: { on: 'machine'; of: BindingName } | { on: 'port'; of: BindingName; role: 'fault' } | { on: 'lineEnd'; from: BindingName };
     /** The refusal tag the press draws from the app, so the walk knows which coaching line to expect. */
     tag: string;
   };

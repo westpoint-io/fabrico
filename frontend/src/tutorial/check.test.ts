@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineStuck, looseBeltInTheWay, nodeKey, outputFacing, wireFrom, type CheckContext } from './check.ts';
+import { BELT_ENDS, BINDING_NAMES_COMPLETE, boundBeltIds, boundMachineKeys, evaluateCheck, freeOutputs, lineDoorstep, lineEndTile, lineStuck, looseBeltInTheWay, nodeKey, outputFacing, wireFrom, type CheckContext } from './check.ts';
 import { boardShape } from './shape.ts';
 import type { StepBaseline, TutorialState } from './machine.ts';
 import type { AppliedConfig, BoardBelt, BoardFacts, BoardNode, BoardWire, ChromeFacts } from './types.ts';
@@ -923,5 +923,35 @@ describe('lineTurnsAt', () => {
     // A drag from the Sink's input onto the stub reaches the host as the same two belts, oriented from the
     // Out end, so the check reads it exactly as the forward draw.
     expect(result([down(CORNER), stub]).done).toBe(true);
+  });
+});
+
+// The refused press at lesson 2's carry-on stage lands on the last tile of the line from the Source, which
+// no binding names until the join, so the walk and the lesson find it through this helper.
+describe('lineEndTile', () => {
+  const SRC = node(1, SOURCE, 1, 2);
+  const tiles = (...cells: ReadonlyArray<readonly [number, number]>): BoardBelt['tiles'] => cells.map(([cell_x, cell_y]) => ({ cell_x, cell_y }));
+  const on = (belts: readonly BoardBelt[]): Pick<BoardFacts, 'belts'> => ({ belts });
+  const STUB: BoardBelt = { ...belt(10, [], [{ end: 'Tail', node: SRC.id, port: 0 }]), tiles: tiles([2, 2], [3, 2], [4, 2], [5, 2]) };
+
+  it('is the last piece of the line and its Head tile', () => {
+    expect(lineEndTile(on([STUB]), SRC.id)).toEqual({ belt: STUB, tile: { cell_x: 5, cell_y: 2 } });
+  });
+
+  it('follows Head docks to the last piece', () => {
+    const first: BoardBelt = { ...STUB, docks: [...STUB.docks, { end: 'Head', node: 11, port: 0 }] };
+    const second: BoardBelt = { ...belt(11, [], [{ end: 'Tail', node: 10, port: 0 }]), tiles: tiles([6, 2], [6, 3]) };
+    expect(lineEndTile(on([second, first]), SRC.id)).toEqual({ belt: second, tile: { cell_x: 6, cell_y: 3 } });
+  });
+
+  it('leaves out the belts in the skip set', () => {
+    expect(lineEndTile(on([STUB]), SRC.id, new Set([10]))).toBeUndefined();
+  });
+
+  it('is undefined with no line leaving the machine, or a piece with no tiles', () => {
+    expect(lineEndTile(on([]), SRC.id)).toBeUndefined();
+    const stranger: BoardBelt = { ...STUB, docks: [{ end: 'Tail', node: 99, port: 0 }] };
+    expect(lineEndTile(on([stranger]), SRC.id)).toBeUndefined();
+    expect(lineEndTile(on([{ ...STUB, tiles: [] }]), SRC.id)).toBeUndefined();
   });
 });

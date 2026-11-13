@@ -13,6 +13,7 @@ import {
   boundBeltIds,
   boundGone,
   boundMachineKeys,
+  cornerShippedAt,
   evaluateCheck,
   freeOutputs,
   lineDoorstep,
@@ -250,6 +251,15 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
       const route = bindings[when.of];
       const read = chrome.routeUrl;
       return route === undefined || read === null || read.node !== route.id || read.generation !== board.generation;
+    }
+    // The same two reads the join step's check makes, so this stage holds exactly while a joined line
+    // leaves that step open.
+    case 'lineNoCorner': {
+      const a = bindings[when.a];
+      const b = bindings[when.b];
+      const ring = s.baseline?.ringCell;
+      if (a === undefined || b === undefined || ring === undefined || ring === null) return false;
+      return beltJoining(board, a.id, b.id) !== undefined && !cornerShippedAt(board, ring);
     }
   }
 }

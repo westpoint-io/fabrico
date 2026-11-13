@@ -1011,6 +1011,9 @@ function checkRefusalReached(lesson: Lesson, state: WalkState, stepIndex: number
 async function walkRefusal(page: Page, lesson: Lesson, state: WalkState, stepIndex: number): Promise<boolean> {
   const { atStage, press, tag } = lesson.refused;
   const label = refusalLabel(lesson, stepIndex);
+  // No shipped lesson presses a line's end yet. The press that finds its tile through `lineEndTile`
+  // comes with the first lesson that uses it, and until then a lesson naming it fails here by name.
+  if (press.on === 'lineEnd') throw new Error(`${label}: the walk has no press on the end of the line from ${press.from} yet`);
   const probe = await probeAtStage(page, stepIndex, atStage);
   if (probe === null) return false;
   const sentenceWanted = REFUSED_SENTENCES[tag];

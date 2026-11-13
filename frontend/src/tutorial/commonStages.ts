@@ -90,6 +90,38 @@ export interface BeltEnd {
   kind: number;
 }
 
+/**
+ * The press-play step's stages, lesson 1's words. A running board finishes the step on its next higher
+ * tick, about one drawn frame, so it needs a stage of its own for that frame, with nothing to ask for.
+ */
+export const PRESS_PLAY_STAGES: readonly Stage[] = [
+  {
+    id: 'board-paused',
+    when: { is: 'paused' },
+    hint: { on: 'panel', target: { kind: 'playButton' } },
+    gesture: { do: 'pressHint' },
+    text: ['Press Play in the toolbar, or press ', { key: 'playPause' }, '.'],
+  },
+  {
+    id: 'board-running',
+    when: { is: 'always' },
+    hint: null,
+    gesture: { do: 'none' },
+    text: ['The board is running.'],
+  },
+];
+
+/** The stage that rings a Sink while items ride into it, with the lesson's own sentence. */
+export function watchStage(text: readonly PhraseToken[], of: BindingName = 'sink'): Stage {
+  return {
+    id: 'watch',
+    when: { is: 'always' },
+    hint: { on: 'machine', of },
+    gesture: { do: 'watch' },
+    text,
+  };
+}
+
 /** What a lesson may change in `beltStages`. Each one left out keeps lesson 1's. */
 export interface BeltStageOptions {
   /**
@@ -99,8 +131,14 @@ export interface BeltStageOptions {
   pick?: 'free' | 'facing';
   /** The plain drag's words. */
   draw?: readonly PhraseToken[];
+  /** The belt-tool stage's words. */
+  tool?: readonly PhraseToken[];
+  /** The words of the stage that undoes a belt that can't be carried on. */
+  undo?: readonly PhraseToken[];
   /** The carry-on stage's words. */
   carryOn?: readonly PhraseToken[];
+  /** Coaching lines for the carry-on stage, keyed by refusal tag. */
+  carryOnCoach?: Readonly<Record<string, readonly PhraseToken[]>>;
   /** Coaching lines for the plain drag, keyed by refusal tag. */
   drawCoach?: Readonly<Record<string, readonly PhraseToken[]>>;
 }
@@ -117,7 +155,7 @@ export function beltStages(from: BeltEnd, to: BeltEnd, options: BeltStageOptions
       when: { is: 'beltNotArmed' },
       hint: { on: 'panel', target: { kind: 'beltTool' } },
       gesture: { do: 'pressHint' },
-      text: ['A ', { kind: BELT_KIND }, ' carries items between machines. Click ', { kind: BELT_KIND }, ' in the palette.'],
+      text: options.tool ?? ['A ', { kind: BELT_KIND }, ' carries items between machines. Click ', { kind: BELT_KIND }, ' in the palette.'],
     },
     // Ahead of both drags, because each of them starts or ends on something this belt holds, and a
     // press can't carry it on. The user presses the key, and this stage sends nothing itself. It takes
@@ -127,7 +165,7 @@ export function beltStages(from: BeltEnd, to: BeltEnd, options: BeltStageOptions
       when: { is: 'lineStuck', from: from.bind, to: to.bind },
       hint: null,
       gesture: { do: 'key', shortcut: 'undo' },
-      text: ['That ', { kind: BELT_KIND }, " can't be carried on. Press ", { key: 'undo' }, " until it's gone, then draw it again."],
+      text: options.undo ?? ['That ', { kind: BELT_KIND }, " can't be carried on. Press ", { key: 'undo' }, " until it's gone, then draw it again."],
     },
     // Ahead of the plain drag, because that drag starts on an output this belt already holds and the
     // host refuses it. The app rings the belt's free end while the tool is armed, so this ring only
@@ -138,6 +176,7 @@ export function beltStages(from: BeltEnd, to: BeltEnd, options: BeltStageOptions
       hint: { on: 'port', of: to.bind, role: 'in' },
       gesture: { do: 'dragToHint' },
       text: options.carryOn ?? ['That ', { kind: BELT_KIND }, ' stops before the ', { kind: to.kind }, '. Drag from the ring at its end to the ', { kind: to.kind }, "'s input dot."],
+      ...(options.carryOnCoach === undefined ? {} : { coach: options.carryOnCoach }),
     },
     {
       id: 'belt-draw',

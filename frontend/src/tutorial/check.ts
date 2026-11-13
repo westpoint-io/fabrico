@@ -194,6 +194,21 @@ function lastPiece(board: Pick<BoardFacts, 'belts'>, a: number): BoardBelt | und
   return belt;
 }
 
+/**
+ * The last piece of the line leaving `a` and that piece's Head tile, the last of its tiles, or undefined
+ * with no line or a piece with no tiles. Belts in `skip` aren't pieces of this line. A press aimed at a
+ * line's end finds its tile here, so it never guesses the tile from where the machines sit.
+ */
+export function lineEndTile(
+  board: Pick<BoardFacts, 'belts'>,
+  a: number,
+  skip: ReadonlySet<number> = NO_BELTS,
+): { belt: BoardBelt; tile: { cell_x: number; cell_y: number } } | undefined {
+  const belt = lastPiece(without(board, skip), a);
+  const head = belt?.tiles[belt.tiles.length - 1];
+  return belt === undefined || head === undefined ? undefined : { belt, tile: { cell_x: head.cell_x, cell_y: head.cell_y } };
+}
+
 /** Every piece of the line leaving `a`, Tail first, following Head docks through belts as `lastPiece` does. Empty with no belt leaving it. */
 function piecesOf(board: Pick<BoardFacts, 'belts'>, a: number): BoardBelt[] {
   const pieces: BoardBelt[] = [];
