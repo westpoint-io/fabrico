@@ -23,6 +23,12 @@ import {
 // equal the native engine's dump (FABRICO_PLAYER_NATIVE_DUMP), the end hash the manifest pin, the
 // board's camera must not move, and the page must scroll under the wheel. Frames and ticks keep
 // rising through the input, and the board still draws afterwards.
+//
+// After each input the test waits for the tick and the frame count to pass the last sample rather
+// than sleeping a fixed time. The clock steps 0 ticks on its first frame after Restart or a
+// caption's Continue, and the page presses Continue on a 50 ms poll, so on a page drawing 10
+// frames a second a board can sit on one tick for 250 ms or more. A run that input froze still
+// fails: its tick never passes the last sample, and the wait times out.
 
 const BOARD = 'demo_scene';
 const PAGE = pageUrl('three-boards.html');
@@ -74,34 +80,44 @@ test('clicks, drags, keys and wheel turns leave every tick, the end hash and the
   expect(cameraBefore).not.toBeNull();
   const { stage, machine } = await targets(page);
   const samples: Sample[] = [await sample(page)];
-  const pause = (): Promise<void> => page.waitForTimeout(120);
+  /** Wait until the tick and the frame count both pass the last sample, then record that sample. */
+  const next = async (after: string): Promise<void> => {
+    const prev = samples[samples.length - 1];
+    let now = prev;
+    await expect
+      .poll(
+        async () => {
+          now = await sample(page);
+          return { tickRose: now.tick > prev.tick, framesRose: now.frames > prev.frames };
+        },
+        { message: `the tick and the frame count rise after ${after} (sample ${samples.length})`, intervals: [20], timeout: 10_000 },
+      )
+      .toEqual({ tickRose: true, framesRose: true });
+    samples.push(now);
+  };
 
   // A click on a machine.
   await page.mouse.click(machine.x, machine.y);
-  await pause();
-  samples.push(await sample(page));
+  await next('the click on a machine');
 
   // A drag across the stage.
   await page.mouse.move(stage.x + stage.width * 0.2, stage.y + stage.height * 0.5);
   await page.mouse.down();
   await page.mouse.move(stage.x + stage.width * 0.8, stage.y + stage.height * 0.3, { steps: 8 });
   await page.mouse.up();
-  await pause();
-  samples.push(await sample(page));
+  await next('the drag');
 
   // Keys, with the stage clicked first.
   await page.mouse.click(stage.x + stage.width / 2, stage.y + stage.height / 2);
   for (const key of KEYS) await page.keyboard.press(key);
-  await pause();
-  samples.push(await sample(page));
+  await next('the keys');
 
   // Three wheel turns over the stage. The page scrolls; the board must not zoom.
   const scrollBefore = await page.evaluate(() => window.scrollY);
   await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
   for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 120);
   await expect.poll(() => page.evaluate(() => window.scrollY), { message: 'the wheel scrolls the page' }).toBeGreaterThan(scrollBefore);
-  await pause();
-  samples.push(await sample(page));
+  await next('the wheel turns');
 
   const end = manifestLine(BOARD);
   for (let i = 1; i < samples.length; i++) {
