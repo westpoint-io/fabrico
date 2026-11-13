@@ -34,6 +34,9 @@ import {
   webhookUrl,
   type SceneFacts,
 } from './oracle';
+// The PNG decoder @playwright/test already bundles (pngjs), as the seam reader uses.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { PNG } from 'playwright-core/lib/utilsBundle';
 import { SEAM_BOXES_E_TO_S, SEAM_E_TO_S_AT_1, groundColour, tileInk, type SeamBox } from './seamInk';
 import { decodePngRows } from './pngRows';
 import { changedPixels, sampleFramesInPage, type CaptureRect } from './frameCapture';
@@ -270,6 +273,8 @@ interface WalkState {
   beltTile: { cell: readonly [number, number]; a: Buffer; b: Buffer | null } | null;
   /** The ring cell a `lineTurnsAt` step's carry-on drag started from, read off the board as the drag began. */
   seamCell: readonly [number, number] | null;
+  /** The stub-motion read on a prepared board has run. */
+  motionRead: boolean;
 }
 
 /**
@@ -1164,7 +1169,11 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
 
   const watchStage = step.stages.find((s) => s.gesture.do === 'watch');
   let dotsRead = false;
-  const rounds = step.stages.length + 2;
+  // On a prepared board the stub-motion read runs on the join step's first round with the board playing,
+  // before the join. The lesson board plays from the moment it loads, so this lands inside the window plan
+  // 106-02 measured (items ride the stub from 0.9 s until it fills at 15.3 s). It takes a round of its own.
+  const motionHere = lesson.board !== undefined && !state.motionRead && step.done.is === 'lineTurnsAt';
+  const rounds = step.stages.length + 2 + (motionHere ? 1 : 0);
   let movedOn = false;
   let lastStageId: string | null = null;
   for (let round = 0; round < rounds && !movedOn; round++) {
@@ -1190,6 +1199,10 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
     if (left) {
       movedOn = true;
       break;
+    }
+    if (motionHere && !state.motionRead && stageOf(lesson, stepIndex, entry!.stageId)?.when.is !== 'paused') {
+      await readStubMotion(page, lesson, state, stepIndex);
+      continue;
     }
     lastStageId = entry!.stageId;
     const stage = stageOf(lesson, stepIndex, entry!.stageId);
@@ -1322,6 +1335,7 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
   }
   if (step.done.is === 'wireJoins') await expectWiresJoin(page, label, step.done.a, step.done.b);
   if (step.done.is === 'lineTurnsAt') {
+    if (motionHere && !state.motionRead) throw new Error(`${label}: the stub-motion read never ran before the join, because the board never read as playing on this step`);
     await expectSeamDrawnAsCorner(page, label, state);
   }
   if (goneTarget !== null) await expectTargetGone(page, label, goneTarget);
@@ -1899,6 +1913,175 @@ async function expectSeamDrawnAsCorner(page: Page, label: string, state: WalkSta
   console.log(`SEAM ${label}: ring (${ring[0]},${ring[1]}) ships and draws Corner ${DIR_NAMES[from]} to ${DIR_NAMES[to]}`);
 }
 
+/** The stub-motion read samples the stub's clip about this often. */
+const MOTION_SAMPLE_MS = 250;
+/** For this long with the item layer shown, and again with it hidden. */
+const MOTION_WINDOW_MS = 3_000;
+/**
+ * A sample differs from the one before when more than this many pixels changed in any channel. Zero, as
+ * `93-boards-load.live.spec.ts` grades its first belt: under pinned treads any change counts, which is
+ * what makes the hidden-layer control strict.
+ */
+const MOTION_DELTA_MIN = 0;
+/** Consecutive carrying samples the control must see with the item layer hidden, so it can't pass on none. */
+const MOTION_CONTROL_PAIRS_MIN = 4;
+/** Sim ticks the read waits for the first item on the stub: the board's first rides on tick 55 (106-02). */
+const MOTION_ITEM_TICKS = 120;
+/** The lesson board's boot ends on this tick, so its clock reads ticks since it arrived as tick minus this. */
+const LESSON_BOARD_BOOT_TICK = 7;
+/** The stub fills this many ticks after the board arrives, and the items on it stop (106-02 MEASURE lesson-board). */
+const LESSON_BOARD_FILL_TICKS = 955;
+/** The host's sim clock, ticks a second. */
+const BOARD_TICKS_PER_S = 62.5;
+
+interface StubSample {
+  /** The model reported items on the stub just before or just after the capture. */
+  carrying: boolean;
+  tick: number;
+  /** `window.__fabrico.tickerTime()`: when the Pixi ticker last finished a frame. */
+  frameAt: number;
+  png: Buffer;
+}
+
+async function tickerTimeNow(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const hook = (window as { __fabrico?: { tickerTime?(): number } }).__fabrico;
+    if (!hook?.tickerTime) throw new Error('window.__fabrico.tickerTime() not installed');
+    return hook.tickerTime();
+  });
+}
+
+/** Sample the stub's clip every `MOTION_SAMPLE_MS` for `MOTION_WINDOW_MS`. */
+async function sampleStub(page: Page, beltId: number, clip: { x: number; y: number; width: number; height: number }): Promise<StubSample[]> {
+  const itemsOn = (scene: SceneFacts) => scene.belts.find((b) => b.id === beltId)?.items ?? 0;
+  const out: StubSample[] = [];
+  const began = Date.now();
+  while (Date.now() - began < MOTION_WINDOW_MS) {
+    const at = Date.now();
+    const before = itemsOn(await readScene(page));
+    const png = await captureClip(page, clip);
+    const after = await readScene(page);
+    out.push({ carrying: before > 0 || itemsOn(after) > 0, tick: after.tick, frameAt: await tickerTimeNow(page), png });
+    const rest = MOTION_SAMPLE_MS - (Date.now() - at);
+    if (rest > 0) await page.waitForTimeout(rest);
+  }
+  return out;
+}
+
+/** Pixels where any channel differs between two captures of one clip. */
+function pixelsChanged(a: Buffer, b: Buffer): number {
+  const pa = PNG.sync.read(a);
+  const pb = PNG.sync.read(b);
+  if (pa.width !== pb.width || pa.height !== pb.height) return pa.width * pa.height;
+  let n = 0;
+  for (let i = 0; i < pa.data.length; i += 4) {
+    if (pa.data[i] !== pb.data[i] || pa.data[i + 1] !== pb.data[i + 1] || pa.data[i + 2] !== pb.data[i + 2]) n++;
+  }
+  return n;
+}
+
+/** The consecutive pairs where both samples carry items, and how many of those changed. */
+function gradePairs(samples: readonly StubSample[]): { pairs: number; changed: number; largest: number } {
+  let pairs = 0;
+  let changed = 0;
+  let largest = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1]!;
+    const b = samples[i]!;
+    if (!a.carrying || !b.carrying) continue;
+    pairs++;
+    const n = pixelsChanged(a.png, b.png);
+    largest = Math.max(largest, n);
+    if (n > MOTION_DELTA_MIN) changed++;
+  }
+  return { pairs, changed, largest };
+}
+
+/** Distinct ticker frames across the samples, and whether the last is later than the first. */
+function framesRose(samples: readonly StubSample[]): { distinct: number; rose: boolean } {
+  const distinct = new Set(samples.map((s) => s.frameAt)).size;
+  return { distinct, rose: samples.length > 1 && samples[samples.length - 1]!.frameAt > samples[0]!.frameAt };
+}
+
+/**
+ * THE STUB-MOTION READ (phase 106, ROADMAP criterion 1; RESEARCH Pattern 6). On the loaded board, before
+ * the join, items have to be seen riding the stub, not just counted by the model. The render clock is
+ * pinned so the treads hold still, and a change between two samples counts only when the model reports
+ * items on the stub around both. Then the same read with the item layer hidden must see no change, which
+ * is what shows the change came from items. The Pixi ticker's frame time has to rise across both windows,
+ * so neither half can be graded on a renderer that stopped drawing.
+ */
+async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, stepIndex: number): Promise<void> {
+  const label = `${stepLabel(lesson, stepIndex)} stub-motion read`;
+  const scene = await readScene(page);
+  expect(scene.belts.length, `${label}: before the join the board holds only its stub`).toBe(1);
+  const stub = scene.belts[0]!;
+  const cam = await cameraOf(page);
+  const size = CELL * cam.scale;
+  const xs = stub.tiles.map((t) => t.cell_x);
+  const ys = stub.tiles.map((t) => t.cell_y);
+  const inset = 2;
+  const clip = {
+    x: Math.min(...xs) * size + cam.x + inset,
+    y: Math.min(...ys) * size + cam.y + inset,
+    width: (Math.max(...xs) - Math.min(...xs) + 1) * size - 2 * inset,
+    height: (Math.max(...ys) - Math.min(...ys) + 1) * size - 2 * inset,
+  };
+  await expectOnTheBoard(page, label, "the stub's clip is", [
+    { x: clip.x + 1, y: clip.y + 1 },
+    { x: clip.x + clip.width - 1, y: clip.y + 1 },
+    { x: clip.x + 1, y: clip.y + clip.height - 1 },
+    { x: clip.x + clip.width - 1, y: clip.y + clip.height - 1 },
+  ]);
+  await expect
+    .poll(async () => (await readScene(page)).belts.find((b) => b.id === stub.id)?.items ?? 0, {
+      message: `${label}: the model reports items on the stub`,
+      timeout: addWaitBudget(tickBudgetMs(MOTION_ITEM_TICKS) + frameBudgetMs(MOVE_ON_FRAMES), `${label}: the first item on the stub`),
+    })
+    .toBeGreaterThan(0);
+  addWaitBudget(2 * MOTION_WINDOW_MS, `${label}: two ${MOTION_WINDOW_MS} ms sample windows`);
+  let shown: StubSample[] = [];
+  let hidden: StubSample[] = [];
+  await holdTheFrame(page, 0, true);
+  try {
+    shown = await sampleStub(page, stub.id, clip);
+    await holdTheFrame(page, 0, false);
+    hidden = await sampleStub(page, stub.id, clip);
+  } finally {
+    await holdTheFrame(page, null, true);
+  }
+  state.motionRead = true;
+  const seen = gradePairs(shown);
+  const control = gradePairs(hidden);
+  const seenFrames = framesRose(shown);
+  const controlFrames = framesRose(hidden);
+  const firstTick = shown[0]?.tick ?? 0;
+  const lastTick = hidden[hidden.length - 1]?.tick ?? shown[shown.length - 1]?.tick ?? 0;
+  const secs = (t: number) => ((t - LESSON_BOARD_BOOT_TICK) / BOARD_TICKS_PER_S).toFixed(1);
+  console.log(
+    `MEASURE stub-motion when=before-fill window_s=${secs(lastTick)} samples=${shown.length} changed=${seen.changed} control_changed=${control.changed} ` +
+      `from_s=${secs(firstTick)} ticks=${firstTick}-${lastTick} carrying_pairs=${seen.pairs} control_pairs=${control.pairs} control_samples=${hidden.length} ` +
+      `largest=${seen.largest} frames=${seenFrames.distinct}/${controlFrames.distinct}`,
+  );
+  expect(seenFrames.rose, `${label}: the Pixi ticker drew frames across the ${shown.length} samples (${seenFrames.distinct} distinct frame times)`).toBe(true);
+  expect(seenFrames.distinct, `${label}: the Pixi ticker drew a new frame for at least half the ${shown.length} samples`).toBeGreaterThanOrEqual(Math.ceil(shown.length / 2));
+  expect(seen.pairs, `${label}: the model reported items on the stub around at least two consecutive samples`).toBeGreaterThan(0);
+  expect(
+    seen.changed,
+    `${label}: under pinned treads, the stub's pixels changed between consecutive samples with items on it (${seen.changed} of ${seen.pairs} pairs, largest change ${seen.largest} pixels)`,
+  ).toBeGreaterThan(0);
+  expect(controlFrames.rose, `${label}: the Pixi ticker drew frames across the control's ${hidden.length} samples`).toBe(true);
+  expect(control.pairs, `${label}: the control saw items on the stub around at least ${MOTION_CONTROL_PAIRS_MIN} consecutive pairs`).toBeGreaterThanOrEqual(MOTION_CONTROL_PAIRS_MIN);
+  expect(
+    control.changed,
+    `${label}: with the item layer hidden and the treads pinned, the stub's pixels changed on ${control.changed} of ${control.pairs} pairs, so something other than items passes the read`,
+  ).toBe(0);
+  expect(
+    lastTick - LESSON_BOARD_BOOT_TICK,
+    `${label}: both windows ran before the stub filled, ${LESSON_BOARD_FILL_TICKS} ticks after the board arrived (last sample at tick ${lastTick})`,
+  ).toBeLessThan(LESSON_BOARD_FILL_TICKS);
+}
+
 async function walkSteps(page: Page, lesson: Lesson, state: WalkState, from: number, to: number): Promise<void> {
   for (let stepIndex = from; stepIndex < to; stepIndex++) {
     const step = lesson.steps[stepIndex] as Step;
@@ -1951,6 +2134,7 @@ export async function walkLesson(page: Page, lesson: Lesson, opts: { until?: str
     undone: false,
     beltTile: null,
     seamCell: null,
+    motionRead: false,
   };
   walkStates.set(page, state);
   await walkSteps(page, lesson, state, 0, to);
