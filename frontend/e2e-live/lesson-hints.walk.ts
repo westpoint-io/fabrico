@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import { CELL } from '../shared/geometry';
 import type { HintRect, TutorialProbe } from '../src/chrome/tutorial/TutorialLayer';
-import { doorstepCell, dropHitRadiusWorld, unitDelta } from '../src/protocol/ports';
+import { MEDIUM_ELECTRICAL, PORT_ROLE, doorstepCell, dropHitRadiusWorld, nubAnchor, unitDelta, wireNubHitRadiusWorld } from '../src/protocol/ports';
+import { ANSWER_A_WEB_REQUEST } from '../src/tutorial/lessons/answerAWebRequest';
 import { YOUR_FIRST_LINE as LESSON } from '../src/tutorial/lessons/yourFirstLine';
 import type { Stage } from '../src/tutorial/types';
 import { MAX_ZOOM } from '../src/render/camera';
@@ -29,6 +30,7 @@ import {
   screenCellCentre,
   waitForAppReady,
   watchPageErrors,
+  type PortFacts,
   type SceneFacts,
 } from './support/oracle';
 
@@ -320,6 +322,176 @@ test('the drop disc docks inside and not outside, zoom at or below 1', async ({ 
 
 test('the drop disc docks inside and not outside, zoom near 2', async ({ page }) => {
   await dropTest(page, 1.9, 2.1);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The wire disc (lesson 5's wire-draw). Both ends of a wire drag get a disc whose inner edge is the
+// circle the Wire tool's press hit-tests. A press 2 px outside the Route Out disc, on the side away from
+// the Route's In, must start no wire; a press 1 px inside it must start the drag that lays both legs.
+// The radius and centre are the probe's, the disc as painted this frame, so a disc drawn smaller than
+// the press's real reach sends the outside press inside that reach and the test fails there.
+
+const WIRE_LESSON = ANSWER_A_WEB_REQUEST;
+const WIRE_STEP = WIRE_LESSON.steps.findIndex((s) => s.id === 'wire');
+/** Sim ticks the board is watched after the outside press, for a wire on its way from the host. */
+const WIRE_TICKS = 30;
+
+function wireStage(id: string): Stage {
+  const stage = WIRE_LESSON.steps[WIRE_STEP]?.stages.find((s) => s.id === id);
+  if (stage === undefined) throw new Error(`wire has no stage ${id}`);
+  return stage;
+}
+
+async function reachWireStage(page: Page, id: string): Promise<void> {
+  await expect
+    .poll(async () => (await probeAtStage(page, WIRE_STEP, id)) !== null, {
+      message: `wire reached stage ${id}`,
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(true);
+}
+
+async function wireRings(page: Page): Promise<{ hint: HintRect; hintTo: HintRect | null }> {
+  const rects = await hintsForStage(page, WIRE_LESSON, WIRE_STEP, wireStage('wire-draw'));
+  if (rects === null) throw new Error('wire: the app left stage wire-draw');
+  return rects;
+}
+
+/** The wires between the bound Route and Handler, as `from>to` node ids, sorted. */
+async function legsBetween(page: Page, route: number, handler: number): Promise<string[]> {
+  const scene = await readScene(page);
+  return scene.wires
+    .filter((w) => (w.from.node === route && w.to.node === handler) || (w.from.node === handler && w.to.node === route))
+    .map((w) => `${w.from.node}>${w.to.node}`)
+    .sort();
+}
+
+async function wireDiscTest(page: Page, lo: number, hi: number): Promise<void> {
+  const errors = watchPageErrors(page);
+  await page.goto('/');
+  await waitForAppReady(page);
+  expect(await page.evaluate(() => window.devicePixelRatio), 'the page runs at device scale 1.18').toBeCloseTo(DPR, 5);
+  await resetToDemo(page);
+  await openLessonsFromHelp(page);
+  await startLesson(page, WIRE_LESSON);
+  await walkLesson(page, WIRE_LESSON, { until: 'wire' });
+
+  // 1. The Wire tool's ring, pressed by hand.
+  await reachWireStage(page, 'wire-tool');
+  const tool = await hintsForStage(page, WIRE_LESSON, WIRE_STEP, wireStage('wire-tool'));
+  if (tool === null) throw new Error('wire: the app left stage wire-tool');
+  await pressPointByHand(page, pointInRect(tool.hint, { x: -6, y: 3 }));
+  await reachWireStage(page, 'wire-draw');
+
+  // 2. The bound Route and Handler, the Route's electrical In and Out and the Handler's electrical In.
+  const { bound } = await readProbe(page);
+  const scene = await readScene(page);
+  const route = scene.nodes.find((n) => n.id === bound.route);
+  const handler = scene.nodes.find((n) => n.id === bound.handler);
+  const electrical = (role: number, ports: readonly PortFacts[] | undefined): PortFacts | undefined =>
+    ports?.find((p) => p.role === role && p.medium === MEDIUM_ELECTRICAL);
+  const routeOut = electrical(PORT_ROLE.OUT, route?.ports);
+  const routeIn = electrical(PORT_ROLE.IN, route?.ports);
+  const handlerIn = electrical(PORT_ROLE.IN, handler?.ports);
+  if (route === undefined || handler === undefined || routeOut === undefined || routeIn === undefined || handlerIn === undefined) {
+    throw new Error("the bound Route and HTTP Handler, with the Route's electrical In and Out and the Handler's electrical In, are not all on the board");
+  }
+  expect(await legsBetween(page, route.id, handler.id), 'no wire joins the Route and the Handler yet').toEqual([]);
+
+  // 3. The zoom, by the wheel, at the floor between the Route's Out and the Handler's In.
+  const outAt = await screenCellCentre(page, routeOut.cell_x, routeOut.cell_y);
+  const inAt = await screenCellCentre(page, handlerIn.cell_x, handlerIn.cell_y);
+  const scale = await zoomInto(page, { x: (outAt.x + inAt.x) / 2, y: (outAt.y + inAt.y) / 2 }, lo, hi);
+  console.log(`MEASURE wire-disc zoom=${scale.toFixed(3)} dpr=${DPR}`);
+
+  // 4. The rings at wire-draw: a disc on the Route's Out and a disc on the Handler's In.
+  const rings = await wireRings(page);
+  const disc = rings.hint;
+  const drop = rings.hintTo;
+  if (drop === null) throw new Error('wire-draw reported no release ring');
+  expect(disc.shape, "the Route Out ring is a disc").toBe('circle');
+  expect(drop.shape, "the Handler In ring is a disc").toBe('circle');
+  if (disc.hitCentre === undefined || disc.hitRadiusPx === undefined || drop.hitCentre === undefined) {
+    throw new Error('a wire disc reports no hit circle');
+  }
+  const centre = disc.hitCentre;
+  const hitR = disc.hitRadiusPx;
+  // Away from the Route's In: from the In's dot through the Out's dot, both through the camera.
+  const cam = await cameraOf(page);
+  const toScreen = (w: { x: number; y: number }): Pt => ({ x: w.x * cam.scale + cam.x, y: w.y * cam.scale + cam.y });
+  const inDot = toScreen(nubAnchor(routeIn.cell_x, routeIn.cell_y, routeIn.side));
+  const outDot = toScreen(nubAnchor(routeOut.cell_x, routeOut.cell_y, routeOut.side));
+  const span = Math.hypot(outDot.x - inDot.x, outDot.y - inDot.y);
+  const away: [number, number] = span > 0 ? [(outDot.x - inDot.x) / span, (outDot.y - inDot.y) / span] : unitDelta(routeOut.side);
+  expect(Math.hypot(outDot.x - centre.x, outDot.y - centre.y), "the disc is centred on the Route Out's dot").toBeLessThanOrEqual(TOLERANCE_PX);
+
+  // 5. The outside press: hitR + 2 px out, released on the Handler's In disc. No wire may start.
+  const outside = along(centre, away, hitR + OUTSIDE_MARGIN_PX);
+  const outsideDist = Math.hypot(outside.x - centre.x, outside.y - centre.y);
+  const inDotDist = Math.hypot(outside.x - inDot.x, outside.y - inDot.y);
+  console.log(
+    `MEASURE wire-disc-outside zoom=${scale.toFixed(3)} r=${hitR.toFixed(2)} dist=${outsideDist.toFixed(2)} away=${away.map((v) => v.toFixed(2)).join(',')} from_route_in=${inDotDist.toFixed(2)}`,
+  );
+  expect(inDotDist, "the outside press is farther from the Route's In dot than from its Out").toBeGreaterThan(outsideDist);
+  await expectOnBoard(page, [outside, drop.hitCentre], 'the outside press and its release are on the board');
+  const tick0 = (await readScene(page)).tick;
+  await dragByHand(page, outside, drop.hitCentre);
+  await expect
+    .poll(async () => (await readScene(page)).tick >= tick0 + WIRE_TICKS, {
+      message: `the board kept ticking for ${WIRE_TICKS} ticks after the outside press`,
+      timeout: tickBudgetMs(WIRE_TICKS) + frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBe(true);
+  expect(await legsBetween(page, route.id, handler.id), `a press ${outsideDist.toFixed(1)} px from the Route Out's dot started no wire`).toEqual([]);
+  const held = await readProbe(page);
+  console.log(`MEASURE wire-disc-outside-result zoom=${scale.toFixed(3)} step=${held.stepId} stage=${held.stageId}`);
+  expect(`${held.stepId}/${held.stageId}`, 'the outside press leaves the lesson on wire-draw').toBe('wire/wire-draw');
+
+  // 6. The inside press: hitR - 1 px out on the same side, released on the Handler's In disc.
+  const again = await wireRings(page);
+  const disc2 = again.hint;
+  const drop2 = again.hintTo;
+  if (disc2.hitCentre === undefined || disc2.hitRadiusPx === undefined || drop2 === null || drop2.hitCentre === undefined) {
+    throw new Error('wire-draw lost a disc');
+  }
+  const inside = along(disc2.hitCentre, away, disc2.hitRadiusPx - INSIDE_MARGIN_PX);
+  const insideDist = Math.hypot(inside.x - disc2.hitCentre.x, inside.y - disc2.hitCentre.y);
+  console.log(`MEASURE wire-disc-inside zoom=${scale.toFixed(3)} r=${disc2.hitRadiusPx.toFixed(2)} dist=${insideDist.toFixed(2)}`);
+  await expectOnBoard(page, [inside, drop2.hitCentre], 'the inside press and its release are on the board');
+  await dragByHand(page, inside, drop2.hitCentre);
+  await expect
+    .poll(() => legsBetween(page, route.id, handler.id), {
+      message: `a press ${insideDist.toFixed(1)} px from the Route Out's dot, inside the disc, laid both legs`,
+      timeout: tickBudgetMs(WIRE_TICKS) + frameBudgetMs(STAGE_FRAMES),
+    })
+    .toEqual([`${handler.id}>${route.id}`, `${route.id}>${handler.id}`].sort());
+  await expect
+    .poll(async () => (await readProbe(page)).stepIndex, {
+      message: 'the two legs moved the lesson past wire',
+      timeout: frameBudgetMs(STAGE_FRAMES),
+    })
+    .toBeGreaterThan(WIRE_STEP);
+
+  // The disc as painted is the Wire tool's own circle at this zoom.
+  expect(Math.abs(hitR - wireNubHitRadiusWorld(scale) * scale), "the disc's hit radius is the Wire tool's, in CSS px").toBeLessThanOrEqual(TOLERANCE_PX);
+
+  // 7. Render health.
+  await expectRenderLoopAlive(page, `after the wire disc presses at zoom ${scale.toFixed(2)}`);
+  errors.assertNone(`during the wire disc presses at zoom ${scale.toFixed(2)}`);
+}
+
+/** Every point lands on the canvas, not on a panel over it. */
+async function expectOnBoard(page: Page, points: readonly Pt[], what: string): Promise<void> {
+  const tags = await page.evaluate((ps) => ps.map((p) => document.elementFromPoint(p.x, p.y)?.tagName ?? null), [...points]);
+  expect(tags, what).toEqual(points.map(() => 'CANVAS'));
+}
+
+test('the wire disc starts a wire inside and not outside, zoom at or below 1', async ({ page }) => {
+  await wireDiscTest(page, 0.9, 1.0);
+});
+
+test('the wire disc starts a wire inside and not outside, zoom near 2', async ({ page }) => {
+  await wireDiscTest(page, 1.9, 2.1);
 });
 
 // --- HINT-03 on the real host: the off-screen flag and Show me ---
