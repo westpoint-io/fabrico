@@ -1,0 +1,171 @@
+---
+title: Install Fabrico
+description: How to build and run Fabrico from source on Linux, macOS and Windows. There is no download yet, so this page covers what ships today.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+There is no download of Fabrico yet. To run it today you build it from source, which takes a Rust toolchain, Node and a few minutes of compiling. The steps below cover Linux, macOS and Windows.
+
+## What you need
+
+- Rust, installed through rustup. The repository pins its compiler version in `rust-toolchain.toml`, and rustup installs that version the first time you build.
+- Node 22 or newer, with npm. Node builds the app's frontend, and CI builds the app with Node 22.
+- A C compiler. The JavaScript engine that runs Factory code is written in C and compiles along with the app.
+- git, to get the code.
+
+## Build from source
+
+<Tabs syncKey="os">
+<TabItem label="Linux">
+<Steps>
+
+1. Clone the repository and go into it.
+
+   ```bash
+   git clone https://github.com/westpoint-io/fabrico.git
+   cd fabrico
+   ```
+
+2. Install the system libraries the app builds against, shown here for Debian and Ubuntu with the same package list CI installs.
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev
+   ```
+
+3. Build the frontend, which the app carries inside its binary.
+
+   ```bash
+   cd frontend
+   npm ci
+   npm run build
+   cd ..
+   ```
+
+4. Build the app, which compiles every Rust dependency the first time and takes a few minutes.
+
+   ```bash
+   cargo build -p fabrico-app --features tauri/custom-protocol
+   ```
+
+5. Start the app you built.
+
+   ```bash
+   ./target/debug/fabrico-app
+   ```
+
+</Steps>
+</TabItem>
+<TabItem label="macOS">
+
+CI compiles Fabrico on macOS for each push and doesn't run it, so these steps haven't been tried on a Mac.
+
+<Steps>
+
+1. Install the system tools Tauri lists for macOS on its [prerequisites page](https://v2.tauri.app/start/prerequisites/), which include the C compiler.
+
+2. Clone the repository and go into it.
+
+   ```bash
+   git clone https://github.com/westpoint-io/fabrico.git
+   cd fabrico
+   ```
+
+3. Build the frontend, which the app carries inside its binary.
+
+   ```bash
+   cd frontend
+   npm ci
+   npm run build
+   cd ..
+   ```
+
+4. Build the app, which compiles every Rust dependency the first time and takes a few minutes.
+
+   ```bash
+   cargo build -p fabrico-app --features tauri/custom-protocol
+   ```
+
+5. Start the app you built.
+
+   ```bash
+   ./target/debug/fabrico-app
+   ```
+
+</Steps>
+</TabItem>
+<TabItem label="Windows">
+
+CI compiles Fabrico on Windows for each push and doesn't run it, so these steps haven't been tried on Windows.
+
+<Steps>
+
+1. Install the system tools Tauri lists for Windows on its [prerequisites page](https://v2.tauri.app/start/prerequisites/), which include the C compiler.
+
+2. Clone the repository and go into it.
+
+   ```bash
+   git clone https://github.com/westpoint-io/fabrico.git
+   cd fabrico
+   ```
+
+3. Build the frontend, which the app carries inside its binary.
+
+   ```bash
+   cd frontend
+   npm ci
+   npm run build
+   cd ..
+   ```
+
+4. Build the app, which compiles every Rust dependency the first time and takes a few minutes.
+
+   ```bash
+   cargo build -p fabrico-app --features tauri/custom-protocol
+   ```
+
+5. Start the app you built.
+
+   ```bash
+   ./target/debug/fabrico-app.exe
+   ```
+
+</Steps>
+</TabItem>
+</Tabs>
+
+## Linux: install a .deb you built
+
+This part is optional. It puts Fabrico in your app launcher, so you can start it without a terminal.
+
+The app can be packaged as a Debian package, and `scripts/install-local-bundle.sh` copies what that package holds into your home folder instead of installing it system-wide. It copies the binary to `~/.local/bin/fabrico-app`, the launcher entry to `~/.local/share/applications/`, the icons under `~/.local/share/icons/hicolor/` and the app's files to `~/.local/lib/Fabrico`. It doesn't use sudo, and it won't overwrite a file that is already there unless you pass `--force`.
+
+Build the package first, from the repository root:
+
+```bash
+cd crates/fabrico-app
+../../frontend/node_modules/.bin/tauri build --bundles deb
+cd ../..
+```
+
+Then copy it into place:
+
+```bash
+bash scripts/install-local-bundle.sh install
+```
+
+The script writes down each file and folder it creates in `~/.local/share/fabrico/install-manifest`. To take Fabrico out again, run it with `uninstall`, which removes only the paths on that list:
+
+```bash
+bash scripts/install-local-bundle.sh uninstall
+```
+
+`verify` lists each place the script installs to and whether something is there.
+
+## Related pages
+
+- [What is Fabrico](../): what the app does, and what it doesn't do yet.
+- [Reference](../../reference/): a page for each machine kind and engine rule.

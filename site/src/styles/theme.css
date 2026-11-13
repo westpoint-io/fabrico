@@ -683,3 +683,40 @@ starlight-file-tree .directory > details > summary:hover {
   background-color: var(--fab-panel-fill);
   box-shadow: none;
 }
+
+/*
+ * The tabs on the Install page (Starlight's Tabs). The list sits on a 1 px panel-fill hairline,
+ * the house rule, in place of Starlight's 2 px line. Each tab is a standalone control, so it is at
+ * least 44 px tall, with 16 px either side and its label centred, 16 px Martian Mono at 400 and a
+ * 1.2 line height, in ink. The selected tab keeps 700 (set with the other bold parts above) and is
+ * marked by a 2 px accent line along its top edge, one of the three places the accent appears. An
+ * unselected tab under the pointer shows the same line in edge-lit ink, so hover previews where the
+ * mark goes without using the accent. Focus keeps the 2 px accent outline, drawn inside the tab
+ * because the list's wrapper scrolls sideways and would clip an outline drawn outside.
+ */
+starlight-tabs [role='tablist'] {
+  border-bottom: 1px solid var(--fab-panel-fill);
+}
+starlight-tabs [role='tab'] {
+  display: flex;
+  align-items: center;
+  min-height: var(--fab-min-target);
+  padding: 0 var(--fab-space-md);
+  font-family: var(--site-font);
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--fab-ink);
+  box-shadow: none;
+}
+starlight-tabs [role='tab'][aria-selected='true'] {
+  color: var(--fab-ink);
+  box-shadow: inset 0 2px 0 var(--fab-focus);
+}
+starlight-tabs [role='tab'][aria-selected='false']:hover {
+  color: var(--fab-ink);
+  box-shadow: inset 0 2px 0 var(--fab-edge-lit);
+}
+starlight-tabs [role='tab']:focus-visible {
+  outline-offset: -2px;
+}
