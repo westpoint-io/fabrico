@@ -709,6 +709,60 @@ describe('wires - a reply that lands and leaves between two draws still draws it
     layer.draw(scene, 141, 141);
     expect(heads(layer), 'no comet after a keyframe on a quiet cable').toEqual([]);
   });
+
+  // The first-sight rule (`replyDrawn.get(id) ?? replyCount`): a layer counts what the scene had
+  // already counted when it first sees a wire as drawn, so it never draws a reply it wasn't there for.
+  it('a_layer_built_after_a_counted_reply_draws_nothing', () => {
+    const scene = createSceneState();
+    applyPacket(scene, packet({ tick: T, full: true, wires: [cable([])] }));
+    applyPacket(scene, packet({ tick: T + 1, wires: [cable(reply(T + 1))] }));
+    applyPacket(scene, packet({ tick: T + 2, wires: [cable([])] }));
+    expect(scene.wireReplyPulses.get(5), 'CONTROL: the scene counted one reply before the layer existed').toBe(1);
+    const layer = createWireLayer(LOCKED_SKIN);
+    layer.draw(scene, 200, 200);
+    expect(heads(layer), 'a layer built after the reply draws no comet for it').toEqual([]);
+    layer.draw(scene, 214, 214);
+    expect(heads(layer), 'nor on its second draw').toEqual([]);
+  });
+
+  // The keyframe clear: a keyframe empties the scene's counts and may re-mint wire handles, so wire 5
+  // after it is read as a first sighting, the same answer a layer built at that keyframe gives. Without
+  // the clear the answer would depend on what the cable under handle 5 counted before the keyframe.
+  it('a_keyframe_reads_every_wire_as_a_first_sighting_whatever_it_counted_before', () => {
+    const run = (repliesBefore: number): number => {
+      const layer = createWireLayer(LOCKED_SKIN);
+      const scene = createSceneState();
+      let tick = T;
+      applyPacket(scene, packet({ tick, full: true, wires: [cable([])] }));
+      layer.draw(scene, 100, 100);
+      let clock = 100;
+      for (let i = 0; i < repliesBefore; i++) {
+        tick += 1;
+        applyPacket(scene, packet({ tick, wires: [cable(reply(tick))] }));
+        clock += 1;
+        layer.draw(scene, clock, clock);
+        tick += 1;
+        applyPacket(scene, packet({ tick, wires: [cable([])] }));
+        clock += 40;
+        layer.draw(scene, clock, clock); // the comet reaches home on this draw and retires
+        clock += 1;
+        layer.draw(scene, clock, clock);
+      }
+      expect(heads(layer), `CONTROL (${repliesBefore} before): the cable is quiet before the keyframe`).toEqual([]);
+      // Between two draws: a keyframe re-mints handle 5 with a reply riding it, and the next diff
+      // re-sends the cable with the pulse gone, so the draw sees a count of 1 and no pulse.
+      tick += 1;
+      applyPacket(scene, packet({ tick, full: true, wires: [cable(reply(tick))] }));
+      tick += 1;
+      applyPacket(scene, packet({ tick, wires: [cable([])] }));
+      expect(scene.wireReplyPulses.get(5), 'CONTROL: the keyframe restarted the count at the reply it carried').toBe(1);
+      expect(scene.wires.get(5)?.pulses, 'CONTROL: and the draw cannot see the pulse').toEqual([]);
+      layer.draw(scene, clock + 2, clock + 2);
+      return heads(layer).length;
+    };
+    expect(run(0), 'a cable that counted no reply before the keyframe').toBe(0);
+    expect(run(2), 'a cable that counted two').toBe(0);
+  });
 });
 
 describe('wires - forward vs reply distinctness (WUI-01, LOCKED Phase-40 visuals fed via the latch)', () => {
