@@ -2470,18 +2470,26 @@ describe('a lesson on a prepared board', () => {
   const onItsBoard = (): TutorialState => run(sent(), { nodes: DECLARED, belts: [stub(10)] });
 
   describe('the start', () => {
-    it('waits through a frame below the swap floor, an empty board, the late demo frame, and its board with one machine more', () => {
-      const demo = [node(30, SOURCE, 2, 2), node(31, SINK, 8, 2)];
+    const demo = [node(30, SOURCE, 2, 2), node(31, SINK, 8, 2)];
+    const refused: ReadonlyArray<readonly [string, Partial<BoardFacts>]> = [
+      ['a frame from the board before the swap', { swapFloor: FLOOR, nodes: DECLARED, belts: [stub(10)] }],
+      ["an empty board, which is New's and not the lesson's", {}],
+      ['the late demo frame', { nodes: demo }],
+      ['its board plus one extra machine', { nodes: [...DECLARED, node(32, SINK, 9, 9)], belts: [stub(10)] }],
+      ['its board with the Sink missing', { nodes: [B_SOURCE], belts: [stub(10)] }],
+    ];
+    for (const [what, frameBoard] of refused) {
+      it(`waits on starting through ${what}`, () => {
+        const s = run(sent(), frameBoard);
+        expect(s.card, what).toBe('starting');
+        expect(s.floor, 'the floor to beat is still the one at the send').toBe(FLOOR);
+      });
+    }
+
+    it('starts on the first frame past the floor whose machines are the declared ones, after refusing the others', () => {
       let s = sent();
-      s = run(s, { swapFloor: FLOOR, nodes: DECLARED, belts: [stub(10)] });
-      expect(s.card, 'a frame from the board before the swap').toBe('starting');
-      s = run(s, {});
-      expect(s.card, "an empty board is New's, not the lesson's").toBe('starting');
-      s = run(s, { nodes: demo });
-      expect(s.card, 'the late demo frame').toBe('starting');
-      s = run(s, { nodes: [...DECLARED, node(32, SINK, 9, 9)], belts: [stub(10)] });
-      expect(s.card, 'its board plus one extra machine').toBe('starting');
-      expect(s.floor, 'the floor to beat is still the one at the send').toBe(FLOOR);
+      for (const [, frameBoard] of refused) s = run(s, frameBoard);
+      expect(s.card).toBe('starting');
       s = run(s, { nodes: DECLARED, belts: [stub(10)], swapFloor: FLOOR + 2 });
       expect([s.card, s.stepIndex, s.floor]).toEqual(['running', 0, FLOOR + 2]);
     });
