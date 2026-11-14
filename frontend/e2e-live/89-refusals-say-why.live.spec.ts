@@ -61,8 +61,9 @@ import { cellPoint, expectOnCanvas, turnUntilFacing, transport, resumeIfPaused, 
 //      sentence, and still no belt.
 //   3. The edge presses, at camera scale 1 and again after the wheel has zoomed below 1: a press 2
 //      screen px inside a Source's East edge, dragged about 80 screen px East in 3 px samples and
-//      released: the sentence and the flash on the pressed (Source) cell. The same 2 px inside a
-//      drawn belt's last tile, beside its end ring: the sentence and the flash on that tile. Then
+//      released: the collision sentence and the flash on the pressed (Source) cell. The same 2 px
+//      inside a drawn belt's last tile, beside its end ring: the client's BeltEndTile sentence
+//      (start from the ring), nothing sent, and the flash on that tile. Then
 //      the regression guard: a press on each ring itself (the Source's doorstep and the belt's)
 //      still draws a belt.
 //   4. Past the grid edge (WINDOWS 251, D-12): the camera is panned by the shipped pan gesture (a
@@ -98,6 +99,12 @@ const ROLE_OUT = 1;
 const E = 1;
 /** The host's FootprintCollision sentence, as plan 89-08 worded it (a literal, so a copy edit is seen). */
 const COLLISION_COPY = 'That space is taken. Clear it or try elsewhere.';
+/**
+ * The client's sentence for a Belt-armed press on a free belt's last tile while the ring past it is
+ * drawn, transcribed, not imported (`CLIENT_REFUSAL_COPY.BeltEndTile`). Nothing is sent for that press,
+ * so the host never answers it, and the band carries this sentence instead of the collision.
+ */
+const BELT_END_TILE_COPY = "Start from the ring past the belt's end.";
 /** How far inside an edge an edge press lands, in screen px (the todo measured 1 to 3). */
 const EDGE_INSET_PX = 2;
 /** The edge-press drag: about 80 screen px, in samples of this many px (the todo measured 2 to 4). */
@@ -370,16 +377,20 @@ test.describe('89 live: a belt the host will not draw says why, and the flash na
         console.log(`P89-SAY leg 3 ${row.name}: camera scale ${scale}`);
       }
       const inset = EDGE_INSET_PX / scale;
-      const presses: Array<{ what: string; world: { x: number; y: number }; pressed: Cell }> = [
+      const presses: Array<{ what: string; world: { x: number; y: number }; pressed: Cell; says: string; who: string }> = [
         {
           what: `${row.name}: 2 px inside the Source's East edge`,
           world: { x: (SOURCE_X + 1) * CELL - inset, y: (row.y + 0.5) * CELL },
           pressed: [SOURCE_X, row.y],
+          says: COLLISION_COPY,
+          who: 'the host says why',
         },
         {
           what: `${row.name}: 2 px inside the belt's last tile, beside its end ring`,
           world: { x: (BELT_X + 3) * CELL - inset, y: (row.y + 0.5) * CELL },
           pressed: [BELT_X + 2, row.y],
+          says: BELT_END_TILE_COPY,
+          who: 'the app says to start from the ring, and sends nothing',
         },
       ];
       for (const p of presses) {
@@ -392,9 +403,7 @@ test.describe('89 live: a belt the host will not draw says why, and the flash na
         await latchRejectFlashCells(page);
         const samples = await edgeDragEast(page, start);
         expect(samples, `${p.what}: the drag moved in many small samples`).toBeGreaterThanOrEqual(20);
-        expect(await captureRefusalText(page, `${p.what}: the release was answered`), `${p.what}: the host says why`).toBe(
-          COLLISION_COPY,
-        );
+        expect(await captureRefusalText(page, `${p.what}: the release was answered`), `${p.what}: ${p.who}`).toBe(p.says);
         const flashes = await flashCellsAfterRelease(page, p.what);
         console.log(`P89-SAY leg 3 ${p.what}: flashes=${JSON.stringify(flashes)}`);
         expect(flashes, `${p.what}: ONE flash, on the pressed cell`).toEqual([{ cx: p.pressed[0], cy: p.pressed[1] }]);
