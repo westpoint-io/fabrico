@@ -1,0 +1,60 @@
+---
+title: Determinism and replay
+description: "Why the same board fed the same events ends in the same state on every run, shown with one board run twice, and where that promise stops."
+sidebar:
+  order: 6
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+The same board given the same events ends in the same state on every run. The engine can show this with a [hash](../../reference/files/glossary/#term-hash) of the board, a short fingerprint that changes when anything on the board changes, and it is what makes [replay](../../reference/files/glossary/#term-replay) possible: the app can rebuild a board from an earlier copy and the events it recorded, and land exactly where the board was.
+
+The two boards below are one board loaded twice. The second gets the webhooks that share a tick in reverse order. Each board stops once on a note. Press Continue on both.
+
+<Board name="docs-arrival-order" order="forward" height={240} />
+<Board name="docs-arrival-order" order="reversed" height={240} />
+
+Both badges read match and show the same hash. On tick 40 and again on tick 120, three webhooks arrive together, one for each Source, and in both runs the Debug Sink records the first round's items on ticks 115, 117 and 141 in the same order. Each webhook goes to its own Source, so each Source makes its item on the same tick whichever webhook the engine handles first. Where two items then reach a Merge together, as the note on tick 71 shows, the Merge takes them in an order that doesn't depend on the order the webhooks came in. A matching end hash alone would prove less than it looks: by the last tick every item has reached the Sink and the belts are empty. So the check behind this pair also compares the two runs after every tick, and they match at each one.
+
+Checked by <code>the forward and reversed boards hold the same state at every tick and end on the same hash</code> in [frontend/e2e-embed/pair.spec.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/e2e-embed/pair.spec.ts).
+
+## When the order does matter
+
+Send all three webhooks to the top Source instead, and the order counts. A Source queues the items it makes in the order its webhooks arrived, so the reversed copy puts the third webhook's item on the belt first, on tick 42, and the Debug Sink records the three items in the opposite order. That copy still ends on the same hash as the board above, because the belts are empty again by the last tick, which is why the test compares every tick and not only the last one.
+
+This isn't a gap in replay. The app records webhooks in the order they arrived and replays them in that order, so a replayed board sees the same order as the original run.
+
+Checked by <code>a_variant_that_sends_every_webhook_to_one_source_differs_when_reversed</code> in [crates/fabrico-engine/tests/board_arrival_order.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-engine/tests/board_arrival_order.rs).
+
+## Why it holds
+
+- The desktop app and the boards on this site run the same engine code. The boards here use a build of it for the browser.
+- The engine moves the whole board forward one [tick](../../reference/files/glossary/#term-tick) at a time, and how long a tick takes on your computer never enters the result.
+- The engine does its arithmetic on integers, never floating point, whose results can differ between computers. Inside a Factory, JavaScript numbers stay, but the `Math` functions whose results can differ from one computer to the next, such as `Math.sin`, are left out.
+- The only random numbers on a board come from a generator started from the board's seed, so the same seed gives the same numbers on every run.
+
+The hash on each badge comes from the same function the repository's tests use to compare runs, and each board's expected end hash is listed in `examples/boards/hashes.manifest`. The badge reads match when the run ends on that hash.
+
+## What replay uses it for
+
+When you open a project file, the app puts back a saved copy of the board and replays the recorded events and edits from there, each on its tick, with outbound calls muted. Because the engine gives the same result from the same start and the same events, the replayed board stands exactly where the saved one did. [Save, open and replay](../../get-started/save-open-replay/) walks through it in the app.
+
+## Where determinism ends
+
+A [Factory](../../reference/files/glossary/#term-factory)'s code runs under three limits: stack, memory and work. The promise holds while the code stays clear of the first two, because the desktop app and a browser handle them differently.
+
+- The stack limit caps how deep a Factory's functions can call each other. In the desktop app it is <Fact id="limit.factory_stack_desktop" />. In a browser, where the boards on this site run, it is 128 KiB, because the same calls also use the stack of the browser's own JavaScript engine, and the limit has to trip before that one runs out. How deep code gets before it hits the limit also varies with the compiler that built the app: in one measurement at the same stack size, the same recursion went 51 calls deep on Windows and 335 on Linux.
+- The memory limit is <Fact id="limit.factory_memory" /> in both, but the browser build stores JavaScript values in less memory, so the point where a Factory first runs out differs between the desktop app and a browser.
+- The work limit, <Fact id="limit.factory_gas_budget" />, counts the engine's own steps, never time, so a Factory runs out at the same point everywhere. CI checks that the desktop and browser builds run out of work at the same point, checks where each build runs out of memory against a pinned count, reports where each runs out of stack, and checks that a runaway recursion in the browser build faults the Factory instead of stopping the whole board.
+
+So a Factory that gets near its memory or stack limit can end on one hash in the desktop app and another in a browser. The board lint runs every board under `examples/boards` a second time at half the memory limit and a quarter of the stack limit, and fails the board if anything changes, so no board on this site comes near either one. A board here that isn't about faults is also checked to raise no fault at all, which keeps it clear of the work limit too.
+
+The CI step is `Check where a Factory runs out of gas, memory and stack on both targets`, which runs [scripts/check-fence-report.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-fence-report.sh).
+
+## Related pages
+
+- [Limits](../../reference/board/limits/): each Factory limit, its value and the fault you get when code reaches it.
+- [The determinism gate](../../contributing/determinism-gate/): the check that stops an undeclared change to the engine or its recorded runs.
+- [Save, open and replay](../../get-started/save-open-replay/): what opening a project file replays, step by step.
+- [Faults are items](../faults-are-items/): what a Factory sends out when its code fails.
