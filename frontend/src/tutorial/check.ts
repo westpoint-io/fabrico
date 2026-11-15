@@ -170,14 +170,20 @@ export function isShippedCorner(kind: unknown): boolean {
   return typeof kind === 'object' && kind !== null && Object.hasOwn(kind, 'Corner');
 }
 
-/** The kinds the host shipped for every belt tile on this cell. Empty when no belt covers it. */
-function kindsAt(board: Pick<BoardFacts, 'belts'>, cell: { x: number; y: number }): unknown[] {
-  return board.belts.flatMap((belt) => belt.tiles.filter((t) => t.cell_x === cell.x && t.cell_y === cell.y).map((t) => t.kind));
-}
-
-/** Does some belt tile on this cell ship as a Corner? */
-export function cornerShippedAt(board: Pick<BoardFacts, 'belts'>, cell: { x: number; y: number }): boolean {
-  return kindsAt(board, cell).some(isShippedCorner);
+/**
+ * Does a tile of the line that joins `a` to `b` sit on `cell` and ship as a Corner? The joined line is the
+ * pieces of the line leaving `a` by its Tail (`piecesOf`), up to and including the belt `beltJoining`
+ * returns. One belt docked to both machines that doesn't leave `a` by its Tail is the line alone. False
+ * when nothing joins them. Another belt's tile on the cell doesn't count, so a stray belt turning there
+ * can't stand in for a line that turns somewhere else.
+ */
+export function lineCornerAt(board: Pick<BoardFacts, 'belts'>, a: number, b: number, cell: { x: number; y: number }): boolean {
+  const last = beltJoining(board, a, b);
+  if (last === undefined) return false;
+  const pieces = piecesOf(board, a);
+  const at = pieces.findIndex((piece) => piece.id === last.id);
+  const line = at < 0 ? [last] : pieces.slice(0, at + 1);
+  return line.some((belt) => belt.tiles.some((t) => t.cell_x === cell.x && t.cell_y === cell.y && isShippedCorner(t.kind)));
 }
 
 /** The last piece of the line leaving `a`, following Head docks through belts. Undefined with no belt leaving it. */
@@ -514,7 +520,7 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       const ring = baseline.ringCell;
       if (a === undefined || b === undefined || ring === undefined || ring === null) return NOT_DONE;
       const belt = beltJoining(board, a.id, b.id);
-      if (belt === undefined || !cornerShippedAt(board, ring)) return NOT_DONE;
+      if (belt === undefined || !lineCornerAt(board, a.id, b.id, ring)) return NOT_DONE;
       return { done: true, bound: { name: check.bind, node: { nodeKey: beltKey(a, b), id: belt.id } } };
     }
   }

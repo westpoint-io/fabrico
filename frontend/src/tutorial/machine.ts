@@ -13,9 +13,9 @@ import {
   boundBeltIds,
   boundGone,
   boundMachineKeys,
-  cornerShippedAt,
   evaluateCheck,
   freeOutputs,
+  lineCornerAt,
   lineDoorstep,
   lineStuck,
   lowestSlotInto,
@@ -260,7 +260,7 @@ function holds(when: StageWhen, board: BoardFacts, chrome: ChromeFacts, s: Pick<
       const b = bindings[when.b];
       const ring = s.baseline?.ringCell;
       if (a === undefined || b === undefined || ring === undefined || ring === null) return false;
-      return beltJoining(board, a.id, b.id) !== undefined && !cornerShippedAt(board, ring);
+      return beltJoining(board, a.id, b.id) !== undefined && !lineCornerAt(board, a.id, b.id, ring);
     }
   }
 }

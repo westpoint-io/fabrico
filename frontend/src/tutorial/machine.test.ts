@@ -2536,6 +2536,41 @@ describe('lesson 2: Belts that join', () => {
     expect(s.card).toBe('finished');
   });
 
+  it('stays open, with the no-corner stage, when a stray belt turns on the ring cell and the joined line runs elsewhere', () => {
+    // The stub deleted, a line joined down column 2 and along row 4 into the Sink, and an undocked belt
+    // turning on the ring cell.
+    const around: BoardBelt = {
+      id: 20,
+      items: 0,
+      occupiedSlots: [],
+      tiles: [
+        { cell_x: 2, cell_y: 2 },
+        { cell_x: 2, cell_y: 3 },
+        { cell_x: 2, cell_y: 4 },
+        { cell_x: 3, cell_y: 4 },
+        { cell_x: 4, cell_y: 4 },
+        { cell_x: 5, cell_y: 4 },
+        { cell_x: 6, cell_y: 4 },
+        { cell_x: 6, cell_y: 5 },
+      ],
+      docks: [
+        { end: 'Tail', node: SRC2.id, port: 0 },
+        { end: 'Head', node: SNK2.id, port: 0 },
+      ],
+    };
+    const stray: BoardBelt = {
+      id: 21,
+      items: 0,
+      occupiedSlots: [],
+      tiles: [{ cell_x: 6, cell_y: 1 }, { cell_x: 6, cell_y: 2, kind: CORNER }, { cell_x: 7, cell_y: 2 }],
+      docks: [],
+    };
+    const belts = [around, stray];
+    const s = frame(onItsBoard(), { nodes: DECLARED, belts });
+    expect(s.stepIndex).toBe(0);
+    expect(stageAt(s, { nodes: DECLARED, belts }, { armed: { kind: 'belt' } })?.id).toBe('belt-no-corner');
+  });
+
   // The tick stays at the board's 10 (11 once the play step is behind) across the frames that should stay
   // on a step, so the play step can't finish in the same frame as the join.
   describe('going back to the join step keeps the declared ring cell', () => {

@@ -924,6 +924,20 @@ describe('lineTurnsAt', () => {
     // Out end, so the check reads it exactly as the forward draw.
     expect(result([down(CORNER), stub]).done).toBe(true);
   });
+
+  it('does not finish on a Corner at the ring cell on a belt that is not part of the joined line', () => {
+    // The stub deleted, a line joined down column 2 and along row 4 into the Sink, and a stray belt with
+    // no docks turning on the ring cell.
+    const around: BoardBelt = {
+      ...belt(20, [], [
+        { end: 'Tail', node: SRC.id, port: 0 },
+        { end: 'Head', node: SNK.id, port: 0 },
+      ]),
+      tiles: [at(2, 2), at(2, 3), at(2, 4), at(3, 4), at(4, 4), at(5, 4), at(6, 4), at(6, 5)],
+    };
+    const stray: BoardBelt = { ...belt(21, [], []), tiles: [at(6, 1), at(6, 2, CORNER), at(7, 2)] };
+    expect(result([around, stray]).done).toBe(false);
+  });
 });
 
 // The refused press at lesson 2's carry-on stage lands on the last tile of the line from the Source, which
