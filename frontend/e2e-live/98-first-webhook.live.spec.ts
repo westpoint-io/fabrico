@@ -49,10 +49,10 @@ import { curlArgs, readFirstWebhookCurl } from './support/pageCurl';
 // ---------------------------------------------------------------------------
 //
 //   1. Step 1 built by gestures equals `start-first-factory-1.board.ron`. The Source's inspector
-//      shows the label Webhook URL and a URL equal to the host's own (`webhookUrl`), and the
-//      page's URL with that port and id filled in is the same URL.
-//   2. With the board playing, curl sends the page's body with a delivery id unique to this run
-//      and prints 200. In one poll, the model lists an item on the step 1 belt and the item layer
+//      shows the label Webhook URL and a URL equal to the host's own (`webhookUrl`).
+//   2. With the board playing, curl posts the page's body to the page's URL, with that port and id
+//      filled in and a delivery id unique to this run, and prints 200. This is what shows the
+//      page's URL works: a wrong path gets 404 here. In one poll, the model lists an item on the step 1 belt and the item layer
 //      draws a dot inside one of its cells. A dead renderer fails this leg while the model moves.
 //   3. Once the belt is empty, curl sends again with the SAME delivery id and prints 200, as the
 //      page says it will. An in-page watch on every drawn frame then sees no item on the belt, in
@@ -114,8 +114,11 @@ test.describe('98 live: Send your first webhook, with the page curl on the real 
       page.locator('span.fab-field', { hasText: 'http://127.0.0.1:' }),
       "the inspector's Webhook URL is the host's own URL for this Source",
     ).toHaveText(hostUrl!);
+    // The page's URL with the inspector's port and id filled in. No assertion compares it with
+    // hostUrl: parseFirstWebhookCurl already requires the page's URL to equal URL_TEMPLATE, and
+    // the regex above has the same shape, so that comparison could never fail. Leg 2 is the check:
+    // curl posts to this URL and has to get 200 and an item on the belt.
     const url = pageCurl.urlFor(Number(parts![1]), Number(parts![2]));
-    expect(url, "the page's URL with the inspector's port and id filled in is the Source's URL").toBe(hostUrl);
     await deselectOnFloor(page, FLOOR, 'after reading the Webhook URL');
     await expectRenderLoopAlive(page, 'after step 1 and the Webhook URL');
 
