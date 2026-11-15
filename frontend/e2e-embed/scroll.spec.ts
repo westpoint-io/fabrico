@@ -122,7 +122,10 @@ async function settle(page: Page, inView: readonly Slot[], away: readonly Slot[]
 }
 
 test('five scroll round trips keep at most 8 live contexts and every returning board picks up where it left', async ({ page }) => {
-  test.setTimeout(300_000);
+  // 37 drawing checks, each walking the board's ticks with a screenshot every 3 or 4. Measured
+  // with the stepped check: 5.2 min with 2 workers pinned to one core. The wall-clock check took
+  // 3.1 min there and 1.8 min on CI's 4-vCPU runner, so CI should take about 3 min.
+  test.setTimeout(600_000);
   const errors = watchPageErrors(page);
   const consoleErrors = recordConsoleErrors(page);
   const requests = recordRequests(page);
