@@ -1,0 +1,36 @@
+---
+title: Editing a running board
+description: What happens to items on a belt when you delete, undo, rotate or unlink while the board runs, as measured by a test in the repo.
+sidebar:
+  order: 10
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+You can change a board while it runs, and what an edit does to the [items](../../reference/files/glossary/#term-item) already on a [belt](../../reference/files/glossary/#term-belt) depends on the edit. Cut the end of a belt that hands items to a machine and they wait. Cut the end a machine feeds and they keep going. Delete the belt, or the machine it is docked to, and they are gone for good, even after an undo.
+
+On the board below, a [Source](../../reference/files/glossary/#term-source) on a timer puts an item on its belt every 8 [ticks](../../reference/files/glossary/#term-tick), and the belt carries each one to a Debug [Sink](../../reference/files/glossary/#term-sink). Scripted edits take the belt off the Sink on tick 80 and put it back on tick 140, then turn the Sink away from the belt on tick 220 and back on tick 280. Each time the Sink is cut off, items pile up at the end of the belt.
+
+<Board name="docs-rules-docking" />
+
+## Unlink and Rotate
+
+Unlink takes one [docked](../../reference/files/glossary/#term-dock) end of a belt off its [port](../../reference/files/glossary/#term-port). Rotate turns a machine a quarter-turn, and a docked belt whose end the turned port no longer faces comes off. Either way the belt stays where it is, and so do the items on it. What they do next depends on which end came off.
+
+When the belt's head, the end that hands items to a machine, comes off, the items have nowhere to go. They move up to the end of the belt and wait there. Turn the machine back, dock the head again, or undo the edit, and they move in. In the test, a belt carrying 3 items to a Debug Sink still carries all 3 after the Sink turns away, and the Sink takes all 3, in the order they were sent, once it turns back.
+
+Checked by <code>turning_the_sink_away_holds_the_items_and_turning_it_back_delivers_them</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
+Unlinking the head from the Sink holds the items the same way: all 3 wait on the belt, and an Undo of the Unlink delivers all 3.
+
+Checked by <code>unlinking_the_head_holds_the_items_and_undo_delivers_them</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
+On the board above, the belt carries 4 items when the Unlink takes effect on tick 80. The Sink takes nothing more until tick 141, and by then 12 items are waiting at the end of the belt. Once the Dock joins it again they move in, and by tick 160 the belt is back to 4. The turn on tick 220 does the same: the belt carries 5 items when the Sink turns away and 12 by tick 280, and the Sink starts taking them again on tick 281.
+
+## Related pages
+
+- [Docking, unlinking and rotation](../../reference/board/docking-unlinking-rotation/): the three commands, and when the app refuses each one.
+- [Undo and redo](../../reference/board/undo-and-redo/): what one undo takes back, and its keys.
+- [Belts are queues](../belts-are-queues/): how items wait on a belt in the order they got on.
+- [Backpressure](../backpressure/): what happens to a line when items can't move on.
