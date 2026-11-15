@@ -485,6 +485,11 @@ const STEP_SPAN_TICKS = 240;
  * {@link STEP_SPAN_TICKS} ticks, or reached its end tick, with no tile changing. On a pass it
  * presses Play, unless the board is at its end tick, where Play would restart it.
  *
+ * A board already at its end tick has no tick left to step, so the check fails at once and says
+ * so; it never restarts the board itself, since a caller that checks a resumed scene must not get
+ * a Restart. A caller that restarts boards restarts each one right before its own check: a board
+ * restarted before a slow check on another board can play to its end in the meantime.
+ *
  * Stepping runs the same ticks and sends the same render packets as playing, and a keyframe only
  * on Restart, so a caller that checks a resumed scene before any Restart still checks it here.
  */
@@ -494,7 +499,18 @@ export async function expectBoardDrawingStepped(page: Page, name: string, contex
 
 /** {@link expectBoardDrawingStepped} for the board a CSS selector finds, for pages with two of one name. */
 export async function expectBoardDrawingSteppedAt(page: Page, selector: string, context: string, name = selector): Promise<void> {
-  const before = (await readProbeAt(page, selector)).frames;
+  // A board with no tick left to step would show one picture and fail as "the same pixels in 1
+  // screenshots", which hides the cause. Name it instead.
+  const failIfAtEnd = (p: BoardProbe, when: string): void => {
+    if (p.tick >= p.endTick) {
+      throw new Error(
+        `${context}: ${name} was already at its end tick ${p.endTick} ${when}; restart it right before the check`,
+      );
+    }
+  };
+  const first = await readProbeAt(page, selector);
+  failIfAtEnd(first, 'when the drawing check started');
+  const before = first.frames;
   await expect
     .poll(async () => (await readProbeAt(page, selector)).frames - before, {
       message: `${context}: ${name}'s frame count rises`,
@@ -505,6 +521,8 @@ export async function expectBoardDrawingSteppedAt(page: Page, selector: string, 
   const packets = await readProbeAt(page, selector);
   expect(packets.decodeErrors, `${context}: ${name} refused no render packet`).toBe(0);
   expect(packets.packetsApplied, `${context}: ${name} applied its render packets`).toBeGreaterThan(0);
+  // It plays on while the frame count is read, so it may have reached its end since.
+  failIfAtEnd(packets, 'when the drawing check began to step it');
 
   // Press Step n times in one task, then once more while a caption holds the board, so the
   // page's auto-Continue never finds a hold to turn back into play. Step is disabled at the end
@@ -522,7 +540,9 @@ export async function expectBoardDrawingSteppedAt(page: Page, selector: string, 
       [selector, n] as const,
     );
   await step(1);
-  const start = (await readProbeAt(page, selector)).tick;
+  const pausedAt = await readProbeAt(page, selector);
+  failIfAtEnd(pausedAt, `at the drawing check's first Step (it read tick ${packets.tick} just before)`);
+  const start = pausedAt.tick;
   const seen = new Map<string, string>();
   let samples = 0;
   for (;;) {
