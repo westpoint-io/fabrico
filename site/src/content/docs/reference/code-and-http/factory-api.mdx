@@ -107,7 +107,7 @@ When `hi` isn't above `lo`, it returns `lo`. It draws from the same stream as `c
 
 ## Withheld globals
 
-The function runs in a sandbox that leaves out anything that reads the clock, reaches the network or the computer, or could give a different answer on another computer. Code that uses one of these names throws, and the run faults with <Fact id="fault.FactoryError" />.
+The function runs in a sandbox that leaves out anything that reads the clock, reaches the network or the computer, or could give a different answer on another computer. Code that uses one of these names throws, and the run faults with <Fact id="fault.FactoryError" />. [The Factory sandbox](../../../concepts/factory-sandbox/) explains why the sandbox leaves them out.
 
 | Name | Why it is left out |
 |---|---|

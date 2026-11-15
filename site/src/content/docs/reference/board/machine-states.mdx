@@ -27,7 +27,7 @@ A machine is working on a tick when it ran: it took an item, a request or a time
 
 A machine is backed up in two cases. Either its inbox is full and it turns away items from its belt, or it didn't run on this tick because its output can't take another item while it still holds work to send. A Source is backed up when its own queue of waiting webhooks is full. The outline for backed up is darker than the idle one.
 
-A jam can spread back along a line. Once a backed-up machine stops taking items, the belt before it fills up, and the machine before that belt waits too. To find the cause, follow the line to the backed-up machine furthest along it, which is usually the one before the slowest belt or machine.
+A jam can spread back along a line. Once a backed-up machine stops taking items, the belt before it fills up, and the machine before that belt waits too. To find the cause, follow the line to the backed-up machine furthest along it, which is usually the one before the slowest belt or machine. [Backpressure](../../../concepts/backpressure/) shows how far back up a line a jam like this one spreads.
 
 ## When two states apply
 

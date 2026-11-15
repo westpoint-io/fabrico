@@ -35,7 +35,7 @@ A new HTTP Sink uses <Fact id="http.method.Post.label" />. The body is the item'
 
 ## The idempotency key
 
-The Sink puts an `Idempotency-Key` header on each request, whatever its method. Its value is `fabrico-cmd-` followed by the tick the Sink sent it on, a number for the Sink, and a sequence number, joined with hyphens, such as `fabrico-cmd-172-4294967303-0` for the second Sink in the example. The key comes from the engine's own logged history, so a request for the same item gets the same key on every replay. A service that stores the keys it has seen can use it to ignore a repeat.
+The Sink puts an `Idempotency-Key` header on each request, whatever its method. Its value is `fabrico-cmd-` followed by the tick the Sink sent it on, a number for the Sink, and a sequence number, joined with hyphens, such as `fabrico-cmd-172-4294967303-0` for the second Sink in the example. The key comes from the engine's own logged history, so a request for the same item gets the same key on every replay. A service that stores the keys it has seen can use it to ignore a repeat. [Side effects and delivery](../../../concepts/side-effects-and-delivery/) says why the receiver needs it: the app tries each request once with no retry, and a replay never sends it again.
 
 ## Waiting for the answer
 
@@ -49,7 +49,7 @@ The Sink takes one item each time it runs and sends its request, and the other m
 
 The 30 seconds are real time on your computer, measured by the app's network client. The 600 ticks are ticks of the engine. Both faults rest on the Sink's Fault port, where a docked belt can carry them to another Sink.
 
-In the example, the second Sink's request leaves on tick 172 and its failure comes back three ticks later, so the Sink shows <Fact id="fault.CommandFailure" /> from tick 176. The third Sink's request leaves on tick 222 and gets no answer, so the Sink shows <Fact id="fault.CommandTimeout" /> from tick 823.
+In the example, the second Sink's request leaves on tick 172 and its failure comes back three ticks later, so the Sink shows <Fact id="fault.CommandFailure" /> from tick 176. The third Sink's request leaves on tick 222 and gets no answer, so the Sink shows <Fact id="fault.CommandTimeout" /> from tick 823. A request that timed out may still have reached its target; [Side effects and delivery](../../../concepts/side-effects-and-delivery/#a-timed-out-call-may-still-have-arrived) covers that case.
 
 ## Related pages
 
