@@ -1,0 +1,47 @@
+---
+title: Your first factory
+description: "Build a first factory in about 10 minutes: a webhook Source, a Factory that changes each item, and a Debug Sink, with a running board at each step."
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+In this tutorial you build your first factory in the app, in about 10 minutes. It takes in webhooks, changes each one with a few lines of JavaScript, and records the result. You need the app running, and [Install Fabrico](../install/) shows how to build it from source.
+
+<Aside type="note">
+The boards on this page run the same steps on the real engine, with scripted webhooks standing in for yours. You can play them, but you build your own in the app.
+</Aside>
+
+## Step 1: A webhook into a Debug Sink
+
+In this step you place a [Source](../../reference/files/glossary/#term-source), which turns each webhook it gets into an [item](../../reference/files/glossary/#term-item), and a [Sink](../../reference/files/glossary/#term-sink), which takes each item at the end of the line, and you join them with a [belt](../../reference/files/glossary/#term-belt).
+
+<Steps>
+
+1. Press New, or <Fact id="shortcut.newBoard" />, to start an empty board. If the app asks about unsaved work, press Discard.
+
+2. Click Source in the palette, then click an empty cell near the left of the board. Press <Fact id="shortcut.escape" /> to put the tool down.
+
+3. Click Sink in the palette, then click the cell eight cells to the right of the Source, on the same row, so seven empty cells sit between them. Press <Fact id="shortcut.escape" />.
+
+4. Click Belt in the palette. Press on the cell just right of the Source, drag along the row to the Sink, and let go on the dot at the Sink's left edge, which is its input. Press <Fact id="shortcut.escape" />.
+
+5. If the toolbar shows Play, press it so the board runs.
+
+</Steps>
+
+Your board should now look like the one below.
+
+<Board name="docs-start-first-factory-1" />
+
+Press Play and watch each item cross the seven belt cells: the Sink takes the first one on [tick](../../reference/files/glossary/#term-tick) 95, and near the end a run of 26 webhooks packs the belt. A Sink you place from the palette starts as a Debug Sink, which records each item and sends nothing.
+
+## Related pages
+
+- [Install Fabrico](../install/): build the app before you start.
+- [A tour of the app](../app-tour/): where the palette, the toolbar and the inspector are.
+- [Source](../../reference/machines/source/): the triggers a Source can have, and what it does with a webhook.
+- [Sink](../../reference/machines/sink/): what a Debug Sink records, and how an HTTP Sink sends.
