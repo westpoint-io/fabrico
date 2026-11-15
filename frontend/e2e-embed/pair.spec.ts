@@ -107,11 +107,13 @@ test('the forward and reversed boards hold the same state at every tick and end 
   await expect(page.locator(FORWARD).locator('.order-strip')).toBeVisible();
 
   // 5. Both still draw. From the boot tick at 1x, the webhooks' items cross the long belt.
+  // Restart each board right before its own check: the forward check takes several seconds on a
+  // slow runner, and a reversed board restarted before it played to its end tick 300 meanwhile.
   for (const sel of [FORWARD, REVERSED]) {
     await page.locator(sel).locator('select').selectOption({ label: '1x' });
     await control(page, sel, 'restart').click();
+    await expectBoardDrawingSteppedAt(page, sel, 'on the pair page');
   }
-  for (const sel of [FORWARD, REVERSED]) await expectBoardDrawingSteppedAt(page, sel, 'on the pair page');
 
   // 6. Side by side at this width: the wrapper is wider than 960 px.
   const boxes = await page.evaluate(() =>
