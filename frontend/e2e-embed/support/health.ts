@@ -259,11 +259,15 @@ export function pageUrl(name: string): string {
   return pathToFileURL(fileURLToPath(new URL(`../../dist-embed/pages/${name}`, import.meta.url))).href;
 }
 
-/** `demo_scene` to `examples/boards/demo_scene.board.ron`; `docs-x` to `examples/boards/docs/x.board.ron`. */
+/**
+ * A board id to its file. The embed build names a board by its path under `examples/boards/` with `/`
+ * turned into `-`, so `demo_scene` is `examples/boards/demo_scene.board.ron`, `docs-x` is
+ * `examples/boards/docs/x.board.ron` and `lessons-x` is `examples/boards/lessons/x.board.ron`.
+ */
 export function boardPathOf(id: string): string {
   const parts = id.split('-');
-  const nested = parts[0] === 'docs' && parts.length > 1;
-  return nested ? `examples/boards/docs/${parts.slice(1).join('-')}.board.ron` : `examples/boards/${id}.board.ron`;
+  const nested = (parts[0] === 'docs' || parts[0] === 'lessons') && parts.length > 1;
+  return nested ? `examples/boards/${parts[0]}/${parts.slice(1).join('-')}.board.ron` : `examples/boards/${id}.board.ron`;
 }
 
 /** The board's line in hashes.manifest, read at run time. */
