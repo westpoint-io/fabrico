@@ -506,7 +506,8 @@ export function evaluateCheck(check: Check, ctx: CheckContext): CheckResult {
       const seen = wireFrom(board, from.id, to.id)?.replyPulsesSeen;
       return seen !== undefined && seen > baseline.replies ? DONE : NOT_DONE;
     }
-    // The ring cell is read off the step's baseline, because the stub's end moves once the join is drawn.
+    // The ring cell is read off the step's baseline, which holds the cell the lesson declares, because the
+    // stub's end moves once the join is drawn.
     case 'lineTurnsAt': {
       const a = bindings[check.a];
       const b = bindings[check.b];

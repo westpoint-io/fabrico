@@ -1277,7 +1277,14 @@ async function walkStep(page: Page, lesson: Lesson, state: WalkState, stepIndex:
         const from = stage.when.is === 'lineStopsShort' ? bound[stage.when.from] : undefined;
         const cell = from === undefined ? null : lineDoorstep(await readScene(page), from, boundBeltsOf(bound));
         if (cell === null) throw new Error(`${label}: the board holds no line end to carry on from`);
-        if (step.done.is === 'lineTurnsAt') state.seamCell = cell;
+        if (step.done.is === 'lineTurnsAt') {
+          state.seamCell = cell;
+          // The join step grades the ring cell the lesson declares. The real host builds the stub from
+          // the board file, so the doorstep read here is the cell that declaration has to match.
+          const ring = lesson.board?.ring;
+          console.log(`RING ${lesson.id} declared=${ring === undefined ? 'none' : `${ring.x},${ring.y}`} host=${cell[0]},${cell[1]}`);
+          expect(ring === undefined ? null : [ring.x, ring.y], `${label}: the ring cell the lesson declares is the cell past the host's stub`).toEqual([cell[0], cell[1]]);
+        }
         await expectBeltEndRingPainted(page, label, cell);
         const at = await screenCellCentre(page, cell[0], cell[1]);
         const start = { x: at.x + walk.dragFrom.dx, y: at.y + walk.dragFrom.dy };

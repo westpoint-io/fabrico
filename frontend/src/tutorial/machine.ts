@@ -92,8 +92,9 @@ export interface StepBaseline {
    */
   replies: number | null;
   /**
-   * At a `lineTurnsAt` step, the cell past the free end of the line from the check's `a`, read when the
-   * step began, or from the first frame after that has one. Null until it's known. Left out at any other step.
+   * At a `lineTurnsAt` step, the ring cell the lesson declares on its board (`Lesson.board.ring`), never
+   * read off the board, so going back to the step after an Undo or a Delete grades the same cell. Null
+   * for a lesson with no board. Left out at any other step.
    */
   ringCell?: { x: number; y: number } | null;
 }
@@ -499,19 +500,14 @@ function repliesFor(check: Check | undefined, board: BoardFacts, bindings: Tutor
   return wireFrom(board, from.id, to.id)?.replyPulsesSeen ?? 0;
 }
 
-/** At a `lineTurnsAt` step, the cell past the free end of the line from its `a`, as the carry-on stage reads that line. Null with none. */
-function ringCellFor(check: Extract<Check, { is: 'lineTurnsAt' }>, board: BoardFacts, bindings: TutorialState['bindings']): { x: number; y: number } | null {
-  const from = bindings[check.a];
-  const cell = from === undefined ? null : lineDoorstep(board, from.id, boundBeltIds(bindings));
-  return cell === null ? null : { x: cell[0], y: cell[1] };
-}
-
+/** `ring` is the lesson's declared ring cell, which a `lineTurnsAt` step grades. */
 function baselineFor(
   step: Step | undefined,
   knownKeys: readonly string[],
   board: BoardFacts,
   chrome: ChromeFacts,
   bindings: TutorialState['bindings'],
+  ring: { x: number; y: number } | null,
 ): StepBaseline {
   const done = step?.done;
   return {
@@ -523,7 +519,7 @@ function baselineFor(
     generation: board.generation,
     factorySource: appliedSourceOf(codeWatch(step), board, chrome, bindings),
     replies: repliesFor(done, board, bindings),
-    ...(done?.is === 'lineTurnsAt' ? { ringCell: ringCellFor(done, board, bindings) } : {}),
+    ...(done?.is === 'lineTurnsAt' ? { ringCell: ring } : {}),
   };
 }
 
@@ -620,7 +616,7 @@ function advance(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, lesso
       card: isLast ? 'finished' : 'running',
       stepIndex,
       bindings,
-      baseline: baselineFor(isLast ? undefined : lesson.steps[stepIndex], knownKeys, board, chrome, bindings),
+      baseline: baselineFor(isLast ? undefined : lesson.steps[stepIndex], knownKeys, board, chrome, bindings, lesson.board?.ring ?? null),
       capture: isLast ? next.capture : captureAt(lesson, stepIndex, board, chrome, bindings, next.capture),
       deliberate: withDeliberate(next.deliberate, step.done, board),
     };
@@ -744,7 +740,7 @@ function withGoingBack(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
     ...s,
     stepIndex: gone,
     bindings,
-    baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings),
+    baseline: baselineFor(steps[gone], knownKeys, board, chrome, bindings, lesson.board?.ring ?? null),
     spot: null,
     note: { kind: 'wentBack', a: gone + 1, b: gone + 1 },
     deliberate: null,
@@ -804,10 +800,6 @@ function withWatchRead(s: TutorialState, board: BoardFacts, chrome: ChromeFacts,
   if (baseline.factorySource === null) {
     const source = appliedSourceOf(codeWatch(step), board, chrome, s.bindings);
     if (source !== null) baseline = { ...baseline, factorySource: source };
-  }
-  if (step.done.is === 'lineTurnsAt' && baseline.ringCell == null) {
-    const ringCell = ringCellFor(step.done, board, s.bindings);
-    if (ringCell !== null) baseline = { ...baseline, ringCell };
   }
   return baseline === held ? s : { ...s, baseline };
 }
@@ -888,7 +880,7 @@ export function reduce(s: TutorialState, e: TutorialEvent, lessons: readonly Les
       stepIndex: 0,
       floor: e.board.swapFloor,
       bindings,
-      baseline: baselineFor(lesson?.steps[0], start.knownKeys, e.board, e.chrome, bindings),
+      baseline: baselineFor(lesson?.steps[0], start.knownKeys, e.board, e.chrome, bindings, lesson?.board?.ring ?? null),
       capture: lesson === undefined ? null : captureAt(lesson, 0, e.board, e.chrome, bindings, null),
     };
     return runFrame(running, e.board, e.chrome, lessons);

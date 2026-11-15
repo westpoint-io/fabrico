@@ -3,8 +3,10 @@
 //
 // The board's machines are declared by their node keys, read off the Place lines in the board file
 // (`lessonBoard.source.test.ts` holds the two together), so the lesson starts only on that board and the
-// prepared Source and Sink finish no step. The join step reads the tile kind the host ships on the ring
-// cell, so a line that joins without turning there keeps the step open. Machine and key names are tokens.
+// prepared Source and Sink finish no step. The join step reads the host's tile kind on the ring cell the
+// lesson declares, on a tile of the line that joins the Source to the Sink, so a line that joins without
+// turning there keeps the step open. The same test holds the declared cell to the board file's stub.
+// Machine and key names are tokens.
 
 import { BELT_KIND, BOARD_PAUSED, PRESS_PLAY_STAGES, SINK_KIND, SOURCE_KIND, beltStages, watchStage } from '../commonStages';
 import type { Lesson, Stage } from '../types';
@@ -31,6 +33,7 @@ export const BELTS_THAT_JOIN: Lesson = {
       { nodeKey: `${SOURCE_KIND}@1,2`, bind: 'source' },
       { nodeKey: `${SINK_KIND}@6,6`, bind: 'sink' },
     ],
+    ring: { x: 6, y: 2 },
   },
   steps: [
     {

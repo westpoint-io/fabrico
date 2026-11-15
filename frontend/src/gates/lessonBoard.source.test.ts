@@ -13,6 +13,9 @@
 //    the same string, and demo_scene.rs embeds the board file this gate reads.
 // 3. The key tauriChannel.ts passes to the load_lesson_board invoke is the camelCase form of the
 //    command's parameter in lib.rs, the mapping Tauri makes.
+// 4. The ring cell the lesson declares is the cell past the last cell of the board file's DrawBelt, one
+//    more step in the direction of its last two cells: the cell the app rings past the stub's free end,
+//    which the join step grades.
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -43,6 +46,29 @@ function placeKeys(ron: string): string[] {
     keys.push(`${m[1]}@${m[2]},${m[3]}`);
   }
   return keys;
+}
+
+/** The cells of the last `DrawBelt(cells: [...])` command in a board file, in order. Empty with none. */
+function drawBeltCells(ron: string): Array<{ x: number; y: number }> {
+  const lists = [...withoutLineComments(ron).matchAll(/DrawBelt\(\s*cells:\s*\[([^\]]*)\]\s*\)/g)];
+  const last = lists[lists.length - 1];
+  if (last === undefined) return [];
+  return [...(last[1] as string).matchAll(/\(\s*(\d+)\s*,\s*(\d+)\s*\)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+}
+
+/** Pin 4: the lesson's declared ring cell against the cell past the board file's stub. Empty means they agree. */
+function ringFindings(lesson: Lesson, ron: string, file: string): string[] {
+  const ring = lesson.board?.ring;
+  if (ring === undefined) return [`lesson ${lesson.id} declares no ring cell, so there is nothing to hold to ${file}`];
+  const cells = drawBeltCells(ron);
+  const end = cells[cells.length - 1];
+  const before = cells[cells.length - 2];
+  if (end === undefined || before === undefined) return [`${file}: ${cells.length} DrawBelt cells read, and the ring needs the last two`];
+  const past = { x: end.x + (end.x - before.x), y: end.y + (end.y - before.y) };
+  if (past.x === ring.x && past.y === ring.y) return [];
+  return [
+    `lesson ${lesson.id} declares its ring cell as (${ring.x},${ring.y}), and the cell past the DrawBelt in ${file}, stepping on from (${before.x},${before.y}) and (${end.x},${end.y}), is (${past.x},${past.y})`,
+  ];
 }
 
 /** Pin 1: the lesson's declared machines against the board file's Place lines. Empty means they agree. */
@@ -135,6 +161,12 @@ const REAL = {
 describe("a lesson's prepared board, held across TypeScript, RON and Rust", () => {
   it('reads the real files', () => {
     expect(placeKeys(REAL.ron)).toEqual(['0@1,2', '7@6,6']);
+    expect(drawBeltCells(REAL.ron)).toEqual([
+      { x: 2, y: 2 },
+      { x: 3, y: 2 },
+      { x: 4, y: 2 },
+      { x: 5, y: 2 },
+    ]);
     expect(parseArms(REAL.demoScene)).toEqual(['belts_that_join']);
     expect(lessonBoardIdLiteral(REAL.types)).toBe('belts_that_join');
   });
@@ -151,6 +183,10 @@ describe("a lesson's prepared board, held across TypeScript, RON and Rust", () =
     expect(invokeKeyFindings(REAL.channel, REAL.appLib)).toEqual([]);
   });
 
+  it(`holds the ring cell Belts that join declares to the cell past the last DrawBelt cell in ${BOARD_FILE}`, () => {
+    expect(ringFindings(BELTS_THAT_JOIN, REAL.ron, BOARD_FILE)).toEqual([]);
+  });
+
   describe('fails on', () => {
     it('a Place line moved in the board file only', () => {
       const moved = REAL.ron.replace('Place(kind: 7, cell_x: 6, cell_y: 6)', 'Place(kind: 7, cell_x: 6, cell_y: 7)');
@@ -162,6 +198,12 @@ describe("a lesson's prepared board, held across TypeScript, RON and Rust", () =
       const renamed = REAL.demoScene.replace('"belts_that_join" => Some(Self::BeltsThatJoin)', '"belts-that-join" => Some(Self::BeltsThatJoin)');
       expect(renamed, 'the substitution landed').not.toBe(REAL.demoScene);
       expect(boardIdFindings(BELTS_THAT_JOIN, REAL.types, renamed, BOARD_FILE).join('\n')).toMatch(/accepts "belts-that-join"/);
+    });
+
+    it('a DrawBelt cut short in the board file only', () => {
+      const cut = REAL.ron.replace('DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2)])', 'DrawBelt(cells: [(2, 2), (3, 2), (4, 2)])');
+      expect(cut, 'the substitution landed').not.toBe(REAL.ron);
+      expect(ringFindings(BELTS_THAT_JOIN, cut, BOARD_FILE).join('\n')).toMatch(/declares its ring cell as \(6,2\), .* stepping on from \(3,2\) and \(4,2\), is \(5,2\)/);
     });
 
     it('the invoke key renamed', () => {

@@ -148,9 +148,10 @@ export type Check =
    */
   | { is: 'replyPulseRose'; from: BindingName; to: BindingName }
   /**
-   * The line from `a` reaches `b` (`beltJoining`), and the tile at the ring cell captured when the step
-   * began ships as a Corner. It reads the kind the host sent and never works one out, so a draw from the
-   * ring, a reversed draw and a stub extended by its Head handle all finish it when the board agrees.
+   * The line from `a` reaches `b` (`beltJoining`), and a tile of that line on the ring cell ships as a
+   * Corner. The cell comes from the lesson (`Lesson.board.ring`), never from the board. It reads the kind
+   * the host sent and never works one out, so a draw from the ring, a reversed draw and a stub extended by
+   * its Head handle all finish it when the board agrees.
    */
   | { is: 'lineTurnsAt'; a: BindingName; b: BindingName; bind: BindingName };
 
@@ -314,8 +315,11 @@ export interface Lesson {
    * name it's bound as. A lesson with a board begins on the first frame of a new board whose machines are
    * exactly these, and those machines count as known, so they finish no step. With no board, a lesson
    * begins on New's empty board.
+   *
+   * `ring` is the cell past the stub's free end, where the app rings the carry-on start. The join step
+   * grades this cell, and `lessonBoard.source.test.ts` holds it to the board file.
    */
-  board?: { id: LessonBoardId; machines: ReadonlyArray<{ nodeKey: string; bind: BindingName }> };
+  board?: { id: LessonBoardId; machines: ReadonlyArray<{ nodeKey: string; bind: BindingName }>; ring: { x: number; y: number } };
   steps: readonly Step[];
   /** What the card says once the last step is done. */
   closing: readonly PhraseToken[];

@@ -2457,6 +2457,7 @@ describe('lesson 2: Belts that join', () => {
         { nodeKey: '0@1,2', bind: 'source' },
         { nodeKey: '7@6,6', bind: 'sink' },
       ],
+      ring: { x: 6, y: 2 },
     });
     const stages = (id: string): string[] => BELTS_THAT_JOIN.steps.find((st) => st.id === id)?.stages.map((g) => g.id) ?? [];
     expect(BELTS_THAT_JOIN.steps.map((st) => st.id)).toEqual(['join-belt', 'press-play', 'watch']);
@@ -2534,6 +2535,116 @@ describe('lesson 2: Belts that join', () => {
     s = frame(s, { nodes: DECLARED, belts: joined(CORNER, []), tick: 13 });
     expect(s.card).toBe('finished');
   });
+
+  // The tick stays at the board's 10 (11 once the play step is behind) across the frames that should stay
+  // on a step, so the play step can't finish in the same frame as the join.
+  describe('going back to the join step keeps the declared ring cell', () => {
+    const withHead = (belt: BoardBelt, head: number): BoardBelt => ({ ...belt, docks: [...belt.docks, { end: 'Head', node: head, port: 0 }] });
+    /** The first of two pieces: (6,2), shipping the Corner, and (6,3), its Tail on the stub. */
+    const PIECE_1: BoardBelt = {
+      id: 11,
+      items: 0,
+      occupiedSlots: [],
+      tiles: [
+        { cell_x: 6, cell_y: 2, kind: CORNER },
+        { cell_x: 6, cell_y: 3 },
+      ],
+      docks: [{ end: 'Tail', node: STUB.id, port: 0 }],
+    };
+    /** The second piece: (6,4) to (6,5), its Tail on piece 1 and its Head on the Sink. */
+    const PIECE_2: BoardBelt = {
+      id: 12,
+      items: 0,
+      occupiedSlots: [],
+      tiles: [
+        { cell_x: 6, cell_y: 4 },
+        { cell_x: 6, cell_y: 5 },
+      ],
+      docks: [
+        { end: 'Tail', node: PIECE_1.id, port: 0 },
+        { end: 'Head', node: SNK2.id, port: 0 },
+      ],
+    };
+    const TWO_PIECES: BoardBelt[] = [withHead(STUB, PIECE_1.id), withHead(PIECE_1, PIECE_2.id), PIECE_2];
+    const PIECE_1_ONLY: BoardBelt[] = [withHead(STUB, PIECE_1.id), PIECE_1];
+    /** The lesson at the join step after a two-drag join lost its second piece to Undo. */
+    const afterPartialUndo = (): TutorialState => {
+      let s = frame(onItsBoard(), { nodes: DECLARED, belts: PIECE_1_ONLY });
+      expect(s.stepIndex, 'piece 1 alone stops short of the Sink').toBe(0);
+      s = frame(s, { nodes: DECLARED, belts: TWO_PIECES });
+      expect(s.stepIndex, 'the two pieces join with the Corner on (6,2)').toBe(1);
+      s = frame(s, { nodes: DECLARED, belts: PIECE_1_ONLY, generation: 2 });
+      expect(s.stepIndex, 'Undo of piece 2 sends the lesson back').toBe(0);
+      expect(s.note).toEqual({ kind: 'wentBack', a: 1, b: 1 });
+      return s;
+    };
+
+    it('finishes again when a two-drag join loses its second piece to Undo and the piece is drawn again', () => {
+      const s = frame(afterPartialUndo(), { nodes: DECLARED, belts: TWO_PIECES, generation: 2 });
+      expect(s.stepIndex).toBe(1);
+    });
+
+    it('finishes when the user undoes to the stub and draws one straight drag down from the ring', () => {
+      let s = frame(afterPartialUndo(), { nodes: DECLARED, belts: [STUB], generation: 3 });
+      expect(s.stepIndex).toBe(0);
+      const down: BoardBelt = {
+        id: 13,
+        items: 0,
+        occupiedSlots: [],
+        tiles: [{ cell_x: 6, cell_y: 2, kind: CORNER }, { cell_x: 6, cell_y: 3 }, { cell_x: 6, cell_y: 4 }, { cell_x: 6, cell_y: 5 }],
+        docks: [
+          { end: 'Tail', node: STUB.id, port: 0 },
+          { end: 'Head', node: SNK2.id, port: 0 },
+        ],
+      };
+      s = frame(s, { nodes: DECLARED, belts: [withHead(STUB, down.id), down], generation: 3 });
+      expect(s.stepIndex).toBe(1);
+    });
+
+    it('moves on again when a stub deleted after the join comes back with Undo', () => {
+      let s = frame(onItsBoard(), { nodes: DECLARED, belts: joined(CORNER) });
+      expect(s.stepIndex).toBe(1);
+      s = frame(s, { nodes: DECLARED, belts: joined(CORNER), tick: 11 });
+      expect(s.stepIndex, 'a tick rise reaches the watch step').toBe(2);
+      // The Delete keeps the generation. The joining piece stays, with no Tail dock left.
+      const orphan: BoardBelt = { ...joiner(CORNER), docks: [{ end: 'Head', node: SNK2.id, port: 0 }] };
+      s = frame(s, { nodes: DECLARED, belts: [orphan], tick: 11 });
+      expect(s.stepIndex, 'the stub deleted sends the lesson back').toBe(0);
+      s = frame(s, { nodes: DECLARED, belts: joined(CORNER), tick: 11, generation: 2 });
+      expect(s.stepIndex, 'Undo brings the stub and the join back on this frame').toBe(1);
+    });
+
+    it('finishes on a new belt drawn from the Source round into the Sink after the stub was deleted', () => {
+      let s = frame(onItsBoard(), { nodes: DECLARED, belts: joined(CORNER) });
+      expect(s.stepIndex).toBe(1);
+      const orphan: BoardBelt = { ...joiner(CORNER), docks: [{ end: 'Head', node: SNK2.id, port: 0 }] };
+      s = frame(s, { nodes: DECLARED, belts: [orphan] });
+      expect(s.stepIndex, 'the stub deleted sends the lesson back').toBe(0);
+      s = frame(s, { nodes: DECLARED, belts: [] });
+      expect(s.stepIndex).toBe(0);
+      const round: BoardBelt = {
+        id: 20,
+        items: 0,
+        occupiedSlots: [],
+        tiles: [
+          { cell_x: 2, cell_y: 2 },
+          { cell_x: 3, cell_y: 2 },
+          { cell_x: 4, cell_y: 2 },
+          { cell_x: 5, cell_y: 2 },
+          { cell_x: 6, cell_y: 2, kind: CORNER },
+          { cell_x: 6, cell_y: 3 },
+          { cell_x: 6, cell_y: 4 },
+          { cell_x: 6, cell_y: 5 },
+        ],
+        docks: [
+          { end: 'Tail', node: SRC2.id, port: 0 },
+          { end: 'Head', node: SNK2.id, port: 0 },
+        ],
+      };
+      s = frame(s, { nodes: DECLARED, belts: [round] });
+      expect(s.stepIndex).toBe(1);
+    });
+  });
 });
 
 // A LESSON ON A PREPARED BOARD, built here so the engine is tested before any shipped lesson uses it. The
@@ -2581,6 +2692,7 @@ describe('a lesson on a prepared board', () => {
         { nodeKey: '0@1,2', bind: 'source' },
         { nodeKey: '7@6,6', bind: 'sink' },
       ],
+      ring: { x: 6, y: 2 },
     },
     steps,
     closing: [],
@@ -2641,16 +2753,17 @@ describe('a lesson on a prepared board', () => {
   });
 
   describe('the ring cell', () => {
-    it('is captured at the join step from the cell past the stub', () => {
+    it('is the cell the lesson declares at the join step', () => {
       expect(onItsBoard().baseline?.ringCell).toEqual({ x: 6, y: 2 });
+      const elsewhere: Lesson = { ...JOIN_LESSON, board: { ...JOIN_LESSON.board!, ring: { x: 9, y: 9 } } };
+      const s = run(sent([elsewhere]), { nodes: DECLARED, belts: [stub(10)] }, [elsewhere]);
+      expect(s.baseline?.ringCell, 'the declared cell, not the one past the stub on the board').toEqual({ x: 9, y: 9 });
     });
 
-    it('fills on the first later frame that has one, when the step began with no stub', () => {
-      let s = run(sent(), { nodes: DECLARED });
-      expect(s.card).toBe('running');
-      expect(s.baseline?.ringCell).toBeNull();
-      s = run(s, { nodes: DECLARED, belts: [stub(10)] });
-      expect(s.baseline?.ringCell).toEqual({ x: 6, y: 2 });
+    it('gives every lesson with a lineTurnsAt step a board with a ring cell', () => {
+      const joins = LESSONS.filter((l) => l.steps.some((st) => st.done.is === 'lineTurnsAt'));
+      expect(joins.length, 'the loop found a lesson to hold').toBeGreaterThan(0);
+      for (const l of joins) expect(l.board?.ring, l.id).toEqual({ x: expect.any(Number), y: expect.any(Number) });
     });
 
     it('is not held at a step with another check', () => {
@@ -2744,6 +2857,7 @@ describe('lineNoCorner and the shared stages', () => {
         { nodeKey: '0@1,2', bind: 'source' },
         { nodeKey: '7@6,6', bind: 'sink' },
       ],
+      ring: { x: 6, y: 2 },
     },
     steps: [
       {
