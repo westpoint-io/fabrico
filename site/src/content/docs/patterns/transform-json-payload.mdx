@@ -1,0 +1,55 @@
+---
+title: Transform a JSON payload
+description: "Reshape a webhook's JSON payload in a Factory: rename, add and drop fields before the item moves on."
+searchPhrase: transform a JSON payload
+sidebar:
+  order: 40
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+You transform a JSON payload when the service sending a webhook and the one receiving it disagree on field names or shape. A [Factory](../../reference/files/glossary/#term-factory) does it in a few lines of JavaScript: it reads the [item](../../reference/files/glossary/#term-item) that arrives, renames, adds or drops fields, and emits the new item.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right, joined by two [belts](../../reference/files/glossary/#term-belt). Each order webhook names its id `order_id` and carries a `debug` flag. The Factory renames the id to `orderId`, adds a `currency` field and leaves `debug` out, and the Debug Sink logs the result.
+
+<Board name="docs-patterns-transform-json-payload" />
+
+## How the board works
+
+Press Play and the board stops on these two [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory reshapes the first order: it renames the order id field, adds a currency of EUR, leaves out the debug flag and sends the new item on.
+2. Tick 85: The Debug Sink logs the new item with three fields, orderId 7, total 30 and currency EUR, and no debug flag.
+
+The second order takes the same path 80 ticks later: the Factory runs on tick 143, and on tick 165 the Debug Sink logs order 8 with a total of 12 and currency EUR.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// rename one field, add one, drop one
+export default function (input, ctx) {
+  ctx.emit(0, {
+    orderId: input.order_id,
+    total: input.total,
+    currency: "EUR",
+  });
+}
+```
+
+The line `orderId: input.order_id,` does the rename: it reads the old field and writes its value under the new name. The code builds a new object from only the fields it names, so `currency` is added and `debug` stays behind.
+
+## Trade-offs
+
+- The code runs with a budget of <Fact id="limit.factory_gas_budget" />, which counts steps of the code, not time. Code that uses it up, usually in a loop that never ends or one that does too much work for one item, stops with a <Fact id="fault.FactoryTimeout" /> [fault](../../reference/files/glossary/#term-fault), and that run emits nothing. The [FactoryTimeout entry](../../troubleshooting/fault-reasons/#fault-factory-timeout) says how to fix it.
+- Code that throws stops with a <Fact id="fault.FactoryError" /> fault. The run emits nothing, `ctx.state` keeps the value it had, and the item leaves by the Fault port, where a belt can carry it to a Sink. The [FactoryError entry](../../troubleshooting/fault-reasons/#fault-factory-error) says how to fix it.
+- The code gets the item parsed from JSON. A body that isn't valid JSON, such as a form post like `order_id=8&total=12`, makes the run fault with <Fact id="fault.FactoryError" />, and the Factory emits nothing for that item. [Factory API](../../reference/code-and-http/factory-api/) describes `input`.
+- A field the body doesn't have reads as `undefined`, and the new item leaves it out with no fault. An order with no `order_id` comes out of this Factory with `total` and `currency` and no `orderId`, so check for the fields the receiver needs when a missing one matters.
+
+## Related pages
+
+- [Forward a webhook to another URL](../forward-a-webhook/): send the reshaped item on to another service with an HTTP Sink.
+- [Factory API](../../reference/code-and-http/factory-api/): what `input`, `ctx.emit` and `ctx.state` hold, and the limits on one run.
+- [Fault reasons](../../troubleshooting/fault-reasons/): what each fault on an item means and how to fix it.
