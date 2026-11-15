@@ -1,0 +1,57 @@
+---
+title: Forward a webhook to another URL
+description: "Forward each webhook that reaches a Source to another URL through an HTTP Sink, with a Factory shaping the body on the way."
+searchPhrase: forward a webhook
+sidebar:
+  order: 10
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To forward a webhook to another URL, receive it on a [Source](../../reference/files/glossary/#term-source) and pass it to an HTTP [Sink](../../reference/files/glossary/#term-sink) that posts it on. You need this when one service posts events to an endpoint and a second service needs the same events, often with a smaller body.
+
+The board below has a Source, a [Factory](../../reference/files/glossary/#term-factory) and an HTTP Sink, left to right, joined by two [belts](../../reference/files/glossary/#term-belt). The Source turns each order webhook into an [item](../../reference/files/glossary/#term-item), the Factory takes the card number out, and the HTTP Sink posts what is left to `https://example.com/orders`.
+
+<Board name="docs-patterns-forward-a-webhook" />
+
+## How the board works
+
+Press Play and the board stops on these two [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory takes the first order, keeps its id and total, drops the card number and sends the smaller item on.
+2. Tick 85: The HTTP Sink sends the smaller item to its URL as a POST, with no card number in the body, and the script answers it 20 ticks later.
+
+The second order takes the same path 80 ticks later: the Factory runs on tick 143 and the HTTP Sink sends on tick 165.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// keep the fields the next service reads
+export default function (input, ctx) {
+  ctx.emit(0, { id: input.id, total: input.total });
+}
+```
+
+The `ctx.emit` line builds a new object from two fields of the order, `id` and `total`, so every other field, the card number among them, stays behind.
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- The app listens for webhooks on 127.0.0.1 only, so only programs on the same computer can send one to a Source. A webhook from a service on the internet needs a tunnel to your computer, which the app doesn't provide. [Webhook ingress](../../reference/code-and-http/webhook-ingress/) has the URL and the rules.
+- The app sends each request once and never retries it. An error status, a failed connection or no answer in time makes the HTTP Sink send a <Fact id="fault.CommandFailure" /> or <Fact id="fault.CommandTimeout" /> [fault](../../reference/files/glossary/#term-fault) out of its Fault port instead. [Side effects and delivery](../../concepts/side-effects-and-delivery/) explains why, and [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/) lists each answer and what it becomes.
+- The request carries the item's bytes as its body and one header of its own, `Idempotency-Key`. The headers the webhook arrived with don't travel with the item, and the Sink adds no `content-type` header, so a receiver that needs one of those won't get it.
+- When the receiver wants the body exactly as it arrived, leave the Factory out and run one belt from the Source to the HTTP Sink. The Sink sends the item's bytes as they came.
+
+## Related pages
+
+- [Patterns](../): the other recipes for common automation jobs.
+- [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/): the method, body and key of each request, and how long the Sink waits.
+- [Side effects and delivery](../../concepts/side-effects-and-delivery/): why each call gets one attempt and is never sent again on replay.
+- [Webhook ingress](../../reference/code-and-http/webhook-ingress/): the URL a Source listens on, the size limit and the order in one tick.

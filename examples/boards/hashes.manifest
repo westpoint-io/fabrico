@@ -30,6 +30,7 @@ examples/boards/docs/machines-sink.board.ron 260 4bbd9790d7cdf059e967d3d3988ea16
 examples/boards/docs/machines-source.board.ron 300 a4df1f32bfc2b6f11e398ab1116b15e8c3b869c8d629e9b5e08a378a7542d3bf
 examples/boards/docs/machines-tee.board.ron 260 6c26554a757f6d8446203664fd55af7761ca01fa805acb75a8c9b0ccf33d3b63
 examples/boards/docs/machines-wire.board.ron 240 ab7bc3864429495a7d55a9d928c64723759e81b61f1d19b90883412d73f1f523
+examples/boards/docs/patterns-forward-a-webhook.board.ron 260 a00b62261c8d689a285702a9f6f6f7b2e8a23a2fe740d6b23d6e5954e060f41f
 examples/boards/docs/rules-docking.board.ron 360 37b3e037a1a2197e1b5c772a238c90931124b99bbc748330b2ee975a7cfacee4
 examples/boards/docs/rules-machine-states.board.ron 260 44124ce6ae6fd32adf0e0295ee928f4cd4eed11ba5d8b2ffe0ce860933cd26a7
 examples/boards/docs/rules-ports.board.ron 240 da2e3fce9b232146abecc1046ef67d7366ab7668b913d7a8a58629ba86a9ada8

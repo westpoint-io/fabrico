@@ -27,7 +27,13 @@ const withFixtures = process.env.FABRICO_DOCS_FIXTURES === '1';
 const docsPages = withFixtures ? glob({ base: './src/content/docs', pattern: '**/*.{md,mdx}' }) : docsLoader();
 
 export const collections = {
-  docs: defineCollection({ loader: docsPages, schema: docsSchema({ extend: z.object({ description }) }) }),
+  // `searchPhrase` is the words a reader types into a search to find a pattern page. Only pattern
+  // pages carry it, so it's optional here; tests/unit/pattern-pages.test.ts requires it on them.
+  // `min(1)` makes an empty phrase fail the build.
+  docs: defineCollection({
+    loader: docsPages,
+    schema: docsSchema({ extend: z.object({ description, searchPhrase: z.string().min(1).optional() }) }),
+  }),
   // The site's own interface strings (search, edit link, pagination): src/content/i18n/en.json.
   i18n: defineCollection({ loader: i18nLoader(), schema: i18nSchema() }),
 };
