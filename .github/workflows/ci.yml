@@ -1231,15 +1231,22 @@ jobs:
   # packages, so this job has no setup-python step. libgl1-mesa-dri is listed so Mesa's software
   # GL, which WebGL needs under Xvfb, doesn't depend on what the other packages pull in.
   #
-  # TIME LIMIT. 10 minutes, about 1.7 times this job's first GitHub run: 5 min 55 s in all, of which
-  # the embed build took 17 s, the embed check 163 s, the three-browser offline check 130 s and the
-  # Playwright browser install 24 s.
+  # TIME LIMIT. The offline check runs one test a board in each of the three browsers, so this job
+  # grows with the board count. The first GitHub run took 5 min 55 s in all (embed build 17 s, embed
+  # check 163 s, offline check 130 s). Run 43670312713 with 34 boards was cancelled at the old
+  # 10-minute limit: setup 52 s, embed build 60 s, embed check 3 min 47 s, then the offline check
+  # spent 4 min 2 s on Chromium (7.1 s a board) and was cut 3 boards into Firefox. Locally at 34
+  # boards Chromium took 3.2 s a board, Firefox 4.7 s and WebKitGTK about 3.1 s. Firefox runs about
+  # 1.2 times slower on GitHub and Chromium 2.2 times, so the offline check comes to about 12 min
+  # there (about 20 s a board) and the job to about 17.5 min, or 20.3 min if Firefox runs 2 and
+  # WebKitGTK 3 times slower. The limit is 35 minutes, 2.0 times the estimate. Each new board adds
+  # about 20 s, so measure again after about 15 more boards.
   embed:
     name: the read-only board embed runs from disk in a browser
     needs: [changes, wasm-player]
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 35
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
     steps:
