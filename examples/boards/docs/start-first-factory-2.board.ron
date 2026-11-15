@@ -1,0 +1,44 @@
+// The second step of the first-factory tutorial. The long belt from step 1 is gone, and a Factory
+// stands in its middle, joined to the Source and the Sink by two short belts. The Factory has no code
+// of its own yet, so it runs the starting code every new Factory gets, which sends each item on
+// unchanged. Its Fault port, on its bottom middle cell facing south, stays undocked. The run makes
+// no outbound call.
+//
+//   row 8:   SOURCE 0 -b3-> FACTORY 2 -b4-> SINK 1
+//
+// Handles mint in command order: the Source 0, the Sink 1, the Factory 2, then the belts 3 and 4.
+// The 9 commands and the history seal end the boot on tick 10.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1, Fault=2; SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "First factory, step 2",
+    seed: 98,
+    commands: [
+        Place(kind: 0, cell_x: 10, cell_y: 8),       // 0: SOURCE, a webhook trigger by default
+        Place(kind: 7, cell_x: 18, cell_y: 8),       // 1: SINK, Debug by default
+        Place(kind: 2, cell_x: 13, cell_y: 7),       // 2: FACTORY, 3x3
+        DrawBelt(cells: [(11, 8), (12, 8)]),          // 3: source -> factory
+        DrawBelt(cells: [(16, 8), (17, 8)]),          // 4: factory -> sink
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 2, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"order":2}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"order":3}"#)),
+    ],
+    captions: [
+        Caption(tick: 55, highlight: 2, text: "The Factory runs its starting code on this item and sends it out unchanged."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)

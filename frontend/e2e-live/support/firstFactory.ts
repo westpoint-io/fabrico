@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 import {
+  CELL,
   anchorOf,
   applyConfig,
   clickAt,
@@ -238,4 +239,70 @@ export async function buildStepThree(page: Page, code: string): Promise<string> 
 /** The Factory-to-Sink belt's cells, tail first, once step 2 is built. */
 export function outletCells(): Array<[number, number]> {
   return rowCells(FACTORY_AT[0] + 3, SINK_AT[0] - 1, SINK_AT[1]);
+}
+
+/** What the outlet watch saw since it started. */
+export interface OutletWatch {
+  /** The model listed at least one item on the outlet belt in some frame. */
+  carried: boolean;
+  /** The item layer drew at least one dot inside an outlet cell in some frame. */
+  drawn: boolean;
+  /** The frames in which both held at once. */
+  bothFrames: number;
+  /** Ids of machines the model showed in the FAULTED state (state byte 2) in any frame. */
+  faulted: number[];
+}
+
+/**
+ * Start an in-page watch over the outlet belt, sampled on every drawn frame: whether the model
+ * listed an item on it, whether the item layer drew a dot inside one of its cells, and whether any
+ * machine read FAULTED. An item crosses the two-cell outlet in about 16 ticks, a quarter of a
+ * second at full speed, so a poll from the test side could miss it; the watch latches it instead.
+ * Read with `readOutletWatch`, stop with `stopOutletWatch`.
+ */
+export async function startOutletWatch(page: Page, cells: ReadonlyArray<Cell>): Promise<void> {
+  await page.evaluate(
+    ([outlet, cellPx]) => {
+      type Scene = { nodes: { id: number; state: number }[]; belts: { tiles: { cell_x: number; cell_y: number }[]; items: number }[] };
+      const w = window as unknown as {
+        __fabrico: { scene(): Scene; itemDots(): Array<{ x: number; y: number }> };
+        __ffOutlet?: { carried: boolean; drawn: boolean; bothFrames: number; faulted: number[]; stop: boolean };
+      };
+      const key = (x: number, y: number): string => `${x},${y}`;
+      const want = new Set(outlet.map(([x, y]) => key(x, y)));
+      const watch = { carried: false, drawn: false, bothFrames: 0, faulted: [] as number[], stop: false };
+      w.__ffOutlet = watch;
+      const step = (): void => {
+        if (watch.stop) return;
+        const s = w.__fabrico.scene();
+        const belt = s.belts.find((b) => b.tiles.length === want.size && b.tiles.every((t) => want.has(key(t.cell_x, t.cell_y))));
+        const carried = (belt?.items ?? 0) > 0;
+        const drawn = w.__fabrico.itemDots().some((d) => want.has(key(Math.floor(d.x / cellPx), Math.floor(d.y / cellPx))));
+        if (carried) watch.carried = true;
+        if (drawn) watch.drawn = true;
+        if (carried && drawn) watch.bothFrames += 1;
+        for (const n of s.nodes) if (n.state === 2 && !watch.faulted.includes(n.id)) watch.faulted.push(n.id);
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    },
+    [cells.map(([x, y]) => [x, y] as [number, number]), CELL] as const,
+  );
+}
+
+/** Read the outlet watch's latched facts. */
+export async function readOutletWatch(page: Page): Promise<OutletWatch> {
+  return page.evaluate(() => {
+    const w = (window as unknown as { __ffOutlet?: OutletWatch }).__ffOutlet;
+    if (!w) throw new Error('the outlet watch was not started');
+    return { carried: w.carried, drawn: w.drawn, bothFrames: w.bothFrames, faulted: [...w.faulted] };
+  });
+}
+
+/** Stop the outlet watch (safe on a page that never started one). */
+export async function stopOutletWatch(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = (window as unknown as { __ffOutlet?: { stop: boolean } }).__ffOutlet;
+    if (w) w.stop = true;
+  });
 }

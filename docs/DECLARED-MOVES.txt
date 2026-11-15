@@ -147,11 +147,11 @@
 # =====================================================================================
 
 [fixtures]
-# Two new lines, written by the generator: one for the board a lesson starts on
-# (examples/boards/lessons/belts-that-join.board.ron), and one for the first step of the
-# first-factory tutorial (examples/boards/docs/start-first-factory-1.board.ron). The thirty older
-# lines are unchanged.
-examples/boards/hashes.manifest f6bf8b556fe7b067c6c7fe3013d366e8b1e18e909b9b6ea9f55bbacfa8b9cac1
+# Four new lines, written by the generator: one for the board a lesson starts on
+# (examples/boards/lessons/belts-that-join.board.ron), and three for the steps of the
+# first-factory tutorial (examples/boards/docs/start-first-factory-1.board.ron, -2 and -3). The
+# thirty older lines are unchanged.
+examples/boards/hashes.manifest 347c688ed7cb47638b08cc00aa77b0b560ca821c5fcd048def4df008fe28f8ef
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

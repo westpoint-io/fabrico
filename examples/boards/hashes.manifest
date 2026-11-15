@@ -36,5 +36,7 @@ examples/boards/docs/rules-ports.board.ron 240 da2e3fce9b232146abecc1046ef67d736
 examples/boards/docs/rules-undo-redo.board.ron 380 56a5d3bfa169b4cb8dc202d4e78c1a1e919d07a35ee81653cdd799ddfa46621b
 examples/boards/docs/script-outcomes.board.ron 1000 36c72035162febc3f5b1a9e2dd850a1bc386e34bcb5c0a9f7d1f6b1427dc20ef
 examples/boards/docs/start-first-factory-1.board.ron 260 a372efce6b6286e94a5b97f9179015b459ecf0d50de4b5acd6f20625da40ad15
+examples/boards/docs/start-first-factory-2.board.ron 260 fca270296865fb42d9316ea2536cee3f8e951ade718fd285888e03121cca7dab
+examples/boards/docs/start-first-factory-3.board.ron 260 bc9f819fb81a8b7aa74e08420c085a8391034ce7c527b7ec89fc99b2b91d21d8
 examples/boards/lessons/belts-that-join.board.ron 360 8214579d11c769d64559ed9136b9d6b2c5fdf382ca4f9f5a35c105d2011b31ee
 examples/boards/order_processing.board.ron 1200 668d0400451aafaa4d4749650c0165727c3f67d66f631c9a46a68863cb9c0830

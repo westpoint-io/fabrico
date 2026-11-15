@@ -39,9 +39,67 @@ Your board should now look like the one below.
 
 Press Play and watch each item cross the seven belt cells: the Sink takes the first one on [tick](../../reference/files/glossary/#term-tick) 95, and near the end a run of 26 webhooks packs the belt. A Sink you place from the palette starts as a Debug Sink, which records each item and sends nothing.
 
+## Step 2: Put a Factory on the line
+
+In this step you swap the long belt for a [Factory](../../reference/files/glossary/#term-factory), a machine that runs JavaScript on each item, with a short belt on each side of it.
+
+<Steps>
+
+1. Click the belt between the Source and the Sink, then press <Fact id="shortcut.delete" />. The app has no way to move a belt, so you delete it and draw new ones. If the app asks about items still on the belt, press Delete anyway.
+
+2. Click Factory in the palette, then click the cell three to the right of the Source and one row up. The Factory is three cells wide and three tall, so its middle row lines up with the Source. Press <Fact id="shortcut.escape" />.
+
+3. Click Belt in the palette. Press on the cell just right of the Source, drag to the Factory, and let go on the dot at the Factory's left edge. Press <Fact id="shortcut.escape" />.
+
+4. Click Belt again. Press on the cell just right of the Factory, drag to the Sink, and let go on the dot at the Sink's left edge. Press <Fact id="shortcut.escape" />.
+
+</Steps>
+
+Your board should now look like the one below.
+
+<Board name="docs-start-first-factory-2" />
+
+Press Play and watch the Factory take the first item on tick 55 and pass it on unchanged, because a new Factory starts with code that sends each item straight out.
+
+## Step 3: Give the Factory its code
+
+In this step you replace the Factory's starting code with your own, which adds a `greeting` field to each item.
+
+<Steps>
+
+1. Click the Factory. The inspector, the panel on the right, opens with the Factory's code.
+
+2. Select all the code in the inspector and replace it with this:
+
+   ```js title="Factory code"
+   // add a greeting to each item
+   export default function (input, ctx) {
+     input.greeting = "hello";
+     ctx.emit(0, input);
+   }
+   ```
+
+3. Press Apply.
+
+4. Click an empty cell to close the inspector.
+
+</Steps>
+
+Your board should now look like the one below.
+
+<Board name="docs-start-first-factory-3" />
+
+Press Play and read the log under the board: from tick 68 on, each DEBUG row shows an item with its new `greeting` field.
+
+## What you built
+
+Your board takes in webhooks, runs your code on each item, and records the result in a Debug Sink. The [Factory](../../reference/machines/factory/) page shows the same kind of line with other code, and the [Factory API](../../reference/code-and-http/factory-api/) lists what your code can call.
+
 ## Related pages
 
 - [Install Fabrico](../install/): build the app before you start.
 - [A tour of the app](../app-tour/): where the palette, the toolbar and the inspector are.
 - [Source](../../reference/machines/source/): the triggers a Source can have, and what it does with a webhook.
 - [Sink](../../reference/machines/sink/): what a Debug Sink records, and how an HTTP Sink sends.
+- [Factory](../../reference/machines/factory/): a Factory's ports, its starting code and its limits.
+- [Factory API](../../reference/code-and-http/factory-api/): what `input` and `ctx` give your code.
