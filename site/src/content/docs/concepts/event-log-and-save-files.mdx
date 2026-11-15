@@ -1,0 +1,49 @@
+---
+title: The event log and save files
+description: "What the app records as the board runs, what a project file holds, and how the two together let the app rebuild a board exactly."
+sidebar:
+  order: 7
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+As a board runs, the app keeps a record of everything that reaches it from outside, each entry stamped with the [tick](../../reference/files/glossary/#term-tick) it arrived on. Each [event](../../reference/files/glossary/#term-event) such as a webhook goes in that record, and so does each edit you make and the answer to each call the board sends out. A save writes a copy of the board at one tick together with that record, and the two are enough to rebuild the board exactly.
+
+The log under the board below is the closest thing this site has to the app's record. It lists each call the board's two Sinks make, with the tick and the answer: the top Sink sends two POST requests, logged as t70 and t190, and each gets its scripted answer 20 ticks later; the bottom Sink, a Debug Sink, records one item, logged as t130.
+
+<Board name="docs-machines-sink" />
+
+## What the app records
+
+The app keeps two logs, each in the order things happened:
+
+- The event log holds what came in from outside: each webhook a Source received, and the answer to each call a Sink sent.
+- The edit log holds each edit you made to the board, such as placing a machine or drawing a belt.
+
+Each entry carries the tick it took effect on. A Source's timer and the work machines do on their own stay out of both logs, because the engine works them out again from the board itself.
+
+## What a project file holds
+
+A save writes five things into the [project file](../../reference/files/glossary/#term-project-file), in this order:
+
+1. A version number, which the app checks before it reads anything else.
+2. The head tick, the tick you saved on.
+3. A snapshot: a copy of the whole board at the head tick or at an earlier one, with each machine and belt, their settings, the items on the belts, each Factory's saved state and the random number state.
+4. The event log.
+5. The edit log.
+
+The app refuses to open a file larger than <Fact id="limit.max_project_bytes" />. [Project files](../../reference/files/project-files/) lists the versions it opens and what a file leaves out.
+
+## How the two rebuild a board
+
+When you open the file, the app puts back the snapshot and replays the logged events and edits from the snapshot's tick to the head tick, each on its own tick. Outbound calls are muted during the replay: a Sink that takes an item there doesn't send its request again, and the answer the log already holds goes back to it on the tick it first arrived. The board then stands where the saved one did, and runs on from there.
+
+That rests on the engine giving the same result from the same start and the same events. [Determinism and replay](../determinism-and-replay/) shows it with one board run twice.
+
+## Related pages
+
+- [Save, open and replay](../../get-started/save-open-replay/): saving a board and opening it again in the app, step by step.
+- [Project files](../../reference/files/project-files/): the file versions the app opens, the size limit and when a save happens.
+- [Determinism and replay](../determinism-and-replay/): why replaying the same events gives the same board.
+- [Side effects and delivery](../side-effects-and-delivery/): what happens to a Sink's call when the board is replayed.

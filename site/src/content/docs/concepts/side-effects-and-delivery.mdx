@@ -1,0 +1,55 @@
+---
+title: Side effects and delivery
+description: "How the app makes outbound calls: each one is logged once and never sent again on replay, with one attempt and a key the receiver can check."
+sidebar:
+  order: 8
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A side effect is something a board does outside itself, such as an HTTP Sink sending a request. The engine decides each call on a [tick](../../reference/files/glossary/#term-tick) and logs it once, the app tries it once, and a replay of the board never sends it again. The app can't control how many times the receiver acts on a request, so each request carries a key the receiver can use to drop a repeat.
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+On the board below, the top Sink sends each item it takes as a POST request, and the script answers each one 20 ticks later. Its log shows the two calls as t70 and t190; the bottom Sink, a Debug Sink, only records its item.
+
+<Board name="docs-machines-sink" />
+
+## Logged once, never sent again on replay
+
+When a Sink takes an item, the engine turns it into one call and logs it. The app sends the call, and the answer comes back as an event at a later tick, which goes in the log too. When the app replays the board, as it does when you open a project file, it mutes outbound calls: the Sink takes the same item on the same tick, and the logged answer reaches it again, but no request goes out. [The event log and save files](../event-log-and-save-files/) covers what the log holds.
+
+Checked by <code>replay_dispatches_zero</code> in [crates/fabrico-host/tests/driver.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-host/tests/driver.rs).
+
+A save waits while a call is still out. A file saved with a call waiting would reopen with that call timed out, even if it had worked, so the app holds the save until the answer is in, and reports Save failed if it hasn't come after a few seconds.
+
+## One attempt, no retry
+
+The app sends each request once. If the receiver answers with an error status, the connection fails, or no answer comes within 30 seconds of real time, the app doesn't try again: the Sink sends a <Fact id="fault.CommandFailure" /> fault out of its Fault port. If the engine's own deadline passes first, 600 ticks after the call left, the Sink sends a <Fact id="fault.CommandTimeout" /> fault. [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/) gives the full list.
+
+## A timed-out call may still have arrived
+
+A timeout means the answer didn't come back in time. It doesn't mean the request never reached the receiver, which may have acted on it and been slow to answer. The board below faults on purpose to show this: its HTTP Sink posts an item to a scripted service that never answers.
+
+<Board name="docs-faults-command-timeout" faultsAbout="CommandTimeout" />
+
+The Sink sends the item when the tick counter reads 43. The deadline passes 600 ticks later, on tick 643, and the Sink sends a <Fact id="fault.CommandTimeout" /> fault out of its Fault port; a belt carries it to a Debug Sink, which takes it when the counter reads 689. The fault carries no item, and the app doesn't send the request again by itself. If the slow service did act on it, it acted once. If you then send the same data in again, that's a new call on a later tick, with a new key. [Fault reasons](../../troubleshooting/fault-reasons/#fault-command-timeout) says how to deal with a slow service.
+
+## The Idempotency-Key header
+
+Each request carries an `Idempotency-Key` header. Its value is `fabrico-cmd-` followed by the tick the Sink sent the call on, a number for the Sink, and the call's sequence number within that tick, joined with hyphens. The engine builds it from the logged call, so it's the same every time the board makes that call: if you open an earlier save and play past the same tick, the Sink makes the same call with the same key. A receiver that stores the keys it has handled can drop a request whose key it has seen.
+
+Checked by <code>http_loopback</code> in [crates/fabrico-host/tests/sinks.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-host/tests/sinks.rs).
+
+The app has no way to drop a repeat on the receiver's side, so a receiver that ignores the key can act twice on the same call.
+
+## Related pages
+
+- [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/): the method, body and key of each request, and how long the Sink waits.
+- [Fault reasons](../../troubleshooting/fault-reasons/): what CommandFailure and CommandTimeout mean and how to fix each.
+- [The event log and save files](../event-log-and-save-files/): what the app logs and what a project file holds.
+- [Determinism and replay](../determinism-and-replay/): why a replay reaches the same board without sending anything.

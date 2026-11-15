@@ -28,7 +28,7 @@ A slot holds one item, so a belt can hold as many items as it has slots. The bel
 
 Items queue up when the machine at the head doesn't take them. Take the same board with nothing docked on the belt's head: the first item stops at the head, each item behind it stops one slot further back, and by tick 260 all 36 slots are full. A longer belt takes a longer burst before it fills, which gives a slow machine at its head time to catch up.
 
-Items never pass each other on a belt, so they leave in the order they got on. When a belt is full, the machine that feeds it can't put anything more on it. That is backpressure, and the Source page says what a Source does with items it can't send yet.
+Items never pass each other on a belt, so they leave in the order they got on. When a belt is full, the machine that feeds it can't put anything more on it. That is [backpressure](../backpressure/), and the Source page says what a Source does with items it can't send yet.
 
 ## Related pages
 
@@ -36,4 +36,5 @@ Items never pass each other on a belt, so they leave in the order they got on. W
 - [Source](../../reference/machines/source/): the backlog a Source keeps while its belt is full.
 - [Ticks](../ticks/): how the engine counts the time an item spends on a belt.
 - [Ports, docks and wires](../ports-docks-and-wires/): how a belt's tail and head dock on machines.
+- [Backpressure](../backpressure/): how a full belt makes the line behind it pack up.
 - [Items and events](../): what the items on a belt are.

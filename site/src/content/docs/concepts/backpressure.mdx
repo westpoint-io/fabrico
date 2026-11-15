@@ -1,0 +1,40 @@
+---
+title: Backpressure
+description: "Why a line packs up when a machine or belt downstream is slower than the one feeding it, and what the backed up state on a machine means."
+sidebar:
+  order: 5
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+Backpressure is what happens when one part of a line is slower than the part feeding it. The slow part takes [items](../../reference/files/glossary/#term-item) at its own pace, the rest wait in front of it in the order they came, and the wait spreads back up the line toward whatever makes the items.
+
+The board below faults on purpose, but its fault isn't what this page is about. Watch the bottom line, where a timer Source makes an item every 4 [ticks](../../reference/files/glossary/#term-tick) and the Router backs up behind a slow [belt](../../reference/files/glossary/#term-belt) that takes one item every 20. The top line's NoMatch fault belongs to [Faults are items](../faults-are-items/).
+
+<Board name="docs-rules-machine-states" faultsAbout="NoMatch" />
+
+## Where the line packs up
+
+The bottom Source switches to its timer on tick 60 and makes its first item on tick 65. Its Router sends every item out the same output, onto a belt one tile long set to <Fact id="limit.belt_pace_max" />, the slowest pace a belt can have. The Sink at the end of that belt takes an item every 20 ticks, and its log lists them as t140, t160, t180 and on.
+
+For a while the slow belt soaks up the difference. By tick 180 it carries 3 items, the Router holds one more it can't send, and the Router shows backed up for the first time. From then on the Router takes in an item every 4 ticks and passes one on every 20, so the items inside it pile up: 5 by tick 200, 9 by tick 220, 13 by tick 240. On tick 255 it holds <Fact id="limit.mechanical_inbox_cap" bare /> items, as many as a machine's input can hold, and on tick 259 the next item reaches the end of the belt feeding it and stops there.
+
+## What backed up means
+
+A machine is <Fact id="state.BACKED_UP" /> when it holds work it can't pass on, because the belt at its output can't take another item, or when its input is full and it turns items away. Here the bottom Router shows backed up on most ticks from 180. Until its input fills, it shows <Fact id="state.WORKING" /> on the tick another item arrives, about one tick in four, and its count goes up by one.
+
+A backed up machine isn't broken. Nothing on this line faults, and every item the Router holds is still there, in order, waiting for room on the slow belt.
+
+## How far back it goes
+
+Once a machine's input is full, the belt feeding it stops at its end and fills from the front. When that belt is full, the machine feeding it has nowhere to put its next item and backs up in turn. The jam moves back one machine at a time until it reaches a Source. A Source keeps up to <Fact id="limit.source_pending_cap" bare /> waiting webhooks of its own, and once that queue is full it drops each further webhook until its belt takes some.
+
+This board ends on tick 260, just as the belt feeding the Router starts to fill. To keep a line from packing up, make the slow part faster, such as a belt at a quicker pace, or split the work across a second line with a Balancer.
+
+## Related pages
+
+- [Machine states](../../reference/board/machine-states/): what each state looks like on the board, and which one wins when two apply.
+- [Limits](../../reference/board/limits/): how many items an input and a Source's queue can hold, and what happens at each limit.
+- [Belts are queues](../belts-are-queues/): how a belt's length and pace decide how long an item waits on it.
+- [Faults are items](../faults-are-items/): the NoMatch fault on this board's top line.
