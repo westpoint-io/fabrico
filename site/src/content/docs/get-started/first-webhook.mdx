@@ -1,0 +1,61 @@
+---
+title: Send your first webhook
+description: Send a real webhook to the app with curl and watch it arrive as an item on the first belt of your board.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+
+A webhook is an HTTP request one program sends another to say that something happened. On this page you send one to the app from a terminal with curl, and watch the app turn it into an [item](../../reference/files/glossary/#term-item) on your board. You need the board from step 1 of [Your first factory](../first-factory/) open in the app.
+
+<Aside type="caution">
+The app listens on 127.0.0.1, the loopback address, so only programs on the same computer can send it a webhook. Keep it that way, because the listener has no sign-in of its own.
+</Aside>
+
+## Find the Source's URL
+
+Click the [Source](../../reference/files/glossary/#term-source) to select it. The inspector, the panel on the right, shows the Source's Webhook URL, which has the form `http://127.0.0.1:PORT/hook/src-ID`, with a Copy button beside it.
+
+The app picks a new port each time it starts, so copy the URL again after a restart. A Source placed from the palette listens for webhooks. A Source set to run on a timer has no Webhook URL.
+
+## Send it
+
+The board has to be playing. If the toolbar shows Play, press it. While the board is paused the app answers 503 and logs nothing, so a webhook sent then makes no item.
+
+In the command below, replace `PORT` and `ID` with the values from the Source's Webhook URL.
+
+```bash wrap
+curl -X POST http://127.0.0.1:PORT/hook/src-ID \
+  -H 'x-delivery-id: first-1' \
+  -d '{"order":1}'
+```
+
+Change `first-1` to a new value each time you send, such as `first-2`. The app treats a second request with the same delivery id as a repeat: it answers 200 but makes no new item, so the same command run twice puts one item on the board.
+
+On its own, curl prints nothing, because the app's answer has no body. To see the status code, put `-w '%{http_code}\n'` right after `curl`: 200 means the app took the webhook.
+
+The command is written for a Unix shell, the kind Linux and macOS terminals open. On Windows, run it in Git Bash, which comes with Git for Windows, because PowerShell and Command Prompt read the quotes differently.
+
+## What you should see
+
+A moment after you send, an item leaves the Source, rides the [belt](../../reference/files/glossary/#term-belt) and reaches the [Sink](../../reference/files/glossary/#term-sink). The board below is the same line, with scripted webhooks in place of yours.
+
+<Board name="docs-start-first-factory-1" />
+
+Each item takes about 70 [ticks](../../reference/files/glossary/#term-tick) to cross the nine belt cells. In the board, the first item leaves the Source on tick 41 and the Sink takes it on tick 111.
+
+## If nothing arrives
+
+- If curl says the connection was refused, the app isn't listening at that address. See [A webhook call gets connection refused](../../troubleshooting/common-problems/#symptom-a-webhook-call-gets-connection-refused).
+- If the app answers 503, the board is paused. Press Play and send again.
+- If the app answers 404, no Source has that URL. The ID may belong to a Source you deleted. Copy the URL from the inspector again.
+- If the app answers 200 and no item appears, you've used that delivery id before. Change it and send again. [Webhook ingress](../../reference/code-and-http/webhook-ingress/#what-the-app-answers) lists every answer the app gives.
+
+## Related pages
+
+- [Webhook ingress](../../reference/code-and-http/webhook-ingress/): the URL, the answers, the size limit and how repeats are dropped.
+- [Your first factory](../first-factory/): build the board this page sends to.
+- [Source](../../reference/machines/source/): the triggers a Source can have, and what it does with a webhook.
+- [Common problems](../../troubleshooting/common-problems/): fixes for webhooks that don't arrive and other trouble.
