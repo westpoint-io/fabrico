@@ -40,7 +40,12 @@ const GL_ARGS = ['--use-gl=angle', '--use-angle=swiftshader'];
 const RUN_TIMEOUT_MS = 120_000;
 /** The stage background, `--fab-substrate`. A poster with almost nothing else is a blank stage. */
 const SUBSTRATE = [0x1b, 0x1f, 0x27] as const;
-const MIN_DRAWN_PERCENT = 5;
+/**
+ * The share of a poster that has to differ from the substrate. It sits under the smallest board the
+ * folder ships, a lesson's prepared board drawn small on purpose, whose end-tick poster draws 4.4
+ * percent. A stage that drew nothing shows only the substrate.
+ */
+const MIN_DRAWN_PERCENT = 4;
 
 /** Every `*.board.ron` under `examples/boards/`, as board ids (`docs/x.board.ron` is `docs-x`). */
 export function boardIds(): string[] {
