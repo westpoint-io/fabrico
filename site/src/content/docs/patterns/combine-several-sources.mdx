@@ -1,0 +1,58 @@
+---
+title: Combine several sources with Merge
+description: "Combine webhooks from several Sources into one line with a Merge, which takes from its inputs in turn."
+searchPhrase: combine several sources
+sidebar:
+  order: 30
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+You combine several sources when webhooks from different services should run through one workflow. A [Merge](../../reference/machines/merge/) takes [items](../../reference/files/glossary/#term-item) from its inputs in turn and puts them on one [belt](../../reference/files/glossary/#term-belt) in the same order on every run.
+
+The board below has two [Sources](../../reference/files/glossary/#term-source), a Merge, a [Factory](../../reference/files/glossary/#term-factory) and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right. The top Source gets orders from a shop and the bottom one gets orders from a marketplace, which sends them in a different shape. The Merge joins the two lines, the Factory gives every order the same two fields, and the Debug Sink logs the result.
+
+<Board name="docs-patterns-combine-several-sources" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Merge takes the first shop order from its top input and sends it on to the Factory, which gives orders from both Sources the same shape.
+2. Tick 183: The second shop and marketplace orders reach the Merge together, and the Merge takes the shop order first because it is the top input's turn.
+3. Tick 229: The Debug Sink logs the second marketplace order last, though its webhook reached the app 8 ticks before the second shop order did.
+
+The first marketplace order passes through the Merge on tick 131, when the top input is empty, and that pass gives the next turn to the top input. The bottom belt is one tile longer than the top one, so an item from the marketplace takes 8 ticks longer to reach the Merge, and that is why the two second orders arrive on the same tick.
+
+## The Factory code
+
+Shop orders carry `id` and `total`, and marketplace orders carry the same values as `order.ref` and `order.sum`. The Factory runs this code once for each item the Merge sends it:
+
+```js title="Factory code"
+// one shape for orders from both sources
+export default function (input, ctx) {
+  if (input.order) {
+    ctx.emit(0, {
+      id: input.order.ref,
+      total: input.order.sum,
+    });
+  } else {
+    ctx.emit(0, { id: input.id, total: input.total });
+  }
+}
+```
+
+The `if (input.order)` test tells the two shapes apart. Both branches emit an item with the same two fields, so every step after the Factory sees one shape.
+
+## Trade-offs
+
+- A Merge takes from its <Fact id="limit.default_arity" bare /> inputs in turn: when both hold an item, it takes one from each, starting with the input whose turn it is. So the output order isn't the order the webhooks reached the app. On this board the second marketplace webhook arrives 8 ticks before the second shop webhook and still leaves second. The order is the same on every run; [Determinism and replay](../../concepts/determinism-and-replay/) says why, and [Merge](../../reference/machines/merge/) has the rule.
+- A Merge passes each item on unchanged and adds nothing about which input it came from. The Factory on this board tells the two services apart by their fields. When two services send the same shape, put a Factory on each line before the Merge and add a field that names the service.
+- A Merge sends an item out only when the belt on its output has room. While that belt is full, items wait on both input belts and those belts back up toward their Sources, so one slow step after the Merge holds up both services. [Backpressure](../../concepts/backpressure/) explains how a line packs up.
+
+## Related pages
+
+- [Send a webhook to multiple URLs](../send-to-multiple-urls/): the other way round, one webhook copied to two endpoints with a Tee.
+- [Merge](../../reference/machines/merge/): its ports, and the order it takes items in.
+- [Determinism and replay](../../concepts/determinism-and-replay/): why a board gives the same order on every run.

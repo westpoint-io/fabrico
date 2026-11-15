@@ -1,0 +1,82 @@
+// A docs board for the pattern page Combine several sources with Merge. Two Sources stand for two
+// services: the top one gets shop orders and the bottom one gets marketplace orders, which arrive
+// in a different shape. Each Source's belt runs into one input of a Merge, and the Merge sends
+// every item out its one output to a Factory. The Factory's code gives orders from both services
+// the same two fields, and a belt carries the result to a Debug Sink. The run makes no outbound
+// call.
+//
+//   row 1:   SOURCE 0 -b5-------> MERGE 2 In 0, Out -b7-> FACTORY 3 -b8-> SINK 4
+//   row 2:              +-b6---> MERGE 2 In 1
+//   row 3:   SOURCE 1 --+
+//
+// The bottom belt is one tile longer than the top one, because it turns up a row into the Merge,
+// so an item from the marketplace Source reaches the Merge 8 ticks later than one from the shop
+// Source would. The second marketplace webhook arrives 8 ticks before the second shop webhook,
+// so both items reach the Merge on the same tick and the Merge's turn decides which leaves first.
+//
+// The Factory's and the Sink's Fault ports stay undocked. The code never throws, so nothing
+// faults.
+//
+// Handles mint in command order: the Sources 0 and 1, the Merge 2, the Factory 3, the Sink 4, then
+// the belts 5 to 8. The 18 commands and the history seal end the boot on tick 19.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, MERGE=6, SINK=7. Dock `port` is the catalog port
+// index: SOURCE Out=0; MERGE In=0, In=1, Out=2; FACTORY In=0, Out=1, Fault=2; SINK In=0. In the
+// code, ctx.emit(0, ...) sends on the Factory's first output, catalog port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Combine several sources with Merge",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 1),        // 0: SOURCE shop
+        Place(kind: 0, cell_x: 1, cell_y: 3),        // 1: SOURCE marketplace
+        Place(kind: 6, cell_x: 5, cell_y: 1),        // 2: MERGE 2x2 In0 (5,1) In1 (5,2) Out (6,1)
+        Place(kind: 2, cell_x: 10, cell_y: 0),       // 3: FACTORY In (10,1) Out (12,1)
+        Place(kind: 7, cell_x: 16, cell_y: 1),       // 4: SINK, Debug by default
+        DrawBelt(cells: [(2, 1), (3, 1), (4, 1)]),                 // 5
+        DrawBelt(cells: [(2, 3), (3, 3), (3, 2), (4, 2)]),         // 6
+        DrawBelt(cells: [(7, 1), (8, 1), (9, 1)]),                 // 7
+        DrawBelt(cells: [(13, 1), (14, 1), (15, 1)]),              // 8
+        Dock(belt: 5, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 2, port: 1),
+        Dock(belt: 7, endpoint: Tail, node: 2, port: 2),
+        Dock(belt: 7, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 8, endpoint: Tail, node: 3, port: 1),
+        Dock(belt: 8, endpoint: Head, node: 4, port: 0),
+        Configure(node: 3, config: Factory(source: r#"// one shape for orders from both sources
+export default function (input, ctx) {
+  if (input.order) {
+    ctx.emit(0, {
+      id: input.order.ref,
+      total: input.order.sum,
+    });
+  } else {
+    ctx.emit(0, { id: input.id, total: input.total });
+  }
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"id":"s-1","total":30}"#)),
+        At(tick: 100, input: Webhook(source: 1, body: r#"{"order":{"ref":"m-1","sum":12}}"#)),
+        At(tick: 152, input: Webhook(source: 1, body: r#"{"order":{"ref":"m-2","sum":8}}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"id":"s-2","total":45}"#)),
+    ],
+    captions: [
+        // Measured: Merge WORKING[63,131,183-184]; the Sink logs {"id":"s-1","total":30} on 107.
+        Caption(tick: 63, highlight: 2, text: "The Merge takes the first shop order from its top input and sends it on to the Factory, which gives orders from both Sources the same shape."),
+        // Measured: Merge WORKING[63,131,183-184], max_inbox=1. The pass on 131 took from input 1,
+        // so the pass on 183 starts at input 0 and takes s-2; input 1's m-2 leaves on 184.
+        Caption(tick: 183, highlight: 2, text: "The second shop and marketplace orders reach the Merge together, and the Merge takes the shop order first because it is the top input's turn."),
+        // Measured: the Sink logs {"id":"s-2","total":45} on 227 and {"id":"m-2","total":8} on 229.
+        Caption(tick: 229, highlight: 4, text: "The Debug Sink logs the second marketplace order last, though its webhook reached the app 8 ticks before the second shop order did."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)

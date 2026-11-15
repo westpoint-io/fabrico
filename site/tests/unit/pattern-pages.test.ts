@@ -27,7 +27,7 @@ const BOARDS = path.resolve(SITE, '../examples/boards/docs');
  * it to the new page count in the same commit, so a glob that matches nothing, or a lost page,
  * can't pass. It ends at 12 once all twelve pattern pages are written.
  */
-const MIN_PATTERN_PAGES = 2;
+const MIN_PATTERN_PAGES = 3;
 
 /** Curly quotes made straight and runs of space made one, so markdown and HTML compare as text. */
 function plain(text: string): string {
