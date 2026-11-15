@@ -82,12 +82,24 @@ const HELD_MS = 250;
 /** The wall-clock part of the held read's cap: a few HELD_MS rounds past the board's drain. */
 const HELD_POLL_MS = 1_000;
 
+/** State bytes (`fabrico-protocol` `state_tag`). */
+const IDLE = 0;
+const WORKING = 1;
+
 /**
  * The board as one string: the tick, each machine's id, kind, state and cells, and each belt's id
  * and occupied slots, sorted so two records compare with one `toBe`.
+ *
+ * WORKING is read as IDLE here. The engine paints a machine WORKING when it stepped on the last
+ * tick (`derive_state` in render_packet.rs reads the tick's observation, not the board), and a
+ * board just loaded has run no tick yet, so a Factory that worked on the saved tick reads IDLE
+ * after the Load with nothing in the file different. Measured on the first run of this spec: the
+ * demo's Factory read 1 saved and 0 loaded, every other line equal. FAULTED and BACKED_UP come
+ * from the board itself and are compared as they are.
  */
 function recordOf(s: SceneFacts): string {
-  const nodes = s.nodes.map((n) => `node ${n.id} kind=${n.kind} state=${n.state} cells=${JSON.stringify(n.cells)}`).sort();
+  const stateOf = (state: number): number => (state === WORKING ? IDLE : state);
+  const nodes = s.nodes.map((n) => `node ${n.id} kind=${n.kind} state=${stateOf(n.state)} cells=${JSON.stringify(n.cells)}`).sort();
   const belts = s.belts.map((b) => `belt ${b.id} items=${b.items} slots=${JSON.stringify(b.occupiedSlots)}`).sort();
   return [`tick=${s.tick}`, ...nodes, ...belts].join('\n');
 }
