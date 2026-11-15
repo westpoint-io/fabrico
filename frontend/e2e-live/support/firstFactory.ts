@@ -24,8 +24,10 @@ import {
   applyConfig,
   clickAt,
   drawBeltThroughCells,
+  fillPanelField,
   nodeAtAnchor,
   pollScene,
+  pressSegment,
   readFactorySource,
   readScene,
   selectMachineAt,
@@ -234,6 +236,20 @@ export async function buildStepThree(page: Page, code: string): Promise<string> 
   const applied = await readFactorySource(page);
   await deselectOnFloor(page, FLOOR, 'step 3: after the Apply');
   return applied;
+}
+
+/**
+ * Point the Sink at an HTTP listener: select it, set Target to HTTP, the URL and POST, Apply. The
+ * app's Debug Sink shows nothing of what it takes, so this is how the spec reads the payload the
+ * Sink delivers. The board's machines and belts stay as they are.
+ */
+export async function pointSinkAt(page: Page, url: string): Promise<void> {
+  await selectMachineAt(page, SINK_AT[0], SINK_AT[1]);
+  await pressSegment(page, 'Target', 'HTTP');
+  await fillPanelField(page, 'fab-sink-http-url', url);
+  await pressSegment(page, 'Method', 'POST');
+  await applyConfig(page);
+  await deselectOnFloor(page, FLOOR, 'the Sink pointed at the listener');
 }
 
 /** The Factory-to-Sink belt's cells, tail first, once step 2 is built. */
