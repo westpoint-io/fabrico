@@ -121,6 +121,10 @@ for (const id of IDS) {
     const board = section.locator('fabrico-board');
     await board.locator('select').selectOption({ label: '0.25x' });
     await board.locator('button[data-control="restart"]').click();
+    // In Firefox the page can move on after the link's scroll, and on a board whose belt runs across
+    // the middle of a tall canvas it left the belt tiles 0 to 18 px into the viewport, where a
+    // screenshot of them never changed. Bring the board into view before the drawing check reads it.
+    await board.scrollIntoViewIfNeeded();
     await expectBoardDrawing(page, id, `${id} after its link`);
 
     await board.locator('select').selectOption({ label: '4x' });
