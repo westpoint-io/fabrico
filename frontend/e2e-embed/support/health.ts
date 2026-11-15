@@ -159,22 +159,41 @@ const BUDGET_MS = 10_000;
 const POLL_MS = 250;
 
 /**
- * A tile's cell and its box on screen. A tile is compared only with itself at the same place: when
- * the page's layout moves the board (another board's effect log grows, the browser anchors the
- * scroll), its tiles get new keys rather than counting as changed pixels.
+ * A tile's cell, its box on screen, and the page's scroll offset. A tile is compared only with
+ * itself at the same place: when the page's layout moves the board (another board's effect log
+ * grows, the browser anchors the scroll), its tiles get new keys rather than counting as changed
+ * pixels.
+ *
+ * The scroll offset is in the key for Firefox. Its scroll anchoring answers a 24.8 px effect-log
+ * row with a 24.8 px scroll, so the board keeps its box to the hundredth of a pixel, but the page
+ * now sits at a new fraction of a pixel and the canvas is drawn to the screen with different
+ * anti-aliased edges. Measured on a board whose drawing calls were turned off: up to 218 of a
+ * 4,624-pixel tile changed, by up to 164 of 255, at exactly the samples where scrollY moved, and
+ * at no other sample.
  */
-const tileKey = (t: BeltTile): string =>
-  `${t.cellX},${t.cellY}@${t.x.toFixed(2)},${t.y.toFixed(2)},${t.width.toFixed(2)},${t.height.toFixed(2)}`;
+const tileKey = (t: BeltTile, scroll: string): string =>
+  `${t.cellX},${t.cellY}@${t.x.toFixed(2)},${t.y.toFixed(2)},${t.width.toFixed(2)},${t.height.toFixed(2)}/${scroll}`;
+
+/** A board's belt tiles and the page's scroll offset, read in one task so they agree. */
+async function readTilesAt(page: Page, selector: string): Promise<{ tiles: BeltTile[]; scroll: string }> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel) as (Element & { fabricoProbe?: () => { beltTiles: unknown } }) | null;
+    if (el === null || typeof el.fabricoProbe !== 'function') throw new Error(`no fabrico-board at ${sel}`);
+    return { tiles: el.fabricoProbe().beltTiles, scroll: `${window.scrollX},${window.scrollY}` };
+  }, selector) as Promise<{ tiles: BeltTile[]; scroll: string }>;
+}
 
 /**
  * One sample of a board's belt tiles: a compositor screenshot of the box around them, and a hash
- * of each tile's pixels, by {@link tileKey}. The probe is read before and after the screenshot and
- * only tiles in both lists are kept, so neither a chip or ring that appeared over a tile nor a
- * layout move while the screenshot was taken counts as the tile changing.
+ * of each tile's pixels, by {@link tileKey}. The tiles and the scroll offset are read before and
+ * after the screenshot and only keys in both lists are kept, so neither a chip or ring that
+ * appeared over a tile nor a layout move or scroll while the screenshot was taken counts as the
+ * tile changing.
  */
 async function sampleTiles(page: Page, selector: string): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  const before = (await readProbeAt(page, selector)).beltTiles;
+  const first = await readTilesAt(page, selector);
+  const before = first.tiles;
   if (before.length === 0) return out;
   const x0 = Math.floor(Math.min(...before.map((t) => t.x)));
   const y0 = Math.floor(Math.min(...before.map((t) => t.y)));
@@ -182,10 +201,11 @@ async function sampleTiles(page: Page, selector: string): Promise<Map<string, st
   const y1 = Math.ceil(Math.max(...before.map((t) => t.y + t.height)));
   const clip = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
   const png = PNG.sync.read(await page.screenshot({ clip, animations: 'allow' }));
-  const still = new Set((await readProbeAt(page, selector)).beltTiles.map(tileKey));
+  const after = await readTilesAt(page, selector);
+  const still = new Set(after.tiles.map((t) => tileKey(t, after.scroll)));
   const scale = png.width / clip.width;
   for (const t of before) {
-    const key = tileKey(t);
+    const key = tileKey(t, first.scroll);
     if (!still.has(key)) continue;
     const left = Math.max(0, Math.round((t.x - clip.x) * scale));
     const top = Math.max(0, Math.round((t.y - clip.y) * scale));
@@ -213,8 +233,10 @@ function foldSample(seen: Map<string, string>, sample: Map<string, string>): boo
 }
 
 /**
- * Assert the board is drawing: its frame count rises by at least 2, and the pixels of at least one
- * of its belt tiles, in screenshots taken by the browser's compositor, change within the budget.
+ * The wall-clock drawing check, left for the callers not yet moved to
+ * {@link expectBoardDrawingStepped}: its frame count rises by at least 2, and the pixels of at
+ * least one of its belt tiles, in screenshots taken by the browser's compositor, change within the
+ * budget.
  */
 export async function expectBoardDrawing(page: Page, name: string, context: string): Promise<void> {
   await expectBoardDrawingAt(page, `fabrico-board[name="${name}"]`, context, name);
@@ -479,21 +501,39 @@ export async function readTraceAt(page: Page, selector: string): Promise<[number
   }, selector);
 }
 
-/** Ticks per Step press between samples: fewer than the 7 ticks an item spends on a sampled middle cell. */
-const STEP_TICKS = 4;
+/**
+ * Ticks stepped between samples, in turn. Each is fewer than the 7 ticks an item spends on a
+ * sampled middle cell. They take turns because a belt that carries nothing still marches its tread
+ * with the sim tick, and on the docs site's wire boards the tread looked the same every 4 ticks,
+ * so a fixed 4-tick step saw no change in 240 ticks. 3 and 4 share no factor, so a tread with any
+ * period of 2 ticks or more shows a new phase within two samples.
+ */
+const STEP_TICKS = [3, 4] as const;
 /** Board ticks the stepped check may walk through before it fails. */
 const STEP_SPAN_TICKS = 240;
 
 /**
- * {@link expectBoardDrawing} sampled at board ticks instead of wall time, for boards whose items
- * cross a sampled cell in a few ticks. The board is paused with Step, so a screenshot shows one
- * known tick however long it takes, and a screenshot whose tiles moved under it is retaken at the
- * same tick. Between samples it presses Step {@link STEP_TICKS} times, so no item visit of more
- * than that many ticks falls between two screenshots. It fails once the board has walked
- * {@link STEP_SPAN_TICKS} ticks, or reached its end tick, with no tile changing.
+ * Assert the board is drawing: its frame count rises by at least 2, and the pixels of at least one
+ * of its belt tiles, in screenshots taken by the browser's compositor, change between board ticks.
+ *
+ * It samples at board ticks, not wall time. On a slow runner a screenshot took 1.5 to 2 s, the
+ * first ones lost every tile to a layout move, and the few left in a 10 s window missed belt
+ * motion that lasts a few ticks. So the board is paused with Step, a screenshot shows one known
+ * tick however long it takes, and a screenshot whose tiles moved under it is retaken at the same
+ * tick. Between samples it presses Step 3 or 4 times, in turn ({@link STEP_TICKS}), so no item
+ * visit of more than 4 ticks falls between two screenshots. It fails once the board has walked
+ * {@link STEP_SPAN_TICKS} ticks, or reached its end tick, with no tile changing. On a pass it
+ * presses Play, unless the board is at its end tick, where Play would restart it.
+ *
+ * Stepping runs the same ticks and sends the same render packets as playing, and a keyframe only
+ * on Restart, so a caller that checks a resumed scene before any Restart still checks it here.
  */
 export async function expectBoardDrawingStepped(page: Page, name: string, context: string): Promise<void> {
-  const selector = `fabrico-board[name="${name}"]`;
+  await expectBoardDrawingSteppedAt(page, `fabrico-board[name="${name}"]`, context, name);
+}
+
+/** {@link expectBoardDrawingStepped} for the board a CSS selector finds, for pages with two of one name. */
+export async function expectBoardDrawingSteppedAt(page: Page, selector: string, context: string, name = selector): Promise<void> {
   const before = (await readProbeAt(page, selector)).frames;
   await expect
     .poll(async () => (await readProbeAt(page, selector)).frames - before, {
@@ -540,21 +580,27 @@ export async function expectBoardDrawingStepped(page: Page, name: string, contex
     }
     samples += 1;
     if (foldSample(seen, sample)) {
-      // Leave the board playing, as it was before the check.
-      await page.evaluate((sel) => {
-        const play = document.querySelector(sel)?.shadowRoot?.querySelector<HTMLButtonElement>('button[data-control="play"]');
-        if (play?.getAttribute('aria-label') === 'Play') play.click();
-      }, selector);
+      // Leave the board playing, as it was before the check, unless it is at its end tick.
+      const at = await readProbeAt(page, selector);
+      if (at.tick < at.endTick) {
+        await page.evaluate((sel) => {
+          const play = document.querySelector(sel)?.shadowRoot?.querySelector<HTMLButtonElement>('button[data-control="play"]');
+          if (play?.getAttribute('aria-label') === 'Play') play.click();
+        }, selector);
+      }
       return;
     }
     const probe = await readProbeAt(page, selector);
     if (probe.tick - start >= STEP_SPAN_TICKS || probe.tick >= probe.endTick) {
       expect(seen.size, `${context}: ${name} reports belt tiles on screen`).toBeGreaterThan(0);
+      // A tile seen at two scroll offsets has two keys; name the tiles, and the keys compared.
+      const tiles = new Set([...seen.keys()].map((key) => key.slice(0, key.indexOf('@')))).size;
       throw new Error(
-        `${context}: ${name}'s ${seen.size} belt tiles showed the same pixels in ${samples} screenshots, stepped from tick ${start} to ${probe.tick}`,
+        `${context}: ${name}'s ${tiles} belt tiles showed the same pixels in ${samples} screenshots ` +
+          `(${seen.size} tile and scroll positions), stepped from tick ${start} to ${probe.tick}`,
       );
     }
-    await step(STEP_TICKS);
+    await step(STEP_TICKS[samples % STEP_TICKS.length]);
     // A board that stopped (an engine fault disables Step) would otherwise loop until the test's
     // own timeout.
     const after = (await readProbeAt(page, selector)).tick;
