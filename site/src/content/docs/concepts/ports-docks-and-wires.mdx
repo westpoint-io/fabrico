@@ -1,0 +1,41 @@
+---
+title: Ports, docks and wires
+description: "Where belts and wires join machines: ports, docks, and the two media, with belts carrying items and wires carrying a request and its reply."
+sidebar:
+  order: 3
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A port is a spot on a machine's edge where a [belt](../../reference/files/glossary/#term-belt) or a [wire](../../reference/files/glossary/#term-wire) joins it. To dock is to join one end of a belt to a port. Belts carry [items](../../reference/files/glossary/#term-item) from one machine to the next, and wires carry a request to an HTTP Handler and its reply back.
+
+On the board below, a [Source](../../reference/files/glossary/#term-source) sends items along a belt into a Router's input on its west side, and the Router sends each one out of one of two outputs on its east side. A third belt is docked on the Router's Fault port, on its south side, and it stays empty because every item matches a route or the default.
+
+<Board name="docs-rules-ports" />
+
+## A port has a role, a medium and a side
+
+The role says what passes through a [port](../../reference/files/glossary/#term-port): <Fact id="port.role.In" /> takes things in, <Fact id="port.role.Out" /> sends them out, and <Fact id="port.role.Fault" /> sends out the machine's faults, apart from its normal outputs. The medium says what the port takes: a <Fact id="port.medium.Mechanical" /> port takes a belt, and an <Fact id="port.medium.Electrical" /> port takes a wire. The side is the edge of the machine the port faces, one of <Fact id="port.side.N" />, <Fact id="port.side.E" />, <Fact id="port.side.S" /> and <Fact id="port.side.W" />.
+
+On this board the Router's input faces <Fact id="port.side.W" />, its two outputs in use face <Fact id="port.side.E" />, and its Fault port faces <Fact id="port.side.S" />. The first item starts with `{"to":"a"`, so the Router sends it out of the top output on [tick](../../reference/files/glossary/#term-tick) 71 and the top [Sink](../../reference/files/glossary/#term-sink) takes it on tick 85. The second matches no route, so it leaves by the default output, the bottom one, on tick 131 and reaches the bottom Sink on tick 145.
+
+## A dock joins a belt end to a port
+
+A belt has no ports of its own. Its tail docks on an output or a Fault port, and its head docks on an input, so items always run from the tail to the head. A port faces the cell just outside its side, and a belt end [docks](../../reference/files/glossary/#term-dock) on it only when the end sits on that cell. Unlinking takes the end off again, and turning a machine turns its ports with it.
+
+## A wire carries a request and its reply
+
+The board below has a Route and an HTTP Handler joined by one wire. You draw a wire from a Route's output to a Handler's input, it takes no cells on the grid, and it is two cables: one carries each request to the Handler, and the other carries the reply back.
+
+<Board name="docs-machines-wire" />
+
+The script sends the first request to the Route on tick 40. The Route puts it on the request cable on tick 41, the Handler runs its code on tick 42 and puts its reply on the reply cable, and the Route takes the reply on tick 43. The second request makes the same trip on ticks 141 to 143, one tick for each hop. Below the Handler, a belt docked on its Fault port leads to a Debug Sink and stays empty, because the code never fails.
+
+## Related pages
+
+- [Ports](../../reference/board/ports/): the role, medium and side of every port, and which machines have which.
+- [Docking, unlinking and rotation](../../reference/board/docking-unlinking-rotation/): joining a belt to a port, taking it off, and turning a machine.
+- [Wire](../../reference/machines/wire/): the cable pair between a Route and an HTTP Handler.
+- [Faults are items](../faults-are-items/): what leaves by a Fault port, and where it goes.
+- [Belts are queues](../belts-are-queues/): what happens to items between a belt's tail and its head.

@@ -1,0 +1,39 @@
+---
+title: Faults are items
+description: "When a machine can't handle an item, the item becomes a fault with a reason and leaves by the fault port, where a belt can carry it on."
+sidebar:
+  order: 4
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+When a machine can't handle an [item](../../reference/files/glossary/#term-item) that reaches it, the machine sends out a fault in its place: a new item that says why the machine failed, which leaves by the machine's fault port instead of its normal outputs. A [belt](../../reference/files/glossary/#term-belt) docked on that port carries the fault on like any other item, so you can lead it somewhere and read it.
+
+The board below faults on purpose, and that fault is what this page is about. Its [Factory](../../reference/files/glossary/#term-factory) throws on an item with no amount field, and a belt from the Factory's fault port takes the fault to a Debug [Sink](../../reference/files/glossary/#term-sink).
+
+<Board name="docs-faults-factory-error" faultsAbout="FactoryError" />
+
+## What a fault carries
+
+The first item, `{"order":1,"amount":20}`, reaches the Factory on [tick](../../reference/files/glossary/#term-tick) 63. The code emits it, and it goes on to the Sink on the right. The second item, `{"order":2}`, reaches the Factory on tick 123. The code throws, the Factory emits nothing for that item, and on the next tick a [fault](../../reference/files/glossary/#term-fault) sits at the start of the fault belt.
+
+That fault carries three things: its reason, <Fact id="fault.FactoryError" />; the machine that raised it; and the error message from the code, `Error: no amount`. The Debug Sink at the end of the fault belt records it on tick 169, so the log under the board shows why the code failed.
+
+## The fault port and the belt docked there
+
+The fault port is kept apart from a machine's numbered outputs, so a fault never travels with the normal items. On a Factory it is the bottom middle cell, facing <Fact id="port.side.S" />. A fault on a belt moves like any item: this one takes 45 ticks to cross the six tiles to its Sink.
+
+Dock nothing on the fault port and the fault goes no further, though the machine still shows as faulted on that tick. Dock a belt there and the fault can go wherever a belt can take an item, such as a Debug Sink that keeps a record of each one.
+
+## Where the reasons are listed
+
+Each fault carries one reason. <Fact id="fault.FactoryError" /> means a Factory's code failed on the item, and a Router that can't match an item to any output gives <Fact id="fault.NoMatch" />. [Fault reasons](../../reference/board/fault-reasons/) lists every reason with the machine that gives it and an example board, and the troubleshooting page for [fault reasons](../../troubleshooting/fault-reasons/) says what to change for each one.
+
+## Related pages
+
+- [Fault reasons](../../reference/board/fault-reasons/): every reason, what makes a machine give it, and where the fault goes.
+- [Fault reasons](../../troubleshooting/fault-reasons/): the troubleshooting page, with what to change when you see each reason.
+- [Factory](../../reference/machines/factory/): the machine whose code faults on this page.
+- [Ports, docks and wires](../ports-docks-and-wires/): where the fault port sits among a machine's ports.
+- [Items and events](../): what an item is before it becomes a fault.
