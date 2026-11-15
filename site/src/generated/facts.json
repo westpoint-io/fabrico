@@ -967,6 +967,12 @@
       "symbol": "REFUSAL_COPY",
       "value": "That belt end is already joined. Use a free end."
     },
+    "refusal.BeltEndTile": {
+      "kind": "text",
+      "source": "frontend/src/chrome/RefusalMessage.tsx",
+      "symbol": "CLIENT_REFUSAL_COPY",
+      "value": "Start from the ring past the belt's end."
+    },
     "refusal.BeltEndsApart": {
       "kind": "text",
       "source": "frontend/src/chrome/RefusalMessage.tsx",
