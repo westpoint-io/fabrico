@@ -18,12 +18,19 @@
 // - a full-window picture isn't 2880 x 1800 pixels, or a crop has an odd side or differs by more
 //   than 2 px from twice the CSS box it measured in the same run,
 // - one colour covers more than 95 percent of a picture (a blank capture),
+// - a full-window picture's board didn't draw: the cells the board's machines and belts cover
+//   aren't clearly busier than empty floor cells (an empty canvas inside a full app window passes
+//   the one-colour check, since the toolbar and panels still draw),
 // - the page threw, or a render packet failed to apply, while taking a picture,
 // - the render loop wasn't finishing frames when a picture was taken.
 // It doesn't compare the pictures with the committed ones: a picture of a changed app is a new
 // picture, and the person who commits it looks at it.
 //
-// It kills only the two process groups it started, in a `finally`.
+// It kills only the two process groups it started: in a `finally` on a normal exit or a thrown
+// error, and from SIGINT, SIGTERM and SIGHUP handlers (exit 130, 143, 129) when it is stopped,
+// because both children run in their own process group and a Ctrl+C never reaches them. A child
+// that fails to start (an 'error' event, say a host binary that can't be run) or exits before its
+// port answers fails the run with its own message, and the same cleanup runs.
 //
 // NO PATH INPUT. Every path comes from this file's own location, so it runs the same from the
 // repo root and from `frontend/`. Erasure-only TypeScript, so Node runs it as it is. The live
@@ -58,6 +65,20 @@ const FULL = { width: 2880, height: 1800 };
 const CROP_SLACK_PX = 2;
 /** A picture where one colour covers more than this share of the pixels is blank. */
 const BLANK_PERCENT = 95;
+/**
+ * The board check on a full-window picture. Each grid cell on screen that no panel covers is
+ * trimmed by BOARD_INSET of its side on every edge (so the floor's grid lines stay out), and its
+ * pixels are counted as floor when their summed RGB distance from the floor colour (the most
+ * common colour in empty cells) is at most FLOOR_TOLERANCE. The board drew when the cells its
+ * machines and belts cover have at least BOARD_MIN_LIFT percentage points more non-floor pixels
+ * than empty cells, over at least BOARD_MIN_CELLS such cells.
+ */
+const BOARD_INSET = 0.2;
+const FLOOR_TOLERANCE = 30;
+const BOARD_MIN_LIFT = 10;
+const BOARD_MIN_CELLS = 8;
+/** How many cells past the board's outermost machine or belt count as floor for the board check. */
+const BOARD_FLOOR_MARGIN = 3;
 
 /**
  * The tick every picture shows. The demo boots one command per tick and has all 67 commands in by
@@ -104,6 +125,8 @@ type Camera = { x: number; y: number; scale: number };
 
 /** A full-window picture, or a crop whose size is checked against the box it was taken from. */
 type Shot = { file: string; kind: 'full' } | { file: string; kind: 'crop'; box: Box };
+/** The cell boxes, in CSS px, the board check grades: under machines and belts, and empty floor. */
+type BoardCells = { occupied: Box[]; empty: Box[] };
 
 class CaptureError extends Error {}
 
@@ -129,13 +152,20 @@ function portAnswers(port: number): Promise<boolean> {
   });
 }
 
-async function waitForPort(port: number, what: string): Promise<void> {
+async function waitForPort(child: ChildProcess, port: number, what: string): Promise<void> {
   const deadline = Date.now() + BOOT_TIMEOUT_MS;
   while (!(await portAnswers(port))) {
+    const trouble = childTrouble.get(child);
+    if (trouble !== undefined) fail(`${what} ${trouble}, so nothing answers on ${LOOPBACK}:${port}.`);
     if (Date.now() > deadline) fail(`${what} didn't start listening on ${LOOPBACK}:${port} within ${BOOT_TIMEOUT_MS} ms.`);
     await sleep(300);
   }
 }
+
+/** The two children this run started, so the signal handlers can reach them. */
+const started: ChildProcess[] = [];
+/** What went wrong with a child before its port answered: a failed spawn or an early exit. */
+const childTrouble = new Map<ChildProcess, string>();
 
 /** Kill a detached child's whole process group, and nothing else. */
 function killGroup(child: ChildProcess | null): void {
@@ -159,20 +189,60 @@ async function refuseBusyPorts(): Promise<void> {
   }
 }
 
+/** Kill every child this run started. Synchronous, so it also works from an 'exit' handler. */
+function killStarted(): void {
+  for (const child of started) killGroup(child);
+}
+
+/**
+ * Remember a child, and turn its 'error' event (a spawn that failed) and an exit before the run
+ * ends into a message waitForPort reports. Without the 'error' listener Node throws the event
+ * outside main()'s try/finally and the other child is left running.
+ */
+function track(child: ChildProcess): ChildProcess {
+  started.push(child);
+  child.on('error', (e) => childTrouble.set(child, `couldn't start (${e.message})`));
+  child.on('exit', (code, signal) => {
+    if (!childTrouble.has(child)) childTrouble.set(child, `exited early (code ${code}, signal ${signal})`);
+  });
+  return child;
+}
+
 function startHost(): ChildProcess {
   if (!existsSync(HOST_BIN)) {
     fail(`the dev host is missing at ${HOST_BIN}. Build it first: cargo build -p fabrico-host --example dev_render_server`);
   }
-  return spawn(HOST_BIN, [], { cwd: REPO, detached: true, stdio: 'ignore' });
+  return track(spawn(HOST_BIN, [], { cwd: REPO, detached: true, stdio: 'ignore' }));
 }
 
 function startVite(): ChildProcess {
-  return spawn(process.execPath, [VITE_BIN, '--host', LOOPBACK, '--port', String(VITE_PORT), '--strictPort'], {
-    cwd: FRONTEND,
-    detached: true,
-    stdio: 'ignore',
+  return track(
+    spawn(process.execPath, [VITE_BIN, '--host', LOOPBACK, '--port', String(VITE_PORT), '--strictPort'], {
+      cwd: FRONTEND,
+      detached: true,
+      stdio: 'ignore',
+    }),
+  );
+}
+
+/**
+ * Stop both children when the run is stopped. Node's default for these signals ends the process
+ * without running a pending `finally`, and the children, each in its own process group, never get
+ * the terminal's signal, so without this they keep 8787 and 5173 and the next run refuses to start.
+ */
+const STOP_SIGNALS: [NodeJS.Signals, number][] = [
+  ['SIGINT', 130],
+  ['SIGTERM', 143],
+  ['SIGHUP', 129],
+];
+for (const [signal, code] of STOP_SIGNALS) {
+  process.once(signal, () => {
+    killStarted();
+    console.error(`capture:tour: stopped by ${signal}; killed the dev host and Vite process groups.`);
+    process.exit(code);
   });
 }
+process.on('exit', killStarted);
 
 // --- Page reads -------------------------------------------------------------
 
@@ -252,7 +322,109 @@ async function checkRenderLoop(page: Page, file: string, tick: number): Promise<
   if (now !== tick) fail(`the board moved while taking ${file}: it was paused on tick ${tick} and now reads ${now}.`);
 }
 
-function checkPicture(shot: Shot, png: Buffer): { width: number; height: number; topPercent: number } {
+/**
+ * The grid cells on screen that the board check grades, as CSS px boxes trimmed by BOARD_INSET.
+ * A cell counts only when the board canvas is the topmost element at its centre and its four
+ * corners, so a panel over the board never counts as drawn board.
+ */
+async function boardCells(page: Page, scene: SceneRead): Promise<BoardCells> {
+  const cam = await readCamera(page);
+  const drawn = new Set<string>();
+  for (const n of scene.nodes) for (const [cx, cy] of n.cells) drawn.add(`${cx},${cy}`);
+  for (const b of scene.belts) for (const t of b.tiles) drawn.add(`${t.cell_x},${t.cell_y}`);
+  const taken = occupiedCells(scene);
+  const xs = [...taken].map((k) => Number(k.split(',')[0]));
+  const ys = [...taken].map((k) => Number(k.split(',')[1]));
+  if (xs.length === 0) return fail('the board has no machine or belt, so the board check has nothing to grade.');
+  const side = CELL * cam.scale;
+  const trim = side * BOARD_INSET;
+  const candidates: { box: Box; occupied: boolean }[] = [];
+  for (let cy = Math.min(...ys) - BOARD_FLOOR_MARGIN; cy <= Math.max(...ys) + BOARD_FLOOR_MARGIN; cy++) {
+    for (let cx = Math.min(...xs) - BOARD_FLOOR_MARGIN; cx <= Math.max(...xs) + BOARD_FLOOR_MARGIN; cx++) {
+      const key = `${cx},${cy}`;
+      // A wire cell is neither: the wire is a thin line the trimmed box can miss.
+      if (taken.has(key) && !drawn.has(key)) continue;
+      const box = { x: cam.x + cx * side + trim, y: cam.y + cy * side + trim, width: side - 2 * trim, height: side - 2 * trim };
+      if (box.x < 0 || box.y < 0 || box.x + box.width > VIEWPORT.width || box.y + box.height > VIEWPORT.height) continue;
+      candidates.push({ box, occupied: drawn.has(key) });
+    }
+  }
+  const onCanvas = await page.evaluate(
+    (boxes) =>
+      boxes.map((b) =>
+        [
+          [b.x + b.width / 2, b.y + b.height / 2],
+          [b.x, b.y],
+          [b.x + b.width, b.y],
+          [b.x, b.y + b.height],
+          [b.x + b.width, b.y + b.height],
+        ].every(([x, y]) => document.elementFromPoint(x, y) instanceof HTMLCanvasElement),
+      ),
+    candidates.map((c) => c.box),
+  );
+  const cells: BoardCells = { occupied: [], empty: [] };
+  candidates.forEach((c, i) => {
+    if (onCanvas[i]) (c.occupied ? cells.occupied : cells.empty).push(c.box);
+  });
+  return cells;
+}
+
+type Rgba = { data: Uint8Array | Buffer; width: number };
+
+/** The pixels of a CSS px box in a 2x picture, as [r, g, b] triples. */
+function* boxPixels(img: Rgba, box: Box): Generator<[number, number, number]> {
+  const x0 = Math.ceil(box.x * SCALE);
+  const y0 = Math.ceil(box.y * SCALE);
+  const x1 = Math.floor((box.x + box.width) * SCALE);
+  const y1 = Math.floor((box.y + box.height) * SCALE);
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const at = (y * img.width + x) * 4;
+      yield [img.data[at], img.data[at + 1], img.data[at + 2]];
+    }
+  }
+}
+
+/**
+ * Grade the board in a full-window picture: the mean share of non-floor pixels in cells under
+ * machines and belts, minus the same share in empty cells, in percentage points. The script
+ * calls it on every full-window picture.
+ */
+function boardLift(img: Rgba, cells: BoardCells): { lift: number; occupied: number; empty: number } {
+  const counts = new Map<number, number>();
+  for (const box of cells.empty) {
+    for (const [r, g, b] of boxPixels(img, box)) {
+      const key = (r << 16) | (g << 8) | b;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  let floor = -1;
+  let best = 0;
+  for (const [key, n] of counts) {
+    if (n > best) {
+      best = n;
+      floor = key;
+    }
+  }
+  const fr = (floor >> 16) & 0xff;
+  const fg = (floor >> 8) & 0xff;
+  const fb = floor & 0xff;
+  const busy = (box: Box): number => {
+    let all = 0;
+    let off = 0;
+    for (const [r, g, b] of boxPixels(img, box)) {
+      all++;
+      if (Math.abs(r - fr) + Math.abs(g - fg) + Math.abs(b - fb) > FLOOR_TOLERANCE) off++;
+    }
+    return all === 0 ? 0 : (off / all) * 100;
+  };
+  const mean = (boxes: Box[]): number => boxes.reduce((sum, b) => sum + busy(b), 0) / Math.max(boxes.length, 1);
+  const occupied = mean(cells.occupied);
+  const empty = mean(cells.empty);
+  return { lift: occupied - empty, occupied, empty };
+}
+
+function checkPicture(shot: Shot, png: Buffer, board: BoardCells | null): { width: number; height: number; topPercent: number; lift: number | null } {
   const img = PNG.sync.read(png);
   if (shot.kind === 'full') {
     if (img.width !== FULL.width || img.height !== FULL.height) {
@@ -275,19 +447,33 @@ function checkPicture(shot: Shot, png: Buffer): { width: number; height: number;
   }
   const topPercent = (top / pixels.length) * 100;
   if (topPercent > BLANK_PERCENT) fail(`${shot.file} is blank: one colour covers ${topPercent.toFixed(1)}% of it.`);
-  return { width: img.width, height: img.height, topPercent };
+  if (board === null) return { width: img.width, height: img.height, topPercent, lift: null };
+  if (board.occupied.length < BOARD_MIN_CELLS || board.empty.length < BOARD_MIN_CELLS) {
+    fail(
+      `${shot.file}: only ${board.occupied.length} board cells and ${board.empty.length} floor cells are on screen and clear of the panels; the board check needs ${BOARD_MIN_CELLS} of each.`,
+    );
+  }
+  const graded = boardLift(img, board);
+  if (graded.lift < BOARD_MIN_LIFT) {
+    fail(
+      `${shot.file}: the board didn't draw. Cells under machines and belts are ${graded.occupied.toFixed(1)}% non-floor and empty cells ${graded.empty.toFixed(1)}%, a lift of ${graded.lift.toFixed(1)} points, under ${BOARD_MIN_LIFT}.`,
+    );
+  }
+  return { width: img.width, height: img.height, topPercent, lift: graded.lift };
 }
 
 async function take(page: Page, errors: string[], shot: Shot, tick: number): Promise<void> {
   await checkRenderLoop(page, shot.file, tick);
+  const board = shot.kind === 'full' ? await boardCells(page, await readScene(page)) : null;
   const png =
     shot.kind === 'full'
       ? await page.screenshot({ animations: 'allow' })
       : await page.screenshot({ clip: shot.box, animations: 'allow' });
   if (errors.length > 0) fail(`the page threw while taking ${shot.file}: ${errors.join('; ')}`);
-  const got = checkPicture(shot, png);
+  const got = checkPicture(shot, png, board);
   writeFileSync(path.join(OUT_DIR, shot.file), png);
-  console.log(`capture:tour: wrote ${shot.file} ${got.width} x ${got.height}, top colour ${got.topPercent.toFixed(1)}%`);
+  const lift = got.lift === null ? '' : `, board lift ${got.lift.toFixed(1)} points over ${board?.occupied.length} cells`;
+  console.log(`capture:tour: wrote ${shot.file} ${got.width} x ${got.height}, top colour ${got.topPercent.toFixed(1)}%${lift}`);
 }
 
 // --- The board ----------------------------------------------------------------
@@ -436,8 +622,8 @@ async function main(): Promise<void> {
   try {
     host = startHost();
     vite = startVite();
-    await waitForPort(HOST_PORT, 'the dev host');
-    await waitForPort(VITE_PORT, 'the Vite dev server');
+    await waitForPort(host, HOST_PORT, 'the dev host');
+    await waitForPort(vite, VITE_PORT, 'the Vite dev server');
 
     const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: SCALE });
     const page = await context.newPage();
