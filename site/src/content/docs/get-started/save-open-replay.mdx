@@ -22,7 +22,7 @@ A save writes your board to a project file: the board as it stands at one tick, 
 
 </Steps>
 
-The app saves only when no outbound call it made, such as an HTTP Sink's request, is still waiting for an answer. On a playing board it holds back new input, lets the items already on the belts finish, writes the file and plays on. A paused board is saved straight away, items on belts included. [Project files](../../reference/files/project-files/#when-the-app-saves) gives the details.
+The app saves only when no outbound call it made, such as an HTTP Sink's request, is still waiting for an answer. On a playing board it stops taking input, lets the items already on the belts finish, writes the file and plays on. That wait lasts until the belts are empty and every answer is in, or a few seconds at most. While it waits, the app answers each webhook with 503 and makes no item from it, so the sender has to send it again, and a Source's timer that comes due doesn't fire at all: the fire is skipped, not saved for later. Edits you make in that time wait and take effect once the save is done. A paused board is saved straight away, items on belts included. [Project files](../../reference/files/project-files/#when-the-app-saves) gives the details.
 
 ## Open it again
 

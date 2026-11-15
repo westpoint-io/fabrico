@@ -45,7 +45,7 @@ The app refuses to open a project file larger than <Fact id="limit.max_project_b
 
 The app saves only when no request it sent, such as an HTTP Sink's, is still waiting for an answer. A file saved with one waiting would reopen with that request timed out, even if it had worked.
 
-- On a playing factory, the app holds back new input and timers and lets the factory run until the belts are empty and every answer is in, or for a few seconds at most. Then it writes the file and plays on.
+- On a playing factory, the app stops taking input and lets the factory run until the belts are empty and every answer is in, or for a few seconds at most. Then it writes the file and plays on. While it waits, each webhook gets a 503 and makes no item, a timer fire that comes due is skipped for good, and your edits wait until the save is done.
 - On a paused factory, the app writes the file straight away if no request is waiting, items on the belts included. If one is waiting, it runs the factory until the answer comes, then writes.
 - If an answer still hasn't come after a few seconds of running, the save fails. The app shows Save failed and keeps the factory marked as unsaved.
 
