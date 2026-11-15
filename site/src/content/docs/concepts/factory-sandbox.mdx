@@ -8,7 +8,7 @@ sidebar:
 import Board from '../../../components/Board.astro';
 import Fact from '../../../components/Fact.astro';
 
-A [Factory](../../reference/files/glossary/#term-factory) runs your JavaScript on each item it takes, inside a sandbox. The sandbox leaves out the clock, `Math.random` and the network, so the code can only work from the item, its own saved state and random numbers the engine hands it. Given the same items, the code then does the same thing on every run, and a replay of the board gets the same result.
+A [Factory](../../reference/files/glossary/#term-factory) runs your JavaScript on each item it takes, inside a sandbox. The sandbox leaves out the clock, `Math.random` and the network, so the code can only work from the item, its own saved state and random numbers the engine hands it. Given the same items, the code then does the same thing on every run, and a replay of the board gets the same result. The one exception is the `**` operator, covered at the end of the next section.
 
 The board below runs the code shown with it on four orders. It counts the orders in `ctx.state` and picks a lane for each one with `ctx.randomInt`. The Debug Sink's log shows lanes 3, 3, 2 and 2 for orders A to D, on every run.
 
@@ -22,6 +22,8 @@ Code that uses any of these names throws, and the run faults with <Fact id="faul
 - `fetch`, because it reaches the network, and `process` and `require`, because they reach the computer and its files.
 - `Math.random`, because nothing seeds it from the board.
 - The `Math` functions whose last digits can differ between computers, such as `Math.sin`, `Math.exp` and `Math.pow`.
+
+The `**` operator isn't left out, and it can differ between computers. It calls the same function from the computer's C library that `Math.pow` does, so a power that doesn't come out exact, such as `2 ** 0.5`, can end in a different last digit in the desktop app on one system, on another system and in a browser. A board whose code needs the same result everywhere multiplies a number by itself instead of using `**`.
 
 A Factory that needs to call a service sends an item to an HTTP Sink, which makes the call outside the sandbox. [Side effects and delivery](../side-effects-and-delivery/) covers what happens to that call.
 

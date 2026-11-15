@@ -31,7 +31,7 @@ Checked by <code>a_variant_that_sends_every_webhook_to_one_source_differs_when_r
 
 - The desktop app and the boards on this site run the same engine code. The boards here use a build of it for the browser.
 - The engine moves the whole board forward one [tick](../../reference/files/glossary/#term-tick) at a time, and how long a tick takes on your computer never enters the result.
-- The engine does its arithmetic on integers, never floating point, whose results can differ between computers. Inside a Factory, JavaScript numbers stay, but the `Math` functions whose results can differ from one computer to the next, such as `Math.sin`, are left out.
+- The engine does its arithmetic on integers, never floating point, whose results can differ between computers. Inside a Factory, JavaScript numbers stay, but the `Math` functions whose results can differ from one computer to the next, such as `Math.sin`, are left out. The `**` operator is the one gap, covered under [Where determinism ends](#where-determinism-ends).
 - The only random numbers on a board come from a generator started from the board's seed, so the same seed gives the same numbers on every run.
 
 The hash on each badge comes from the same function the repository's tests use to compare runs, and each board's expected end hash is listed in `examples/boards/hashes.manifest`. The badge reads match when the run ends on that hash.
@@ -51,6 +51,8 @@ A [Factory](../../reference/files/glossary/#term-factory)'s code runs under thre
 So a Factory that gets near its memory or stack limit can end on one hash in the desktop app and another in a browser. The board lint runs every board under `examples/boards` a second time at half the memory limit and a quarter of the stack limit, and fails the board if anything changes, so no board on this site comes near either one. A board here that isn't about faults is also checked to raise no fault at all, which keeps it clear of the work limit too.
 
 The CI step is `Check where a Factory runs out of gas, memory and stack on both targets`, which runs [scripts/check-fence-report.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-fence-report.sh).
+
+The `**` operator is the other place the promise stops. The sandbox leaves out `Math.pow`, but `**` still works and calls the same function from the C library the app was built with. So `2 ** 0.5` and other powers that don't come out exact can end in a different last digit in the desktop app on Linux, macOS or Windows and in a browser, and a Factory that uses one can end on a different hash. No board on this site uses `**`; code that needs the same result everywhere multiplies instead.
 
 ## Related pages
 
