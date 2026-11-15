@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   autoContinueCaptions,
   enableTrace,
-  expectBoardDrawingAt,
+  expectBoardDrawingSteppedAt,
   expectTraceMatchesNative,
   glCounts,
   installGlCounter,
@@ -111,7 +111,7 @@ test('the forward and reversed boards hold the same state at every tick and end 
     await page.locator(sel).locator('select').selectOption({ label: '1x' });
     await control(page, sel, 'restart').click();
   }
-  for (const sel of [FORWARD, REVERSED]) await expectBoardDrawingAt(page, sel, 'on the pair page');
+  for (const sel of [FORWARD, REVERSED]) await expectBoardDrawingSteppedAt(page, sel, 'on the pair page');
 
   // 6. Side by side at this width: the wrapper is wider than 960 px.
   const boxes = await page.evaluate(() =>
@@ -138,6 +138,6 @@ test('at a 900 px viewport the pair stacks with a 16 px gap', async ({ page }) =
   expect(boxes[0].width).toBeCloseTo(wrapper, 0);
   await page.locator(REVERSED).scrollIntoViewIfNeeded();
   await control(page, REVERSED, 'restart').click();
-  await expectBoardDrawingAt(page, REVERSED, 'stacked at 900 px');
+  await expectBoardDrawingSteppedAt(page, REVERSED, 'stacked at 900 px');
   await finish();
 });

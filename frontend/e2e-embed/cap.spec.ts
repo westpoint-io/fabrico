@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   autoContinueCaptions,
-  expectBoardDrawingAt,
+  expectBoardDrawingSteppedAt,
   glCounts,
   installGlCounter,
   pageUrl,
@@ -121,7 +121,9 @@ test('eight boards run, two wait on their posters, a lost context redraws on Pla
   expect(back.lostShown, `${lostBoard}: the line goes`).toBe(false);
   expect(back.tick, `${lostBoard}: picks up at the tick it lost its context on`).toBeGreaterThanOrEqual(lostProbe.tick);
   expect((await stillParts(page, lostBoard)).band, `${lostBoard}: no band`).toBe('');
-  await expectBoardDrawingAt(page, sel(lostBoard), 'after Play redraws the lost board', `${lostBoard} (${back.id})`);
+  // The drawing check steps the board on from that tick with the new renderer over the kept scene;
+  // Step sends no keyframe, so the pixels that change are drawn from the scene the board kept.
+  await expectBoardDrawingSteppedAt(page, sel(lostBoard), 'after Play redraws the lost board', `${lostBoard} (${back.id})`);
   counts = await glCounts(page);
   expect(counts.live).toBe(8);
   expect(counts.lost, 'no other context was lost').toBe(1);
@@ -135,7 +137,7 @@ test('eight boards run, two wait on their posters, a lost context redraws on Pla
   const b8 = await readProbeAt(page, sel('b8'));
   expect(b8.capped, 'b8 no longer waits').toBe(false);
   expect((await stillParts(page, 'b8')).band, 'b8: no band').toBe('');
-  await expectBoardDrawingAt(page, sel('b8'), 'after a slot frees', `b8 (${b8.id})`);
+  await expectBoardDrawingSteppedAt(page, sel('b8'), 'after a slot frees', `b8 (${b8.id})`);
   counts = await glCounts(page);
   expect(counts.live, 'still at most 8 live contexts').toBe(8);
   expect(counts.lost, 'no context was lost to the cap').toBe(1);

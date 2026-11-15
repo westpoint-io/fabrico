@@ -4,7 +4,7 @@ import type { BoardProbe } from '../src/embed/probe.ts';
 import {
   autoContinueCaptions,
   fileCaptions,
-  expectBoardDrawingAt,
+  expectBoardDrawingSteppedAt,
   glCounts,
   installGlCounter,
   pageUrl,
@@ -30,15 +30,16 @@ import {
 // - each stage has the size it had before its board first loaded.
 //
 // The drawing check passes once a screenshot of the board's belt tiles differs from the first one.
-// The probe samples only the belt cells no machine draws over, which on a short belt is its middle
-// cell, and an item crosses a middle cell in about 7 ticks. On a slow page a screenshot takes about
-// a second, so on a board whose items come rarely no screenshot in a whole 10 s check may catch one.
-// So the bottom row's first board is the docking board, which has an item on a middle cell on 344
-// of the 354 ticks from its boot to its end on tick 360, moving one slot every 2 ticks, rather than
-// the script-outcomes board, whose belts go up to 78 ticks with nothing on them. And just before
-// each board's drawing check the test presses Restart on it, so the check starts at the beginning
-// of the board's motion however long the checks before it took: order_processing has nothing
-// moving after tick 256, and the arrival-order board nothing after tick 220.
+// It pauses the board with Step and takes a screenshot every 4 ticks, so a slow screenshot can't
+// step over an item, and it fails after 240 ticks or at the end tick with no change. The probe
+// samples only the belt cells no machine draws over, which on a short belt is its middle cell, and
+// an item crosses a middle cell in about 7 ticks. The bottom row's first board is the docking
+// board, which has an item on a middle cell on 344 of the 354 ticks from its boot to its end on
+// tick 360, moving one slot every 2 ticks, so the resumed-scene check below passes on the first
+// steps rather than on a rare item. And just before each board's other drawing check the test
+// presses Restart on it, so the check starts at the beginning of the board's motion however far
+// the board ran before: order_processing has nothing moving after tick 256, and the arrival-order
+// board nothing after tick 220.
 //
 // Just before a row leaves, the test presses Restart on each of its boards again and waits 10
 // ticks: each board then leaves early in its run and comes back with items still to move. Ten
@@ -239,8 +240,10 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
     }
 
     // A board that came back draws its resumed scene with a new renderer and no keyframe, so its
-    // items must move before any Restart sends one. The docking board in bottom-0 moves its belt
-    // on almost every tick, so this check doesn't depend on catching a rare item.
+    // items must move before any Restart sends one. The drawing check steps the board on from the
+    // tick it resumed at, and Step sends no keyframe, so the check reads the resumed scene. The
+    // docking board in bottom-0 moves its belt on almost every tick, so this check doesn't depend
+    // on catching a rare item.
     // A caption stop pauses it for a moment; the page presses Continue, so wait for it to play.
     for (const slot of inView) {
       if (slot !== 'bottom-0' || left.get(slot) === undefined) continue;
@@ -252,7 +255,7 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
         .toBe(true);
       const p = await readProbeAt(page, sel(slot));
       if (p.tick >= p.endTick) continue;
-      await expectBoardDrawingAt(page, sel(slot), context, `${slot} (${p.id}) on its resumed scene, before Restart`);
+      await expectBoardDrawingSteppedAt(page, sel(slot), context, `${slot} (${p.id}) on its resumed scene, before Restart`);
       resumedMotionChecks++;
     }
 
@@ -261,7 +264,7 @@ test('five scroll round trips keep at most 8 live contexts and every returning b
     for (const slot of inView) {
       await page.locator(sel(slot)).locator('button[data-control="restart"]').click();
       const p = await readProbeAt(page, sel(slot));
-      await expectBoardDrawingAt(page, sel(slot), context, `${slot} (${p.id})`);
+      await expectBoardDrawingSteppedAt(page, sel(slot), context, `${slot} (${p.id})`);
     }
   };
 
