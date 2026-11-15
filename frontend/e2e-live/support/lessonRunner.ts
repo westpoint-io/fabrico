@@ -40,6 +40,7 @@ import { PNG } from 'playwright-core/lib/utilsBundle';
 import { SEAM_BOXES_E_TO_S, SEAM_E_TO_S_AT_1, groundColour, tileInk, type SeamBox } from './seamInk';
 import { decodePngRows } from './pngRows';
 import { changedPixels, sampleFramesInPage, type CaptureRect } from './frameCapture';
+import { BOARD_TICKS_PER_S, LESSON_BOARD_BOOT_TICK, LESSON_BOARD_FILL_TICKS, gradeWindow, stubMotionFindings, type MotionSample } from './stubMotion';
 
 // lessonRunner.ts - walks a lesson from its data, through the hint.
 //
@@ -1927,29 +1928,11 @@ const MOTION_SAMPLE_MS = 250;
  * where a capture is quick. A count, not a deadline, so a slow machine takes the same samples, only later.
  */
 const MOTION_SAMPLES = 12;
-/**
- * A sample differs from the one before when more than this many pixels changed in any channel. Zero, as
- * `93-boards-load.live.spec.ts` grades its first belt: under pinned treads any change counts, which is
- * what makes the hidden-layer control strict.
- */
-const MOTION_DELTA_MIN = 0;
-/** Consecutive carrying samples the control must see with the item layer hidden, so it can't pass on none. */
-const MOTION_CONTROL_PAIRS_MIN = 4;
 /** Sim ticks the read waits for the first item on the stub: the board's first rides on tick 55 (106-02). */
 const MOTION_ITEM_TICKS = 120;
-/** The lesson board's boot ends on this tick, so its clock reads ticks since it arrived as tick minus this. */
-const LESSON_BOARD_BOOT_TICK = 7;
-/** The stub fills this many ticks after the board arrives, and the items on it stop (106-02 MEASURE lesson-board). */
-const LESSON_BOARD_FILL_TICKS = 955;
-/** The host's sim clock, ticks a second. */
-const BOARD_TICKS_PER_S = 62.5;
 
-interface StubSample {
-  /** The model reported items on the stub just before or just after the capture. */
-  carrying: boolean;
-  tick: number;
-  /** `window.__fabrico.tickerTime()`: when the Pixi ticker last finished a frame. */
-  frameAt: number;
+/** One sample of the stub's clip with its capture. `stubMotion.ts` grades the rest. */
+interface StubSample extends MotionSample {
   png: Buffer;
 }
 
@@ -1989,21 +1972,11 @@ function pixelsChanged(a: Buffer, b: Buffer): number {
   return n;
 }
 
-/** The consecutive pairs where both samples carry items, and how many of those changed. */
-function gradePairs(samples: readonly StubSample[]): { pairs: number; changed: number; largest: number } {
-  let pairs = 0;
-  let changed = 0;
-  let largest = 0;
-  for (let i = 1; i < samples.length; i++) {
-    const a = samples[i - 1]!;
-    const b = samples[i]!;
-    if (!a.carrying || !b.carrying) continue;
-    pairs++;
-    const n = pixelsChanged(a.png, b.png);
-    largest = Math.max(largest, n);
-    if (n > MOTION_DELTA_MIN) changed++;
-  }
-  return { pairs, changed, largest };
+/** The pixels that changed between each sample and the next, the counts `gradeWindow` reads. */
+function changedBetween(samples: readonly StubSample[]): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < samples.length; i++) out.push(pixelsChanged(samples[i - 1]!.png, samples[i]!.png));
+  return out;
 }
 
 /** Distinct ticker frames across the samples, and whether the last is later than the first. */
@@ -2060,8 +2033,9 @@ async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, step
     await holdTheFrame(page, null, true);
   }
   state.motionRead = true;
-  const seen = gradePairs(shown);
-  const control = gradePairs(hidden);
+  const fillTick = LESSON_BOARD_BOOT_TICK + LESSON_BOARD_FILL_TICKS;
+  const seen = gradeWindow(shown, changedBetween(shown), fillTick);
+  const control = gradeWindow(hidden, changedBetween(hidden), fillTick);
   const seenFrames = framesRose(shown);
   const controlFrames = framesRose(hidden);
   const firstTick = shown[0]?.tick ?? 0;
@@ -2074,21 +2048,8 @@ async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, step
   );
   expect(seenFrames.rose, `${label}: the Pixi ticker drew frames across the ${shown.length} samples (${seenFrames.distinct} distinct frame times)`).toBe(true);
   expect(seenFrames.distinct, `${label}: the Pixi ticker drew a new frame for at least half the ${shown.length} samples`).toBeGreaterThanOrEqual(Math.ceil(shown.length / 2));
-  expect(seen.pairs, `${label}: the model reported items on the stub around at least two consecutive samples`).toBeGreaterThan(0);
-  expect(
-    seen.changed,
-    `${label}: under pinned treads, the stub's pixels changed between consecutive samples with items on it (${seen.changed} of ${seen.pairs} pairs, largest change ${seen.largest} pixels)`,
-  ).toBeGreaterThan(0);
   expect(controlFrames.rose, `${label}: the Pixi ticker drew frames across the control's ${hidden.length} samples`).toBe(true);
-  expect(control.pairs, `${label}: the control saw items on the stub around at least ${MOTION_CONTROL_PAIRS_MIN} consecutive pairs`).toBeGreaterThanOrEqual(MOTION_CONTROL_PAIRS_MIN);
-  expect(
-    control.changed,
-    `${label}: with the item layer hidden and the treads pinned, the stub's pixels changed on ${control.changed} of ${control.pairs} pairs, so something other than items passes the read`,
-  ).toBe(0);
-  expect(
-    lastTick - LESSON_BOARD_BOOT_TICK,
-    `${label}: both windows ran before the stub filled, ${LESSON_BOARD_FILL_TICKS} ticks after the board arrived (last sample at tick ${lastTick})`,
-  ).toBeLessThan(LESSON_BOARD_FILL_TICKS);
+  expect(stubMotionFindings(seen, control), `${label}: the grade of the two windows`).toEqual([]);
 }
 
 async function walkSteps(page: Page, lesson: Lesson, state: WalkState, from: number, to: number): Promise<void> {
