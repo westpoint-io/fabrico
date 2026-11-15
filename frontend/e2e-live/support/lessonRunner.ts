@@ -40,6 +40,7 @@ import { PNG } from 'playwright-core/lib/utilsBundle';
 import { SEAM_BOXES_E_TO_S, SEAM_E_TO_S_AT_1, groundColour, tileInk, type SeamBox } from './seamInk';
 import { decodePngRows } from './pngRows';
 import { changedPixels, sampleFramesInPage, type CaptureRect } from './frameCapture';
+import { PULSE_PIN_STEPS, pinnedPulseFindings, pinnedPulseSummary, type PinnedStep } from './pulsePin';
 import {
   BOARD_TICKS_PER_S,
   LESSON_BOARD_BOOT_TICK,
@@ -94,32 +95,14 @@ const PAUSED_STATUS = 503;
 const PAUSED_BODY = '{"error":"overloaded"}';
 /** The endpoint is mounted for POST only, so the router turns any other method away. */
 const WRONG_METHOD_STATUS = 405;
-/** The pulse read's window: at least this long from just before the POST. */
-const PULSE_WINDOW_MS = 1_500;
-/** And at least this long after the answer, which comes back as the reply sets off home. */
-const PULSE_AFTER_MS = 1_000;
-/** A ceiling on frames, far above what 2.5 s of back-to-back reads yields at 60 frames a second. */
-const PULSE_MAX_FRAMES = 400;
+/** Drawn frames one pinned comet step costs: the two `holdTheFrame` waits and the read's own frame. */
+const PULSE_STEP_FRAMES = 3;
 /** Whole cells kept between a read tile and either machine's footprint. */
 const PULSE_CLEAR_CELLS = 1;
 /** The read rect sits this far inside each cell. */
 const PULSE_INSET_PX = 2;
 /** A channel must move by more than this for a pixel to count as changed. */
 const PULSE_CHANNEL_MIN = 24;
-/**
- * A frame differs from the one before the POST when more than this many pixels changed. Six measuring
- * runs on lesson 5's four read tiles: a drawn comet changed 134 to 137 pixels in 10 frames each (about
- * 106 of them amber), and a request with no comet drawn changed 0 pixels in every one of 89 to 91 frames.
- */
-const PULSE_DELTA_MIN = 20;
-/**
- * A changed frame must also hold more than this many amber pixels above the frame before the POST, so the
- * change on the return cable is the reply comet's ink and not a forward spark, a hover mark or an outline
- * that a later routing or floor change put on a read tile. Measured on lesson 5 at `ffa6fd9` (seven runs)
- * and `df60bec` (three walks): the changed frames held 57 to 107 amber pixels, at least five frames per
- * request above 50, and the baseline held 0.
- */
-const PULSE_WARM_MIN = 50;
 /** Drawn frames for the Lessons list to show a row's buttons after it opens. */
 const ROW_FRAMES = 20;
 /**
@@ -1558,77 +1541,81 @@ async function walkRequest(page: Page, lesson: Lesson, state: WalkState, stepInd
   // so the card says `curl.exe` there. The walk makes that call itself rather than asking the app's rule.
   const userAgent = await page.evaluate(() => navigator.userAgent);
   const word = /\bWindows NT\b/.test(userAgent) ? 'curl.exe' : 'curl';
-  // The reply comet is drawn along the return cable for about half a second, so its tiles are read in
-  // frames back to back from just before the POST until a while after the answer, against one frame
-  // taken before. The rects, the baseline and the page-error listener are all set up first.
+  // THE REPLY COMET, READ AT PINNED RENDER-CLOCK STEPS. The comet sweeps the return cable over 28
+  // render-clock units and sits on the four read tiles for about 9.5 of them. Read on the test's own
+  // schedule, a slow runner misses it: in CI run 43670312713 each canvas read blocked the page for about
+  // 300 ms, the window held 4 frames 20 to 25 ticks apart, and the comet passed between two of them. So
+  // the render clock is pinned before the POST. The wire layer latches the reply comet at the pinned
+  // value when the reply count rises, which puts it at the start of its sweep on the Handler's nub, and
+  // the walk then moves the pin one unit at a time and reads the tiles after each step. What a step draws
+  // doesn't depend on the runner's frame rate. `pulsePin.ts` holds every rule and floor. Lesson 5's board
+  // has no belts, and the forward spark rides the other cable in the electric accent, so nothing else puts
+  // amber on these tiles. The pin is freed in the `finally`, before the render loop's own check.
   const pulse = await returnCableRects(page, label, bound);
-  const [baseline] = await sampleFramesInPage(page, { rects: pulse.rects, windowMs: 0, maxFrames: 1 });
-  expect(baseline?.flat, `${label}: the frame before the POST holds the board, not a cleared buffer`).toBe(false);
+  const [before] = await sampleFramesInPage(page, { rects: pulse.rects, windowMs: 0, maxFrames: 1 });
+  expect(before?.flat, `${label}: the frame before the POST holds the board, not a cleared buffer`).toBe(false);
+  const beforeWarm = before!.rects.reduce((n, r) => n + r.warm, 0);
+  const returnWireOf = (scene: SceneFacts) => scene.wires.find((w) => w.from.node === bound.handler && w.to.node === bound.route);
+  const sceneBefore = await readScene(page);
+  const repliesBefore = returnWireOf(sceneBefore)?.replyPulsesSeen ?? 0;
+  const pin = sceneBefore.tick - 1;
+  addFrameBudget((PULSE_PIN_STEPS + 2) * PULSE_STEP_FRAMES, `${label}: the reply comet read at ${PULSE_PIN_STEPS + 1} pinned steps`);
   const pageErrors: string[] = [];
   const onPageError = (e: Error): void => {
     pageErrors.push(e.message);
   };
   page.on('pageerror', onPageError);
-  let answered!: () => void;
-  const settled = new Promise<void>((resolve) => {
-    answered = resolve;
-  });
-  const sampling = sampleFramesInPage(page, {
-    rects: pulse.rects,
-    windowMs: PULSE_WINDOW_MS,
-    maxFrames: PULSE_MAX_FRAMES,
-    until: settled,
-    afterMs: PULSE_AFTER_MS,
-  });
-  const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false }).finally(answered);
-  const frames = await sampling;
-  page.off('pageerror', onPageError);
-  const status = resp.status();
-  const body = await resp.text();
-  console.log(`REQUEST ${lesson.id} url=${url} status=${status} body=${body} card=${card}`);
-  console.log(`REQUEST-WORD ${lesson.id} word=${word} userAgent=${userAgent}`);
-  expect(card, `${label}: the card's request line is ${word} -X POST and the panel's URL`).toBe(`${word} -X POST ${url}`);
-  expect(status, `${label}: the Route answered the request`).toBe(200);
-  expect(body, `${label}: with the HTTP Handler's preset reply`).toBe(HANDLER_PRESET_BODY);
-  await expect
-    .poll(
-      async () => {
-        const p = await readProbe(page);
-        return p.card === 'finished' || p.stepIndex > stepIndex ? 'done' : `${p.card} index ${p.stepIndex} stage ${p.stageId ?? 'none'}`;
-      },
-      { message: `${label}: the reply came back and the step was marked done`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
-    )
-    .toBe('done');
-  // The step finished on the model's reply count. What follows is a separate read of the screen, so a
-  // canvas that drew no reply fails here even though the model says the reply came back.
-  const done = await readProbe(page);
-  const returnWire = (await readScene(page)).wires.find((w) => w.from.node === bound.handler && w.to.node === bound.route);
-  console.log(`REPLY-LATCH ${lesson.id} card=${done.card} index=${done.stepIndex} replyPulsesSeen=${returnWire?.replyPulsesSeen ?? 'no return wire'}`);
-  const read = frames.map((f) => ({
-    flat: f.flat,
-    tick: f.tick,
-    warm: f.rects.reduce((n, r) => n + r.warm, 0),
-    delta: f.flat ? 0 : f.rects.reduce((n, r, i) => n + changedPixels(r, baseline!.rects[i]!, PULSE_CHANNEL_MIN), 0),
-  }));
-  const baselineWarm = baseline!.rects.reduce((n, r) => n + r.warm, 0);
-  const changed = read.filter((f) => f.delta > PULSE_DELTA_MIN).length;
-  const amber = read.filter((f) => f.delta > PULSE_DELTA_MIN && f.warm > baselineWarm + PULSE_WARM_MIN).length;
-  const maxDelta = Math.max(0, ...read.map((f) => f.delta));
-  const maxWarm = Math.max(0, ...read.map((f) => f.warm));
-  const flat = read.filter((f) => f.flat).length;
-  const ticks = frames.length === 0 ? 'none' : `${frames[0]!.tick}-${frames[frames.length - 1]!.tick}`;
-  console.log(
-    `MEASURE pulse frames=${frames.length} changed=${changed} amber=${amber} max_delta=${maxDelta} threshold=${PULSE_DELTA_MIN} warm_min=${PULSE_WARM_MIN} ticks=${ticks} flat=${flat} max_warm=${maxWarm} baseline_warm=${baselineWarm}`,
-  );
-  console.log(`PULSE-FRAMES delta/warm=${read.map((f) => (f.flat ? 'flat' : `${f.delta}/${f.warm}`)).join(' ')}`);
-  expect(
-    changed,
-    `${label}: a frame read on the return cable while the reply came home differs from the frame before the POST by more than ${PULSE_DELTA_MIN} pixels (${frames.length} frames, largest change ${maxDelta}, ${flat} cleared)`,
-  ).toBeGreaterThan(0);
-  expect(
-    amber,
-    `${label}: a changed frame on the return cable holds more than ${PULSE_WARM_MIN} amber pixels above the frame before the POST, the reply comet's ink (${changed} changed frames, most amber ${maxWarm}, before the POST ${baselineWarm})`,
-  ).toBeGreaterThan(0);
+  try {
+    await holdTheFrame(page, pin, true);
+    const resp = await page.request.post(url, { timeout: REQUEST_TIMEOUT_MS, failOnStatusCode: false });
+    const status = resp.status();
+    const body = await resp.text();
+    console.log(`REQUEST ${lesson.id} url=${url} status=${status} body=${body} card=${card}`);
+    console.log(`REQUEST-WORD ${lesson.id} word=${word} userAgent=${userAgent}`);
+    expect(card, `${label}: the card's request line is ${word} -X POST and the panel's URL`).toBe(`${word} -X POST ${url}`);
+    expect(status, `${label}: the Route answered the request`).toBe(200);
+    expect(body, `${label}: with the HTTP Handler's preset reply`).toBe(HANDLER_PRESET_BODY);
+    await expect
+      .poll(
+        async () => {
+          const p = await readProbe(page);
+          return p.card === 'finished' || p.stepIndex > stepIndex ? 'done' : `${p.card} index ${p.stepIndex} stage ${p.stageId ?? 'none'}`;
+        },
+        { message: `${label}: the reply came back and the step was marked done`, timeout: frameBudgetMs(MOVE_ON_FRAMES) },
+      )
+      .toBe('done');
+    // The step finished on the model's reply count. What follows is a separate read of the screen, so a
+    // canvas that drew no reply fails here even though the model says the reply came back.
+    await expect
+      .poll(async () => returnWireOf(await readScene(page))?.replyPulsesSeen ?? 0, {
+        message: `${label}: the return wire's reply count rose above ${repliesBefore}`,
+        timeout: frameBudgetMs(MOVE_ON_FRAMES),
+      })
+      .toBeGreaterThan(repliesBefore);
+    const done = await readProbe(page);
+    const returnWire = returnWireOf(await readScene(page));
+    console.log(`REPLY-LATCH ${lesson.id} card=${done.card} index=${done.stepIndex} replyPulsesSeen=${returnWire?.replyPulsesSeen ?? 'no return wire'}`);
+    const steps: PinnedStep[] = [];
+    let anchor: (typeof before) | undefined;
+    for (let k = 0; k <= PULSE_PIN_STEPS; k++) {
+      await holdTheFrame(page, pin + k, true);
+      const [frame] = await sampleFramesInPage(page, { rects: pulse.rects, windowMs: 0, maxFrames: 1 });
+      if (frame === undefined) throw new Error(`${label}: the read at pinned step ${k} returned no frame`);
+      if (k === 0) anchor = frame;
+      const delta = frame.flat || anchor!.flat ? 0 : frame.rects.reduce((n, r, i) => n + changedPixels(r, anchor!.rects[i]!, PULSE_CHANNEL_MIN), 0);
+      steps.push({ k, flat: frame.flat, delta, warm: frame.rects.reduce((n, r) => n + r.warm, 0), tileWarm: frame.rects.map((r) => r.warm) });
+    }
+    const sum = pinnedPulseSummary(steps, beforeWarm);
+    const findings = pinnedPulseFindings(steps, beforeWarm);
+    console.log(
+      `MEASURE pulse-pin pin=${pin} steps=${steps.length} lit=${sum.lit} first_lit=${sum.firstLit ?? 'none'} last_lit=${sum.lastLit ?? 'none'} tile_first=${sum.tileFirst.map((t) => t ?? 'none').join(',')} max_warm=${sum.maxWarm} before_warm=${beforeWarm} anchor_warm=${steps[0]!.warm}`,
+    );
+    console.log(`PULSE-PIN warm/delta=${steps.map((s) => (s.flat ? `${s.k}:flat` : `${s.k}:${s.warm}/${s.delta}`)).join(' ')}`);
+    expect(findings, `${label}: the reply comet drawn at pinned render-clock steps heads home along the return cable (${findings.join('; ')})`).toEqual([]);
+  } finally {
+    await holdTheFrame(page, null, true);
+    page.off('pageerror', onPageError);
+  }
   await expectRenderLoopAlive(page, `after the reply pulse read at ${label}`);
   expect(pageErrors, `${label}: no uncaught page error while the request was answered`).toEqual([]);
 }
