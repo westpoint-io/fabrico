@@ -8,7 +8,7 @@ sidebar:
 import Board from '../../../components/Board.astro';
 import Fact from '../../../components/Fact.astro';
 
-As a board runs, the app keeps a record of everything that drives it, each entry stamped with the [tick](../../reference/files/glossary/#term-tick) it arrived on. Each [event](../../reference/files/glossary/#term-event), such as a webhook or a Source's timer firing, goes in that record, and so does each edit you make and the answer to each call the board sends out. A save writes a copy of the board at one tick together with that record, and the two are enough to rebuild the board exactly.
+As a board runs, the app keeps a record of everything that drives it, each entry stamped with the [tick](../../reference/files/glossary/#term-tick) it arrived on. Each webhook and each fire of a Source's timer is an [event](../../reference/files/glossary/#term-event) and goes in that record, and so does each edit you make and the answer to each call the board sends out. A save writes a copy of the board at one tick together with that record, and the two are enough to rebuild the board exactly.
 
 The log under the board below is the closest thing this site has to the app's record. It lists each call the board's two Sinks make, with the tick and the answer: the top Sink sends two POST requests, logged as t70 and t190, and each gets its scripted answer 20 ticks later; the bottom Sink, a Debug Sink, records one item, logged as t130.
 
