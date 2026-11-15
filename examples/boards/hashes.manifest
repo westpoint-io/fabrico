@@ -35,8 +35,8 @@ examples/boards/docs/rules-machine-states.board.ron 260 44124ce6ae6fd32adf0e0295
 examples/boards/docs/rules-ports.board.ron 240 da2e3fce9b232146abecc1046ef67d7366ab7668b913d7a8a58629ba86a9ada8
 examples/boards/docs/rules-undo-redo.board.ron 380 56a5d3bfa169b4cb8dc202d4e78c1a1e919d07a35ee81653cdd799ddfa46621b
 examples/boards/docs/script-outcomes.board.ron 1000 36c72035162febc3f5b1a9e2dd850a1bc386e34bcb5c0a9f7d1f6b1427dc20ef
-examples/boards/docs/start-first-factory-1.board.ron 260 a372efce6b6286e94a5b97f9179015b459ecf0d50de4b5acd6f20625da40ad15
-examples/boards/docs/start-first-factory-2.board.ron 260 fca270296865fb42d9316ea2536cee3f8e951ade718fd285888e03121cca7dab
-examples/boards/docs/start-first-factory-3.board.ron 260 bc9f819fb81a8b7aa74e08420c085a8391034ce7c527b7ec89fc99b2b91d21d8
+examples/boards/docs/start-first-factory-1.board.ron 260 742b038793adac86798325817672096eafc821293b50bcd63f7748ec6728d53c
+examples/boards/docs/start-first-factory-2.board.ron 260 f4b14002cc83e74679403486e3b4615887ef7831b19891d1fe8e7f648d8b9362
+examples/boards/docs/start-first-factory-3.board.ron 260 0e883182e9390be2e6572124c845288263c25a0e30419fd90b6dd56e6b7e043c
 examples/boards/lessons/belts-that-join.board.ron 360 8214579d11c769d64559ed9136b9d6b2c5fdf382ca4f9f5a35c105d2011b31ee
 examples/boards/order_processing.board.ron 1200 668d0400451aafaa4d4749650c0165727c3f67d66f631c9a46a68863cb9c0830

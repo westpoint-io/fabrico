@@ -46,9 +46,9 @@ const ROLE_OUT = 1;
 const EAST = 1;
 const WEST = 3;
 
-/** Where step 1 puts the Source and the Sink: one row, seven empty cells between them. */
-export const SOURCE_AT: Cell = [10, 8];
-export const SINK_AT: Cell = [18, 8];
+/** Where step 1 puts the Source and the Sink: one row, nine empty cells between them. */
+export const SOURCE_AT: Cell = [9, 8];
+export const SINK_AT: Cell = [19, 8];
 /** Where step 2 puts the 3 by 3 Factory, its In and Out on its middle row, level with the line. */
 export const FACTORY_AT: Cell = [13, 7];
 /** Empty floor cells a deselect click lands on, clear of every machine and belt here. */
@@ -158,7 +158,7 @@ async function beltBetween(page: Page, fromCell: Cell, toCell: Cell, what: strin
 }
 
 /**
- * Step 1 by gestures: New, a Source, a Sink eight cells to its right on the same row, and one belt
+ * Step 1 by gestures: New, a Source, a Sink ten cells to its right on the same row, and one belt
  * drawn from the Source's output to the Sink's input. The page must already be on the app.
  * Neither machine is turned: the tutorial relies on the palette's unturned facing, so that is
  * checked rather than fixed.
@@ -256,7 +256,7 @@ export interface OutletWatch {
 /**
  * Start an in-page watch over the outlet belt, sampled on every drawn frame: whether the model
  * listed an item on it, whether the item layer drew a dot inside one of its cells, and whether any
- * machine read FAULTED. An item crosses the two-cell outlet in about 16 ticks, a quarter of a
+ * machine read FAULTED. An item crosses the three-cell outlet in about 24 ticks, under half a
  * second at full speed, so a poll from the test side could miss it; the watch latches it instead.
  * Read with `readOutletWatch`, stop with `stopOutletWatch`.
  */

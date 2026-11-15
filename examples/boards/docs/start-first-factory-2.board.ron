@@ -20,11 +20,11 @@ Board(
     title: "First factory, step 2",
     seed: 98,
     commands: [
-        Place(kind: 0, cell_x: 10, cell_y: 8),       // 0: SOURCE, a webhook trigger by default
-        Place(kind: 7, cell_x: 18, cell_y: 8),       // 1: SINK, Debug by default
+        Place(kind: 0, cell_x: 9, cell_y: 8),       // 0: SOURCE, a webhook trigger by default
+        Place(kind: 7, cell_x: 19, cell_y: 8),       // 1: SINK, Debug by default
         Place(kind: 2, cell_x: 13, cell_y: 7),       // 2: FACTORY, 3x3
-        DrawBelt(cells: [(11, 8), (12, 8)]),          // 3: source -> factory
-        DrawBelt(cells: [(16, 8), (17, 8)]),          // 4: factory -> sink
+        DrawBelt(cells: [(10, 8), (11, 8), (12, 8)]),  // 3: source -> factory
+        DrawBelt(cells: [(16, 8), (17, 8), (18, 8)]),  // 4: factory -> sink
         Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
         Dock(belt: 3, endpoint: Head, node: 2, port: 0),
         Dock(belt: 4, endpoint: Tail, node: 2, port: 1),
@@ -36,7 +36,7 @@ Board(
         At(tick: 160, input: Webhook(source: 0, body: r#"{"order":3}"#)),
     ],
     captions: [
-        Caption(tick: 55, highlight: 2, text: "The Factory runs its starting code on this item and sends it out unchanged."),
+        Caption(tick: 63, highlight: 2, text: "The Factory runs its starting code on this item and sends it out unchanged."),
     ],
     executor: Executor(default: Reply(after_ticks: 1), rules: []),
     view: View(fit: Board),

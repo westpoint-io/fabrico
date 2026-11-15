@@ -44,7 +44,7 @@ import {
 // THE LEGS, GRADED ON WHAT THE USER SEES
 // ---------------------------------------------------------------------------
 //
-//   1. Step 1: New, a Source, a Sink eight cells to its right, and a belt dragged from the Source's
+//   1. Step 1: New, a Source, a Sink ten cells to its right, and a belt dragged from the Source's
 //      output to the Sink's input. The machines and belts on the live board, by kind and cell,
 //      equal the Place and DrawBelt commands of `start-first-factory-1.board.ron`, and the belt is
 //      docked at both ends. The cells the gestures use are the support module's own, so a gesture
@@ -67,8 +67,8 @@ import {
 
 /** The state byte for a faulted machine (`fabrico-protocol` `state_tag`). */
 const FAULTED = 2;
-/** Ticks from the POST to the item on the outlet: the Source's next step, the two-cell inlet at
- *  2 ticks a slot (16), the Factory's step, and the outlet's first slot, rounded up to 40. */
+/** Ticks from the POST to the item on the outlet: the Source's next step, the three-cell inlet at
+ *  2 ticks a slot (24), the Factory's step, and the outlet's first slot, rounded up to 40. */
 const TRAVEL_TICKS = 40;
 /** How many times slower than full speed the host may tick and still be graded (the 87 specs' 3). */
 const SLOW_BOARD = 3;

@@ -151,7 +151,7 @@
 # (examples/boards/lessons/belts-that-join.board.ron), and three for the steps of the
 # first-factory tutorial (examples/boards/docs/start-first-factory-1.board.ron, -2 and -3). The
 # thirty older lines are unchanged.
-examples/boards/hashes.manifest 347c688ed7cb47638b08cc00aa77b0b560ca821c5fcd048def4df008fe28f8ef
+examples/boards/hashes.manifest ec42722ccd1103507cf9fee9ed4d648df4b5c65ccc09aee31989ba143f9966e3
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the
