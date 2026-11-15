@@ -1929,10 +1929,11 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
 const TOUR_CAPTURE: &str = "run: npm run capture:tour";
 /// The capture step's folder, where the npm script lives.
 const TOUR_CAPTURE_DIR: &str = "working-directory: frontend";
-/// The two parts the capture step's condition must hold: run on one leg only, and run even when
-/// that leg's checker went red, since the capture's check doesn't depend on the suite's.
-const TOUR_CAPTURE_SHARD: &str = "matrix.shard == 1";
-const TOUR_CAPTURE_NOT_CANCELLED: &str = "!cancelled()";
+/// The capture step's whole condition line: run on one leg only (`matrix.shard == 1`), and run even
+/// when that leg's checker went red (`!cancelled()`), since the capture's check doesn't depend on
+/// the suite's. Matched exactly, because a condition that holds both parts and adds a clause, such
+/// as `&& false`, or names another leg, such as `matrix.shard == 10`, skips the capture everywhere.
+const TOUR_CAPTURE_IF: &str = "if: ${{ !cancelled() && matrix.shard == 1 }}";
 
 /// Everything wrong with how `yml` runs the tour capture. Empty means right.
 fn tour_capture_wrong(yml: &str) -> Vec<String> {
@@ -1973,16 +1974,12 @@ fn tour_capture_wrong(yml: &str) -> Vec<String> {
         .map(|l| step_key(l))
         .filter(|l| l.starts_with("if:"))
         .collect();
-    let right = matches!(
-        conditions.as_slice(),
-        [c] if c.contains(TOUR_CAPTURE_SHARD) && c.contains(TOUR_CAPTURE_NOT_CANCELLED)
-    );
-    if !right {
+    if conditions != [TOUR_CAPTURE_IF] {
         wrong.push(format!(
             "the tour capture's step in job `{LIVE_JOB}` has the condition(s) {conditions:?}. It \
-             needs one `if:` holding `{TOUR_CAPTURE_SHARD}`, so it runs once per CI run rather than \
-             on every leg, and `{TOUR_CAPTURE_NOT_CANCELLED}`, so a red checker before it doesn't \
-             skip it."
+             needs exactly one line, `{TOUR_CAPTURE_IF}`: `matrix.shard == 1` so it runs once per \
+             CI run rather than on every leg, and `!cancelled()` so a red checker before it \
+             doesn't skip it, with nothing added."
         ));
     }
     let checker = live_run_lines().checker;
@@ -2077,7 +2074,7 @@ fn the_tour_capture_check_names_each_way_of_switching_it_off() {
                 &format!("{CAPTURE_STEP}        if: ${{{{ !cancelled() }}}}\n"),
             ),
             tour_capture_wrong,
-            format!("needs one `if:` holding `{TOUR_CAPTURE_SHARD}`"),
+            "has the condition(s) [\"if: ${{ !cancelled() }}\"]".to_string(),
         ),
         (
             "the condition without !cancelled()",
@@ -2089,13 +2086,49 @@ fn the_tour_capture_check_names_each_way_of_switching_it_off() {
             "has the condition(s) [\"if: ${{ matrix.shard == 1 }}\"]".to_string(),
         ),
         (
+            "the condition with `&& false` appended",
+            CI_YML.replace(
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}"),
+                &format!("{CAPTURE_STEP}        if: ${{{{ !cancelled() && matrix.shard == 1 && false }}}}\n"),
+            ),
+            tour_capture_wrong,
+            "has the condition(s) [\"if: ${{ !cancelled() && matrix.shard == 1 && false }}\"]".to_string(),
+        ),
+        (
+            "the condition naming shard 10",
+            CI_YML.replace(
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}"),
+                &format!("{CAPTURE_STEP}        if: ${{{{ !cancelled() && matrix.shard == 10 }}}}\n"),
+            ),
+            tour_capture_wrong,
+            "has the condition(s) [\"if: ${{ !cancelled() && matrix.shard == 10 }}\"]".to_string(),
+        ),
+        (
+            "the condition negated around the shard",
+            CI_YML.replace(
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}"),
+                &format!("{CAPTURE_STEP}        if: ${{{{ !(matrix.shard == 1) || !cancelled() }}}}\n"),
+            ),
+            tour_capture_wrong,
+            "has the condition(s) [\"if: ${{ !(matrix.shard == 1) || !cancelled() }}\"]".to_string(),
+        ),
+        (
+            "a second condition line added",
+            CI_YML.replace(
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}"),
+                &format!("{CAPTURE_STEP}{CAPTURE_IF}        if: false\n"),
+            ),
+            tour_capture_wrong,
+            format!("needs exactly one line, `{TOUR_CAPTURE_IF}`"),
+        ),
+        (
             "the working directory removed",
             CI_YML.replace(CAPTURE_DIR, "        run: npm run capture:tour\n"),
             tour_capture_wrong,
             format!("has no `{TOUR_CAPTURE_DIR}` line"),
         ),
     ];
-    assert_eq!(plants.len(), 7, "seven ways of switching the tour capture off");
+    assert_eq!(plants.len(), 11, "eleven ways of switching the tour capture off");
 
     let mut missed: Vec<String> = Vec::new();
     for (what, yml, check, must_name) in &plants {
