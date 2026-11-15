@@ -40,7 +40,15 @@ import { PNG } from 'playwright-core/lib/utilsBundle';
 import { SEAM_BOXES_E_TO_S, SEAM_E_TO_S_AT_1, groundColour, tileInk, type SeamBox } from './seamInk';
 import { decodePngRows } from './pngRows';
 import { changedPixels, sampleFramesInPage, type CaptureRect } from './frameCapture';
-import { BOARD_TICKS_PER_S, LESSON_BOARD_BOOT_TICK, LESSON_BOARD_FILL_TICKS, gradeWindow, stubMotionFindings, type MotionSample } from './stubMotion';
+import {
+  BOARD_TICKS_PER_S,
+  LESSON_BOARD_BOOT_TICK,
+  LESSON_BOARD_FILL_TICKS,
+  MOTION_CONTROL_PAIRS_MIN,
+  gradeWindow,
+  stubMotionFindings,
+  type MotionSample,
+} from './stubMotion';
 
 // lessonRunner.ts - walks a lesson from its data, through the hint.
 //
@@ -1917,17 +1925,26 @@ async function expectSeamDrawnAsCorner(page: Page, label: string, state: WalkSta
     expect.soft(n, `${sample}: the seam reads as a corner, not a T, ${where}: no ${boxes.N.reads} in box N (read ${n}, straight ${sn}, ceiling ${limits.cornerCeiling})`).toBeLessThanOrEqual(limits.cornerCeiling);
     expect.soft(e, `${sample}: the seam reads as a corner, not a T, ${where}: no ${boxes.E.reads} in box E (read ${e}, straight ${se}, ceiling ${limits.cornerCeiling})`).toBeLessThanOrEqual(limits.cornerCeiling);
   });
-  expect(test.info().errors, `${label} seam read: the ink on the ring cell (${ring[0]},${ring[1]}) reads as the corner the host shipped`).toHaveLength(0);
+  expect(test.info().errors.filter((e) => e.message?.includes('seam read') === true), `${label} seam read: the ink on the ring cell (${ring[0]},${ring[1]}) reads as the corner the host shipped`).toHaveLength(0);
   console.log(`SEAM ${label}: ring (${ring[0]},${ring[1]}) ships and draws Corner ${DIR_NAMES[from]} to ${DIR_NAMES[to]}`);
 }
 
 /** The stub-motion read samples the stub's clip about this often. */
 const MOTION_SAMPLE_MS = 250;
 /**
- * Samples a window takes with the item layer shown, and again with it hidden: 3 s at `MOTION_SAMPLE_MS`
- * where a capture is quick. A count, not a deadline, so a slow machine takes the same samples, only later.
+ * Samples the window with the item layer shown takes: 2 s at `MOTION_SAMPLE_MS` where a capture is quick.
+ * A count, not a deadline, so a slow machine takes the same samples, only later. It needs one changed pair
+ * before the stub fills, so it goes second, nearer the fill.
  */
-const MOTION_SAMPLES = 12;
+const MOTION_SAMPLES = 8;
+/**
+ * Samples the control (the item layer hidden) takes, two more than the pairs it needs, so one pair lost
+ * to an empty moment still leaves enough. It goes first, furthest from the fill, because it needs four
+ * whole pairs before the stub fills.
+ */
+const MOTION_CONTROL_SAMPLES = MOTION_CONTROL_PAIRS_MIN + 2;
+/** The walk's CI ratio, CI wall time over local wall time, as the walk-limit comments in ci.yml give it. */
+const WALK_CI_RATIO = 4.1;
 /** Sim ticks the read waits for the first item on the stub: the board's first rides on tick 55 (106-02). */
 const MOTION_ITEM_TICKS = 120;
 
@@ -1944,11 +1961,11 @@ async function tickerTimeNow(page: Page): Promise<number> {
   });
 }
 
-/** Take `MOTION_SAMPLES` samples of the stub's clip, `MOTION_SAMPLE_MS` apart where the capture allows. */
-async function sampleStub(page: Page, beltId: number, clip: { x: number; y: number; width: number; height: number }): Promise<StubSample[]> {
+/** Take `count` samples of the stub's clip, `MOTION_SAMPLE_MS` apart where the capture allows. */
+async function sampleStub(page: Page, beltId: number, clip: { x: number; y: number; width: number; height: number }, count: number): Promise<StubSample[]> {
   const itemsOn = (scene: SceneFacts) => scene.belts.find((b) => b.id === beltId)?.items ?? 0;
   const out: StubSample[] = [];
-  for (let i = 0; i < MOTION_SAMPLES; i++) {
+  for (let i = 0; i < count; i++) {
     const at = Date.now();
     const before = itemsOn(await readScene(page));
     const png = await captureClip(page, clip);
@@ -1989,9 +2006,10 @@ function framesRose(samples: readonly StubSample[]): { distinct: number; rose: b
  * THE STUB-MOTION READ (phase 106, ROADMAP criterion 1; RESEARCH Pattern 6). On the loaded board, before
  * the join, items have to be seen riding the stub, not just counted by the model. The render clock is
  * pinned so the treads hold still, and a change between two samples counts only when the model reports
- * items on the stub around both. Then the same read with the item layer hidden must see no change, which
- * is what shows the change came from items. The Pixi ticker's frame time has to rise across both windows,
- * so neither half can be graded on a renderer that stopped drawing.
+ * items on the stub around both. The read with the item layer hidden goes first and must see no change,
+ * which is what shows the change came from items; then the read with it shown must see one. Only pairs
+ * taken before the stub fills are graded (`stubMotion.ts`). The Pixi ticker's frame time has to rise
+ * across both windows, so neither half can be graded on a renderer that stopped drawing.
  */
 async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, stepIndex: number): Promise<void> {
   const label = `${stepLabel(lesson, stepIndex)} stub-motion read`;
@@ -2021,14 +2039,17 @@ async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, step
       timeout: addWaitBudget(tickBudgetMs(MOTION_ITEM_TICKS) + frameBudgetMs(MOVE_ON_FRAMES), `${label}: the first item on the stub`),
     })
     .toBeGreaterThan(0);
-  addWaitBudget(2 * MOTION_SAMPLES * MOTION_SAMPLE_MS, `${label}: two windows of ${MOTION_SAMPLES} samples ${MOTION_SAMPLE_MS} ms apart`);
+  addWaitBudget(
+    (MOTION_CONTROL_SAMPLES + MOTION_SAMPLES) * MOTION_SAMPLE_MS,
+    `${label}: a control of ${MOTION_CONTROL_SAMPLES} samples and a window of ${MOTION_SAMPLES}, ${MOTION_SAMPLE_MS} ms apart`,
+  );
   let shown: StubSample[] = [];
   let hidden: StubSample[] = [];
-  await holdTheFrame(page, 0, true);
+  await holdTheFrame(page, 0, false);
   try {
-    shown = await sampleStub(page, stub.id, clip);
-    await holdTheFrame(page, 0, false);
-    hidden = await sampleStub(page, stub.id, clip);
+    hidden = await sampleStub(page, stub.id, clip, MOTION_CONTROL_SAMPLES);
+    await holdTheFrame(page, 0, true);
+    shown = await sampleStub(page, stub.id, clip, MOTION_SAMPLES);
   } finally {
     await holdTheFrame(page, null, true);
   }
@@ -2038,13 +2059,16 @@ async function readStubMotion(page: Page, lesson: Lesson, state: WalkState, step
   const control = gradeWindow(hidden, changedBetween(hidden), fillTick);
   const seenFrames = framesRose(shown);
   const controlFrames = framesRose(hidden);
-  const firstTick = shown[0]?.tick ?? 0;
-  const lastTick = hidden[hidden.length - 1]?.tick ?? shown[shown.length - 1]?.tick ?? 0;
-  const secs = (t: number) => ((t - LESSON_BOARD_BOOT_TICK) / BOARD_TICKS_PER_S).toFixed(1);
+  const firstTick = hidden[0]?.tick ?? shown[0]?.tick ?? 0;
+  const lastTick = shown[shown.length - 1]?.tick ?? hidden[hidden.length - 1]?.tick ?? 0;
+  const controlEnd = hidden[hidden.length - 1]?.tick ?? firstTick;
+  const sinceBoard = (t: number) => (t - LESSON_BOARD_BOOT_TICK) / BOARD_TICKS_PER_S;
+  const secs = (t: number) => sinceBoard(t).toFixed(1);
   console.log(
-    `MEASURE stub-motion when=before-fill window_s=${secs(lastTick)} samples=${shown.length} changed=${seen.changed} control_changed=${control.changed} ` +
-      `from_s=${secs(firstTick)} ticks=${firstTick}-${lastTick} carrying_pairs=${seen.pairs} control_pairs=${control.pairs} control_samples=${hidden.length} ` +
-      `largest=${seen.largest} frames=${seenFrames.distinct}/${controlFrames.distinct}`,
+    `MEASURE stub-motion when=before-fill order=control-first from_s=${secs(firstTick)} window_s=${secs(lastTick)} ` +
+      `control_samples=${hidden.length} control_prefill_pairs=${control.pairs} control_late_pairs=${control.late} control_changed=${control.changed} ` +
+      `samples=${shown.length} prefill_pairs=${seen.pairs} late_pairs=${seen.late} changed=${seen.changed} largest=${seen.largest} ` +
+      `frames=${seenFrames.distinct}/${controlFrames.distinct} ci_control_end_s=${(sinceBoard(controlEnd) * WALK_CI_RATIO).toFixed(1)}`,
   );
   expect(seenFrames.rose, `${label}: the Pixi ticker drew frames across the ${shown.length} samples (${seenFrames.distinct} distinct frame times)`).toBe(true);
   expect(seenFrames.distinct, `${label}: the Pixi ticker drew a new frame for at least half the ${shown.length} samples`).toBeGreaterThanOrEqual(Math.ceil(shown.length / 2));
