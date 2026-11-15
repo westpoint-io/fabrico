@@ -49,11 +49,11 @@ export default defineConfig({
   timeout: 90_000,
   // A ceiling on one run, so a wedged browser ends in a written report instead of a runner killed
   // at the CI job's limit. CI runs the walk as three shards split by whole file, and the slowest is
-  // lesson-variants.walk.ts alone, which took 26.2 minutes of CI run 42083745921, at 25 tests. Doubled
-  // and rounded up, that is 55 minutes. The CI job's limit is 70: these 55 plus 15 for the build. At
-  // 32 tests, run unthrottled on one machine, that file took 392 s against 383 s at 25, which scales
-  // to about 26.8 CI minutes, 54 doubled, so 55 stands until a recorded CI run of 32 tests replaces it.
-  globalTimeout: 55 * 60_000,
+  // lesson-variants.walk.ts alone. CI run 43670312713 ran the 32-test walk in legs of 14.0, 29.2 and
+  // 16.0 job minutes (Playwright's own 12.8, 28.1 and 14.8). The second leg's 29.2 doubled is 58.4,
+  // rounded up to the next five minutes the way 26.2 became 55, which gives 60. The CI job's limit is
+  // 75: these 60 plus 15 for the build. That recorded run replaces the local estimate of 26.8 minutes.
+  globalTimeout: 60 * 60_000,
   // One mutable host process is shared by every test, so a shard runs its files one at a time and
   // a file never splits across shards.
   fullyParallel: false,
