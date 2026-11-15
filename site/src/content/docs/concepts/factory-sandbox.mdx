@@ -8,7 +8,7 @@ sidebar:
 import Board from '../../../components/Board.astro';
 import Fact from '../../../components/Fact.astro';
 
-A [Factory](../../reference/files/glossary/#term-factory) runs your JavaScript on each item it takes, inside a sandbox. The sandbox leaves out the clock, `Math.random` and the network, so the code can only work from the item, its own saved state and random numbers the engine hands it. Given the same items, the code then does the same thing on every run, and a replay of the board gets the same result. The one exception is the `**` operator, covered at the end of the next section.
+A [Factory](../../reference/files/glossary/#term-factory) runs your JavaScript on each item it takes, inside a sandbox. The sandbox leaves out the clock, `Math.random` and the network, so the code can only work from the item, its own saved state and random numbers the engine hands it. Given the same items, the code then does the same thing on every run, and a replay of the board gets the same result. There are three exceptions: the `**` operator, covered at the end of the next section, and the memory and stack limits, covered under Limits on one run.
 
 The board below runs the code shown with it on four orders. It counts the orders in `ctx.state` and picks a lane for each one with `ctx.randomInt`. The Debug Sink's log shows lanes 3, 3, 2 and 2 for orders A to D, on every run.
 
@@ -41,7 +41,7 @@ Each run has three limits:
 - Memory: <Fact id="limit.factory_memory" />. Code that runs out and doesn't catch the failed allocation faults with <Fact id="fault.FactoryError" />.
 - Stack, which caps how deep functions can call each other: <Fact id="limit.factory_stack_desktop" /> in the desktop app and 128 KiB in a browser. Code that recurses past it faults with <Fact id="fault.FactoryError" />.
 
-When a run faults, it sends nothing, and `ctx.state` keeps the value it had before the run. The memory and stack limits are where a Factory's result can differ between the desktop app and a browser; [Determinism and replay](../determinism-and-replay/#where-determinism-ends) explains why.
+When a run faults, it sends nothing, and `ctx.state` keeps the value it had before the run. The memory and stack limits, like the `**` operator, are places where a Factory's result can differ between the desktop app and a browser; [Determinism and replay](../determinism-and-replay/#where-determinism-ends) explains why.
 
 ## Related pages
 
