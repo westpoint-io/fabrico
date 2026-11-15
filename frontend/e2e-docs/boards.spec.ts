@@ -60,6 +60,13 @@ for (const { url, boards } of pages) {
       await expect
         .poll(async () => (await readProbeAt(page, selector)).mounted, { message: `${label} mounts`, timeout: 20_000 })
         .toBe(true);
+      // A board after the first has been on the page for as long as the spec waited on the boards
+      // above it. It may have mounted and played beside them, then paused part way when their
+      // growing logs pushed it out of the mount margin, and resumed here in a stretch where nothing
+      // moves. Restart it, as a reader would, so the drawing check sees its run from the start.
+      if (i > 0) {
+        await page.locator(selector).locator('button[data-control="restart"]').click();
+      }
       await expectBoardDrawingAt(page, selector, 'while it plays', label);
 
       const expected = manifestLine(id);
