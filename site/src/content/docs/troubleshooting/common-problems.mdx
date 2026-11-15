@@ -17,7 +17,7 @@ The belt's last cell isn't docked to a machine's input, so items reach the end a
 </Fix>
 
 <Fix symptom="A machine shows backed up">
-The machine is holding work it can't pass on: its inbox already holds <Fact id="limit.mechanical_inbox_cap" bare /> items (for a Source, its backlog holds <Fact id="limit.source_pending_cap" bare /> pending items), or one of its outputs can't take one more item. Follow its outputs to the first machine or belt that isn't backed up. That's where the line is held. Give that point a way out, for example by docking a loose belt end, choosing a faster Belt pace, or splitting the flow with a Balancer. A Sink with no fault belt never backs up. With a fault belt docked, it backs up when that belt is full.
+The machine is holding work it can't pass on: its inbox already holds <Fact id="limit.mechanical_inbox_cap" bare /> items (for a Source, its backlog holds <Fact id="limit.source_pending_cap" bare /> pending items), or one of its outputs can't take one more item. Follow its outputs to the first machine or belt that isn't backed up. That's where the line is held. Give that point a way out, for example by docking a loose belt end, choosing a faster Belt pace, or splitting the flow with a Balancer. A Sink with no fault belt never backs up. With a fault belt docked, it backs up when that belt is full. [Backpressure](../../concepts/backpressure/) shows a line packing up like this on a running board.
 </Fix>
 
 <Fix symptom="The badge under a board says the hash differs">
@@ -27,7 +27,7 @@ The board ended its run in a different state from the one this site pins for it,
 ## Webhooks and code
 
 <Fix symptom="A webhook call gets connection refused">
-Nothing is listening at that address. The app takes webhooks only while it is running, only on the loopback address 127.0.0.1, and on a port it picks each time it starts, so a URL copied from an earlier launch, or a call from another computer, finds nothing there. Start the app, select the Source, press Copy beside its webhook URL, and send to that URL from the same computer. Keep the listener on loopback: don't forward its port to your network, because it has no sign-in of its own.
+Nothing is listening at that address. The app takes webhooks only while it is running, only on the loopback address 127.0.0.1, and on a port it picks each time it starts, so a URL copied from an earlier launch, or a call from another computer, finds nothing there. Start the app, select the Source, press Copy beside its webhook URL, and send to that URL from the same computer. [Send your first webhook](../../get-started/first-webhook/) walks through the copy and a curl call step by step. Keep the listener on loopback: don't forward its port to your network, because it has no sign-in of its own.
 </Fix>
 
 <Fix symptom="A Factory emits nothing">

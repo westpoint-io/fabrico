@@ -8,7 +8,7 @@ sidebar:
 import Fact from '../../../components/Fact.astro';
 import Fix from '../../../components/Fix.astro';
 
-When a machine can't handle an item, it sends a fault out of its fault output and shows as faulted on the board. Every fault carries one of the reasons on this page. Each entry says what makes a machine give that reason, then what to change in the board or in the Factory code so it stops.
+When a machine can't handle an item, it sends a fault out of its fault output and shows as faulted on the board. Every fault carries one of the reasons on this page. Each entry says what makes a machine give that reason, then what to change in the board or in the Factory code so it stops. [Faults are items](../../concepts/faults-are-items/) explains how a fault travels on a belt like any other item.
 
 ## Routing
 
@@ -41,7 +41,7 @@ A request the Sink sent came back with a status outside 200 to 299, or never got
 </Fix>
 
 <Fix id="fault.CommandTimeout">
-The Sink's request was still waiting for an answer when its deadline passed. Point the Sink at a service that answers sooner, or find out why the service is slow. The request may still have reached the service, so make the service safe to receive the same request twice: each request carries an `Idempotency-Key` header the service can check. [See it run](../../reference/board/fault-reasons/#commandtimeout)
+The Sink's request was still waiting for an answer when its deadline passed. Point the Sink at a service that answers sooner, or find out why the service is slow. The request may still have reached the service, so make the service safe to receive the same request twice: each request carries an `Idempotency-Key` header the service can check. [Side effects and delivery](../../concepts/side-effects-and-delivery/#a-timed-out-call-may-still-have-arrived) explains why a timed-out request may still have arrived. [See it run](../../reference/board/fault-reasons/#commandtimeout)
 </Fix>
 
 ## Routes and Handlers

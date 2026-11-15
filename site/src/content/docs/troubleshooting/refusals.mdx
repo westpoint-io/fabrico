@@ -47,7 +47,7 @@ One of the two belt ends is already joined to something, and a belt end feeds on
 ## Placing, moving and resizing
 
 <Fix id="refusal.FootprintCollision">
-One of the cells the machine or belt would cover already holds another machine, belt or label. The flash on the board shows the cell. Move or delete what is there first, or place, move or draw it on free cells.
+One of the cells the machine or belt would cover already holds another machine, belt or label. The flash on the board shows the cell. Delete what is in the way and place or draw it again where there is room, or place or draw yours on free cells.
 </Fix>
 
 <Fix id="refusal.OutOfBounds">
@@ -63,23 +63,23 @@ Adding the output would make the machine more than <Fact id="limit.max_footprint
 </Fix>
 
 <Fix id="refusal.RotateCoversBelt">
-Turned, the machine would cover a cell that holds a belt. A belt docked to the machine's own output counts too, because a turn moves the output. The flash shows which belt. Move that belt, or delete it and draw it again after the turn.
+Turned, the machine would cover a cell that holds a belt. A belt docked to the machine's own output counts too, because a turn moves the output. The flash shows which belt. Delete that belt and draw it again after the turn.
 </Fix>
 
 <Fix id="refusal.RotateBlocked">
-Turned, the machine would cover a cell that holds another machine or a label. Clear the space first by moving or deleting what is there, or move the machine somewhere with room to turn.
+Turned, the machine would cover a cell that holds another machine or a label. Clear the space first by deleting what is there and placing it again where there is room, or delete the machine and place it again somewhere with room to turn. Deleting a machine also deletes the belts docked to it.
 </Fix>
 
 <Fix id="refusal.GrowCoversBelt">
-Pressing + Add output grows the machine by one row (one column if it is turned), and a belt runs through that row, often the machine's own fault belt. Move that belt, or delete it and draw it again, then add the output. When this would happen, the panel shows a note beside + Add output before you press it.
+Pressing + Add output grows the machine by one row (one column if it is turned), and a belt runs through that row, often the machine's own fault belt. Delete that belt and draw it again where it doesn't cross that row, then add the output. When this would happen, the inspector shows a note beside + Add output before you press it.
 </Fix>
 
 <Fix id="refusal.GrowBlocked">
-Pressing + Add output grows the machine by one row (one column if it is turned), and that row holds another machine or a label. Clear the space first by moving or deleting what is there, or move the machine somewhere with room to grow.
+Pressing + Add output grows the machine by one row (one column if it is turned), and that row holds another machine or a label. Clear the space first by deleting what is there and placing it again where there is room, or delete the machine and place it again somewhere with room to grow. Deleting a machine also deletes the belts docked to it.
 </Fix>
 
 <Fix id="refusal.ResizeCovers">
-The label's new size would cover a cell that holds a machine, a belt or another label. Pick a smaller size, or move the label or the thing in its way, then resize it again.
+The label's new size would cover a cell that holds a machine, a belt or another label. Pick a smaller size, or delete the thing in its way and place or draw it again where there is room, then resize the label again.
 </Fix>
 
 ## Ports, docks and wires
@@ -101,7 +101,7 @@ Belts dock onto belt ports and wires onto wire ports, and this edit put a belt o
 </Fix>
 
 <Fix id="refusal.NoSuchPort">
-The edit named an output the machine doesn't have: a Router rule or the Router's Default sends items to an output that is gone, or something asked to remove an output past the last one. Open the Router's panel and set Send to on each rule, and the Default, to one of its outputs. A rule that points at a gone output shows Missing output.
+The edit named an output the machine doesn't have: a Router rule or the Router's Default sends items to an output that is gone, or something asked to remove an output past the last one. Select the Router and, in the inspector, set Send to on each rule, and the Default, to one of its outputs. A rule that points at a gone output shows Missing output.
 </Fix>
 
 <Fix id="refusal.LabelDoesNotConnect">

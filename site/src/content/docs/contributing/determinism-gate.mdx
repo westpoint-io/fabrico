@@ -7,6 +7,8 @@ sidebar:
 
 Fabrico's core has to give the same result from the same starting state and the same events on every run and every computer. The determinism gate is the script that stops a change to the core, or to the recorded runs that prove it still behaves that way, from going in unnoticed. A change to a covered file is allowed, but you have to declare it first in `docs/DECLARED-MOVES.txt` with the digest the file will have afterwards.
 
+[Determinism and replay](../../concepts/determinism-and-replay/) explains what that promise means on a running board, and where it ends.
+
 ## What it covers
 
 [scripts/check-core-declared.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-core-declared.sh) compares your working tree, uncommitted edits included, with the tag `public-base`. It covers three groups of files.
