@@ -1,0 +1,60 @@
+---
+title: Save, open and replay
+description: Save a board to a project file, open it again, and see how opening replays the saved events to bring the board back where you left it.
+sidebar:
+  order: 5
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Fact from '../../../components/Fact.astro';
+
+A save writes your board to a project file: the board as it stands at one tick, plus the record of every edit you made and every event that came in from outside. Opening the file brings the board back at the tick you saved, and from there it runs on the same way it would have.
+
+## Save a board
+
+<Steps>
+
+1. Press Save on the toolbar, or <Fact id="shortcut.save" />.
+
+2. The first time you save a board, the app opens your system's save dialog. Pick a folder and a name, and the app writes a `.fab` [project file](../../reference/files/glossary/#term-project-file) there.
+
+3. After that, Save writes to the same file without asking. To save under a new name, hold Shift as you press Save, or press <Fact id="shortcut.saveAs" />.
+
+</Steps>
+
+The app saves only when no outbound call it made, such as an HTTP Sink's request, is still waiting for an answer. On a playing board it holds back new input, lets the items already on the belts finish, writes the file and plays on. A paused board is saved straight away, items on belts included. [Project files](../../reference/files/project-files/#when-the-app-saves) gives the details.
+
+## Open it again
+
+<Steps>
+
+1. Press Load on the toolbar, or <Fact id="shortcut.open" />. If the board you have open has changes you haven't saved, the app asks first.
+
+2. Pick the `.fab` file in your system's open dialog.
+
+</Steps>
+
+The board in the file replaces the one you had open.
+
+## What opening replays
+
+When you open a project file, the app rebuilds the board in three steps. It:
+
+- puts back the saved snapshot, a copy of the whole board taken at or before the tick you saved;
+- [replays](../../reference/files/glossary/#term-replay) the saved [events](../../reference/files/glossary/#term-event) and edits forward from there, in order, each on the tick it happened, with outside calls muted so nothing is sent a second time;
+- stops at the tick you saved, so the board stands exactly where it was.
+
+If your board was playing when you pressed Load, the opened board plays on from the saved tick. If it was paused, the opened board stays paused at the saved tick until you press Play.
+
+A file leaves out where you were looking, what you had selected, and the list of delivery ids the app uses to drop a repeated webhook. Opening a file starts that list empty, so a webhook sent again with an old delivery id makes a new item.
+
+<Aside type="note">
+The app writes over the file you saved to. If it stops partway through a save, the file can be left incomplete, so keep a copy of a project you care about.
+</Aside>
+
+## Related pages
+
+- [Project files](../../reference/files/project-files/): what a file holds, which versions the app opens, the size limit and when a save happens.
+- [Keyboard shortcuts](../../reference/files/keyboard-shortcuts/): Save, Save As, Load and the other keys.
+- [Webhook ingress](../../reference/code-and-http/webhook-ingress/): how the app drops a repeated webhook, and why opening a file resets that list.
+- [Send your first webhook](../first-webhook/): put an event on the board before you save it.
