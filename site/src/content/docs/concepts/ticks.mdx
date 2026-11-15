@@ -1,0 +1,42 @@
+---
+title: Ticks
+description: "The engine moves in ticks, not seconds. A tick is one step of the whole board, and Source timers and belt pace both count in ticks."
+sidebar:
+  order: 1
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A tick is one step of the engine's clock. The engine counts ticks, not seconds: a [Source](../../reference/files/glossary/#term-source) timer, the pace of a [belt](../../reference/files/glossary/#term-belt) and every time a page gives for a board are numbers of ticks. How many ticks fit in a second depends on where the board runs.
+
+On the board below, the top Source makes an [item](../../reference/files/glossary/#term-item) from each webhook it gets, and the bottom Source is set to a timer. Press Step to move the board one tick at a time and watch the tick counter beside the controls. The bottom Source makes an item on tick 61 with no webhook at all, then again every 60 ticks.
+
+<Board name="docs-machines-source" />
+
+## A tick is one step of the whole board
+
+Everything on a board happens on some tick. On this board the top Source makes its first item on tick 41, the belt moves the item forward, and the Debug [Sink](../../reference/files/glossary/#term-sink) takes it on tick 71. The board doesn't change between two ticks, and on a tick where no machine or belt has work, nothing moves. Here that happens from tick 93 to tick 110, after both items have reached their Sinks and before the next webhook, and the engine just counts those ticks.
+
+The same edits and events on the same ticks always give the same result, which is why the engine works in ticks. A tick is the unit a replay repeats, one at a time, in the same order.
+
+## Ticks and seconds
+
+The app runs a tick, then waits <Fact id="app.tick_pause_ms" /> before the next one, so each tick takes that pause plus the time the tick's own work takes. A busy board runs fewer ticks a second than an idle one.
+
+The boards on this site play at <Fact id="embed.ticks_per_second" /> at 1x, and the speed menu under each board changes that. A board also stops on each of its notes until you press Continue, and Step moves it one tick however long you wait between presses.
+
+So a number of ticks only approximates a number of seconds, and the gap changes from one place to another. The engine itself never reads a clock, so a board's result doesn't depend on how fast it ran.
+
+## Timers and belt pace count ticks
+
+A Source on a timer makes an item once every so many ticks. The bottom Source here has an interval of 60 ticks, and it fires on ticks 61, 121, 181 and 241.
+
+A belt moves each item one slot forward after a set number of ticks, and a belt you draw starts at <Fact id="limit.default_ticks_per_slot" />. Each belt here is four tiles long, and an item takes 30 ticks to cross it. [Belts are queues](../belts-are-queues/) says how length and pace set the time an item spends on a belt.
+
+## Related pages
+
+- [Source](../../reference/machines/source/): the webhook and timer triggers, and the timer's interval field.
+- [Belt](../../reference/machines/belt/): slots, tiles and the pace field.
+- [Items and events](../): what a Source makes on each tick it fires.
+- [Belts are queues](../belts-are-queues/): why an item spends time on a belt, and how much.

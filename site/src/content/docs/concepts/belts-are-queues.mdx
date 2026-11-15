@@ -1,0 +1,38 @@
+---
+title: Belts are queues
+description: "A belt is a queue. Its length is how long an item takes to cross it and how many items it can hold while the next machine is busy."
+sidebar:
+  order: 2
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A belt is a queue. [Items](../../reference/files/glossary/#term-item) get on at its tail, wait their turn in the order they got on, and leave at its head. A belt's length and pace decide two things, how long an item spends crossing it and how many items it can hold while the machine at its head is busy.
+
+On the board below, two [Sources](../../reference/files/glossary/#term-source) each put an item on their own [belt](../../reference/files/glossary/#term-belt) on [tick](../../reference/files/glossary/#term-tick) 41. The top belt is longer and turns twice, and it keeps the pace a new belt starts with. The bottom belt is shorter, but it is set three times slower.
+
+<Board name="docs-machines-belt" />
+
+## Length and pace are delay
+
+A belt is made of tiles, one per cell you draw, and each tile has <Fact id="limit.slots_per_tile" bare /> slots. An item moves forward one slot at a time, and the pace says how many ticks it waits before each step. A belt you draw starts at <Fact id="limit.default_ticks_per_slot" />.
+
+The top belt is seven tiles long at that starting pace, and its item reaches the Sink on tick 95, 54 ticks after the Source made it. The bottom belt is five tiles long at three times the wait per slot, and its item arrives on tick 151, 110 ticks after. The second pair of webhooks makes the same trip later: the items reach their Sinks on tick 255 and tick 313.
+
+So an item spends longer on a belt with more slots to cross, and longer on a belt with more ticks between steps. The turns on the top belt cost nothing extra.
+
+## Length is also a buffer
+
+A slot holds one item, so a belt can hold as many items as it has slots. The belt on [Items and events](../) is nine tiles long, which makes 36 slots, and it ends its run carrying 35 items back to back.
+
+Items queue up when the machine at the head doesn't take them. Take the same board with nothing docked on the belt's head: the first item stops at the head, each item behind it stops one slot further back, and by tick 260 all 36 slots are full. A longer belt takes a longer burst before it fills, which gives a slow machine at its head time to catch up.
+
+Items never pass each other on a belt, so they leave in the order they got on. When a belt is full, the machine that feeds it can't put anything more on it. That is backpressure, and the Source page says what a Source does with items it can't send yet.
+
+## Related pages
+
+- [Belt](../../reference/machines/belt/): the pace field, its limits, and how a belt docks.
+- [Source](../../reference/machines/source/): the backlog a Source keeps while its belt is full.
+- [Ticks](../ticks/): how the engine counts the time an item spends on a belt.
+- [Items and events](../): what the items on a belt are.

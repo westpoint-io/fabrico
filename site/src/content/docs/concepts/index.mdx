@@ -1,6 +1,22 @@
 ---
-title: Concepts
-description: "The ideas Fabrico is built on: machines, belts, items, ticks, faults, and why every replay ends in the same state."
+title: Items and events
+description: "What travels on a belt: each event from outside becomes an item, a small piece of data that machines pick up, change and pass on."
+sidebar:
+  order: 0
 ---
 
-This section will explain the ideas underneath Fabrico, one page each. Its pages aren't written yet.
+import Board from '../../../components/Board.astro';
+
+An item is one piece of data moving through your factory, such as the body of a webhook call. An event is something that happens outside the board, such as that webhook call reaching the app. The app logs each event, and a Source, the machine where items enter the board, turns it into one item that travels along the belts from machine to machine.
+
+The board below is step 1 of [Your first factory](../get-started/first-factory/). A script sends webhooks to its [Source](../reference/files/glossary/#term-source), and one long [belt](../reference/files/glossary/#term-belt) carries each [item](../reference/files/glossary/#term-item) to a Debug [Sink](../reference/files/glossary/#term-sink), which records it and sends nothing.
+
+<Board name="docs-start-first-factory-1" />
+
+Each webhook in the script is an [event](../reference/files/glossary/#term-event). The Source makes the first item on [tick](../reference/files/glossary/#term-tick) 41, the item crosses the nine cells of belt, and the Sink takes it on tick 111. Two more webhooks follow the same path, then a run of webhooks two ticks apart starts on tick 190. By the last tick, 260, the belt holds 35 items back to back, each one made from its own webhook.
+
+An item carries the webhook's body exactly as the sender posted it. The first item here is `{"order":1}`, and the app doesn't read it or check that it's JSON. Machines along the line read the item, and a [Factory](../reference/files/glossary/#term-factory) can change it with your JavaScript. The Debug Sink at the end writes the item it takes into the log under the board, one DEBUG row each.
+
+Each webhook the app logs makes one item, on the Source it was sent to. The one exception is a Source whose backlog is already full, which drops the new item, as the [Source](../reference/machines/source/) page explains. From there on, machines hand work to each other only along belts and wires, so what a machine does depends on its own settings and on what reaches it.
+
+Read next: [Ticks](ticks/) explains how the engine counts time, and [Belts are queues](belts-are-queues/) explains why an item waits.

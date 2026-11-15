@@ -25,7 +25,7 @@ Press Play to run it, or Step to move one [tick](../reference/files/glossary/#te
 
 ## How it works
 
-Something happens outside the app: a webhook call arrives, or a timer fires. The app logs it as an [event](../reference/files/glossary/#term-event), and a [Source](../reference/files/glossary/#term-source) turns it into an item on the belt docked to its output.
+Something happens outside the app: a webhook call arrives, or a timer fires. The app logs it as an [event](../reference/files/glossary/#term-event), and a [Source](../reference/files/glossary/#term-source) turns it into an item on the belt docked to its output. [Items and events](../concepts/) says what an item carries and how an event becomes one.
 
 [Belts](../reference/files/glossary/#term-belt) carry [items](../reference/files/glossary/#term-item) from machine to machine, and each machine does one job with them. A Router sends an item down one of its outputs, a [Factory](../reference/files/glossary/#term-factory) runs your JavaScript on it, and a [Sink](../reference/files/glossary/#term-sink) at the end of the line sends it out as an HTTP request or records it.
 
