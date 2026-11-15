@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import {
   autoContinueCaptions,
-  expectBoardDrawing,
+  expectBoardDrawingStepped,
   glCounts,
   installGlCounter,
   manifestLine,
@@ -125,7 +125,9 @@ for (const id of IDS) {
     // the middle of a tall canvas it left the belt tiles 0 to 18 px into the viewport, where a
     // screenshot of them never changed. Bring the board into view before the drawing check reads it.
     await board.scrollIntoViewIfNeeded();
-    await expectBoardDrawing(page, id, `${id} after its link`);
+    // The drawing check samples at board ticks, not wall time: on a slow runner each screenshot
+    // took 1.5 to 2 s, and a 10 s window missed belt motion that lasts only a few ticks.
+    await expectBoardDrawingStepped(page, id, `${id} after its link`);
 
     await board.locator('select').selectOption({ label: '4x' });
     const expected = manifestLine(id);

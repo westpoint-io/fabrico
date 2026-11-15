@@ -478,3 +478,86 @@ export async function readTraceAt(page: Page, selector: string): Promise<[number
     return el.fabricoTickHashes();
   }, selector);
 }
+
+/** Ticks per Step press between samples: fewer than the 7 ticks an item spends on a sampled middle cell. */
+const STEP_TICKS = 4;
+/** Board ticks the stepped check may walk through before it fails. */
+const STEP_SPAN_TICKS = 240;
+
+/**
+ * {@link expectBoardDrawing} sampled at board ticks instead of wall time, for boards whose items
+ * cross a sampled cell in a few ticks. The board is paused with Step, so a screenshot shows one
+ * known tick however long it takes, and a screenshot whose tiles moved under it is retaken at the
+ * same tick. Between samples it presses Step {@link STEP_TICKS} times, so no item visit of more
+ * than that many ticks falls between two screenshots. It fails once the board has walked
+ * {@link STEP_SPAN_TICKS} ticks, or reached its end tick, with no tile changing.
+ */
+export async function expectBoardDrawingStepped(page: Page, name: string, context: string): Promise<void> {
+  const selector = `fabrico-board[name="${name}"]`;
+  const before = (await readProbeAt(page, selector)).frames;
+  await expect
+    .poll(async () => (await readProbeAt(page, selector)).frames - before, {
+      message: `${context}: ${name}'s frame count rises`,
+      timeout: BUDGET_MS,
+      intervals: [POLL_MS],
+    })
+    .toBeGreaterThanOrEqual(2);
+  const packets = await readProbeAt(page, selector);
+  expect(packets.decodeErrors, `${context}: ${name} refused no render packet`).toBe(0);
+  expect(packets.packetsApplied, `${context}: ${name} applied its render packets`).toBeGreaterThan(0);
+
+  // Press Step n times in one task, then once more while a caption holds the board, so the
+  // page's auto-Continue never finds a hold to turn back into play. Step is disabled at the end
+  // tick, so a caption there would hold the board with no press able to clear it.
+  const step = (n: number): Promise<void> =>
+    page.evaluate(
+      ([sel, count]) => {
+        const root = document.querySelector(sel as string)?.shadowRoot;
+        const stepButton = root?.querySelector<HTMLButtonElement>('button[data-control="step"]');
+        const play = root?.querySelector('button[data-control="play"]');
+        if (!stepButton || !play) throw new Error(`no Step or Play button on ${sel as string}`);
+        for (let i = 0; i < (count as number); i++) stepButton.click();
+        while (play.getAttribute('aria-label') === 'Continue' && !stepButton.disabled) stepButton.click();
+      },
+      [selector, n] as const,
+    );
+  await step(1);
+  const start = (await readProbeAt(page, selector)).tick;
+  const seen = new Map<string, string>();
+  let samples = 0;
+  for (;;) {
+    const frames = (await readProbeAt(page, selector)).frames;
+    await expect
+      .poll(async () => (await readProbeAt(page, selector)).frames - frames, {
+        message: `${context}: ${name} draws a frame after Step`,
+        timeout: BUDGET_MS,
+        intervals: [50],
+      })
+      .toBeGreaterThanOrEqual(2);
+    let sample = await sampleTiles(page, selector);
+    for (let retake = 0; retake < 4 && sample.size === 0 && (await readProbeAt(page, selector)).beltTiles.length > 0; retake++) {
+      sample = await sampleTiles(page, selector);
+    }
+    samples += 1;
+    if (foldSample(seen, sample)) {
+      // Leave the board playing, as it was before the check.
+      await page.evaluate((sel) => {
+        const play = document.querySelector(sel)?.shadowRoot?.querySelector<HTMLButtonElement>('button[data-control="play"]');
+        if (play?.getAttribute('aria-label') === 'Play') play.click();
+      }, selector);
+      return;
+    }
+    const probe = await readProbeAt(page, selector);
+    if (probe.tick - start >= STEP_SPAN_TICKS || probe.tick >= probe.endTick) {
+      expect(seen.size, `${context}: ${name} reports belt tiles on screen`).toBeGreaterThan(0);
+      throw new Error(
+        `${context}: ${name}'s ${seen.size} belt tiles showed the same pixels in ${samples} screenshots, stepped from tick ${start} to ${probe.tick}`,
+      );
+    }
+    await step(STEP_TICKS);
+    // A board that stopped (an engine fault disables Step) would otherwise loop until the test's
+    // own timeout.
+    const after = (await readProbeAt(page, selector)).tick;
+    if (after === probe.tick) throw new Error(`${context}: ${name} stayed at tick ${after} after Step`);
+  }
+}
