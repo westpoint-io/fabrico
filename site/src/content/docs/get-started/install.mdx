@@ -12,7 +12,7 @@ There is no download of Fabrico yet. To run it today you build it from source, w
 ## What you need
 
 - Rust, installed through rustup. The repository pins its compiler version in `rust-toolchain.toml`, and rustup installs that version the first time you build.
-- Node 22 or newer, with npm. Node builds the app's frontend, and CI builds the app with Node 22.
+- Node 22.12 or newer, with npm. Vite, the tool that builds the app's frontend, doesn't support Node 22 releases before 22.12, and CI builds the app with the newest Node 22.
 - A C compiler. The JavaScript engine that runs Factory code is written in C and compiles along with the app.
 - git, to get the code.
 
