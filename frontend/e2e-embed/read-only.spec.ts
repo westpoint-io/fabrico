@@ -143,6 +143,21 @@ test('clicks, drags, keys and wheel turns leave every tick, the end hash and the
   // And it still draws: Play at the end runs it again, and the belts move on screen.
   await board.scrollIntoViewIfNeeded();
   await board.locator('button[data-control="play"]').click();
+  // Play at the end tick restarts the run. It has to leave the board playing on its own clock
+  // before the drawing check presses Step: a board that restarted but stayed paused fails here.
+  await expect
+    .poll(
+      async () => {
+        const p = await readProbe(page, BOARD);
+        return { playing: p.playing, restarted: p.tick < end.endTick };
+      },
+      { timeout: 20_000, message: `${BOARD} restarts and plays after Play at the end` },
+    )
+    .toEqual({ playing: true, restarted: true });
+  const restartedAt = (await readProbe(page, BOARD)).tick;
+  await expect
+    .poll(async () => (await readProbe(page, BOARD)).tick, { timeout: 20_000, message: `${BOARD} plays on past tick ${restartedAt}` })
+    .toBeGreaterThan(restartedAt);
   await expectBoardDrawingStepped(page, BOARD, 'after the input');
   // Only the boards within 200 px of the viewport hold a renderer.
   const near = await boardsNearViewport(page);

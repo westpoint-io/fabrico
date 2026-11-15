@@ -121,6 +121,17 @@ test('eight boards run, two wait on their posters, a lost context redraws on Pla
   expect(back.lostShown, `${lostBoard}: the line goes`).toBe(false);
   expect(back.tick, `${lostBoard}: picks up at the tick it lost its context on`).toBeGreaterThanOrEqual(lostProbe.tick);
   expect((await stillParts(page, lostBoard)).band, `${lostBoard}: no band`).toBe('');
+  // Play has to start it playing again, on its own clock, before the drawing check presses Step:
+  // a board that got its renderer back but stayed paused fails here.
+  await expect
+    .poll(
+      async () => {
+        const p = await readProbeAt(page, sel(lostBoard));
+        return { playing: p.playing, movedOn: p.tick > lostProbe.tick };
+      },
+      { timeout: 20_000, message: `${lostBoard} plays on past tick ${lostProbe.tick} after Play` },
+    )
+    .toEqual({ playing: true, movedOn: true });
   // The drawing check steps the board on from that tick with the new renderer over the kept scene;
   // Step sends no keyframe, so the pixels that change are drawn from the scene the board kept.
   await expectBoardDrawingSteppedAt(page, sel(lostBoard), 'after Play redraws the lost board', `${lostBoard} (${back.id})`);
