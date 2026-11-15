@@ -3,7 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import {
   autoContinueCaptions,
-  expectBoardDrawing,
+  expectBoardDrawingStepped,
   glCounts,
   installGlCounter,
   readProbe,
@@ -42,7 +42,7 @@ test(`${BOARD} draws on a file:// page and ends on its manifest hash`, async ({ 
   await page.goto(PAGE_URL);
   await expect.poll(async () => (await readProbe(page, BOARD)).mounted, { timeout: 20_000 }).toBe(true);
 
-  await expectBoardDrawing(page, BOARD, 'while it plays');
+  await expectBoardDrawingStepped(page, BOARD, 'while it plays');
   expect(await glCounts(page)).toMatchObject({ live: 1, lost: 0, hidden: 1 });
 
   const expected = manifestLine();

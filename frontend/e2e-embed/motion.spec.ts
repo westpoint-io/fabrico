@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
-  expectBoardDrawing,
+  expectBoardDrawingStepped,
   fileCaptions,
   pageUrl,
   readProbe,
@@ -91,7 +91,7 @@ test('a hidden tab pauses every board, and showing it resumes only the ones that
   const advanced = await readProbe(page, 'advanced');
   expect(advanced.playing, 'the board the reader paused stays paused').toBe(false);
   expect(advanced.tick, 'the board the reader paused holds its tick').toBe(hiddenAt.advanced);
-  await expectBoardDrawing(page, 'demo_scene', 'after the tab came back');
+  await expectBoardDrawingStepped(page, 'demo_scene', 'after the tab came back');
 
   errors.assertNone('across the hidden tab');
   expect(consoleErrors).toEqual([]);

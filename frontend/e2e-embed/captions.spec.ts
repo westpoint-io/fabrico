@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 // The PNG decoder Playwright already bundles (pngjs). No new dependency.
 import { PNG } from 'playwright-core/lib/utilsBundle';
 import {
-  expectBoardDrawing,
+  expectBoardDrawingStepped,
   expectDrawsAfter,
   fileCaptions,
   glCounts,
@@ -204,7 +204,7 @@ test('the demo board stops on each caption tick at 1x and 4x and rings the machi
     ]);
     expect(strip.rail, `${speed}: the rail is off after Continue`).toBe(false);
     await expect(board(page, DEMO).locator('button[data-control="play"]')).toHaveAttribute('aria-label', 'Pause');
-    await expectBoardDrawing(page, DEMO, `${speed}, after the last Continue`);
+    await expectBoardDrawingStepped(page, DEMO, `${speed}, after the last Continue`);
   }
 
   const back = await restartAndReadStrip(page, DEMO);

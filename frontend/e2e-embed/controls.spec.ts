@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   autoContinueCaptions,
   enableTrace,
-  expectBoardDrawing,
+  expectBoardDrawingStepped,
   expectTraceMatchesNative,
   glCounts,
   installGlCounter,
@@ -74,7 +74,7 @@ test('three boards draw with the app renderer, each stage sized to its own colum
     // order_processing's items all arrive by tick 256 (about 4 s at 1x), and a board with nothing
     // moving draws the same picture every frame. Restart puts each board early in its run first.
     await control(page, name, 'restart').click();
-    await expectBoardDrawing(page, name, 'on the three-board page');
+    await expectBoardDrawingStepped(page, name, 'on the three-board page');
     const box = await page.evaluate((n) => {
       const el = document.querySelector(`fabrico-board[name="${n}"]`) as HTMLElement;
       const col = el.parentElement as HTMLElement;

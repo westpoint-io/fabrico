@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   autoContinueCaptions,
   enableTrace,
-  expectBoardDrawing,
+  expectBoardDrawingStepped,
   expectTraceMatchesNative,
   glCounts,
   installGlCounter,
@@ -143,7 +143,7 @@ test('clicks, drags, keys and wheel turns leave every tick, the end hash and the
   // And it still draws: Play at the end runs it again, and the belts move on screen.
   await board.scrollIntoViewIfNeeded();
   await board.locator('button[data-control="play"]').click();
-  await expectBoardDrawing(page, BOARD, 'after the input');
+  await expectBoardDrawingStepped(page, BOARD, 'after the input');
   // Only the boards within 200 px of the viewport hold a renderer.
   const near = await boardsNearViewport(page);
   expect(near, 'the demo board is near the viewport').toContain(BOARD);
