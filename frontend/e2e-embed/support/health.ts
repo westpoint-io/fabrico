@@ -232,46 +232,6 @@ function foldSample(seen: Map<string, string>, sample: Map<string, string>): boo
   return changed;
 }
 
-/**
- * The wall-clock drawing check, left for the callers not yet moved to
- * {@link expectBoardDrawingStepped}: its frame count rises by at least 2, and the pixels of at
- * least one of its belt tiles, in screenshots taken by the browser's compositor, change within the
- * budget.
- */
-export async function expectBoardDrawing(page: Page, name: string, context: string): Promise<void> {
-  await expectBoardDrawingAt(page, `fabrico-board[name="${name}"]`, context, name);
-}
-
-/** {@link expectBoardDrawing} for the board a CSS selector finds, for pages with two of one name. */
-export async function expectBoardDrawingAt(page: Page, selector: string, context: string, name = selector): Promise<void> {
-  const before = (await readProbeAt(page, selector)).frames;
-  await expect
-    .poll(async () => (await readProbeAt(page, selector)).frames - before, {
-      message: `${context}: ${name}'s frame count rises`,
-      timeout: BUDGET_MS,
-      intervals: [POLL_MS],
-    })
-    .toBeGreaterThanOrEqual(2);
-  // A dropped packet stops the board with a card, but a decode error has no console line, so
-  // read the counters as well.
-  const packets = await readProbeAt(page, selector);
-  expect(packets.decodeErrors, `${context}: ${name} refused no render packet`).toBe(0);
-  expect(packets.packetsApplied, `${context}: ${name} applied its render packets`).toBeGreaterThan(0);
-
-  const deadline = Date.now() + BUDGET_MS;
-  const seen = new Map<string, string>();
-  let samples = 0;
-  while (Date.now() < deadline) {
-    samples += 1;
-    if (foldSample(seen, await sampleTiles(page, selector))) return;
-    await page.waitForTimeout(POLL_MS);
-  }
-  expect(seen.size, `${context}: ${name} reports belt tiles on screen`).toBeGreaterThan(0);
-  throw new Error(
-    `${context}: ${name}'s ${seen.size} belt tiles showed the same pixels in ${samples} screenshots over ${BUDGET_MS} ms`,
-  );
-}
-
 // --- Board files, the manifest and the native per-tick oracle ---
 
 const repoPath = (path: string): string => fileURLToPath(new URL(`../../../${path}`, import.meta.url));

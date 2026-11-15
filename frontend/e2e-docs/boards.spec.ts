@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   autoContinueCaptions,
-  expectBoardDrawingAt,
+  expectBoardDrawingSteppedAt,
   installGlCounter,
   manifestLine,
   readProbeAt,
@@ -67,7 +67,7 @@ for (const { url, boards } of pages) {
       if (i > 0) {
         await page.locator(selector).locator('button[data-control="restart"]').click();
       }
-      await expectBoardDrawingAt(page, selector, 'while it plays', label);
+      await expectBoardDrawingSteppedAt(page, selector, 'while it plays', label);
 
       const expected = manifestLine(id);
       await expect
