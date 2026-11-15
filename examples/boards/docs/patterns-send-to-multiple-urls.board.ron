@@ -1,0 +1,72 @@
+// A docs board for the pattern page Send a webhook to multiple URLs. One Source gets two
+// webhooks, and its belt carries each item into a Factory, whose code builds the body both
+// services get. A belt carries that item into a Tee, which puts a copy on each of its two
+// outputs. Each output has its own belt into an HTTP Sink: the top one posts to a log URL and the
+// bottom one to a billing URL. The executor below answers the log URL after 10 ticks and the
+// billing URL after 20, so the board never reaches a network.
+//
+//   row 1:                                                 +-b7-> SINK 3, HTTP POST to https://example.com/log
+//   row 2:   SOURCE 0 -b5-> FACTORY 1 -b6-> TEE 2 In, Out -+
+//   row 3:                                       Out -+
+//   row 4:                                            +-b8-> SINK 4, HTTP POST to https://example.com/billing
+//
+// The webhooks are 80 ticks apart, so each output belt has room for its copy and the Tee never
+// finds a branch busy. The Fault ports stay undocked, and nothing faults.
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Tee 2, the Sinks 3 and 4, then
+// the belts 5 to 8. The 20 commands and the history seal end the boot on tick 21.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, TEE=3, SINK=7. Dock `port` is the catalog port
+// index: SOURCE Out=0; FACTORY In=0, Out=1, Fault=2; TEE In=0, Out=1 (top row), Out=2 (bottom
+// row); SINK In=0. In the code, ctx.emit(0, ...) sends on the Factory's first output, catalog
+// port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Send a webhook to multiple URLs",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY
+        Place(kind: 3, cell_x: 11, cell_y: 2),       // 2: TEE 2x2, In (11,2), Outs (12,2) (12,3)
+        Place(kind: 7, cell_x: 16, cell_y: 1),       // 3: SINK HTTP log
+        Place(kind: 7, cell_x: 16, cell_y: 4),       // 4: SINK HTTP billing
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),                 // 5
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),                // 6
+        DrawBelt(cells: [(13, 2), (14, 2), (14, 1), (15, 1)]),     // 7
+        DrawBelt(cells: [(13, 3), (14, 3), (14, 4), (15, 4)]),     // 8
+        Dock(belt: 5, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 5, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 6, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 2, port: 1),
+        Dock(belt: 7, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 8, endpoint: Tail, node: 2, port: 2),
+        Dock(belt: 8, endpoint: Head, node: 4, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// the body both services get
+export default function (input, ctx) {
+  ctx.emit(0, { event: input.type, id: input.id });
+}"#)),
+        Configure(node: 3, config: Sink(target: Http(url: "https://example.com/log", method: Post))),
+        Configure(node: 4, config: Sink(target: Http(url: "https://example.com/billing", method: Post))),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"type":"order.paid","id":1}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"type":"order.paid","id":2}"#)),
+    ],
+    captions: [
+        // Measured: the Tee works on 85 and 165, tee.faults=0.
+        Caption(tick: 85, highlight: 2, text: "The Tee takes the item from the Factory and puts one copy on each of its two outputs, one for each URL."),
+        // Measured: both HTTP Sinks work on 115 and 195; the effects on 115 are the log POST and the billing POST.
+        Caption(tick: 115, highlight: 3, text: "The top HTTP Sink posts its copy to the log URL on this tick, and the bottom HTTP Sink posts the same body to the billing URL."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/log", outcome: Reply(after_ticks: 10)),
+        Rule(url_prefix: "https://example.com/billing", outcome: Reply(after_ticks: 20)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 300,
+)

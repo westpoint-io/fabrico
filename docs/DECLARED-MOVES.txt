@@ -147,10 +147,11 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board on the Forward a webhook to another URL
-# pattern page (examples/boards/docs/patterns-forward-a-webhook.board.ron). The 34 older lines
-# are unchanged.
-examples/boards/hashes.manifest 54452effbc10922bdfa6e19ffbd8cbad4c4adee45b2aad5d4cc005a7e45fd591
+# Two new lines, written by the generator, for the boards on two pattern pages: Forward a webhook
+# to another URL (examples/boards/docs/patterns-forward-a-webhook.board.ron) and Send a webhook to
+# multiple URLs (examples/boards/docs/patterns-send-to-multiple-urls.board.ron). The 34 older
+# lines are unchanged.
+examples/boards/hashes.manifest b2758e3e071ded49911f948c62cbdc998278c99a2903295e4bbdbc279917ac2f
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

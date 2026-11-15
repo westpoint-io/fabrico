@@ -1,0 +1,56 @@
+---
+title: Send a webhook to multiple URLs
+description: "Fan out one webhook to several endpoints with a Tee, which gives each branch its own copy of the item."
+searchPhrase: send a webhook to multiple URLs
+sidebar:
+  order: 20
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+You send a webhook to multiple URLs when more than one service needs the same event, such as a log, a chat channel and a billing system. A [Tee](../../reference/machines/tee/) makes the copies: each of its outputs gets its own copy of every [item](../../reference/files/glossary/#term-item) that reaches it, and HTTP [Sinks](../../reference/files/glossary/#term-sink) post the copies to their endpoints.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a [Factory](../../reference/files/glossary/#term-factory), a Tee and two HTTP Sinks, left to right, joined by [belts](../../reference/files/glossary/#term-belt). The Factory builds one body from each webhook, the Tee copies it, and the top HTTP Sink posts its copy to a log URL while the bottom one posts to a billing URL.
+
+<Board name="docs-patterns-send-to-multiple-urls" />
+
+## How the board works
+
+Press Play and the board stops on these two [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 85: The Tee takes the item from the Factory and puts one copy on each of its two outputs, one for each URL.
+2. Tick 115: The top HTTP Sink posts its copy to the log URL on this tick, and the bottom HTTP Sink posts the same body to the billing URL.
+
+The second webhook takes the same path 80 ticks later: the Tee copies it on tick 165 and both HTTP Sinks post on tick 195.
+
+## The Factory code
+
+The Factory builds the body both services get:
+
+```js title="Factory code"
+// the body both services get
+export default function (input, ctx) {
+  ctx.emit(0, { event: input.type, id: input.id });
+}
+```
+
+The `ctx.emit` line sends one item on output 0. The Tee after the Factory does the copying, so the code doesn't change when you add another URL.
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- A Tee has <Fact id="limit.default_arity" /> outputs, so one Tee reaches two URLs. For a third URL, put a second Tee on one of the two branches and give each of its outputs an HTTP Sink. [Limits](../../reference/board/limits/) lists the branch count.
+- The Tee sends both copies on the same tick. When one branch's belt has no room for its copy, that copy becomes a <Fact id="fault.BranchBusy" /> [fault](../../reference/files/glossary/#term-fault) and the other branch still gets its copy; the Tee waits only when both branches are busy. This board's webhooks arrive 80 ticks apart, so neither belt fills. [Backpressure](../../concepts/backpressure/) explains how a slow line packs up.
+- Each HTTP Sink makes its own call and gets one attempt. One URL can fail while the other succeeds, and the failure is a <Fact id="fault.CommandFailure" /> fault on that Sink only. [Side effects and delivery](../../concepts/side-effects-and-delivery/) covers the one attempt.
+
+## Related pages
+
+- [Forward a webhook to another URL](../forward-a-webhook/): receive a webhook and send it on with one HTTP Sink.
+- [Tee](../../reference/machines/tee/): its ports, and what happens when an output is busy.
+- [Backpressure](../../concepts/backpressure/): why a line packs up behind a slow belt or machine.
+- [Limits](../../reference/board/limits/): how many outputs a Tee has and how many items an input holds.
