@@ -21,7 +21,7 @@ On the board below, one Source sends three webhooks to a Router: the first two e
 
 The <Fact id="config.Router.routes" /> field holds the routes in the order you wrote them. Each route has a byte position, a run of bytes and an output. The Router compares the item's bytes, starting at that position, with the route's bytes, and the first route that matches decides the output. The Router never sorts the routes, so put a narrow route above a broad one that would also match. A Router holds at most <Fact id="limit.max_routes" />, and a route's bytes run to at most <Fact id="limit.max_route_expect_bytes" bare /> bytes.
 
-An item too short to hold the route's bytes at that position doesn't match the route. In the app's config panel you type a route's bytes as text, and the Router compares them byte for byte, so case and spacing count.
+An item too short to hold the route's bytes at that position doesn't match the route. In the inspector, the panel on the right that shows the selected machine's settings, you type a route's bytes as text, and the Router compares them byte for byte, so case and spacing count.
 
 ## The default output
 
@@ -29,7 +29,7 @@ The <Fact id="config.Router.default" /> field names the output an item takes whe
 
 ## An item that matches nothing, with no default
 
-When you clear the default and an item matches no route, the Router sends the item out its Fault port as a <Fact id="fault.NoMatch" /> fault, and the Router shows as faulted on that tick. Dock a belt on the Fault port to carry those items to a Sink where you can read them. With nothing docked there, the item goes no further. The troubleshooting entry for [a NoMatch fault](../../../troubleshooting/fault-reasons/#fault-no-match) says how to fix one.
+When you clear the default and an item matches no route, the Router sends the item out its Fault port as a <Fact id="fault.NoMatch" /> fault, and the Router shows as faulted on that tick. Dock a belt on the Fault port to carry those items to a Sink where you can read them. With nothing docked there, the item goes no further. The troubleshooting entry for [a NoMatch fault](../../../troubleshooting/fault-reasons/#fault-no-match) says how to fix one. [Faults are items](../../../concepts/faults-are-items/) shows how a fault travels on a belt like any other item.
 
 ## Related pages
 

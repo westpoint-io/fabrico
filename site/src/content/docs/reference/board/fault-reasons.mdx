@@ -10,7 +10,7 @@ import Fact from '../../../../components/Fact.astro';
 
 When a machine can't handle an item, it sends a fault instead of a normal output and shows as faulted on that tick. Each fault carries one reason, the machine that raised it and, for most reasons, the item or the error message behind it. This page lists each reason, what makes a machine give it, and where the fault goes.
 
-A fault leaves by the machine's Fault port. That port is reserved and sits apart from the numbered outputs, so a fault never travels with normal items. Dock a belt on it and lead the belt to a Debug Sink to keep each fault where you can read it. With nothing docked there, the fault goes no further. A Route and a Tee have no Fault port on the grid. They still fault and show as faulted, and the sections below say what happens to their faults.
+A fault leaves by the machine's Fault port. That port is reserved and sits apart from the numbered outputs, so a fault never travels with normal items. Dock a belt on it and lead the belt to a Debug Sink to keep each fault where you can read it. With nothing docked there, the fault goes no further. A Route and a Tee have no Fault port on the grid. They still fault and show as faulted, and the sections below say what happens to their faults. [Faults are items](../../../concepts/faults-are-items/) follows one fault from a Factory's Fault port to a Debug Sink.
 
 Eight of the nine reasons have an example below. Each example faults on purpose, and a line under it names the reason.
 

@@ -20,7 +20,7 @@ The app listens on 127.0.0.1, the loopback address, so only programs on the same
 
 ## The URL and method
 
-Each Source has its own URL, `http://127.0.0.1:PORT/hook/src-ID`, and accepts POST only. The app picks a free port each time it starts, and `ID` is a number the app gives the Source. When you select a Source in the app, its config panel shows the whole URL under Webhook URL, with a Copy button.
+Each Source has its own URL, `http://127.0.0.1:PORT/hook/src-ID`, and accepts POST only. The app picks a free port each time it starts, and `ID` is a number the app gives the Source. When you select a Source in the app, the inspector shows the whole URL under Webhook URL, with a Copy button.
 
 In the command below, replace `PORT` and `ID` with the values from that URL. It sends one webhook with a JSON body:
 
@@ -58,6 +58,8 @@ At the start of each tick, the engine takes every request that arrived since the
 ## Related pages
 
 - [Source](../../machines/source/): puts a new item on the board for each webhook it gets or on a timer.
+- [Items and events](../../../concepts/): how the app logs each webhook as an event and a Source turns it into an item.
+- [Send your first webhook](../../../get-started/first-webhook/): copy a Source's URL and send it a webhook with curl.
 - [Handler requests and replies](../handler-requests-and-replies/): the request a Handler's code receives, the reply it sends and what the caller gets.
 - [A webhook call gets connection refused](../../../troubleshooting/common-problems/#symptom-a-webhook-call-gets-connection-refused): why a call can't connect, and what to check.
 - [Reference](../../): the list of machine pages and the other reference pages.
