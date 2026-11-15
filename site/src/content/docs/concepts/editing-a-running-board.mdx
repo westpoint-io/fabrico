@@ -26,7 +26,69 @@ Unlinking the head from the Sink holds the items the same way: all 3 wait on the
 
 Checked by <code>unlinking_the_head_holds_the_items_and_undo_delivers_them</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
 
+When the belt's tail, the end a machine feeds, comes off, the items already on the belt keep moving. Unlinking the tail from the Source leaves all 3 items moving, and the Sink takes all 3.
+
+Checked by <code>unlinking_the_tail_leaves_the_items_moving</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
+Turning the Source away from the belt's tail does the same: all 3 items reach the Sink.
+
+Checked by <code>turning_the_source_away_leaves_the_items_moving</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
 On the board above, the belt carries 4 items when the Unlink takes effect on tick 80. The Sink takes nothing more until tick 141, and by then 12 items are waiting at the end of the belt. Once the Dock joins it again they move in, and by tick 160 the belt is back to 4. The turn on tick 220 does the same: the belt carries 5 items when the Sink turns away and 12 by tick 280, and the Sink starts taking them again on tick 281.
+
+## Delete
+
+Select a machine or a belt and press <Fact id="shortcut.delete" /> to delete it. Deleting a belt deletes the items on it. Deleting a machine also deletes the belts docked to it, and the items on those belts go with them. A deleted item doesn't turn up anywhere else later.
+
+In the test, deleting the belt while it carries 3 items leaves no item anywhere on the board, and the Sink never takes one.
+
+Checked by <code>deleting_the_belt_drops_its_items_and_undo_brings_it_back_empty</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
+Deleting the Sink instead takes the belt with it, and again no item is left anywhere.
+
+Checked by <code>deleting_the_sink_deletes_its_belt_and_items_and_undo_brings_the_belt_back_empty</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
+The engine has its own test for the same rule: it deletes a belt while an item is crossing it, runs on past the tick the item would have arrived, and checks that the item never reaches the machine at the far end.
+
+Checked by <code>mid_flow_delete_drops_items</code> in [crates/fabrico-core/tests/edit_merge.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-core/tests/edit_merge.rs).
+
+There is no move in the app. To move a machine, delete it and place it again where you want it, then draw and dock its belts again, because the delete takes its docked belts and their items with it.
+
+## The delete dialog
+
+When you delete a machine whose docked belts carry items, the app asks first. The dialog says how many items are in the way, and nothing is deleted until you pick one of its three buttons.
+
+Checked by <code>the guard appears and sends NO command before a choice</code> in [frontend/e2e/delete-guard.spec.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/e2e/delete-guard.spec.ts).
+
+Deleting a belt that carries items opens the same dialog, worded for the belt.
+
+Checked by <code>a belt carrying items opens the guard with the belt body copy, and Delete anyway deletes the belt</code> in [frontend/e2e/delete-guard.spec.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/e2e/delete-guard.spec.ts).
+
+Cancel closes the dialog and deletes nothing, so the items stay where they are.
+
+Checked by <code>Cancel issues NOTHING and closes the guard</code> in [frontend/e2e/delete-guard.spec.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/e2e/delete-guard.spec.ts).
+
+Drain first waits while the items leave, showing how many are left, and deletes once the count reaches 0.
+
+Checked by <code>Drain first waits for the belt to clear, THEN issues one Delete (disc 1)</code> in [frontend/e2e/delete-guard.spec.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/e2e/delete-guard.spec.ts).
+
+Delete anyway deletes straight away, and the items go with the belt as described above.
+
+Checked by <code>Delete anyway issues EXACTLY ONE Delete (disc 1)</code> in [frontend/e2e/delete-guard.spec.ts](https://github.com/westpoint-io/fabrico/blob/main/frontend/e2e/delete-guard.spec.ts).
+
+## Undo
+
+Undo takes back a delete. The machine and its belts come back, docked as they were, but the belts come back empty. The items they carried stay gone, because the history of edits records what is on the grid, not the items moving on it. Putting items back would make up a board that a [replay](../../reference/files/glossary/#term-replay) of the logs could not reproduce.
+
+Checked by <code>a_belt_carrying_items_comes_back_empty_and_that_is_deliberate</code> in [crates/fabrico-command/tests/undo_restores_a_bare_belt.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/undo_restores_a_bare_belt.rs).
+
+In the test, an Undo after deleting the Sink brings back the Sink, both docks and the belt with no items on it, and the Sink never takes any of the 3 the belt was carrying.
+
+Checked by <code>deleting_the_sink_deletes_its_belt_and_items_and_undo_brings_the_belt_back_empty</code> in [crates/fabrico-command/tests/items_in_transit.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/tests/items_in_transit.rs).
+
+On the board below, the same Source, belt and Sink run with a different script. The Sink is deleted on tick 80 while its belt carries 4 items, and the belt goes with it. An Undo on tick 160 brings back both, docked, with an empty belt, and new items start along it. A Redo on tick 240 deletes them again, and a second Undo on tick 300 brings them back.
+
+<Board name="docs-rules-undo-redo" />
 
 ## Related pages
 
