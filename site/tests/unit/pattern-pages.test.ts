@@ -131,15 +131,16 @@ function noProblems(problems: string[]): void {
 
 test('the pattern pages on disk are the Patterns entry in the coverage manifest, and there are at least MIN_PATTERN_PAGES', () => {
   const files = patternFiles();
-  assert.ok(
-    files.length >= MIN_PATTERN_PAGES,
-    `pattern-pages: found ${files.length} pattern pages under site/src/content/docs/patterns/, expected at least ${MIN_PATTERN_PAGES}. Did the folder move?`,
-  );
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) as { sections: { name: string; pages: string[] }[] };
   const section = manifest.sections.find((s) => s.name === 'Patterns');
   assert.ok(section, 'site/coverage-manifest.json has no section named "Patterns"');
   const listed = section.pages.filter((p) => p !== 'patterns/index.mdx').map((p) => p.replace(/^patterns\//, ''));
+  // The floor is one more problem line rather than an early assert, so a lost page reports both
+  // the count and the manifest line that names it.
   const problems: string[] = [];
+  if (files.length < MIN_PATTERN_PAGES) {
+    problems.push(`pattern-pages: found ${files.length} pattern pages under site/src/content/docs/patterns/, expected at least ${MIN_PATTERN_PAGES}. Did the folder move?`);
+  }
   for (const file of files) {
     if (!listed.includes(file)) {
       problems.push(`${shown(file)} is on disk but not in the Patterns entry of site/coverage-manifest.json. Add patterns/${file} to its pages and raise its pageCount.`);
