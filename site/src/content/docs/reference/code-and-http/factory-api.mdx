@@ -107,7 +107,7 @@ When `hi` isn't above `lo`, it returns `lo`. It draws from the same stream as `c
 
 ## Withheld globals
 
-The function runs in a sandbox that leaves out anything that reads the clock, reaches the network or the computer, or could give a different answer on another computer. Code that uses one of these names throws, and the run faults with <Fact id="fault.FactoryError" />. [The Factory sandbox](../../../concepts/factory-sandbox/) explains why the sandbox leaves them out.
+The function runs in a sandbox that leaves out the global names that read the clock, reach the network or the computer, or could give a different answer on another computer. Code that uses one of these names throws, and the run faults with <Fact id="fault.FactoryError" />. [The Factory sandbox](../../../concepts/factory-sandbox/) explains why the sandbox leaves them out.
 
 | Name | Why it is left out |
 |---|---|
@@ -120,6 +120,8 @@ The function runs in a sandbox that leaves out anything that reads the clock, re
 | `Math.sinh`, `Math.cosh`, `Math.tanh`, `Math.asinh`, `Math.acosh`, `Math.atanh` | Hyperbolic functions. Same reason. |
 | `Math.exp`, `Math.expm1`, `Math.log`, `Math.log1p`, `Math.log2`, `Math.log10` | Exponents and logarithms. Same reason. |
 | `Math.pow`, `Math.cbrt`, `Math.hypot` | Powers and roots. Same reason. |
+
+The sandbox leaves out names, not operators, so the `**` operator isn't withheld. It calls the same C library function as `Math.pow`, so `2 ** 0.5` and other powers that don't come out exact can end in a different last digit on another computer or in a browser. Code that needs the same result everywhere multiplies instead. [Where determinism ends](../../../concepts/determinism-and-replay/#where-determinism-ends) covers it.
 
 ## `Math`
 

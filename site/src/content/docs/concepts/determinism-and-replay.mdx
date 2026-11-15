@@ -42,7 +42,7 @@ When you open a project file, the app puts back a saved copy of the board and re
 
 ## Where determinism ends
 
-A [Factory](../../reference/files/glossary/#term-factory)'s code runs under three limits: stack, memory and work. The promise holds while the code stays clear of the first two, because the desktop app and a browser handle them differently.
+A [Factory](../../reference/files/glossary/#term-factory)'s code runs under three limits: stack, memory and work. The desktop app and a browser handle the first two differently, so the promise holds only while the code stays clear of them. It also holds only while the code stays off the `**` operator, covered at the end of this section.
 
 - The stack limit caps how deep a Factory's functions can call each other. In the desktop app it is <Fact id="limit.factory_stack_desktop" />. In a browser, where the boards on this site run, it is 128 KiB, because the same calls also use the stack of the browser's own JavaScript engine, and the limit has to trip before that one runs out. How deep code gets before it hits the limit also varies with the compiler that built the app: in one measurement at the same stack size, the same recursion went 51 calls deep on Windows and 335 on Linux.
 - The memory limit is <Fact id="limit.factory_memory" /> in both, but the browser build stores JavaScript values in less memory, so the point where a Factory first runs out differs between the desktop app and a browser.

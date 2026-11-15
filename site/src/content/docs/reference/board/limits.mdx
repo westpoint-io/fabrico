@@ -39,7 +39,7 @@ Fabrico puts a ceiling on how big a grid, a belt, a label or a routing table can
 | Emits on one output in one run | <Fact id="limit.factory_emits_per_port" /> | Each emit past this isn't sent and faults with its own `FactoryError`. The rest of the run stands. [How to fix](../../../troubleshooting/fault-reasons/#fault-factory-error) |
 | Factory code size | <Fact id="limit.max_config_bytes" /> | The engine's reader for a stored edit refuses longer code. The app doesn't call that reader when you edit or open a project, so this page can't say what you would see. |
 
-Determinism ends at the memory and stack limits. Code that gets near one can end differently in the desktop app and in a browser. [Determinism and replay](../../../concepts/determinism-and-replay/#where-determinism-ends) says why, and [The Factory sandbox](../../../concepts/factory-sandbox/#limits-on-one-run) lists the limits on one run of a Factory's code.
+Determinism ends at the memory and stack limits and at the `**` operator. Code that gets near one of those limits can end differently in the desktop app and in a browser, and code that uses `**` on a power that doesn't come out exact can also end differently on another computer. [Determinism and replay](../../../concepts/determinism-and-replay/#where-determinism-ends) says why, and [The Factory sandbox](../../../concepts/factory-sandbox/#limits-on-one-run) lists the limits on one run of a Factory's code.
 
 ## Routers
 
