@@ -1,0 +1,49 @@
+---
+title: The Factory sandbox
+description: "Factory code runs in a sandbox with no clock, no Math.random and no network, so replaying a board runs its code to the same result."
+sidebar:
+  order: 9
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A [Factory](../../reference/files/glossary/#term-factory) runs your JavaScript on each item it takes, inside a sandbox. The sandbox leaves out the clock, `Math.random` and the network, so the code can only work from the item, its own saved state and random numbers the engine hands it. Given the same items, the code then does the same thing on every run, and a replay of the board gets the same result.
+
+The board below runs the code shown with it on four orders. It counts the orders in `ctx.state` and picks a lane for each one with `ctx.randomInt`. The Debug Sink's log shows lanes 3, 3, 2 and 2 for orders A to D, on every run.
+
+<Board name="docs-code-factory-api" />
+
+## What the sandbox leaves out
+
+Code that uses any of these names throws, and the run faults with <Fact id="fault.FactoryError" />:
+
+- `Date`, `setTimeout` and `setInterval`, because they read the clock or run code by it.
+- `fetch`, because it reaches the network, and `process` and `require`, because they reach the computer and its files.
+- `Math.random`, because nothing seeds it from the board.
+- The `Math` functions whose last digits can differ between computers, such as `Math.sin`, `Math.exp` and `Math.pow`.
+
+A Factory that needs to call a service sends an item to an HTTP Sink, which makes the call outside the sandbox. [Side effects and delivery](../side-effects-and-delivery/) covers what happens to that call.
+
+## Random numbers from the board's seed
+
+`ctx.random()` and `ctx.randomInt()` draw from a random stream for each machine, started from the seed saved with the board, and the stream's position is saved with the rest of the board. So the same board with the same items draws the same numbers on every run. Started from a different seed, the board above picks lanes 1, 1, 2 and 3 instead.
+
+`ctx.state` is the other value that carries from one item to the next. Here it holds the count: the four new items carry `seen` values 1 to 4.
+
+## Limits on one run
+
+Each run has three limits:
+
+- Work: <Fact id="limit.factory_gas_budget" />. The engine counts the code's steps, never time, so a run that uses up its work stops at the same point on every computer, with a <Fact id="fault.FactoryTimeout" /> fault.
+- Memory: <Fact id="limit.factory_memory" />. Code that runs out and doesn't catch the failed allocation faults with <Fact id="fault.FactoryError" />.
+- Stack, which caps how deep functions can call each other: <Fact id="limit.factory_stack_desktop" /> in the desktop app and 128 KiB in a browser. Code that recurses past it faults with <Fact id="fault.FactoryError" />.
+
+When a run faults, it sends nothing, and `ctx.state` keeps the value it had before the run. The memory and stack limits are where a Factory's result can differ between the desktop app and a browser; [Determinism and replay](../determinism-and-replay/#where-determinism-ends) explains why.
+
+## Related pages
+
+- [Factory JavaScript API](../../reference/code-and-http/factory-api/): the function, the ctx object, the Math members a Factory may use and its limits.
+- [Determinism and replay](../determinism-and-replay/): why the same board and the same events end in the same state.
+- [Faults are items](../faults-are-items/): what a Factory sends out when its code fails.
+- [Limits](../../reference/board/limits/): every limit in the engine, with what happens when you reach it.
