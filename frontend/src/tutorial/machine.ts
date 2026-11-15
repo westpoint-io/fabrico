@@ -829,9 +829,21 @@ function runFrame(s: TutorialState, board: BoardFacts, chrome: ChromeFacts, less
  * Is this frame, already past the swap floor, the board the lesson starts on? With no board, that's an
  * empty board: New's board is always empty, and a higher floor with anything on it is a Load sent before
  * this New, whose keyframe landed first. With a board, the frame's machines are exactly the declared ones,
- * by `nodeKey`, so a late demo frame or a stale Load keyframe is refused too. The declared machines come
- * back bound and known, so a step can't finish because the board already held them.
+ * by `nodeKey`, and its one belt is the declared stub: its Tail docked to a declared machine, no Head dock,
+ * and the declared ring cell past its free end. So a late demo frame, a stale Load keyframe, a joined copy
+ * of the board or its machines with no stub are refused too. The declared machines come back bound and
+ * known, so a step can't finish because the board already held them.
  */
+/** Is the frame's one belt the declared stub: Tail on one of `machineIds`, no Head dock, `ring` past its free end? */
+function isDeclaredStub(board: BoardFacts, machineIds: readonly number[], ring: { x: number; y: number } | undefined): boolean {
+  if (ring === undefined || board.belts.length !== 1) return false;
+  const stub = board.belts[0] as BoardFacts['belts'][number];
+  const tail = stub.docks.find((d) => d.end === 'Tail');
+  if (tail === undefined || !machineIds.includes(tail.node) || stub.docks.some((d) => d.end === 'Head')) return false;
+  const past = lineDoorstep(board, tail.node);
+  return past !== null && past[0] === ring.x && past[1] === ring.y;
+}
+
 function startOn(
   lesson: Lesson | undefined,
   board: BoardFacts,
@@ -842,6 +854,7 @@ function startOn(
   }
   const ids = new Map(board.nodes.map((n) => [nodeKey(n), n.id] as const));
   if (ids.size !== board.nodes.length || ids.size !== declared.length || !declared.every((m) => ids.has(m.nodeKey))) return null;
+  if (!isDeclaredStub(board, declared.map((m) => ids.get(m.nodeKey) as number), lesson?.board?.ring)) return null;
   const bindings: Partial<Record<BindingName, BoundNode>> = {};
   for (const m of declared) bindings[m.bind] = { nodeKey: m.nodeKey, id: ids.get(m.nodeKey) as number };
   return { bindings, knownKeys: declared.map((m) => m.nodeKey) };

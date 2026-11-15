@@ -2749,6 +2749,8 @@ describe('a lesson on a prepared board', () => {
       ['the late demo frame', { nodes: demo }],
       ['its board plus one extra machine', { nodes: [...DECLARED, node(32, SINK, 9, 9)], belts: [stub(10)] }],
       ['its board with the Sink missing', { nodes: [B_SOURCE], belts: [stub(10)] }],
+      ['a joined copy of its board', { nodes: DECLARED, belts: JOINED_WITH(CORNER) }],
+      ['its machines with no stub', { nodes: DECLARED }],
     ];
     for (const [what, frameBoard] of refused) {
       it(`waits on starting through ${what}`, () => {
@@ -2790,9 +2792,13 @@ describe('a lesson on a prepared board', () => {
   describe('the ring cell', () => {
     it('is the cell the lesson declares at the join step', () => {
       expect(onItsBoard().baseline?.ringCell).toEqual({ x: 6, y: 2 });
-      const elsewhere: Lesson = { ...JOIN_LESSON, board: { ...JOIN_LESSON.board!, ring: { x: 9, y: 9 } } };
-      const s = run(sent([elsewhere]), { nodes: DECLARED, belts: [stub(10)] }, [elsewhere]);
-      expect(s.baseline?.ringCell, 'the declared cell, not the one past the stub on the board').toEqual({ x: 9, y: 9 });
+      let s = run(onItsBoard(), { nodes: DECLARED, belts: JOINED_WITH(CORNER) });
+      expect(s.stepIndex).toBe(1);
+      // Back at the join step on a line that stops short at (6,3), so the cell past its end is (6,4).
+      const longer: BoardBelt = { ...stub(20), tiles: cells([2, 2], [3, 2], [4, 2], [5, 2], [6, 2, CORNER], [6, 3]) };
+      s = run(s, { nodes: DECLARED, belts: [longer], generation: 2 });
+      expect(s.stepIndex).toBe(0);
+      expect(s.baseline?.ringCell, 'the declared cell, not the one past the line on the board').toEqual({ x: 6, y: 2 });
     });
 
     it('gives every lesson with a lineTurnsAt step a board with a ring cell', () => {

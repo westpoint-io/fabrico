@@ -313,8 +313,8 @@ export interface Lesson {
   /**
    * The prepared board the lesson starts on, and the machines already on it, each by its `nodeKey` and the
    * name it's bound as. A lesson with a board begins on the first frame of a new board whose machines are
-   * exactly these, and those machines count as known, so they finish no step. With no board, a lesson
-   * begins on New's empty board.
+   * exactly these and whose one belt is the stub that stops short of `ring`, and those machines count as
+   * known, so they finish no step. With no board, a lesson begins on New's empty board.
    *
    * `ring` is the cell past the stub's free end, where the app rings the carry-on start. The join step
    * grades this cell, and `lessonBoard.source.test.ts` holds it to the board file.
