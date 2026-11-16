@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   expectDrawsAfter,
   glCounts,
@@ -46,6 +46,39 @@ async function openPage(page: Page): Promise<() => Promise<void>> {
 }
 
 const board = (page: Page, name: string) => page.locator(`fabrico-board[name="${name}"]`);
+
+/**
+ * Turn the wheel up over a board's log until the log reads scrollTop 0, at most three turns, and
+ * return how many it took. Chrome animates a wheel scroll and, on a slow runner, starts it several
+ * hundred ms after the wheel event. A row that lands in that gap still follows the newest row, and
+ * the animation then stops short of the top by that row's height (CI read 25 px, one row). The
+ * reader is off the newest row by then, so the log no longer follows and a second turn reaches the
+ * top. Each turn waits until scrollTop has left the value it had before the turn and two reads 200 ms
+ * apart agree.
+ */
+async function wheelLogToTop(page: Page, well: Locator): Promise<number> {
+  await well.hover();
+  const top = async (): Promise<number> => (await readProbe(page, OUTCOMES)).logScrollTop;
+  for (let turn = 1; turn <= 3; turn++) {
+    const from = await top();
+    if (from === 0) return turn - 1;
+    await page.mouse.wheel(0, -1000);
+    let last = from;
+    await expect
+      .poll(
+        async () => {
+          const now = await top();
+          const settled = now !== from && now === last;
+          last = now;
+          return settled;
+        },
+        { message: `wheel turn ${turn}: the log scrolls from ${from} and comes to rest`, intervals: [200], timeout: 15_000 },
+      )
+      .toBe(true);
+  }
+  expect(await top(), 'the log reads the top after three wheel turns').toBe(0);
+  return 3;
+}
 
 interface Box {
   left: number;
@@ -265,7 +298,7 @@ test('the effect log names each scripted call with ok, error or timeout and neve
 });
 
 test('the log stays where the reader scrolled it, and a long URL is cut on one line', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const finish = await openPage(page);
   const b = board(page, OUTCOMES);
   await b.scrollIntoViewIfNeeded();
@@ -273,19 +306,19 @@ test('the log stays where the reader scrolled it, and a long URL is cut on one l
   await b.locator('button[data-control="restart"]').click();
   const well = b.locator('.log-well');
   await expect
-    .poll(() => well.evaluate((w) => w.scrollHeight - w.clientHeight), { message: 'the log fills its well', timeout: 30_000 })
+    // On a slow runner the board plays slower than its clock asks: one 25% core took 10 s to fill
+    // the well at 4x, and over 30 s with a second worker beside it.
+    .poll(() => well.evaluate((w) => w.scrollHeight - w.clientHeight), { message: 'the log fills its well', timeout: 60_000 })
     .toBeGreaterThan(60);
   // The reader turns the wheel up over the log.
   await b.locator('select').selectOption({ label: '0.5x' });
-  await well.hover();
-  await page.mouse.wheel(0, -1000);
-  await expect.poll(async () => (await readProbe(page, OUTCOMES)).logScrollTop).toBe(0);
+  const turns = await wheelLogToTop(page, well);
   const rowsAtScroll = (await readProbe(page, OUTCOMES)).effectRows.length;
   await expect
     .poll(async () => (await readProbe(page, OUTCOMES)).effectRows.length, { message: 'more rows arrive', timeout: 30_000 })
     .toBeGreaterThan(rowsAtScroll);
   expect((await readProbe(page, OUTCOMES)).logScrollTop, 'the log stays where the reader left it').toBe(0);
-  console.log(`rows ${rowsAtScroll} when the reader scrolled up; the log stayed at the top as more came in`);
+  console.log(`rows ${rowsAtScroll} when the reader scrolled up (${turns} wheel turns); the log stayed at the top as more came in`);
 
   // one-factory's Sink has a long URL.
   const longUrl = 'https://example.com/orders/archive/2026/november/first-week/incoming/accepted/by-region/europe/west';
