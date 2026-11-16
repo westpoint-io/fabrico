@@ -45,7 +45,7 @@ The `ctx.emit` line sends one item on output 0. The Tee after the Factory does t
 An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
 </Aside>
 
-- A Tee has <Fact id="limit.default_arity" /> outputs, so one Tee reaches two URLs. For a third URL, put a second Tee on one of the two branches and give each of its outputs an HTTP Sink. [Limits](../../reference/board/limits/) lists the branch count.
+- A Tee has <Fact id="limit.default_arity" bare /> outputs, so one Tee reaches two URLs. For a third URL, put a second Tee on one of the two branches and give each of its outputs an HTTP Sink. [Limits](../../reference/board/limits/) lists the branch count.
 - The Tee sends both copies on the same tick. When one branch's belt has no room for its copy, that copy becomes a <Fact id="fault.BranchBusy" /> [fault](../../reference/files/glossary/#term-fault) and the other branch still gets its copy; the Tee waits only when both branches are busy. This board's webhooks arrive 80 ticks apart, so neither belt fills. [Backpressure](../../concepts/backpressure/) explains how a slow line packs up.
 - Each HTTP Sink makes its own call and gets one attempt. One URL can fail while the other succeeds, and the failure is a <Fact id="fault.CommandFailure" /> fault on that Sink only. [Side effects and delivery](../../concepts/side-effects-and-delivery/) covers the one attempt.
 
