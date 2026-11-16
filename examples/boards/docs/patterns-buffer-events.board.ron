@@ -1,0 +1,100 @@
+// A docs board for the pattern page Buffer events behind a slow step. One Source gets three bursts
+// of 12 webhooks, 40 ticks apart. Its belt, eight tiles long, is the buffer: its head joins the
+// tail of a two-tile belt set to the slowest pace, and that slow belt feeds a Factory. A belt
+// carries each result to a Debug Sink. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b3 (8 tiles, the buffer)-> b4 (2 tiles, slowest pace) -> FACTORY 1 -b5-> SINK 2
+//
+// The buffer belt is joined to the slow belt, not docked to a machine, so it hands its items
+// straight across and the slow belt's start never holds a waiting item. Every waiting item is in
+// a slot, where the board draws it. The join names the slow belt as the node and its Tail as port
+// 0, the way Join two belts does in the app.
+//
+// No burst passes 12 webhooks and the Source's backlog peaks at 11, under its cap, so the Source
+// drops nothing. At the end tick 17 orders have reached the Debug Sink and the other 19 are still
+// on the three belts, in order.
+//
+// The Factory's Fault port stays undocked. The code never throws, so nothing faults.
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sink 2, then the belts 3, 4 and
+// 5. The 13 commands and the history seal end the boot on tick 14.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1, Fault=2; SINK In=0; a belt as the node, Tail=0. In the
+// code, ctx.emit(0, ...) sends on the Factory's first output, catalog port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Buffer events behind a slow step",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 12, cell_y: 1),       // 1: FACTORY In (12,2) Out (14,2)
+        Place(kind: 7, cell_x: 18, cell_y: 2),       // 2: SINK
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2), (6, 2), (7, 2), (8, 2), (9, 2)]),  // 3: the buffer, 8 tiles
+        DrawBelt(cells: [(10, 2), (11, 2)]),                                               // 4: the slow step, 2 tiles
+        DrawBelt(cells: [(15, 2), (16, 2), (17, 2)]),                                      // 5
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Configure(node: 4, config: Belt(ticks_per_slot: 20)),
+        Configure(node: 1, config: Factory(source: r#"// the work behind the slow step
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, done: true });
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":2}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":3}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":4}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":5}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":6}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":7}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":8}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":9}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":10}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":11}"#)),
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":12}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":13}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":14}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":15}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":16}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":17}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":18}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":19}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":20}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":21}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":22}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":23}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"order":24}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":25}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":26}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":27}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":28}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":29}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":30}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":31}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":32}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":33}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":34}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":35}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"order":36}"#)),
+    ],
+    captions: [
+        // Measured: h0 Source WORKING[41-52,81-92,121-132]; per-tick samples t63 to t80: src0:p0 b3:12+0 b4:0+0.
+        Caption(tick: 64, highlight: 0, text: "The Source has put the first burst of 12 webhooks on the long belt, and they move along it in order toward the slow belt."),
+        // Measured: sample t140: src0:p0 b3:32+2 b4:2+0; h0 max_pending=11 pending_end=0.
+        Caption(tick: 140, highlight: 0, text: "The Source has passed on all 36 webhooks from three bursts and holds none. The long belt is full, its items waiting in the order they came."),
+        // Measured: h1 Factory WORKING[241,261,...,581]; effect step_ends_on=263 DEBUG {"order":1,"done":true}.
+        Caption(tick: 241, highlight: 1, text: "The Factory takes the first order off the slow belt. From here it gets one item every 20 ticks, and the rest wait in order on the belts."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 600,
+)

@@ -1,0 +1,53 @@
+---
+title: Buffer events behind a slow step
+description: "Use a long belt as a buffer, so a burst of events waits in order in front of a slow step with no fault and no lost item."
+searchPhrase: buffer events
+sidebar:
+  order: 100
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To buffer events behind a slow step, give them somewhere to wait: a long [belt](../../reference/files/glossary/#term-belt) in front of the slow part holds a burst of [items](../../reference/files/glossary/#term-item) in order until the slow part takes each one. It puts [backpressure](../../concepts/backpressure/) to work, the way a line packs up behind its slowest part.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a long belt that is the buffer, a short belt at the slowest pace, a [Factory](../../reference/files/glossary/#term-factory) and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right. The long belt's end is joined to the start of the short one, which feeds the Factory. Three bursts of 12 webhooks arrive 40 ticks apart.
+
+<Board name="docs-patterns-buffer-events" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 64: The Source has put the first burst of 12 webhooks on the long belt, and they move along it in order toward the slow belt.
+2. Tick 140: The Source has passed on all 36 webhooks from three bursts and holds none. The long belt is full, its items waiting in the order they came.
+3. Tick 241: The Factory takes the first order off the slow belt. From here it gets one item every 20 ticks, and the rest wait in order on the belts.
+
+The Source's backlog peaks at 11 waiting webhooks, on the tick after each burst arrives. By tick 600 the Debug Sink has logged orders 1 to 17, and the other 19 are still on the belts in order: 11 on the long belt, 7 on the slow belt and 1 on the belt to the Debug Sink.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// the work behind the slow step
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, done: true });
+}
+```
+
+A Factory has no pace of its own, so on this board the slow belt in front of it stands in for the slow step, such as a service that can only take so many calls. The buffer works the same whatever the code does.
+
+## Trade-offs
+
+- A belt holds <Fact id="limit.slots_per_tile" bare /> items a tile, so this eight-tile buffer holds 32, and a belt can be up to <Fact id="limit.max_belt_tiles" /> long. [Belts are queues](../../concepts/belts-are-queues/) says how a belt's length and pace set how long an item waits.
+- A Source keeps up to <Fact id="limit.source_pending_cap" bare /> waiting webhooks, and past that it drops each new one with no item and no fault, so a buffer only helps up to there. This board sends bursts of 12, and its Source's backlog peaks at 11. Bursts that keep coming into a full line add up: once the belts are full, the backlog grows with each burst. [Limits](../../reference/board/limits/#queues) lists the caps.
+- The slow step is a belt at <Fact id="limit.belt_pace_max" />, the slowest pace there is: in the inspector, set Belt pace to its Slowest end. Draw the long belt to end next to the slow belt's start and connect them with Join two belts ([Commands](../../reference/files/commands/) has the gesture), so items cross straight onto the slow belt. A slow belt docked straight onto a machine's output keeps its waiting items at its start, where the board doesn't draw them.
+- Keep a Tee out of the line in front of the slow belt. A Tee doesn't wait for one busy branch while the other has room: the busy branch's copy becomes a <Fact id="fault.BranchBusy" /> fault instead of waiting in a buffer. [Send a webhook to multiple URLs](../send-to-multiple-urls/) shows a Tee.
+
+## Related pages
+
+- [Backpressure](../../concepts/backpressure/): why a line packs up behind its slowest part, and what backed up means.
+- [Belts are queues](../../concepts/belts-are-queues/): how a belt's length and pace decide how long an item waits on it.
+- [Limits](../../reference/board/limits/): how many items an input and a Source's queue can hold.
+- [Spread work across parallel workers](../parallel-workers/): share the work between two Factories when one line can't keep up.
