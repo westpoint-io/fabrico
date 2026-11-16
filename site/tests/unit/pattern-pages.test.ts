@@ -5,10 +5,15 @@
 // - the pages on disk differ from the Patterns entry in site/coverage-manifest.json, or there are
 //   fewer than MIN_PATTERN_PAGES of them;
 // - a page has no searchPhrase, or the phrase is in neither its title nor its description;
-// - a page has no <Board>, more than one, or one named for another page;
+// - a page has no <Board>, more than one, or one named for another page, or its one <Board> sits
+//   inside an MDX comment, a code block or a {...} expression, where a reader never sees it;
 // - a `Factory code` block differs from the board's Factory source;
 // - the How the board works steps differ from the board's captions.
-// The last two are here because page text drifted from the code it describes more than once.
+// The last two are here because page text drifted from the code it describes more than once. The
+// board file is read with a small RON reader below, not a pattern, so a caption or Factory written
+// with a trailing comma, fields in another order, a r##"..."## string or a comment around it is
+// still read the way the engine reads it, and a layout the reader doesn't know fails the test
+// rather than dropping out of it.
 // Run with `npm run test:unit` in site/.
 
 import assert from 'node:assert/strict';
@@ -94,15 +99,168 @@ function pageCodeBlocks(mdx: string): { line: number; code: string }[] {
   return blocks;
 }
 
-/** Every Factory source a board's Configure commands set, from `source: r#"` to `"#`. */
-function boardSources(ron: string): string[] {
-  return [...ron.matchAll(/Configure\(node:\s*\d+,\s*config:\s*Factory\(source:\s*r#"([\s\S]*?)"#\)\)/g)].map((m) => tidy(m[1]));
+/** One token of a board file: a name, a string (escapes decoded), a number, or a bracket, colon or comma. */
+type RonToken = { kind: 'ident' | 'str' | 'num' | 'punct'; value: string; line: number };
+
+/** Rust's string escapes, which RON uses: `\n`, `\u{41}` and so on. Anything else is an error. */
+function ronEscape(src: string, at: number, where: () => string): { text: string; next: number } {
+  const c = src[at];
+  const simple: Record<string, string> = { n: '\n', r: '\r', t: '\t', '0': '\0', '\\': '\\', '"': '"', "'": "'" };
+  if (c in simple) return { text: simple[c], next: at + 1 };
+  if (c === 'x' && /^[0-7][0-9a-fA-F]$/.test(src.slice(at + 1, at + 3))) {
+    return { text: String.fromCharCode(parseInt(src.slice(at + 1, at + 3), 16)), next: at + 3 };
+  }
+  const unicode = c === 'u' ? /^\{([0-9a-fA-F]{1,6})\}/.exec(src.slice(at + 1)) : null;
+  if (unicode !== null) return { text: String.fromCodePoint(parseInt(unicode[1], 16)), next: at + 1 + unicode[0].length };
+  throw new Error(`${where()}: the escape \\${c} isn't one this test can read.`);
 }
 
-/** A board's captions in file order, with RON's escapes decoded (they are JSON's escapes too). */
-const CAPTION = /Caption\(tick:\s*(\d+),\s*highlight:\s*\d+,\s*text:\s*"((?:[^"\\]|\\.)*)"\)/g;
-function captionsOf(ron: string): { tick: number; text: string }[] {
-  return [...ron.matchAll(CAPTION)].map((m) => ({ tick: Number(m[1]), text: JSON.parse(`"${m[2]}"`) as string }));
+/**
+ * Splits a board file into tokens the way RON does, leaving out `//` and nested `/* *\/` comments,
+ * so text inside a comment or a string never counts as a caption or a Factory.
+ */
+function ronTokens(src: string, file: string): RonToken[] {
+  const tokens: RonToken[] = [];
+  let line = 1;
+  let i = 0;
+  const where = (): string => `${file}:${line}`;
+  const advance = (to: number): void => {
+    for (let k = i; k < to; k += 1) if (src[k] === '\n') line += 1;
+    i = to;
+  };
+  while (i < src.length) {
+    const c = src[i];
+    if (/\s/.test(c)) {
+      advance(i + 1);
+    } else if (src.startsWith('//', i)) {
+      const end = src.indexOf('\n', i);
+      advance(end < 0 ? src.length : end);
+    } else if (src.startsWith('/*', i)) {
+      let depth = 0;
+      let k = i;
+      do {
+        if (src.startsWith('/*', k)) (depth += 1), (k += 2);
+        else if (src.startsWith('*/', k)) (depth -= 1), (k += 2);
+        else if (k >= src.length) throw new Error(`${where()}: a /* comment never ends.`);
+        else k += 1;
+      } while (depth > 0);
+      advance(k);
+    } else if (/^r#*"/.test(src.slice(i, i + 300))) {
+      const hashes = /^r(#*)"/.exec(src.slice(i))![1];
+      const close = `"${hashes}`;
+      const start = i + hashes.length + 2;
+      const end = src.indexOf(close, start);
+      if (end < 0) throw new Error(`${where()}: a raw string never ends.`);
+      const startLine = line;
+      advance(end + close.length);
+      tokens.push({ kind: 'str', value: src.slice(start, end), line: startLine });
+    } else if (c === '"') {
+      const startLine = line;
+      let text = '';
+      let k = i + 1;
+      for (;;) {
+        if (k >= src.length) throw new Error(`${where()}: a string never ends.`);
+        if (src[k] === '"') break;
+        if (src[k] === '\\') {
+          const e = ronEscape(src, k + 1, where);
+          text += e.text;
+          k = e.next;
+        } else {
+          text += src[k];
+          k += 1;
+        }
+      }
+      advance(k + 1);
+      tokens.push({ kind: 'str', value: text, line: startLine });
+    } else if (/[A-Za-z_]/.test(c)) {
+      const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(src.slice(i))![0];
+      tokens.push({ kind: 'ident', value: word, line });
+      advance(i + word.length);
+    } else if (/[-+0-9]/.test(c)) {
+      const num = /^[-+]?[0-9][0-9A-Za-z_.]*/.exec(src.slice(i));
+      if (num === null) throw new Error(`${where()}: "${c}" doesn't start anything this test can read.`);
+      tokens.push({ kind: 'num', value: num[0], line });
+      advance(i + num[0].length);
+    } else if ('()[]{}:,'.includes(c)) {
+      tokens.push({ kind: 'punct', value: c, line });
+      advance(i + 1);
+    } else {
+      throw new Error(`${where()}: "${c}" isn't something this test can read in a board file.`);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Each `name(...)` struct in a board file, with its fields: a field whose value is one string or
+ * number keeps that token, and a field holding anything bigger reads as null.
+ */
+function ronStructs(tokens: RonToken[], name: string): { line: number; fields: Map<string, RonToken | null> }[] {
+  const found: { line: number; fields: Map<string, RonToken | null> }[] = [];
+  for (let i = 0; i + 1 < tokens.length; i += 1) {
+    if (tokens[i].kind !== 'ident' || tokens[i].value !== name || tokens[i + 1].value !== '(') continue;
+    const fields = new Map<string, RonToken | null>();
+    let depth = 1;
+    let k = i + 2;
+    for (; k < tokens.length && depth > 0; k += 1) {
+      const t = tokens[k];
+      if (t.kind === 'punct' && '([{'.includes(t.value)) depth += 1;
+      else if (t.kind === 'punct' && ')]}'.includes(t.value)) depth -= 1;
+      else if (depth === 1 && t.kind === 'ident' && tokens[k + 1]?.value === ':') {
+        const value = tokens[k + 2];
+        const after = tokens[k + 3]?.value;
+        const single = value !== undefined && (value.kind === 'str' || value.kind === 'num') && (after === ',' || after === ')');
+        fields.set(t.value, single ? value : null);
+      }
+    }
+    found.push({ line: tokens[i].line, fields });
+  }
+  return found;
+}
+
+/** Every Factory source the board sets, in file order. A Factory(...) with no string source is an error. */
+function boardSources(ron: string, file: string): string[] {
+  return ronStructs(ronTokens(ron, file), 'Factory').map(({ line, fields }) => {
+    const source = fields.get('source');
+    if (source?.kind !== 'str') throw new Error(`${file}:${line}: this Factory(...) has no source string this test can read.`);
+    return tidy(source.value);
+  });
+}
+
+/** A board's captions in file order. A Caption(...) without a number tick and a string text is an error. */
+function captionsOf(ron: string, file: string): { tick: number; text: string }[] {
+  return ronStructs(ronTokens(ron, file), 'Caption').map(({ line, fields }) => {
+    const tick = fields.get('tick');
+    const text = fields.get('text');
+    if (tick?.kind !== 'num' || !/^[0-9]+$/.test(tick.value) || text?.kind !== 'str') {
+      throw new Error(`${file}:${line}: this Caption(...) needs a whole-number tick and a string text that this test can read.`);
+    }
+    return { tick: Number(tick.value), text: text.value };
+  });
+}
+
+/**
+ * The <Board> tags a reader sees: each one alone on its line, outside MDX comments, code blocks
+ * and {...} expressions. `all` counts every `<Board` in the page, so a tag hidden in one of those
+ * places, or written some other way, shows up as a difference between the two.
+ */
+function boardTagsOf(body: string): { shown: string[]; all: number } {
+  const blank = (m: string): string => m.replace(/[^\n]/g, ' ');
+  const visible = body
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, blank)
+    .replace(/^(\s*)(```|~~~)[\s\S]*?^\s*\2\s*$/gm, blank)
+    .replace(/`[^`\n]*`/g, blank);
+  const shown: string[] = [];
+  let depth = 0;
+  for (const l of visible.split('\n')) {
+    const tag = /^<Board\b[^>]*\/>\s*$/.exec(l);
+    if (tag !== null && depth === 0) shown.push(tag[0].trim());
+    for (const c of l) {
+      if (c === '{') depth += 1;
+      else if (c === '}') depth -= 1;
+    }
+  }
+  return { shown, all: [...body.matchAll(/<Board\b/g)].length };
 }
 
 /** The items of the ordered list under `## How the board works`, without their `1. ` numbers. */
@@ -178,9 +336,11 @@ test("each pattern page's searchPhrase is in its title or its description", () =
 test('each pattern page shows exactly one board, named for the page', () => {
   const problems: string[] = [];
   for (const file of patternFiles()) {
-    const tags = [...readPage(file).body.matchAll(/<Board\b[^>]*>/g)].map((m) => m[0]);
-    if (tags.length !== 1) {
-      problems.push(`${shown(file)} has ${tags.length} <Board> tags. A pattern page shows its pattern running on exactly one board.`);
+    const { shown: tags, all } = boardTagsOf(readPage(file).body);
+    if (tags.length !== 1 || all !== 1) {
+      problems.push(
+        `${shown(file)} has ${tags.length} <Board> tags a reader sees and ${all} in the file. A pattern page shows its pattern running on exactly one board, written as \`<Board name="..." />\` on a line of its own, outside comments, code blocks and {...}.`,
+      );
       continue;
     }
     const name = /\bname="([^"]*)"/.exec(tags[0])?.[1] ?? '';
@@ -201,8 +361,14 @@ test("each pattern page's Factory code blocks equal its board's Factory sources"
       continue;
     }
     const blocks = pageCodeBlocks(readPage(file).text);
-    const sources = boardSources(board.ron);
     const boardName = board.id.replace(/^docs-/, '');
+    let sources: string[];
+    try {
+      sources = boardSources(board.ron, `examples/boards/docs/${boardName}.board.ron`);
+    } catch (error) {
+      problems.push(`${shown(file)}: ${(error as Error).message}`);
+      continue;
+    }
     if (blocks.length === 0) {
       problems.push(`${shown(file)} has no js block titled "Factory code".`);
       continue;
@@ -231,7 +397,13 @@ test("each pattern page's How the board works steps restate its board's captions
     }
     const boardName = board.id.replace(/^docs-/, '');
     const steps = stepsOf(readPage(file).body);
-    const captions = captionsOf(board.ron);
+    let captions: { tick: number; text: string }[];
+    try {
+      captions = captionsOf(board.ron, `examples/boards/docs/${boardName}.board.ron`);
+    } catch (error) {
+      problems.push(`${shown(file)}: ${(error as Error).message}`);
+      continue;
+    }
     if (steps.length !== captions.length) {
       problems.push(`${shown(file)}: How the board works has ${steps.length} steps and examples/boards/docs/${boardName}.board.ron has ${captions.length} captions.`);
       continue;
