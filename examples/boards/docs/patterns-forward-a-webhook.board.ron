@@ -47,7 +47,7 @@ export default function (input, ctx) {
         // Measured: the Factory works on 63 and 143.
         Caption(tick: 63, highlight: 1, text: "The Factory takes the first order, keeps its id and total, drops the card number and sends the smaller item on."),
         // Measured: the HTTP Sink sends {"id":1,"total":30} on 85 and {"id":2,"total":75} on 165.
-        Caption(tick: 85, highlight: 2, text: "The HTTP Sink sends the smaller item to its URL as a POST, with no card number in the body, and the script answers it 20 ticks later."),
+        Caption(tick: 85, highlight: 2, text: "The HTTP Sink sends the smaller item to its URL as a POST, with no card number in the body."),
     ],
     executor: Executor(default: Reply(after_ticks: 1), rules: [
         Rule(url_prefix: "https://example.com/orders", outcome: Reply(after_ticks: 20)),
