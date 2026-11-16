@@ -118,6 +118,11 @@ const FACTORY_KIND = 2;
 
 const BOOT_TIMEOUT_MS = 120_000;
 const WAIT_TIMEOUT_MS = 60_000;
+/**
+ * A picture waits for the renderer to draw one frame at 2880 by 1800 px in software GL. On one core
+ * at a 25% quota that took longer than Playwright's 30 s default for overview.png.
+ */
+const SHOT_TIMEOUT_MS = 120_000;
 
 type Box = { x: number; y: number; width: number; height: number };
 type SceneRead = {
@@ -473,8 +478,8 @@ async function take(page: Page, errors: string[], shot: Shot, tick: number): Pro
   const board = shot.kind === 'full' ? await boardCells(page, await readScene(page)) : null;
   const png =
     shot.kind === 'full'
-      ? await page.screenshot({ animations: 'allow' })
-      : await page.screenshot({ clip: shot.box, animations: 'allow' });
+      ? await page.screenshot({ animations: 'allow', timeout: SHOT_TIMEOUT_MS })
+      : await page.screenshot({ clip: shot.box, animations: 'allow', timeout: SHOT_TIMEOUT_MS });
   if (errors.length > 0) fail(`the page threw while taking ${shot.file}: ${errors.join('; ')}`);
   const got = checkPicture(shot, png, board);
   writeFileSync(path.join(OUT_DIR, shot.file), png);
