@@ -19,6 +19,19 @@ import theme from './src/styles/generated/code-theme.json' with { type: 'json' }
  * same script still takes tabindex and role off a block that turns out to fit, the way it always
  * has, and leaves the label; it never removes them from a block that scrolls.
  */
+/**
+ * The label for one block: "Code block 2" for the second block on its page, then ": <title>" when the
+ * block has a title. A named region is a landmark, and two landmarks with the same name on one page
+ * fail axe's landmark-unique rule, so each block carries its place on the page. Astro's markdown
+ * pipeline gives each block its index in the page and no total, so the label has no "of n".
+ */
+function codeBlockLabel(codeBlock) {
+  const index = codeBlock.parentDocument?.positionInDocument?.groupIndex;
+  const base = index === undefined ? 'Code block' : `Code block ${index + 1}`;
+  const title = codeBlock.props.title;
+  return title ? `${base}: ${title}` : base;
+}
+
 function focusableCodeBlocks() {
   return {
     name: 'Focusable code blocks',
@@ -28,10 +41,9 @@ function focusableCodeBlocks() {
         if (codeBlock.props.wrap) return;
         const pre = select('pre', renderData.blockAst);
         if (!pre) return;
-        const title = codeBlock.props.title;
         setProperty(pre, 'tabindex', '0');
         setProperty(pre, 'role', 'region');
-        setProperty(pre, 'aria-label', title ? `Code block: ${title}` : 'Code block');
+        setProperty(pre, 'aria-label', codeBlockLabel(codeBlock));
       },
     },
   };

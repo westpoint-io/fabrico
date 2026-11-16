@@ -114,7 +114,7 @@ test('a wide code block and a wide table scroll in their own focusable box', asy
   const served = await (await request.get(longTitle)).text();
   const pres = served.match(/<pre\b[^>]*>/g) ?? [];
   expect(pres, 'the <pre> tags in the page as served').toHaveLength(1);
-  for (const attribute of ['tabindex="0"', 'role="region"', 'aria-label="Code block"']) {
+  for (const attribute of ['tabindex="0"', 'role="region"', 'aria-label="Code block 1"']) {
     expect(pres[0], `the code block as served: ${attribute}`).toContain(attribute);
   }
   await open(page, longTitle, 1280);
