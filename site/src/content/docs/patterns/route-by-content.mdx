@@ -1,0 +1,72 @@
+---
+title: Route by content
+description: "Send each item down a different belt by what it holds, first with a Factory and two outputs, then with the Router's byte match."
+searchPhrase: route by content
+sidebar:
+  order: 70
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To route by content, send each [item](../../reference/files/glossary/#term-item) down a different [belt](../../reference/files/glossary/#term-belt) depending on what its payload holds, such as orders to one line and refunds to another by a type field. This page isn't about the [Route](../../reference/machines/route/) machine, which picks a Handler by the path of an HTTP request.
+
+The board below has two lines, and both get the same three webhooks: an order, a refund, and a second order whose id comes before its type. On the top line a [Source](../../reference/files/glossary/#term-source) feeds a [Factory](../../reference/files/glossary/#term-factory), which routes each item to one of two Debug [Sinks](../../reference/files/glossary/#term-sink). On the bottom line a Source feeds a [Router](../../reference/machines/router/), which routes by matching bytes, into two more Debug Sinks.
+
+<Board name="docs-patterns-route-by-content" />
+
+## How the board works
+
+Press Play and the board stops on these four [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: Both lines get the same webhooks. On the top line the Factory reads the type field of the first one, an order, and emits it on output 0.
+2. Tick 123: The Router compares the start of the refund with its one route, which expects the bytes that begin an order, and sends it out its default output.
+3. Tick 213: The top orders Debug Sink logs the third order, whose id comes before its type. The Factory read the type field, so the key order made no difference.
+4. Tick 221: The bottom default Debug Sink logs the same order. It starts with its id, not its type, so it missed the Router's route and took the default.
+
+The two lines send the first order and the refund the same way. They split only on the third order. Each item reaches a bottom Debug Sink 8 ticks after its twin reaches a top one, because the bottom line's output belts are one cell longer.
+
+## Route with a Factory
+
+On the top line, the Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// orders go out 0, everything else out 1
+export default function (input, ctx) {
+  if (input.type === "order") {
+    ctx.emit(0, input);
+  } else {
+    ctx.emit(1, input);
+  }
+}
+```
+
+The code reads the item's type field. An order goes out on output 0 with `ctx.emit(0, input)`, and anything else goes out on output 1 with `ctx.emit(1, input)`. This Factory has two outputs: pressing + Add output in the inspector, the panel on the right, once adds output 1, which `ctx.emit(1, ...)` sends to.
+
+The Factory gets each item parsed from JSON, so the order of the keys and the spacing in the body don't matter. That's why the third order still reaches the orders Debug Sink on tick 213.
+
+## Route with the Router
+
+On the bottom line, the Router has one route and a default output:
+
+| Byte position | Bytes | Output |
+|---|---|---|
+| 0 | `{"type":"order"` | Output 1, to the orders Debug Sink |
+| Default | | Output 2, to the other Debug Sink |
+
+In the inspector, the route's fields are At byte, Match text and Send to. The inspector numbers a Router's outputs from 1, where a Factory's code counts its outputs from 0.
+
+The Router compares the item's bytes, starting at the byte position, with the route's bytes, so case, spacing and key order in the JSON all count. The third order holds the same fields as the first, but its body starts with `{"id":3`, so it misses the route and takes the default output on tick 221. The Router has a default output set, so an item that matches no route takes it and raises no <Fact id="fault.NoMatch" /> [fault](../../reference/files/glossary/#term-fault).
+
+## Trade-offs
+
+- A Factory reads the payload as JSON, so it can route by any field, wherever the field sits in the body. The cost is code that someone writes and keeps up. [Factory API](../../reference/code-and-http/factory-api/) lists what the code can read and call.
+- A Router needs no code: you type each route's bytes in the inspector. It matches bytes exactly, so it suits bodies whose start you control, such as a service that always puts the same field first.
+- A Router holds at most <Fact id="limit.max_routes" />, and a route's bytes run to at most <Fact id="limit.max_route_expect_bytes" bare /> bytes. The first route that matches decides the output. The [Router](../../reference/machines/router/#how-routes-match) page says how to order routes and what happens to an item that matches nothing when there is no default.
+
+## Related pages
+
+- [Filter events](../filter-events/): a Factory that emits an item or drops it, the one-output version of this page.
+- [Router](../../reference/machines/router/): how routes match, the default output and the NoMatch fault.
+- [Route](../../reference/machines/route/): the machine that takes HTTP requests at a path, which this page doesn't use.
+- [Factory API](../../reference/code-and-http/factory-api/): what `input` and `ctx.emit` hold, and the limits on one run.

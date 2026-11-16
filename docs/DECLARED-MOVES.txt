@@ -147,15 +147,16 @@
 # =====================================================================================
 
 [fixtures]
-# Six new lines, written by the generator, for the boards on six pattern pages: Forward a
+# Seven new lines, written by the generator, for the boards on seven pattern pages: Forward a
 # webhook to another URL (examples/boards/docs/patterns-forward-a-webhook.board.ron), Send a
 # webhook to multiple URLs (examples/boards/docs/patterns-send-to-multiple-urls.board.ron),
 # Combine several sources with Merge
 # (examples/boards/docs/patterns-combine-several-sources.board.ron), Transform a JSON payload
 # (examples/boards/docs/patterns-transform-json-payload.board.ron), Filter events
-# (examples/boards/docs/patterns-filter-events.board.ron) and Split an array into items
-# (examples/boards/docs/patterns-split-an-array.board.ron). The 34 older lines are unchanged.
-examples/boards/hashes.manifest 9d028dacd5a2f7abda031462786da14fefc10ea9851264de3640372d68a821fa
+# (examples/boards/docs/patterns-filter-events.board.ron), Split an array into items
+# (examples/boards/docs/patterns-split-an-array.board.ron) and Route by content
+# (examples/boards/docs/patterns-route-by-content.board.ron). The 34 older lines are unchanged.
+examples/boards/hashes.manifest f619be51ae002c9cfaff5956fff8c0e5810cd1a27b33f0a1648e0e8a8655be89
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

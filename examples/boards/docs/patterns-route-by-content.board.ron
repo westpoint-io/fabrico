@@ -1,0 +1,108 @@
+// A docs board for the pattern page Route by content. It has two lines, and both get the same
+// three webhooks: an order, a refund, and a second order whose id comes before its type. The top
+// line routes with a Factory, whose code reads the type field and emits orders on output 0 and
+// everything else on output 1. The bottom line routes with a Router, which compares the first bytes
+// of each item with one route and sends what misses it to its default output. Each output has its
+// own belt into a Debug Sink. The run makes no outbound call.
+//
+//   row 1:                                   +-b9--> SINK 2   (orders)
+//   row 2:   SOURCE 0 -b8--> FACTORY 1 emit 0 -+
+//   row 3:                   FACTORY 1 emit 1 -+
+//   row 4:                                   +-b10-> SINK 3   (everything else)
+//
+//   row 6:                                   +-b12-> SINK 6   (orders)
+//   row 7:   SOURCE 4 -b11-> ROUTER 5  emit 0 -+
+//   row 8:                   ROUTER 5  emit 1 -+
+//   row 9:                                   +-b13-> SINK 7   (the default)
+//
+// The Factory starts with one output. AddPort gives it a second one, the way + Add output does in
+// the inspector: role 1 is an output, side 1 is east, medium 0 is a belt. The new output is catalog
+// port 3 and emit 1, and it seats below the first output, at world cell (7,3). The Factory's Fault
+// port stays undocked; the code never throws, so nothing goes there.
+//
+// The Router's one route expects, at byte 0, the bytes 123 34 116 121 112 101 34 58 34 111 114 100
+// 101 114 34, which spell {"type":"order" in UTF-8 (RON has no byte strings, so they are written
+// as numbers). The default output is emit 1. The third order starts with {"id":3 instead, so it
+// misses the route and takes the default, while the Factory still sends it to the orders Sink. The
+// Router's third output (emit 2) and its Fault port stay undocked; with a default set, no item goes
+// to the Fault port.
+//
+// Handles mint in command order: the top line's Source 0, Factory 1 and Sinks 2 and 3, then the
+// bottom line's Source 4, Router 5 and Sinks 6 and 7, then the belts 8 to 13. The 29 commands and
+// the history seal end the boot on tick 30.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, ROUTER=5, SINK=7. Dock `port` is the catalog port
+// index: SOURCE Out=0; FACTORY In=0, Out=1 (emit 0), Fault=2, the added Out=3 (emit 1); ROUTER
+// In=0, Outs 1, 2 and 3 (emit 0, 1 and 2, on its east rows 1, 2 and 0), Fault=4; SINK In=0. A
+// route names its output by emit number, not by catalog index.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Route by content",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE top
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY
+        Place(kind: 7, cell_x: 11, cell_y: 1),       // 2: SINK orders (top)
+        Place(kind: 7, cell_x: 11, cell_y: 4),       // 3: SINK other (top)
+        Place(kind: 0, cell_x: 1, cell_y: 7),        // 4: SOURCE bottom
+        Place(kind: 5, cell_x: 5, cell_y: 6),        // 5: ROUTER 2x3, In (5,7)
+        Place(kind: 7, cell_x: 11, cell_y: 6),       // 6: SINK orders (bottom)
+        Place(kind: 7, cell_x: 11, cell_y: 9),       // 7: SINK other (bottom)
+        AddPort(node: 1, role: 1, side: 1, medium: 0),
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),                         // 8
+        DrawBelt(cells: [(8, 2), (9, 2), (9, 1), (10, 1)]),                // 9  factory emit 0
+        DrawBelt(cells: [(8, 3), (9, 3), (9, 4), (10, 4)]),                // 10 factory emit 1
+        DrawBelt(cells: [(2, 7), (3, 7), (4, 7)]),                         // 11
+        DrawBelt(cells: [(7, 7), (8, 7), (9, 7), (9, 6), (10, 6)]),        // 12 router emit 0
+        DrawBelt(cells: [(7, 8), (8, 8), (9, 8), (9, 9), (10, 9)]),        // 13 router emit 1
+        Dock(belt: 8, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 8, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 9, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 10, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 10, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 11, endpoint: Tail, node: 4, port: 0),
+        Dock(belt: 11, endpoint: Head, node: 5, port: 0),
+        Dock(belt: 12, endpoint: Tail, node: 5, port: 1),
+        Dock(belt: 12, endpoint: Head, node: 6, port: 0),
+        Dock(belt: 13, endpoint: Tail, node: 5, port: 2),
+        Dock(belt: 13, endpoint: Head, node: 7, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// orders go out 0, everything else out 1
+export default function (input, ctx) {
+  if (input.type === "order") {
+    ctx.emit(0, input);
+  } else {
+    ctx.emit(1, input);
+  }
+}"#)),
+        Configure(node: 5, config: Router(routes: [
+            // {"type":"order"  -> emit 0
+            ((offset: 0, expect: [123, 34, 116, 121, 112, 101, 34, 58, 34, 111, 114, 100, 101, 114, 34]), 0),
+        ], default: Some(1))),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"type":"order","id":1}"#)),
+        At(tick: 40, input: Webhook(source: 4, body: r#"{"type":"order","id":1}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"type":"refund","id":2}"#)),
+        At(tick: 100, input: Webhook(source: 4, body: r#"{"type":"refund","id":2}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"id":3,"type":"order"}"#)),
+        At(tick: 160, input: Webhook(source: 4, body: r#"{"id":3,"type":"order"}"#)),
+    ],
+    captions: [
+        // Measured: h1 Factory WORKING[63,123,183] factory.faults=0; effect step_ends_on=93 on h2 DEBUG {"type":"order","id":1}.
+        Caption(tick: 63, highlight: 1, text: "Both lines get the same webhooks. On the top line the Factory reads the type field of the first one, an order, and emits it on output 0."),
+        // Measured: h5 Router WORKING[63,123,183] router.faults=0; effect step_ends_on=161 on h7 DEBUG {"type":"refund","id":2}.
+        Caption(tick: 123, highlight: 5, text: "The Router compares the start of the refund with its one route, which expects the bytes that begin an order, and sends it out its default output."),
+        // Measured: effect step_ends_on=213 on h2 DEBUG {"id":3,"type":"order"}.
+        Caption(tick: 213, highlight: 2, text: "The top orders Debug Sink logs the third order, whose id comes before its type. The Factory read the type field, so the key order made no difference."),
+        // Measured: effect step_ends_on=221 on h7 DEBUG {"id":3,"type":"order"}.
+        Caption(tick: 221, highlight: 7, text: "The bottom default Debug Sink logs the same order. It starts with its id, not its type, so it missed the Router's route and took the default."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)
