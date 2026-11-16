@@ -51,6 +51,7 @@ The `if (input.order)` test tells the two shapes apart. Both branches emit an it
 - A Merge takes from its <Fact id="limit.default_arity" bare /> inputs in turn: when both hold an item, it takes one from each, starting with the input whose turn it is. So the output order isn't the order the webhooks reached the app. On this board the second marketplace webhook arrives 8 ticks before the second shop webhook and still leaves second. The order is the same on every run; [Determinism and replay](../../concepts/determinism-and-replay/) says why, and [Merge](../../reference/machines/merge/) has the rule.
 - A Merge passes each item on unchanged and adds nothing about which input it came from. The Factory on this board tells the two services apart by their fields. When two services send the same shape, put a Factory on each line before the Merge and add a field that names the service.
 - A Merge sends an item out only when the belt on its output has room. While that belt is full, items wait on both input belts and those belts back up toward their Sources, so one slow step after the Merge holds up both services. [Backpressure](../../concepts/backpressure/) explains how a line packs up.
+- The app listens for webhooks on 127.0.0.1 only, so only programs on the same computer can send one to a Source. A shop or a marketplace on the internet needs a tunnel to your computer, which the app doesn't provide. [Webhook ingress](../../reference/code-and-http/webhook-ingress/) has the URL and the rules.
 
 ## Related pages
 
