@@ -37,7 +37,7 @@ export default function (input, ctx) {
 }
 ```
 
-The code only builds the body the service expects, and the short belt in front of the HTTP Sink sets the limit. To set one up, select the short belt, set Belt pace in the inspector to its Slowest end, and connect the queue belt's end to it with Join two belts.
+The code only builds the body the service expects, and the short belt in front of the HTTP Sink sets the limit. To set one up, select the short belt, set Belt pace in the inspector to its Slowest end and press Apply, then connect the queue belt's end to it with Join two belts. Set the pace before you join them: the inspector treats joined belts as one run, and Apply sets the pace on every belt in a run.
 
 ## Trade-offs
 

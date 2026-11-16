@@ -147,7 +147,7 @@
 # =====================================================================================
 
 [fixtures]
-# Eleven new lines, written by the generator, for the boards on eleven pattern pages: Forward a
+# Twelve new lines, written by the generator, for the boards on twelve pattern pages: Forward a
 # webhook to another URL (examples/boards/docs/patterns-forward-a-webhook.board.ron), Send a
 # webhook to multiple URLs (examples/boards/docs/patterns-send-to-multiple-urls.board.ron),
 # Combine several sources with Merge
@@ -158,9 +158,10 @@
 # (examples/boards/docs/patterns-route-by-content.board.ron), Split traffic with seeded
 # randomness (examples/boards/docs/patterns-split-traffic.board.ron), Spread work across parallel
 # workers (examples/boards/docs/patterns-parallel-workers.board.ron), Buffer events behind a slow
-# step (examples/boards/docs/patterns-buffer-events.board.ron) and Rate limit with belt pace
-# (examples/boards/docs/patterns-rate-limit.board.ron). The 34 older lines are unchanged.
-examples/boards/hashes.manifest b8f4f04d3f296a40f887cb7175060e19697efeb1fb2cd2a799f41e784181137e
+# step (examples/boards/docs/patterns-buffer-events.board.ron), Rate limit with belt pace
+# (examples/boards/docs/patterns-rate-limit.board.ron) and Run on a schedule every N ticks
+# (examples/boards/docs/patterns-run-on-a-schedule.board.ron). The 34 older lines are unchanged.
+examples/boards/hashes.manifest 813a0c682fe7ad94e55f23922f76fbaa73fa73b9b8be496e774dd90fef8f744c
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

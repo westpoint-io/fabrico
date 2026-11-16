@@ -1,0 +1,57 @@
+---
+title: Run on a schedule every N ticks
+description: "Run a job on a schedule with a timer Source that makes an item every N ticks. Ticks only approximate seconds, so this isn't cron."
+searchPhrase: run on a schedule
+sidebar:
+  order: 120
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To run on a schedule, such as a task every minute without cron, use a [Source](../../reference/files/glossary/#term-source) set to a timer. It makes an [item](../../reference/files/glossary/#term-item) every N ticks with no webhook, and a [Factory](../../reference/files/glossary/#term-factory) after it does the job. The interval counts [ticks](../../concepts/ticks/#ticks-and-seconds) and ticks only approximate seconds.
+
+The board below has a timer Source, a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right, joined by two [belts](../../reference/files/glossary/#term-belt). The Source's interval is 60 ticks, and the board gets no webhooks at all.
+
+<Board name="docs-patterns-run-on-a-schedule" />
+
+## How the board works
+
+Press Play and the board stops on these three ticks:
+
+1. Tick 61: The Source makes an item on its own, with no webhook. Its timer comes due every 60 ticks, and each item starts the job.
+2. Tick 105: The Debug Sink logs the first report, run 1, which the Factory made from the timer's item.
+3. Tick 121: The Source makes its next item, 60 ticks after the first. The Factory will count it as run 2.
+
+The Source makes items on ticks 61, 121, 181 and 241, and by tick 300 the Debug Sink has logged runs 1 to 4.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// the scheduled job: count the runs, report
+export default function (input, ctx) {
+  const runs = (ctx.state.runs || 0) + 1;
+  ctx.state.runs = runs;
+  ctx.emit(0, { job: "report", run: runs });
+}
+```
+
+The timer's item is an empty object, so the code doesn't read `input`. It keeps the run count in `ctx.state`, which the Factory saves after each run, and emits a report with the run number. Your own job goes here, such as building the body of a request for an HTTP Sink.
+
+To set up the timer in the app, select the Source, pick Timer under Trigger in the inspector, type the interval into the Every field and press Apply.
+
+## Trade-offs
+
+- The interval, the Source's <Fact id="trigger.Timer.interval_ticks" /> field, counts ticks, and ticks only approximate seconds, so the schedule drifts from the wall clock. Boards on this site play at <Fact id="embed.ticks_per_second" /> at 1x, and in the app a busy board runs fewer ticks a second than an idle one. [Ticks and seconds](../../concepts/ticks/#ticks-and-seconds) explains the gap.
+- A timer has no cron expression and no time of day. It fires on each tick that is a multiple of its interval, counted from the start of the board, so it can't pick a date or an hour.
+- Each fire goes into the event log the same way a webhook does, and a replay reads it back from there instead of firing the timer again. [Event log and save files](../../concepts/event-log-and-save-files/) covers the log.
+- When the app saves a playing board, it stops taking input for a few seconds at most, and a timer fire that comes due in that time is skipped for good. [When the app saves](../../reference/files/project-files/#when-the-app-saves) has the details.
+
+## Related pages
+
+- [Rate limit with belt pace](../rate-limit/): space out the calls a line makes with a slow belt.
+- [Ticks](../../concepts/ticks/): why the engine counts ticks, and how a number of ticks relates to seconds.
+- [Source](../../reference/machines/source/): the webhook and timer triggers, and the timer's interval field.
+- [Project files](../../reference/files/project-files/): what a save writes, and when the app saves a playing board.
