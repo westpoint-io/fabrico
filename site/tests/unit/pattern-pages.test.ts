@@ -11,9 +11,9 @@
 // - the How the board works steps differ from the board's captions.
 // The last two are here because page text drifted from the code it describes more than once. The
 // board file is read with a small RON reader below, not a pattern, so a caption or Factory written
-// with a trailing comma, fields in another order, a r##"..."## string or a comment around it is
-// still read the way the engine reads it, and a layout the reader doesn't know fails the test
-// rather than dropping out of it.
+// with a trailing comma, fields in another order, a r##"..."## string, a comment around it or,
+// for a caption, no Caption name in front of its (...) is still read the way the engine reads it,
+// and a layout the reader doesn't know fails the test rather than dropping out of it.
 // Run with `npm run test:unit` in site/.
 
 import assert from 'node:assert/strict';
@@ -191,52 +191,93 @@ function ronTokens(src: string, file: string): RonToken[] {
   return tokens;
 }
 
+/** A struct's fields: a field whose value is one string or number keeps that token, and a bigger value reads as null. */
+type RonFields = Map<string, RonToken | null>;
+
 /**
- * Each `name(...)` struct in a board file, with its fields: a field whose value is one string or
- * number keeps that token, and a field holding anything bigger reads as null.
+ * Reads the struct whose `(` is tokens[open]: its fields, where each field's value starts, and the
+ * index just past its closing `)`.
  */
-function ronStructs(tokens: RonToken[], name: string): { line: number; fields: Map<string, RonToken | null> }[] {
-  const found: { line: number; fields: Map<string, RonToken | null> }[] = [];
+function ronStructAt(tokens: RonToken[], open: number, file: string): { fields: RonFields; valueAt: Map<string, number>; end: number } {
+  const fields: RonFields = new Map();
+  const valueAt = new Map<string, number>();
+  let depth = 1;
+  let k = open + 1;
+  for (; k < tokens.length && depth > 0; k += 1) {
+    const t = tokens[k];
+    if (t.kind === 'punct' && '([{'.includes(t.value)) depth += 1;
+    else if (t.kind === 'punct' && ')]}'.includes(t.value)) depth -= 1;
+    else if (depth === 1 && t.kind === 'ident' && tokens[k + 1]?.value === ':') {
+      const value = tokens[k + 2];
+      const after = tokens[k + 3]?.value;
+      const single = value !== undefined && (value.kind === 'str' || value.kind === 'num') && (after === ',' || after === ')');
+      fields.set(t.value, single ? value : null);
+      valueAt.set(t.value, k + 2);
+    }
+  }
+  if (depth > 0) throw new Error(`${file}:${tokens[open].line}: this ( never closes.`);
+  return { fields, valueAt, end: k };
+}
+
+/** Each `name(...)` struct in a board file, wherever it sits, with its fields. */
+function ronStructs(tokens: RonToken[], name: string, file: string): { line: number; fields: RonFields }[] {
+  const found: { line: number; fields: RonFields }[] = [];
   for (let i = 0; i + 1 < tokens.length; i += 1) {
     if (tokens[i].kind !== 'ident' || tokens[i].value !== name || tokens[i + 1].value !== '(') continue;
-    const fields = new Map<string, RonToken | null>();
-    let depth = 1;
-    let k = i + 2;
-    for (; k < tokens.length && depth > 0; k += 1) {
-      const t = tokens[k];
-      if (t.kind === 'punct' && '([{'.includes(t.value)) depth += 1;
-      else if (t.kind === 'punct' && ')]}'.includes(t.value)) depth -= 1;
-      else if (depth === 1 && t.kind === 'ident' && tokens[k + 1]?.value === ':') {
-        const value = tokens[k + 2];
-        const after = tokens[k + 3]?.value;
-        const single = value !== undefined && (value.kind === 'str' || value.kind === 'num') && (after === ',' || after === ')');
-        fields.set(t.value, single ? value : null);
-      }
-    }
-    found.push({ line: tokens[i].line, fields });
+    found.push({ line: tokens[i].line, fields: ronStructAt(tokens, i + 1, file).fields });
   }
   return found;
 }
 
 /** Every Factory source the board sets, in file order. A Factory(...) with no string source is an error. */
 function boardSources(ron: string, file: string): string[] {
-  return ronStructs(ronTokens(ron, file), 'Factory').map(({ line, fields }) => {
+  return ronStructs(ronTokens(ron, file), 'Factory', file).map(({ line, fields }) => {
     const source = fields.get('source');
     if (source?.kind !== 'str') throw new Error(`${file}:${line}: this Factory(...) has no source string this test can read.`);
     return tidy(source.value);
   });
 }
 
-/** A board's captions in file order. A Caption(...) without a number tick and a string text is an error. */
+/**
+ * A board's captions in file order, read by position: each element of the `captions: [...]` list
+ * of the top-level Board(...). RON lets a struct leave out its name, so an element written
+ * `(tick: 85, ...)` is a Caption to the engine and counts here too. An element that is neither
+ * `Caption(...)` nor an unnamed `(...)`, or one without a whole-number tick and a string text,
+ * is an error naming its line.
+ */
 function captionsOf(ron: string, file: string): { tick: number; text: string }[] {
-  return ronStructs(ronTokens(ron, file), 'Caption').map(({ line, fields }) => {
+  const tokens = ronTokens(ron, file);
+  const named = tokens[0]?.kind === 'ident';
+  const open = named ? 1 : 0;
+  if (tokens[open]?.value !== '(' || (named && tokens[0].value !== 'Board')) {
+    throw new Error(`${file}:${tokens[0]?.line ?? 1}: the file doesn't start with Board(...).`);
+  }
+  const board = ronStructAt(tokens, open, file);
+  if (board.end !== tokens.length) throw new Error(`${file}:${tokens[board.end].line}: there is more after the Board(...).`);
+  const at = board.valueAt.get('captions');
+  if (at === undefined) return [];
+  if (tokens[at]?.value !== '[') throw new Error(`${file}:${tokens[at]?.line ?? 1}: captions isn't a [...] list.`);
+  const captions: { tick: number; text: string }[] = [];
+  let k = at + 1;
+  while (tokens[k]?.value !== ']') {
+    const t = tokens[k];
+    if (t === undefined) throw new Error(`${file}:${tokens[at].line}: the captions list never closes.`);
+    const elementOpen = t.kind === 'ident' && t.value === 'Caption' ? k + 1 : k;
+    if (tokens[elementOpen]?.kind !== 'punct' || tokens[elementOpen].value !== '(') {
+      throw new Error(`${file}:${t.line}: the captions list holds "${t.value}", and this test reads only Caption(...) or an unnamed (...) there.`);
+    }
+    const { fields, end } = ronStructAt(tokens, elementOpen, file);
     const tick = fields.get('tick');
     const text = fields.get('text');
     if (tick?.kind !== 'num' || !/^[0-9]+$/.test(tick.value) || text?.kind !== 'str') {
-      throw new Error(`${file}:${line}: this Caption(...) needs a whole-number tick and a string text that this test can read.`);
+      throw new Error(`${file}:${t.line}: this caption needs a whole-number tick and a string text that this test can read.`);
     }
-    return { tick: Number(tick.value), text: text.value };
-  });
+    captions.push({ tick: Number(tick.value), text: text.value });
+    k = end;
+    if (tokens[k]?.value === ',') k += 1;
+    else if (tokens[k]?.value !== ']') throw new Error(`${file}:${tokens[k]?.line ?? t.line}: a caption is followed by something other than , or ].`);
+  }
+  return captions;
 }
 
 /**
@@ -416,4 +457,19 @@ test("each pattern page's How the board works steps restate its board's captions
     });
   }
   noProblems(problems);
+});
+
+test('the caption reader counts every element of captions, named or not, and fails on one it cannot read', () => {
+  const board = (captions: string): string =>
+    `Board(format: 2, title: "t", seed: 1, commands: [], script: [], captions: [${captions}], executor: Executor(), end_tick: 9)`;
+  assert.deepEqual(
+    captionsOf(board('Caption(tick: 3, highlight: 1, text: "a"), (text: "b (Caption(tick: 1))", highlight: 2, tick: 5,),'), 'x.board.ron'),
+    [
+      { tick: 3, text: 'a' },
+      { tick: 5, text: 'b (Caption(tick: 1))' },
+    ],
+  );
+  assert.deepEqual(captionsOf(board('/* Caption(tick: 1, highlight: 1, text: "c") */'), 'x.board.ron'), []);
+  assert.throws(() => captionsOf(board('Caption(tick: 3, highlight: 1, text: "a"),\n  Note(tick: 4, highlight: 1, text: "b")'), 'x.board.ron'), /^Error: x\.board\.ron:2: /);
+  assert.throws(() => captionsOf(board('(tick: 4, highlight: 1)'), 'x.board.ron'), /x\.board\.ron:1: this caption needs/);
 });
