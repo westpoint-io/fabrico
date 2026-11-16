@@ -1,0 +1,57 @@
+---
+title: Split traffic with seeded randomness
+description: "Split traffic between two lines for an A/B test or a sample, with a Factory whose random numbers repeat on every replay."
+searchPhrase: split traffic
+sidebar:
+  order: 80
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To split traffic, for an A/B test or to sample a share of events, a [Factory](../../reference/files/glossary/#term-factory) picks a line for each [item](../../reference/files/glossary/#term-item) randomly. Its random numbers come from a seed, so the same items take the same lines on every replay.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory with two outputs, and two Debug [Sinks](../../reference/files/glossary/#term-sink), one for line A and one for line B, joined by [belts](../../reference/files/glossary/#term-belt). Eight webhooks arrive, one for each user, and the Factory sends each user down line A or line B.
+
+<Board name="docs-patterns-split-traffic" />
+
+## How the board works
+
+Press Play and the board stops on these two [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory draws a random number for each user and sends about half of them to line B. The first user goes to line A, on output 0.
+2. Tick 133: The line B Debug Sink logs its first user, user 3. The same users take the same lines on every replay, because the random numbers come from a seed.
+
+By the end, line A has logged users 1, 2, 6 and 8, and line B users 3, 4, 5 and 7.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// about half the items go to line B
+export default function (input, ctx) {
+  if (ctx.random() < 0.5) {
+    ctx.emit(1, input);
+  } else {
+    ctx.emit(0, input);
+  }
+}
+```
+
+This Factory has two outputs: pressing + Add output in the inspector, the panel on the right, once adds output 1, which `ctx.emit(1, ...)` sends to.
+
+`ctx.random()` returns a number from 0 up to 1, so comparing it with 0.5 sends about half the items down line B. To send a 10 percent sample to line B instead, compare with 0.1.
+
+## Trade-offs
+
+- <Fact id="factory.ctx.random" /> draws from a seeded stream, so the same items take the same lines on every replay. `Math.random` is left out of the sandbox for that reason; [Factory sandbox](../../concepts/factory-sandbox/#random-numbers-from-the-boards-seed) says what else it leaves out.
+- The share holds on average, and over a handful of items the counts can differ from it. With another seed, 100 instead of this board's 97, the same eight users split six to line A and two to line B. Count over many items before you read anything into a split.
+- Each Factory's stream starts from the project's seed and that machine's identity. If you delete the Factory and place it again, it gets a new stream, and the same items can take other lines. [Determinism and replay](../../concepts/determinism-and-replay/) covers what a replay keeps the same.
+
+## Related pages
+
+- [Route by content](../route-by-content/): send items down two lines by what they hold, not by chance.
+- [Factory sandbox](../../concepts/factory-sandbox/): what Factory code can't reach, and why its random numbers repeat.
+- [Factory API](../../reference/code-and-http/factory-api/): `ctx.random`, `ctx.randomInt` and the other things the code can call.
+- [Determinism and replay](../../concepts/determinism-and-replay/): why the same board and the same items give the same result every time.

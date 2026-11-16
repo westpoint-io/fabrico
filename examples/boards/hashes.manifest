@@ -36,6 +36,7 @@ examples/boards/docs/patterns-forward-a-webhook.board.ron 260 a00b62261c8d689a28
 examples/boards/docs/patterns-route-by-content.board.ron 300 7c8c7281023e57dbc28689d0b169b3a9553c97d38c2ecf7b70767e168f7c4f91
 examples/boards/docs/patterns-send-to-multiple-urls.board.ron 300 d0caa04515daeda9cda5dbd09886c1037941ae16f0064c73b6c09a32b53fb4a1
 examples/boards/docs/patterns-split-an-array.board.ron 260 cdddee03f5f425dce0c2a86d94053841feff73d25f639d1e71c6c98e8537baf8
+examples/boards/docs/patterns-split-traffic.board.ron 300 1641719892112b7fe8272da88671203a68621a407a89cec5d88ae709d4f70955
 examples/boards/docs/patterns-transform-json-payload.board.ron 240 0f5f7dae00171479daeb24202ff5733a15077d880b8a26f4fe86448c884acdf6
 examples/boards/docs/rules-docking.board.ron 360 37b3e037a1a2197e1b5c772a238c90931124b99bbc748330b2ee975a7cfacee4
 examples/boards/docs/rules-machine-states.board.ron 260 44124ce6ae6fd32adf0e0295ee928f4cd4eed11ba5d8b2ffe0ce860933cd26a7

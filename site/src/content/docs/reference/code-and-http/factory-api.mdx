@@ -48,7 +48,7 @@ In an HTTP Handler, `input` is the request: an object with `method`, `path`, `qu
 ctx.emit(port, value)
 ```
 
-Each call sends one new item out of an output. The item holds `value` written as JSON text, so `NaN` and `Infinity` arrive as `null`. A Factory has one output, numbered 0. An emit on an output with no belt docked goes nowhere.
+Each call sends one new item out of an output. The item holds `value` written as JSON text, so `NaN` and `Infinity` arrive as `null`. A Factory starts with one output, numbered 0. Pressing [+ Add output](../../files/commands/#gestures-that-send-another-command) in the inspector adds another, numbered 1, and so on. An emit on an output with no belt docked goes nowhere.
 
 | Argument | Type | What it does |
 |---|---|---|
@@ -172,4 +172,5 @@ Boards on this site run in a browser, where the stack limit is 128 KiB, so deep 
 - [Factory](../../machines/factory/): runs your JavaScript on each item and sends out what the code emits.
 - [HTTP Handler](../../machines/http-handler/): runs your JavaScript on each request and sends back a reply.
 - [Fault reasons](../../../troubleshooting/fault-reasons/): what each fault reason on an item means and how to fix it.
+- [Split traffic with seeded randomness](../../../patterns/split-traffic/): ctx.random picking a line for each item.
 - [Reference](../../): the list of machine pages and the other reference pages.

@@ -1,0 +1,76 @@
+// A docs board for the pattern page Split traffic with seeded randomness. One Source gets eight
+// webhooks, one per user, 20 ticks apart. A belt carries each item into a Factory, whose code draws
+// a random number for each item and sends about half of them to line B and the rest to line A.
+// Each line is a belt into its own Debug Sink. The run makes no outbound call.
+//
+//   row 1:                                   +-b5-> SINK 2   (line A)
+//   row 2:   SOURCE 0 -b4-> FACTORY 1 emit 0 -+
+//   row 3:                  FACTORY 1 emit 1 -+
+//   row 4:                                   +-b6-> SINK 3   (line B)
+//
+// The Factory starts with one output. AddPort gives it a second one, the way + Add output does in
+// the inspector: role 1 is an output, side 1 is east, medium 0 is a belt. The new output is catalog
+// port 3 and emit 1, and it seats below the first output, at world cell (7,3). The Factory's Fault
+// port stays undocked; the code never throws, so nothing goes there.
+//
+// ctx.random draws from a stream seeded by the board seed and the Factory's node key, so the split
+// repeats on every replay. Keep the commands in this order: placing the machines in another order
+// gives the Factory another key, and the users split another way.
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sinks 2 and 3, then the belts 4,
+// 5 and 6. The 15 commands and the history seal end the boot on tick 16.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1 (emit 0), Fault=2, the added Out=3 (emit 1); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Split traffic with seeded randomness",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),
+        Place(kind: 2, cell_x: 5, cell_y: 1),
+        Place(kind: 7, cell_x: 11, cell_y: 1),
+        Place(kind: 7, cell_x: 11, cell_y: 4),
+        AddPort(node: 1, role: 1, side: 1, medium: 0),
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),
+        DrawBelt(cells: [(8, 2), (9, 2), (9, 1), (10, 1)]),
+        DrawBelt(cells: [(8, 3), (9, 3), (9, 4), (10, 4)]),
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 5, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 6, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 6, endpoint: Head, node: 3, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// about half the items go to line B
+export default function (input, ctx) {
+  if (ctx.random() < 0.5) {
+    ctx.emit(1, input);
+  } else {
+    ctx.emit(0, input);
+  }
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"user":1}"#)),
+        At(tick: 60, input: Webhook(source: 0, body: r#"{"user":2}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"user":3}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"user":4}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"user":5}"#)),
+        At(tick: 140, input: Webhook(source: 0, body: r#"{"user":6}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"user":7}"#)),
+        At(tick: 180, input: Webhook(source: 0, body: r#"{"user":8}"#)),
+    ],
+    captions: [
+        // Measured: h1 Factory WORKING[63,83,103,123,143,163,183,203] factory.faults=0; user 1 logs on h2 at 93.
+        Caption(tick: 63, highlight: 1, text: "The Factory draws a random number for each user and sends about half of them to line B. The first user goes to line A, on output 0."),
+        // Measured: effect step_ends_on=133 sinks_stepped=["h3"] DEBUG {"user":3}; h3 Sink WORKING[133,153,173,213].
+        Caption(tick: 133, highlight: 3, text: "The line B Debug Sink logs its first user, user 3. The same users take the same lines on every replay, because the random numbers come from a seed."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 300,
+)
