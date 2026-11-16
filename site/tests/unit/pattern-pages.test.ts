@@ -8,7 +8,8 @@
 // - a page has no <Board>, more than one, or one named for another page, or its one <Board> sits
 //   inside an MDX comment, a code block or a {...} expression, where a reader never sees it;
 // - a `Factory code` block differs from the board's Factory source;
-// - the How the board works steps differ from the board's captions.
+// - the How the board works steps differ from the board's captions. A numbered line inside an MDX
+//   comment, a code block or inline code isn't a step.
 // The last two are here because page text drifted from the code it describes more than once. The
 // board file is read with a small RON reader below, not a pattern, so a caption or Factory written
 // with a trailing comma, fields in another order, a r##"..."## string, a comment around it or,
@@ -80,6 +81,59 @@ const tidy = (code: string): string =>
     .map((l) => l.replace(/\s+$/, ''))
     .join('\n')
     .replace(/\n+$/, '');
+
+/**
+ * The page with the parts a reader never sees blanked to spaces: MDX comments `{/* ... *\/}`
+ * always, and fenced code blocks and inline code too when `code` is 'blank'. Newlines stay, so
+ * line numbers and positions still match the page. A `{/*` inside a fenced block or inline code
+ * is code, and doesn't start a comment.
+ */
+function blankHidden(text: string, code: 'blank' | 'keep'): string {
+  const blank = (s: string): string => s.replace(/[^\n]/g, ' ');
+  const out: string[] = [];
+  let fence: RegExp | null = null;
+  let inComment = false;
+  for (const line of text.split('\n')) {
+    if (fence !== null) {
+      out.push(code === 'keep' ? line : blank(line));
+      if (fence.test(line)) fence = null;
+      continue;
+    }
+    const open = inComment ? null : /^\s*(`{3,}|~{3,})/.exec(line);
+    if (open !== null) {
+      fence = new RegExp(`^\\s*${open[1][0]}{${open[1].length},}\\s*$`);
+      out.push(code === 'keep' ? line : blank(line));
+      continue;
+    }
+    let rest = line;
+    let done = '';
+    while (rest.length > 0) {
+      if (inComment) {
+        const end = rest.indexOf('*/}');
+        const cut = end < 0 ? rest.length : end + 3;
+        done += blank(rest.slice(0, cut));
+        rest = rest.slice(cut);
+        if (end >= 0) inComment = false;
+        continue;
+      }
+      const next = /\{\/\*|`[^`]*`/.exec(rest);
+      if (next === null) {
+        done += rest;
+        break;
+      }
+      done += rest.slice(0, next.index);
+      if (next[0] === '{/*') {
+        inComment = true;
+        done += '   ';
+      } else {
+        done += code === 'keep' ? next[0] : blank(next[0]);
+      }
+      rest = rest.slice(next.index + next[0].length);
+    }
+    out.push(done);
+  }
+  return out.join('\n');
+}
 
 /** Each fenced js block titled `Factory code`, with the list indent it sits under removed, and the line it starts on. */
 function pageCodeBlocks(mdx: string): { line: number; code: string }[] {
@@ -286,11 +340,7 @@ function captionsOf(ron: string, file: string): { tick: number; text: string }[]
  * places, or written some other way, shows up as a difference between the two.
  */
 function boardTagsOf(body: string): { shown: string[]; all: number } {
-  const blank = (m: string): string => m.replace(/[^\n]/g, ' ');
-  const visible = body
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, blank)
-    .replace(/^(\s*)(```|~~~)[\s\S]*?^\s*\2\s*$/gm, blank)
-    .replace(/`[^`\n]*`/g, blank);
+  const visible = blankHidden(body, 'blank');
   const shown: string[] = [];
   let depth = 0;
   for (const l of visible.split('\n')) {
@@ -304,13 +354,21 @@ function boardTagsOf(body: string): { shown: string[]; all: number } {
   return { shown, all: [...body.matchAll(/<Board\b/g)].length };
 }
 
-/** The items of the ordered list under `## How the board works`, without their `1. ` numbers. */
+/**
+ * The items a reader sees in the ordered list under `## How the board works`, without their `1. `
+ * numbers. A numbered line or heading inside an MDX comment, a code block or inline code doesn't
+ * count, and a comment at the end of a step is left out of its text.
+ */
 function stepsOf(mdx: string): string[] {
-  const start = mdx.indexOf('\n## How the board works\n');
+  const visible = blankHidden(mdx, 'blank').split('\n');
+  const text = blankHidden(mdx, 'keep').split('\n');
+  const start = visible.findIndex((l) => l.trimEnd() === '## How the board works');
   if (start < 0) return [];
-  const rest = mdx.slice(start + 1).split('\n').slice(1);
-  const end = rest.findIndex((l) => l.startsWith('## '));
-  return (end < 0 ? rest : rest.slice(0, end)).filter((l) => /^\d+\.\s/.test(l)).map((l) => l.replace(/^\d+\.\s+/, ''));
+  const steps: string[] = [];
+  for (let i = start + 1; i < visible.length && !visible[i].startsWith('## '); i += 1) {
+    if (/^\d+\.\s/.test(visible[i])) steps.push(text[i].replace(/^\d+\.\s+/, '').trimEnd());
+  }
+  return steps;
 }
 
 /** The board file for a page, or a problem line when it doesn't exist. */
@@ -472,4 +530,28 @@ test('the caption reader counts every element of captions, named or not, and fai
   assert.deepEqual(captionsOf(board('/* Caption(tick: 1, highlight: 1, text: "c") */'), 'x.board.ron'), []);
   assert.throws(() => captionsOf(board('Caption(tick: 3, highlight: 1, text: "a"),\n  Note(tick: 4, highlight: 1, text: "b")'), 'x.board.ron'), /^Error: x\.board\.ron:2: /);
   assert.throws(() => captionsOf(board('(tick: 4, highlight: 1)'), 'x.board.ron'), /x\.board\.ron:1: this caption needs/);
+});
+
+test('the step reader skips numbered lines in a comment, a code block or inline code', () => {
+  const page = [
+    '## How the board works',
+    '',
+    '1. Tick 3: a',
+    '{/*',
+    '2. Tick 4: hidden',
+    '*/}',
+    '```text',
+    '3. Tick 5: fenced',
+    '```',
+    '`4. Tick 6: inline`',
+    '2. Tick 7: b `ctx.emit` {/* note */}',
+    '',
+    '{/* ## Hidden heading */}',
+    '3. Tick 8: c',
+    '',
+    '## Next',
+    '1. Tick 9: later',
+  ].join('\n');
+  assert.deepEqual(stepsOf(page), ['Tick 3: a', 'Tick 7: b `ctx.emit`', 'Tick 8: c']);
+  assert.deepEqual(stepsOf('{/*\n## How the board works\n\n1. Tick 1: a\n*/}'), []);
 });
