@@ -113,8 +113,17 @@ test('a wide code block and a wide table scroll in their own focusable box', asy
   const boxes = { 'the code block': page.locator('.sl-markdown-content .expressive-code pre'), 'the table': page.locator('.sl-markdown-content table') };
   for (const [name, box] of Object.entries(boxes)) {
     await expect(box, `${name} on the page`).toHaveCount(1);
-    // Expressive Code adds tabindex to an overflowing code block from its own script, at idle.
-    await expect(box, `${name}: tabindex`).toHaveAttribute('tabindex', '0');
+    // The box overflows first: that is what Expressive Code's script reacts to.
+    await expect
+      .poll(() => box.evaluate((el) => el.scrollWidth - el.clientWidth), { message: `${name}: content width past its box` })
+      .toBeGreaterThan(0);
+    // Expressive Code adds tabindex to an overflowing code block from its own script: a
+    // ResizeObserver, then a 250 ms quiet period, then requestIdleCallback with no deadline. When
+    // the browser grants that idle callback is up to the browser, and a CI runner with a second
+    // worker running boards beside this one went past the 5 s default. The site's own table script
+    // (FocusableTables.astro) sets tabindex straight from its ResizeObserver, so only the code
+    // block's wait can run long.
+    await expect(box, `${name}: tabindex`).toHaveAttribute('tabindex', '0', { timeout: 20_000 });
     const sizes = await box.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, tabIndex: (el as HTMLElement).tabIndex }));
     expect(sizes.scrollWidth, `${name}: content width against its box`).toBeGreaterThan(sizes.clientWidth);
     expect(sizes.tabIndex, `${name}: tabIndex`).toBe(0);
