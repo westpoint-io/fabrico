@@ -1,0 +1,91 @@
+// A docs board for the pattern page Spread work across parallel workers. One Source gets six
+// orders, 4 ticks apart. A belt carries them into a Balancer, which hands them to its two outputs
+// in turn: the odd orders go to the top Factory, worker A, and the even ones to the bottom Factory,
+// worker B. Both Factories run the same code, and each counts the orders it has done in its own
+// ctx.state. A Merge joins their results back onto one belt into a Debug Sink. The run makes no
+// outbound call.
+//
+//   row 2:                     +-b7-> FACTORY 2 (worker A) -b9--+
+//   row 3:   SOURCE 0 -b6-> BALANCER 1                          +-> MERGE 4 -b11-> SINK 5
+//   row 6:                     +-b8-> FACTORY 3 (worker B) -b10-+
+//
+// Worker B's belts are each one tile longer than worker A's, because they turn through more rows,
+// so its results reach the Merge later and the Debug Sink logs orders 1, 3 and 5 before 2, 4
+// and 6.
+//
+// The Factories' Fault ports stay undocked. The code never throws, so nothing faults.
+//
+// Handles mint in command order: the Source 0, the Balancer 1, the Factories 2 and 3, the Merge 4,
+// the Sink 5, then the belts 6 to 11. The 26 commands and the history seal end the boot on
+// tick 27.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, BALANCER=4, MERGE=6, SINK=7. Dock `port` is the
+// catalog port index: SOURCE Out=0; BALANCER In=0, In=1, Out=2 (top), Out=3 (bottom); FACTORY
+// In=0, Out=1, Fault=2; MERGE In=0, In=1, Out=2; SINK In=0. In the code, ctx.emit(0, ...) sends on
+// the Factory's first output, catalog port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Spread work across parallel workers",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 3),        // 0: SOURCE
+        Place(kind: 4, cell_x: 5, cell_y: 3),        // 1: BALANCER In0 (5,3) Outs (6,3) (6,4)
+        Place(kind: 2, cell_x: 10, cell_y: 1),       // 2: FACTORY A In (10,2) Out (12,2)
+        Place(kind: 2, cell_x: 10, cell_y: 5),       // 3: FACTORY B In (10,6) Out (12,6)
+        Place(kind: 6, cell_x: 16, cell_y: 3),       // 4: MERGE In0 (16,3) In1 (16,4) Out (17,3)
+        Place(kind: 7, cell_x: 21, cell_y: 3),       // 5: SINK
+        DrawBelt(cells: [(2, 3), (3, 3), (4, 3)]),                                   // 6
+        DrawBelt(cells: [(7, 3), (8, 3), (8, 2), (9, 2)]),                           // 7
+        DrawBelt(cells: [(7, 4), (8, 4), (8, 5), (8, 6), (9, 6)]),                   // 8
+        DrawBelt(cells: [(13, 2), (14, 2), (14, 3), (15, 3)]),                       // 9
+        DrawBelt(cells: [(13, 6), (14, 6), (14, 5), (14, 4), (15, 4)]),              // 10
+        DrawBelt(cells: [(18, 3), (19, 3), (20, 3)]),                                // 11
+        Dock(belt: 6, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 7, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 8, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 8, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 2, port: 1),
+        Dock(belt: 9, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 10, endpoint: Tail, node: 3, port: 1),
+        Dock(belt: 10, endpoint: Head, node: 4, port: 1),
+        Dock(belt: 11, endpoint: Tail, node: 4, port: 2),
+        Dock(belt: 11, endpoint: Head, node: 5, port: 0),
+        Configure(node: 2, config: Factory(source: r#"// pack the order; each worker counts its own
+export default function (input, ctx) {
+  const done = (ctx.state.done || 0) + 1;
+  ctx.state.done = done;
+  ctx.emit(0, { order: input.order, done: done });
+}"#)),
+        Configure(node: 3, config: Factory(source: r#"// pack the order; each worker counts its own
+export default function (input, ctx) {
+  const done = (ctx.state.done || 0) + 1;
+  ctx.state.done = done;
+  ctx.emit(0, { order: input.order, done: done });
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"order":1}"#)),
+        At(tick: 44, input: Webhook(source: 0, body: r#"{"order":2}"#)),
+        At(tick: 48, input: Webhook(source: 0, body: r#"{"order":3}"#)),
+        At(tick: 52, input: Webhook(source: 0, body: r#"{"order":4}"#)),
+        At(tick: 56, input: Webhook(source: 0, body: r#"{"order":5}"#)),
+        At(tick: 60, input: Webhook(source: 0, body: r#"{"order":6}"#)),
+    ],
+    captions: [
+        // Measured: h1 Balancer WORKING[63,67,71,75,79,83]; order 1 reaches h2 (worker A) on 93.
+        Caption(tick: 63, highlight: 1, text: "The Balancer hands the first order to worker A, the top Factory. It takes its outputs in turn, so the next order goes to worker B."),
+        // Measured: h3 Factory WORKING[105,113,121]; h2 Factory WORKING[93,101,109]; h8 Belt(5t), h7 Belt(4t).
+        Caption(tick: 105, highlight: 3, text: "Worker B, the bottom Factory, runs the same code on order 2. Its belt from the Balancer is one tile longer, so worker A has already done order 3."),
+        // Measured: effect step_ends_on=165 sinks_stepped=["h5"] DEBUG {"order":2,"done":1}, after order 5 on 161.
+        Caption(tick: 165, highlight: 5, text: "The Debug Sink logs order 2 after order 5. Each worker did three orders, but worker B's results take longer to reach the Merge."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)
