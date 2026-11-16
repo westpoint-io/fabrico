@@ -107,23 +107,27 @@ test('at 1280 px the long title wraps inside the sidebar', async ({ page }, test
   expect(box.lines, 'lines the link text takes').toBeGreaterThan(1);
 });
 
-test('a wide code block and a wide table scroll in their own focusable box', async ({ page }) => {
+test('a wide code block and a wide table scroll in their own focusable box', async ({ page, request }) => {
+  // The code block's tabindex, role and label are in the HTML the server sends (site/ec.config.mjs),
+  // so a keyboard user can reach it before any script runs. Expressive Code's own script adds them
+  // only at idle, and on a busy runner that idle callback once didn't come within 20 s.
+  const served = await (await request.get(longTitle)).text();
+  const pres = served.match(/<pre\b[^>]*>/g) ?? [];
+  expect(pres, 'the <pre> tags in the page as served').toHaveLength(1);
+  for (const attribute of ['tabindex="0"', 'role="region"', 'aria-label="Code block"']) {
+    expect(pres[0], `the code block as served: ${attribute}`).toContain(attribute);
+  }
   await open(page, longTitle, 1280);
   const focus = await tokenColour(page, '--fab-focus');
   const boxes = { 'the code block': page.locator('.sl-markdown-content .expressive-code pre'), 'the table': page.locator('.sl-markdown-content table') };
   for (const [name, box] of Object.entries(boxes)) {
     await expect(box, `${name} on the page`).toHaveCount(1);
-    // The box overflows first: that is what Expressive Code's script reacts to.
+    // The box overflows first. A code block that fits loses its tabindex to Expressive Code's script,
+    // and the site's table script (FocusableTables.astro) gives a table one only once it overflows.
     await expect
       .poll(() => box.evaluate((el) => el.scrollWidth - el.clientWidth), { message: `${name}: content width past its box` })
       .toBeGreaterThan(0);
-    // Expressive Code adds tabindex to an overflowing code block from its own script: a
-    // ResizeObserver, then a 250 ms quiet period, then requestIdleCallback with no deadline. When
-    // the browser grants that idle callback is up to the browser, and a CI runner with a second
-    // worker running boards beside this one went past the 5 s default. The site's own table script
-    // (FocusableTables.astro) sets tabindex straight from its ResizeObserver, so only the code
-    // block's wait can run long.
-    await expect(box, `${name}: tabindex`).toHaveAttribute('tabindex', '0', { timeout: 20_000 });
+    await expect(box, `${name}: tabindex`).toHaveAttribute('tabindex', '0');
     const sizes = await box.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, tabIndex: (el as HTMLElement).tabIndex }));
     expect(sizes.scrollWidth, `${name}: content width against its box`).toBeGreaterThan(sizes.clientWidth);
     expect(sizes.tabIndex, `${name}: tabIndex`).toBe(0);
