@@ -10,7 +10,7 @@ sidebar:
 import Board from '../../../components/Board.astro';
 import Fact from '../../../components/Fact.astro';
 
-Parallel workers share a job that one [Factory](../../reference/files/glossary/#term-factory) can't keep up with. A [Balancer](../../reference/machines/balancer/) hands [items](../../reference/files/glossary/#term-item) to its outputs in turn, two Factories do the same work side by side, and a [Merge](../../reference/machines/merge/) puts their results back on one line.
+Parallel workers split one stream of work between two [Factories](../../reference/files/glossary/#term-factory) that run the same code, each keeping its own state. A [Balancer](../../reference/machines/balancer/) hands [items](../../reference/files/glossary/#term-item) to its outputs in turn, two Factories do the same work side by side, and a [Merge](../../reference/machines/merge/) puts their results back on one line.
 
 The board below has a [Source](../../reference/files/glossary/#term-source), a Balancer, two Factories, a Merge and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right, with [belts](../../reference/files/glossary/#term-belt) between them. Six orders arrive 4 ticks apart. The Balancer hands the odd orders to worker A, the top Factory, and the even orders to worker B, the bottom one, and the Merge brings their results to the Debug Sink.
 
@@ -43,7 +43,7 @@ export default function (input, ctx) {
 
 ## Trade-offs
 
-- A second worker helps when one Factory falls behind. A Factory whose run emits several items sends them out one a tick and takes no new item until they have gone, so items queue in front of it; [Factory API](../../reference/code-and-http/factory-api/) has the rule. Each run on this board emits one item, so one Factory would have kept up here.
+- A second worker makes the line faster only while each worker's results go to a Sink of their own. A run takes no ticks of its own, so a Factory falls behind only when a run emits several items: they leave no faster than the belt below takes them, and the Factory takes no new item until they have gone. [Factory API](../../reference/code-and-http/factory-api/) has the rule. Once a Merge joins the results onto one belt, that belt sets the pace. Its fastest pace, <Fact id="limit.belt_pace_min" />, is also the most one worker's own belt could carry, so on this board one Factory would carry the same load.
 - The Balancer hands items to its outputs in turn, not to whichever worker is free, so a worker that falls behind still gets every other item. [Balancer](../../reference/machines/balancer/) has the rule.
 - When the belt to one worker can't take another item, the Balancer holds back, and the other worker gets no new item either: a Balancer sends nothing while either of its outputs is full. [Backpressure](../../concepts/backpressure/) explains how a line packs up from there.
 - Each Factory keeps its own <Fact id="factory.ctx.state" />, so the workers share nothing. A count kept there covers only that worker's items, as the two counts of 3 on this board show.
