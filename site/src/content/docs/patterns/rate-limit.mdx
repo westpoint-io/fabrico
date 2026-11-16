@@ -1,0 +1,58 @@
+---
+title: Rate limit with belt pace
+description: "Throttle how fast items reach an HTTP Sink by slowing the belt in front of it, so it hands over one item every so many ticks."
+searchPhrase: rate limit
+sidebar:
+  order: 110
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To rate limit the calls a board makes, slow the [belt](../../reference/files/glossary/#term-belt) that feeds the HTTP Sink. A slow belt lets [items](../../reference/files/glossary/#term-item) through no faster than its pace however fast webhooks arrive, which is how you throttle requests to a service with its own rate limit.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a [Factory](../../reference/files/glossary/#term-factory), a belt at the usual pace that holds the queue, a short belt at the slowest pace and an HTTP [Sink](../../reference/files/glossary/#term-sink) that posts to `https://example.com/mail`, left to right. The queue belt's end is joined to the start of the short belt, which feeds the HTTP Sink. Six webhooks arrive on the same tick.
+
+<Board name="docs-patterns-rate-limit" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: Six webhooks arrived on one tick, and the Factory turns the first into a request body. A slow belt will space the calls 20 ticks apart.
+2. Tick 221: The HTTP Sink makes its first call. The slow belt in front of it hands over one request body every 20 ticks.
+3. Tick 241: The HTTP Sink makes the next call, 20 ticks after the first. The other four wait in order on the slow belt.
+
+The Factory sends the six request bodies on 2 ticks apart, and by tick 80 all six wait on the queue belt. The calls go out on ticks 221, 241, 261, 281, 301 and 321.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// the request body the service expects
+export default function (input, ctx) {
+  ctx.emit(0, { email: input.email });
+}
+```
+
+The code only builds the body the service expects, and the short belt in front of the HTTP Sink sets the limit. To set one up, select the short belt, set Belt pace in the inspector to its Slowest end, and connect the queue belt's end to it with Join two belts.
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- A belt's pace runs from <Fact id="limit.belt_pace_min" bare /> to <Fact id="limit.belt_pace_max" />, and it counts [ticks, not seconds](../../concepts/ticks/#ticks-and-seconds) as the engine runs them. A tick isn't a fixed length of time, so a limit a service states per second or per minute maps onto belt pace only roughly.
+- A belt takes a new item only when its first slot is free, so a belt at the slowest pace lets at most one item through every 20 ticks, as the calls on this board show. Belt pace can't space calls further apart than that on its own.
+- Join the queue belt to the slow belt with Join two belts rather than docking the slow belt straight onto the Factory. A slow belt docked onto a machine's output keeps its waiting items at its start, where the board doesn't draw them. [Commands](../../reference/files/commands/) has the gesture.
+- When webhooks keep coming faster than the slow belt lets them through, the line fills back from the slow belt to the Source. After that the Source keeps up to <Fact id="limit.source_pending_cap" bare /> waiting webhooks and drops each new one, making no item and no [fault](../../reference/files/glossary/#term-fault) for it. This board's six webhooks peak the Source's backlog at 5. [Limits](../../reference/board/limits/#queues) lists the caps.
+
+## Related pages
+
+- [Buffer events behind a slow step](../buffer-events/): let a burst wait in order on a long belt in front of a slow step.
+- [Belt](../../reference/machines/belt/): the pace field, its range and the slots on each tile.
+- [Ticks](../../concepts/ticks/#ticks-and-seconds): why a number of ticks only approximates a number of seconds.
+- [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/): what each request carries and how long the Sink waits for an answer.
