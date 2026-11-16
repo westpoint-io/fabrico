@@ -47,6 +47,7 @@ To set up the timer in the app, select the Source, pick Timer under Trigger in t
 - The interval, the Source's <Fact id="trigger.Timer.interval_ticks" /> field, counts ticks, and ticks only approximate seconds, so the schedule drifts from the wall clock. Boards on this site play at <Fact id="embed.ticks_per_second" /> at 1x, and in the app a busy board runs fewer ticks a second than an idle one. [Ticks and seconds](../../concepts/ticks/#ticks-and-seconds) explains the gap.
 - A timer has no cron expression and no time of day. It fires on each tick that is a multiple of its interval, counted from the start of the board, so it can't pick a date or an hour.
 - Each fire goes into the event log the same way a webhook does, and a replay reads it back from there instead of firing the timer again. [Event log and save files](../../concepts/event-log-and-save-files/) covers the log.
+- When the job falls behind and the line after the Source backs up, the Source holds up to <Fact id="limit.source_pending_cap" bare /> fires waiting. A fire that comes due past that is skipped, with no item, no entry in the event log and no [fault](../../reference/files/glossary/#term-fault) for it, so a job that keeps falling behind its interval loses runs. [Limits](../../reference/board/limits/#queues) lists the caps.
 - When the app saves a playing board, it stops taking input for a few seconds at most, and a timer fire that comes due in that time is skipped for good. [When the app saves](../../reference/files/project-files/#when-the-app-saves) has the details.
 
 ## Related pages
