@@ -7,7 +7,8 @@
 // - a page has no searchPhrase, or the phrase is in neither its title nor its description;
 // - a page has no <Board>, more than one, or one named for another page, or its one <Board> sits
 //   inside an MDX comment, a code block or a {...} expression, where a reader never sees it;
-// - a `Factory code` block differs from the board's Factory source;
+// - a `Factory code` block differs from the board's Factory source, or the page has none outside
+//   MDX comments;
 // - the How the board works steps differ from the board's captions. A numbered line inside an MDX
 //   comment, a code block or inline code isn't a step.
 // The last two are here because page text drifted from the code it describes more than once. The
@@ -135,19 +136,27 @@ function blankHidden(text: string, code: 'blank' | 'keep'): string {
   return out.join('\n');
 }
 
-/** Each fenced js block titled `Factory code`, with the list indent it sits under removed, and the line it starts on. */
+/**
+ * Each fenced js block titled `Factory code` a reader sees, with the list indent it sits under
+ * removed, and the line it starts on. A block inside an MDX comment, or inside another fenced
+ * block, doesn't count.
+ */
 function pageCodeBlocks(mdx: string): { line: number; code: string }[] {
-  const lines = mdx.split('\n');
+  const lines = blankHidden(mdx, 'keep').split('\n');
   const blocks: { line: number; code: string }[] = [];
   for (let start = 0; start < lines.length; start += 1) {
-    if (!/^\s*```js title="Factory code"\s*$/.test(lines[start])) continue;
-    const indent = /^(\s*)/.exec(lines[start])![1];
+    const open = /^(\s*)(`{3,}|~{3,})(.*)$/.exec(lines[start]);
+    if (open === null) continue;
+    const close = new RegExp(`^\\s*${open[2][0]}{${open[2].length},}\\s*$`);
+    const indent = open[1];
     const body: string[] = [];
     let i = start + 1;
-    for (; i < lines.length && !/^\s*```\s*$/.test(lines[i]); i += 1) {
+    for (; i < lines.length && !close.test(lines[i]); i += 1) {
       body.push(lines[i].startsWith(indent) ? lines[i].slice(indent.length) : lines[i].trimStart());
     }
-    blocks.push({ line: start + 1, code: tidy(body.join('\n')) });
+    if (open[2] === '```' && /^js title="Factory code"\s*$/.test(open[3])) {
+      blocks.push({ line: start + 1, code: tidy(body.join('\n')) });
+    }
     start = i;
   }
   return blocks;
@@ -554,4 +563,29 @@ test('the step reader skips numbered lines in a comment, a code block or inline 
   ].join('\n');
   assert.deepEqual(stepsOf(page), ['Tick 3: a', 'Tick 7: b `ctx.emit`', 'Tick 8: c']);
   assert.deepEqual(stepsOf('{/*\n## How the board works\n\n1. Tick 1: a\n*/}'), []);
+});
+
+test('the code block reader skips a Factory code block in a comment or inside another fenced block', () => {
+  const page = [
+    '```js title="Factory code"',
+    'shown()',
+    '```',
+    '{/*',
+    '```js title="Factory code"',
+    'hidden()',
+    '```',
+    '*/}',
+    '````md',
+    '```js title="Factory code"',
+    'fenced()',
+    '```',
+    '````',
+    '```js title="Factory code"',
+    'if (x) {/* not a comment */}',
+    '```',
+  ].join('\n');
+  assert.deepEqual(pageCodeBlocks(page), [
+    { line: 1, code: 'shown()' },
+    { line: 14, code: 'if (x) {/* not a comment */}' },
+  ]);
 });
