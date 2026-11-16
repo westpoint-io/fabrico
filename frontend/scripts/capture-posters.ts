@@ -6,7 +6,8 @@
 // it wraps `dist-embed/fabrico-board.js` into one capture page per board with the same page shell
 // and policy as the test pages (`build-offline.ts`), opens the pages in Playwright's Chromium with
 // the same GL arguments as the embed checks, runs each board to its end tick at 4x, pressing
-// Continue at each caption, and screenshots the stage at 960 by 600 CSS px.
+// Continue at each caption, and screenshots the stage at 960 by 600 CSS px. It runs PAGES_AT_ONCE
+// boards at a time.
 //
 // It writes `dist-embed/posters/<board id>.png` and the capture pages under `dist-embed/capture/`.
 // `scripts/build-embed.sh` then builds the bundle a second time with the posters inlined.
@@ -38,6 +39,14 @@ export const POSTER_HEIGHT = 600;
 const GL_ARGS = ['--use-gl=angle', '--use-angle=swiftshader'];
 /** A board's run at 4x is 1200 ticks in 5 s; this leaves room for a slow machine. */
 const RUN_TIMEOUT_MS = 120_000;
+/**
+ * How many boards run at once. Every page in the browser draws through one software GL process,
+ * and a screenshot waits for that process to draw a frame. With every board open at once (46 at
+ * the time of writing), CI's 4-core runner left the two longest boards short of their end tick
+ * after 120 s and a screenshot short of a frame after 30 s. A fixed count keeps each board's wait
+ * about its own run, however many boards the folder holds.
+ */
+const PAGES_AT_ONCE = 4;
 /** The stage background, `--fab-substrate`. A poster with almost nothing else is a blank stage. */
 const SUBSTRATE = [0x1b, 0x1f, 0x27] as const;
 /**
@@ -164,24 +173,29 @@ async function main(): Promise<void> {
   const failures: string[] = [];
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
-    await Promise.all(
-      ids.map(async (id) => {
-        const file = path.join(CAPTURE_DIR, `${id}.html`);
-        writeFileSync(file, buildPage(captureTemplate(id), bundle, `${id}.html`));
-        const page = await context.newPage();
-        const errors: string[] = [];
-        page.on('pageerror', (e) => errors.push(e.message));
-        try {
-          const png = await capture(page, id, pathToFileURL(file).href);
-          if (errors.length > 0) throw new Error(`${id}: the page threw: ${errors.join('; ')}`);
-          writeFileSync(path.join(POSTER_DIR, `${id}.png`), png);
-        } catch (error) {
-          failures.push(error instanceof Error ? error.message : String(error));
-        } finally {
-          await page.close();
-        }
-      }),
-    );
+    const captureOne = async (id: string): Promise<void> => {
+      const file = path.join(CAPTURE_DIR, `${id}.html`);
+      writeFileSync(file, buildPage(captureTemplate(id), bundle, `${id}.html`));
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      try {
+        const png = await capture(page, id, pathToFileURL(file).href);
+        if (errors.length > 0) throw new Error(`${id}: the page threw: ${errors.join('; ')}`);
+        writeFileSync(path.join(POSTER_DIR, `${id}.png`), png);
+      } catch (error) {
+        // Playwright's own errors (a timeout, a missing element) don't name the board.
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(message.startsWith(`${id}:`) ? message : `${id}: ${message}`);
+      } finally {
+        await page.close();
+      }
+    };
+    const queue = [...ids];
+    const runQueue = async (): Promise<void> => {
+      for (let id = queue.shift(); id !== undefined; id = queue.shift()) await captureOne(id);
+    };
+    await Promise.all(Array.from({ length: Math.min(PAGES_AT_ONCE, ids.length) }, runQueue));
   } finally {
     await browser.close();
   }
