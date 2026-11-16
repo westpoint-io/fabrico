@@ -1,0 +1,58 @@
+---
+title: Split an array into items
+description: "Split one order into line items: a Factory reads the array in the payload and emits one item for each entry."
+searchPhrase: split an array
+sidebar:
+  order: 60
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+You split an array when one webhook carries a list, such as an order with its line items, and each entry needs to travel on as its own event. A [Factory](../../reference/files/glossary/#term-factory) reads the array from the payload and emits once for each entry, so one [item](../../reference/files/glossary/#term-item) goes in and several come out.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right, joined by two [belts](../../reference/files/glossary/#term-belt). Two order webhooks arrive: A-1 lists three line items and A-2 lists two. The Factory emits one item for each line item, and the Debug Sink logs each one.
+
+<Board name="docs-patterns-split-an-array" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory takes order A-1 and emits one item for each of its three line items; the first leaves at once and the other two follow one a tick.
+2. Tick 85: The Debug Sink logs the first line item of order A-1, a pen with a quantity of 2, as an item of its own.
+3. Tick 89: The Debug Sink logs the third line item, a pad with a quantity of 3, so the one webhook has become three items.
+
+The Factory shows as working on ticks 63, 64 and 65 while the three items leave. Order A-2 goes the same way 100 ticks later: the Factory works on ticks 163 and 164, and the Debug Sink logs its two line items on ticks 185 and 187.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// one item for each line item in the order
+export default function (input, ctx) {
+  for (const line of input.items) {
+    ctx.emit(0, {
+      order: input.order,
+      sku: line.sku,
+      qty: line.qty,
+    });
+  }
+}
+```
+
+The `for` loop calls `ctx.emit` once for each entry in `input.items`, so the number of items out matches the length of the array. Each new item holds only the fields the code names, so the code copies the order id into every one; without it, nothing after the Factory could tell which order a line item came from.
+
+## Trade-offs
+
+- One run can emit up to <Fact id="limit.factory_emits_per_port" bare /> times on each output. Each emit past that isn't sent and becomes a <Fact id="fault.FactoryError" /> [fault](../../reference/files/glossary/#term-fault) of its own, and the rest of the run stands: an order with more line items than that sends the first <Fact id="limit.factory_emits_per_port" bare /> and faults once for each line item after them. The orders on this board have three line items and two. [Limits](../../reference/board/limits/) lists the cap with the other limits on a Factory.
+- The first item leaves at once, and the rest wait in the Factory and leave one a tick. While any wait, the Factory takes no new item, so a long array holds up the orders behind it. [Factory API](../../reference/code-and-http/factory-api/) describes `ctx.emit` and when its items leave.
+- An empty array gives no item and no fault: the loop runs zero times and the run ends without an emit.
+
+## Related pages
+
+- [Transform a JSON payload](../transform-json-payload/): reshape each line item before it goes on.
+- [Filter events](../filter-events/): keep only some of the line items, by a field such as the quantity.
+- [Factory API](../../reference/code-and-http/factory-api/): what `input` and `ctx.emit` hold, and the limits on one run.
+- [Limits](../../reference/board/limits/): the cap on emits in one run, with every other limit on a board.
