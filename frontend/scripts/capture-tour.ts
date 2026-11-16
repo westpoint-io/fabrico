@@ -82,12 +82,18 @@ const BOARD_FLOOR_MARGIN = 3;
 
 /**
  * The tick every picture shows. The demo boots one command per tick and has all 67 commands in by
- * tick 67; by tick 240 orders are on the belts. The script lets the board run to HOLD_FROM, then
+ * tick 67; by tick 240 orders are on the belts. The script lets the board run to a hold tick, then
  * presses Step until the board stands on TOUR_TICK, so each run shows the same tick whatever the
  * machine's speed.
+ *
+ * Step reaches the host a little after the page reads the hold tick, and the host plays on in the
+ * meantime: about 3 ticks locally, 43 on a slow CI runner, over 100 on one core at a 25% quota. When
+ * the board stops past TOUR_TICK the script loads the demo again and holds from the next, earlier
+ * tick in HOLD_FROM. Every hold tick is past 67, so the demo has all its commands in. The engine is
+ * deterministic, so tick 240 shows the same board whichever hold tick got there.
  */
 const TOUR_TICK = 240;
-const HOLD_FROM = 200;
+const HOLD_FROM = [200, 160, 100] as const;
 
 /** The toolbar crops reach this many CSS px past the button they end or start at. */
 const TOOLBAR_MARGIN = 8;
@@ -478,25 +484,53 @@ async function take(page: Page, errors: string[], shot: Shot, tick: number): Pro
 
 // --- The board ----------------------------------------------------------------
 
-/**
- * Load the demo through Examples, let it run to HOLD_FROM, then hold it with Step and step on to
- * TOUR_TICK. Step on a running board runs one tick and freezes it where it is. Pause would not do:
- * the host drains every belt before it freezes, so a paused demo shows empty belts, and the tick it
- * stops on depends on what was in flight.
- */
-async function holdDemoAtTourTick(page: Page): Promise<SceneRead> {
-  const before = await waitUntil('the host streams its first board', () => readScene(page), (s) => s.nodes.length > 0 && s.tick > 30);
+/** Load the demo through Examples and wait until it plays again from tick 0. */
+async function loadDemo(page: Page, before: SceneRead): Promise<void> {
   await page.getByRole('button', { name: 'Examples' }).click();
   await page.getByTitle(DEMO_ENTRY_TITLE).click();
-  await waitUntil(
+  const loaded = await waitUntil(
     'the demo board loads again from tick 0',
     () => readScene(page),
     (s) => s.generation !== before.generation || s.tick < before.tick,
   );
-  await waitUntil(`the demo runs to tick ${HOLD_FROM}`, () => readScene(page), (s) => s.tick >= HOLD_FROM);
-  const step = page.getByRole('button', { name: 'Step', exact: true });
-  await step.click();
-  // Held once two reads 250 ms apart agree.
+  // A board held with Step may load held. Play it if its tick stands still for a second.
+  await sleep(1_000);
+  if ((await readScene(page)).tick === loaded.tick) {
+    await page.getByRole('button', { name: 'Play', exact: true }).click();
+    await waitUntil('the reloaded demo plays', () => readScene(page), (s) => s.tick > loaded.tick);
+  }
+}
+
+/**
+ * Press Step from inside the page on the first read of a tick at or past `from`, and return that
+ * tick. Pressing from Node would add a round trip and Playwright's wait for a still button, and the
+ * host keeps playing through both.
+ */
+function stepOnTick(page: Page, from: number): Promise<number> {
+  return page.evaluate(
+    ({ from, timeoutMs }) =>
+      new Promise<number>((resolve, reject) => {
+        const fab = (window as unknown as { __fabrico: { scene(): { tick: number } } }).__fabrico;
+        const deadline = performance.now() + timeoutMs;
+        const check = (): void => {
+          const tick = fab.scene().tick;
+          if (tick >= from) {
+            const step = document.querySelector<HTMLButtonElement>('header button[aria-label="Step"]');
+            if (step === null) return reject(new Error('the toolbar has no Step button'));
+            step.click();
+            return resolve(tick);
+          }
+          if (performance.now() > deadline) return reject(new Error(`the demo did not reach tick ${from} in ${timeoutMs} ms (it reads ${tick})`));
+          setTimeout(check, 16);
+        };
+        check();
+      }),
+    { from, timeoutMs: WAIT_TIMEOUT_MS },
+  );
+}
+
+/** Wait until two reads 250 ms apart agree on the tick, and return that read. */
+async function waitHeld(page: Page): Promise<SceneRead> {
   let last = -1;
   const settled = await waitUntil(
     'the board holds still after Step',
@@ -509,11 +543,36 @@ async function holdDemoAtTourTick(page: Page): Promise<SceneRead> {
     },
     (r) => r.same,
   );
-  let held = settled.s;
-  if (held.tick > TOUR_TICK) fail(`the board stopped on tick ${held.tick}, past the tour's tick ${TOUR_TICK}.`);
+  return settled.s;
+}
+
+/**
+ * Load the demo through Examples, let it run to a hold tick, then hold it with Step and step on to
+ * TOUR_TICK. Step on a running board runs one tick and freezes it where it is. Pause would not do:
+ * the host drains every belt before it freezes, so a paused demo shows empty belts, and the tick it
+ * stops on depends on what was in flight. When Step lands past TOUR_TICK, load the demo again and
+ * hold from an earlier tick (HOLD_FROM).
+ */
+async function holdDemoAtTourTick(page: Page): Promise<SceneRead> {
+  let before = await waitUntil('the host streams its first board', () => readScene(page), (s) => s.nodes.length > 0 && s.tick > 30);
+  let held: SceneRead | null = null;
+  const landed: string[] = [];
+  for (const from of HOLD_FROM) {
+    await loadDemo(page, before);
+    const pressedOn = await stepOnTick(page, from).catch((error: unknown) => fail(`${error instanceof Error ? error.message : String(error)}.`));
+    const stopped = await waitHeld(page);
+    landed.push(`tick ${stopped.tick} (held from ${from}, Step pressed on ${pressedOn})`);
+    if (stopped.tick <= TOUR_TICK) {
+      held = stopped;
+      break;
+    }
+    console.error(`capture:tour: the board stopped on tick ${stopped.tick}, past the tour's tick ${TOUR_TICK}; loading the demo again.`);
+    before = stopped;
+  }
+  if (held === null) return fail(`the board stopped past the tour's tick ${TOUR_TICK} on every try: ${landed.join('; ')}.`);
   while (held.tick < TOUR_TICK) {
-    const from = held.tick;
-    await step.click();
+    const from: number = held.tick;
+    await page.getByRole('button', { name: 'Step', exact: true }).click();
     held = await waitUntil(`Step moves the board on from tick ${from}`, () => readScene(page), (r) => r.tick > from);
   }
   if (held.tick !== TOUR_TICK) fail(`Step went past the tour's tick: the board reads ${held.tick}, not ${TOUR_TICK}.`);
