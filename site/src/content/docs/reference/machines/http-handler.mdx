@@ -29,7 +29,7 @@ The app checks the reply before it sends it. A reply it can't read, such as one 
 
 ## Limits and faults
 
-The code runs under the same limits as a Factory's. Code that throws stops with a <Fact id="fault.FactoryError" /> fault, and code that runs past its budget stops with a <Fact id="fault.FactoryTimeout" /> fault. Either way that run sends no reply, and the request leaves by the Handler's Fault port. In this example, the Fault port has a belt to a Sink, ready to collect such requests; the code never throws, so the belt stays empty. The troubleshooting entries for [FactoryError](../../../troubleshooting/fault-reasons/#fault-factory-error) and [FactoryTimeout](../../../troubleshooting/fault-reasons/#fault-factory-timeout) say how to fix each one.
+The code runs under the same limits as a Factory's. Code that throws stops with a <Fact id="fault.FactoryError" /> fault, and code that runs past its budget stops with a <Fact id="fault.FactoryTimeout" /> fault. Either way that run sends no reply. The error message rides in the fault, so a belt from the Handler's Fault port to a Sink lets you read why the code failed. The fault doesn't hold the request itself, so that belt can't keep or replay a failed request. In this example, the Fault port has a belt to a Sink, ready to collect those faults; the code never throws, so the belt stays empty. The troubleshooting entries for [FactoryError](../../../troubleshooting/fault-reasons/#fault-factory-error) and [FactoryTimeout](../../../troubleshooting/fault-reasons/#fault-factory-timeout) say how to fix each one.
 
 ## Related pages
 

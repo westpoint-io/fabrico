@@ -25,7 +25,7 @@ Each emit becomes one item. The code can emit nothing, one item, or several, up 
 
 ## Limits and faults
 
-The code runs with a budget of <Fact id="limit.factory_gas_budget" />. The budget counts steps of the code, not time, so the same item stops at the same point on every run. Code that uses it up stops with a <Fact id="fault.FactoryTimeout" /> fault. Code that throws, or reads something the Factory withholds, stops with a <Fact id="fault.FactoryError" /> fault. In both cases that run emits nothing, `ctx.state` keeps the value it had before, and the item leaves by the Fault port, where a belt can carry it to a Sink.
+The code runs with a budget of <Fact id="limit.factory_gas_budget" />. The budget counts steps of the code, not time, so the same item stops at the same point on every run. Code that uses it up stops with a <Fact id="fault.FactoryTimeout" /> fault. Code that throws, or reads something the Factory withholds, stops with a <Fact id="fault.FactoryError" /> fault. In both cases that run emits nothing and `ctx.state` keeps the value it had before. The error message rides in the fault, so draw a belt from the Factory's Fault port to a Debug Sink to read it. The fault doesn't hold the item itself, so that belt can't keep or replay a failed item.
 
 The troubleshooting entries for [FactoryError](../../../troubleshooting/fault-reasons/#fault-factory-error), [FactoryTimeout](../../../troubleshooting/fault-reasons/#fault-factory-timeout) and [a Factory that emits nothing](../../../troubleshooting/common-problems/#symptom-a-factory-emits-nothing) say how to fix each one.
 
