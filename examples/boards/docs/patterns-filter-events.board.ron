@@ -1,0 +1,57 @@
+// A docs board for the pattern page Filter events. One Source gets four order webhooks with totals
+// of 30, 120, 75 and 200. A belt carries each item into a Factory, whose code sends an order on
+// only when its total is 100 or more and emits nothing for the rest. A second belt carries the
+// two orders it keeps to a Debug Sink, which logs them. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2
+//
+// The Factory's Fault port stays undocked. A dropped order is a run that emits nothing, which is
+// not a fault, so nothing faults.
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sink 2, then the belts 3 and 4.
+// The 10 commands and the history seal end the boot on tick 11.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1, Fault=2; SINK In=0. In the code, ctx.emit(0, ...) sends on
+// the Factory's first output, catalog port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Filter events",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY, 3x3
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),   // 3
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),  // 4
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// keep orders of 100 or more
+export default function (input, ctx) {
+  if (input.total >= 100) {
+    ctx.emit(0, input);
+  }
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"id":1,"total":30}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"id":2,"total":120}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"id":3,"total":75}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"id":4,"total":200}"#)),
+    ],
+    captions: [
+        // Measured: h1 Factory WORKING[63,103,143,183] factory.faults=0; no effect on 85.
+        Caption(tick: 63, highlight: 1, text: "The Factory takes the first order, which has a total of 30, and emits nothing, so the order goes no further."),
+        // Measured: effect step_ends_on=125 DEBUG {"id":2,"total":120}.
+        Caption(tick: 125, highlight: 2, text: "The Debug Sink logs the second order, with a total of 120, the first one the Factory kept."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)

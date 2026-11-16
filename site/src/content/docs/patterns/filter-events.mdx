@@ -1,0 +1,51 @@
+---
+title: Filter events
+description: "Keep the events you want and drop the rest with a Factory that emits an item only when a field matches."
+searchPhrase: filter events
+sidebar:
+  order: 50
+---
+
+import Board from '../../../components/Board.astro';
+
+You filter events when only some webhooks matter, such as orders over a set amount or one event type. A [Factory](../../reference/files/glossary/#term-factory) decides by a field in the payload: it emits the [items](../../reference/files/glossary/#term-item) you keep and emits nothing for the rest.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), left to right, joined by two [belts](../../reference/files/glossary/#term-belt). Four order webhooks arrive with totals of 30, 120, 75 and 200. The Factory keeps the orders of 100 or more, and the Debug Sink logs the two it keeps.
+
+<Board name="docs-patterns-filter-events" />
+
+## How the board works
+
+Press Play and the board stops on these two [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory takes the first order, which has a total of 30, and emits nothing, so the order goes no further.
+2. Tick 125: The Debug Sink logs the second order, with a total of 120, the first one the Factory kept.
+
+The Factory runs on ticks 63, 103, 143 and 183, once for each order. The order of 75 stops in the Factory on tick 143 like the first one did, and on tick 205 the Debug Sink logs the order of 200.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// keep orders of 100 or more
+export default function (input, ctx) {
+  if (input.total >= 100) {
+    ctx.emit(0, input);
+  }
+}
+```
+
+The line `if (input.total >= 100) {` decides. When the total is 100 or more the code calls `ctx.emit` and the order goes on unchanged; otherwise the run ends without an emit, and no item leaves the Factory.
+
+## Trade-offs
+
+- An order the Factory drops leaves no item and no [fault](../../reference/files/glossary/#term-fault), so nothing on the board shows it went. The Debug Sink's log lists only the orders that passed, and the board keeps no count of the others.
+- To keep a record of the dropped orders, give the Factory a second output. Select the Factory and press + Add output in the inspector, which grows it one row, then draw a belt from the new output to a second Debug Sink, and add `else { ctx.emit(1, input); }` after the `if` block, so each dropped order goes out on output 1. [Commands](../../reference/files/commands/#gestures-that-send-another-command) lists what + Add output sends to the engine.
+- The amount, 100, is written in the code. A Factory's only setting is its code, so changing the amount means editing the code in the inspector. [Factory API](../../reference/code-and-http/factory-api/) describes what `input` and `ctx.emit` hold.
+
+## Related pages
+
+- [Transform a JSON payload](../transform-json-payload/): reshape the orders you keep before they go on.
+- [Commands](../../reference/files/commands/): what + Add output and the other gestures send to the engine.
+- [Factory API](../../reference/code-and-http/factory-api/): what `input`, `ctx.emit` and `ctx.state` hold, and the limits on one run.
