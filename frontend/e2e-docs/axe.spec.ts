@@ -47,10 +47,10 @@ async function mountBoards(page: Page, name: string): Promise<void> {
 }
 
 /**
- * Waits for the page's own scripts to settle. Expressive Code gives a code block that scrolls
- * sideways tabindex="0" from a resize observer, 250 ms after layout and then at idle, and the site's
- * table script does the same for a wide table. Scanning before that would report a box a reader can
- * reach with the keyboard. The wait gives up after 5 s and the scan still runs, so a box that never
+ * Waits for the page's own scripts to settle. Code blocks carry tabindex="0" in the served HTML
+ * (site/ec.config.mjs writes it at build time), and Expressive Code's script later removes it from
+ * blocks that fit. The site's table script gives a wide table tabindex="0" from a resize observer.
+ * Scanning before those scripts run would grade a box a reader can't reach, or miss one they can. The wait gives up after 5 s and the scan still runs, so a box that never
  * becomes focusable fails on axe's own rule.
  */
 async function settle(page: Page): Promise<void> {
