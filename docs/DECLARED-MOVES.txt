@@ -147,21 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# Twelve new lines, written by the generator, for the boards on twelve pattern pages: Forward a
-# webhook to another URL (examples/boards/docs/patterns-forward-a-webhook.board.ron), Send a
-# webhook to multiple URLs (examples/boards/docs/patterns-send-to-multiple-urls.board.ron),
-# Combine several sources with Merge
-# (examples/boards/docs/patterns-combine-several-sources.board.ron), Transform a JSON payload
-# (examples/boards/docs/patterns-transform-json-payload.board.ron), Filter events
-# (examples/boards/docs/patterns-filter-events.board.ron), Split an array into items
-# (examples/boards/docs/patterns-split-an-array.board.ron), Route by content
-# (examples/boards/docs/patterns-route-by-content.board.ron), Split traffic with seeded
-# randomness (examples/boards/docs/patterns-split-traffic.board.ron), Spread work across parallel
-# workers (examples/boards/docs/patterns-parallel-workers.board.ron), Buffer events behind a slow
-# step (examples/boards/docs/patterns-buffer-events.board.ron), Rate limit with belt pace
-# (examples/boards/docs/patterns-rate-limit.board.ron) and Run on a schedule every N ticks
-# (examples/boards/docs/patterns-run-on-a-schedule.board.ron). The 34 older lines are unchanged.
-examples/boards/hashes.manifest 813a0c682fe7ad94e55f23922f76fbaa73fa73b9b8be496e774dd90fef8f744c
+# One new line, written by the generator, for the board on the pattern page Call an API exactly
+# once (examples/boards/docs/patterns-call-exactly-once.board.ron). The 46 older lines are
+# unchanged.
+examples/boards/hashes.manifest d5a0f24973c58e66532b5724a870e904b245e4c5fa78ee99b92bde87a2c62ed0
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the
