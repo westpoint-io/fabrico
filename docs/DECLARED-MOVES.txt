@@ -147,11 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# Two new lines, written by the generator, for the boards on the pattern pages Validate webhook
-# payloads (examples/boards/docs/patterns-validate-webhook-payloads.board.ron) and Keep a running
-# total per key (examples/boards/docs/patterns-running-total.board.ron). The 49 older lines are
-# unchanged.
-examples/boards/hashes.manifest bfb7c4efe8f46c170755f08dc88aa6ddb66e6a35a286b02d71cad4574b78e430
+# One new line, written by the generator, for the board on the pattern page Deduplicate events
+# (examples/boards/docs/patterns-deduplicate-events.board.ron). The 51 older lines are unchanged.
+examples/boards/hashes.manifest bad277b7eda61ebf18a139a1af13a6df4ec53815821d17e6f0c172c03725cae1
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

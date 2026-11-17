@@ -1,0 +1,58 @@
+---
+title: Deduplicate events
+description: "Drop repeat events with a Factory that remembers the ids it has seen in ctx.state, and see what keeps that list from growing forever."
+searchPhrase: deduplicate events
+sidebar:
+  order: 170
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+You deduplicate events when the same event can arrive more than once, such as a webhook a service sends again after a slow reply. A [Factory](../../reference/files/glossary/#term-factory) keeps the ids it has seen in its state and drops any [item](../../reference/files/glossary/#term-item) whose id is already there, so a duplicate stops at the Factory. This is the receiving side of idempotency.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), joined by [belts](../../reference/files/glossary/#term-belt). Four webhooks arrive, and the third repeats the id of the first, `evt-1`.
+
+<Board name="docs-patterns-deduplicate-events" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory keeps a list of the ids it has seen. The id evt-1 is new, so the Factory adds it to the list and sends the event on to the Debug Sink.
+2. Tick 143: The id evt-1 arrives again. It is already on the list, so the Factory sends nothing on and the repeat stops here.
+3. Tick 183: The id evt-3 is new, so the Factory adds it and sends the event on. The list now holds evt-1, evt-2 and evt-3.
+
+By its last tick the effect log under the board shows three rows for the four webhooks: `t84  DEBUG  {"id":"evt-1","total":30}`, `t124  DEBUG  {"id":"evt-2","total":12}` and `t204  DEBUG  {"id":"evt-3","total":5}`. The fourth webhook, the repeat of `evt-1`, ran the Factory's code on tick 143 and went no further. The Factory's state at the end is `{"seen":["evt-1","evt-2","evt-3"]}`.
+
+## The Factory code
+
+The Factory runs this code once for each event that reaches it:
+
+```js title="Factory code"
+// drop an event whose id was seen before
+export default function (input, ctx) {
+  const seen = ctx.state.seen || [];
+  if (seen.includes(input.id)) {
+    return;
+  }
+  seen.push(input.id);
+  ctx.state.seen = seen.slice(-100);
+  ctx.emit(0, input);
+}
+```
+
+The `return` drops a repeat, because a run that emits nothing sends nothing on. The line `ctx.state.seen = seen.slice(-100);` keeps only the last 100 ids, so the list stops growing at 100 however many events arrive.
+
+## Trade-offs
+
+- `ctx.state` has no size limit of its own. Every run parses the whole state from JSON and saves it again, so a big state runs into the limits on one run: the work budget of <Fact id="limit.factory_gas_budget" /> and the memory limit of <Fact id="limit.factory_memory" />. In a measurement on the desktop build, a list of ten-character ids ran out of memory somewhere between about 55,000 and 60,000 ids, and the work budget never ran out. The number is approximate, and boards on this site run in a browser, where it differs slightly. [Factory API](../../reference/code-and-http/factory-api/#limits) lists the limits.
+- A run that runs out of memory faults, and the state keeps the value it had before the run. In a Factory whose list has grown that large, the next run starts with the same list and faults too, so from then on the Factory passes no items. [Factory API](../../reference/code-and-http/factory-api/#ctxstate) says how the state rolls back.
+- The code keeps the last 100 ids, so a repeat of an id older than that passes again. A bigger number catches later repeats, and makes every run parse and save a bigger state. [Factory API](../../reference/code-and-http/factory-api/#limits) has the limits that state counts against.
+- For exact repeats of a delivery, the app has its own check. A sender can put a delivery id in the `x-delivery-id` header, and the app makes no item for a request whose id it has already logged. That list starts empty when you open a project or restart the app, so a repeat that arrives after that makes an item again. The Factory's list is part of its state, which goes into the save. [Webhook ingress](../../reference/code-and-http/webhook-ingress/#repeat-deliveries) covers the header.
+
+## Related pages
+
+- [Keep a running total per key](../running-total/): another Factory that keeps state from one event to the next.
+- [Webhook ingress](../../reference/code-and-http/webhook-ingress/): the `x-delivery-id` header and the app's own check for repeat deliveries.
+- [Factory API](../../reference/code-and-http/factory-api/): what `ctx.state` keeps, when it rolls back, and the limits on one run.

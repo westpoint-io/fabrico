@@ -58,3 +58,4 @@ The line `(totals[input.customer] || 0) + input.total` adds the order to its cus
 - [Transform a JSON payload](../transform-json-payload/): reshape each item in a Factory before you count it.
 - [Factory API](../../reference/code-and-http/factory-api/): what `ctx.state` keeps, when it rolls back, and the limits on one run.
 - [The event log and save files](../../concepts/event-log-and-save-files/): what a save writes, each Factory's state included.
+- [Deduplicate events](../deduplicate-events/): a Factory that keeps a list of seen ids in its state and drops repeats.

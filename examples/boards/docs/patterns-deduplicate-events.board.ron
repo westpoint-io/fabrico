@@ -1,0 +1,63 @@
+// A docs board for the pattern page Deduplicate events. One Source gets four webhooks, each an
+// event with an id, and the third repeats the first id, evt-1. Its belt carries each event into a
+// Factory. The code keeps the ids it has seen in ctx.state, drops an event whose id is already on
+// that list, and otherwise adds the id, keeps only the last 100 ids, and emits the event. A belt
+// carries each event that passes to a Debug Sink, so the Sink logs three events for four webhooks.
+// The repeat runs the code and stops at the Factory. The code never throws, so the Factory's Fault
+// port, on its bottom middle cell facing south, stays undocked. The run makes no outbound call.
+//
+//   row 2:   SOURCE 0 -b3-> FACTORY 1 -b4-> SINK 2
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sink 2, then the belts 3 and 4.
+// The 10 commands and the history seal end the boot on tick 11.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1, Fault=2; SINK In=0. In the code, ctx.emit(0, ...) sends on
+// the Factory's first output, catalog port 1.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Deduplicate events",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY, 3x3
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug by default
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),   // 3: source -> factory
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),  // 4: factory -> sink
+        Dock(belt: 3, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 3, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 4, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 4, endpoint: Head, node: 2, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// drop an event whose id was seen before
+export default function (input, ctx) {
+  const seen = ctx.state.seen || [];
+  if (seen.includes(input.id)) {
+    return;
+  }
+  seen.push(input.id);
+  ctx.state.seen = seen.slice(-100);
+  ctx.emit(0, input);
+}"#)),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"id":"evt-1","total":30}"#)),
+        At(tick: 80, input: Webhook(source: 0, body: r#"{"id":"evt-2","total":12}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"id":"evt-1","total":30}"#)),
+        At(tick: 160, input: Webhook(source: 0, body: r#"{"id":"evt-3","total":5}"#)),
+    ],
+    captions: [
+        // Measured: h1 Factory WORKING[63,...]; effect step_ends_on=85 DEBUG from=h2 {"id":"evt-1","total":30}
+        Caption(tick: 63, highlight: 1, text: "The Factory keeps a list of the ids it has seen. The id evt-1 is new, so the Factory adds it to the list and sends the event on to the Debug Sink."),
+        // Measured: h1 Factory WORKING[...,143,...]; no effect between step_ends_on=125 and step_ends_on=205
+        Caption(tick: 143, highlight: 1, text: "The id evt-1 arrives again. It is already on the list, so the Factory sends nothing on and the repeat stops here."),
+        // Measured: h1 Factory WORKING[...,183]; effect step_ends_on=205 DEBUG from=h2 {"id":"evt-3","total":5}; state={"seen":["evt-1","evt-2","evt-3"]}
+        Caption(tick: 183, highlight: 1, text: "The id evt-3 is new, so the Factory adds it and sends the event on. The list now holds evt-1, evt-2 and evt-3."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 260,
+)
