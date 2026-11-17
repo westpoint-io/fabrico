@@ -41,6 +41,7 @@ examples/boards/docs/patterns-rate-limit.board.ron 400 e060533933957629e36d5239d
 examples/boards/docs/patterns-request-timeout.board.ron 760 75ab81d652f332942886161a5969e3428f555c297e086264258da760857126ba
 examples/boards/docs/patterns-route-by-content.board.ron 300 7c8c7281023e57dbc28689d0b169b3a9553c97d38c2ecf7b70767e168f7c4f91
 examples/boards/docs/patterns-run-on-a-schedule.board.ron 300 f448e1ccf70b65ae8c8f710ee157d6ffec8b134fb557605b6c7b29195a47e491
+examples/boards/docs/patterns-running-total.board.ron 260 91817c0a06ba02f3c941f4474e6dc4ef9d07a8c555d10fc0684b4978eac489da
 examples/boards/docs/patterns-send-to-multiple-urls.board.ron 300 d0caa04515daeda9cda5dbd09886c1037941ae16f0064c73b6c09a32b53fb4a1
 examples/boards/docs/patterns-split-an-array.board.ron 260 cdddee03f5f425dce0c2a86d94053841feff73d25f639d1e71c6c98e8537baf8
 examples/boards/docs/patterns-split-traffic.board.ron 300 1641719892112b7fe8272da88671203a68621a407a89cec5d88ae709d4f70955

@@ -147,10 +147,11 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board on the pattern page Validate webhook
-# payloads (examples/boards/docs/patterns-validate-webhook-payloads.board.ron). The 49 older lines
-# are unchanged.
-examples/boards/hashes.manifest dfac3a8ea177a36d9b26745bd97b3eaa6d84425ed9b730720d77d489be54166d
+# Two new lines, written by the generator, for the boards on the pattern pages Validate webhook
+# payloads (examples/boards/docs/patterns-validate-webhook-payloads.board.ron) and Keep a running
+# total per key (examples/boards/docs/patterns-running-total.board.ron). The 49 older lines are
+# unchanged.
+examples/boards/hashes.manifest bfb7c4efe8f46c170755f08dc88aa6ddb66e6a35a286b02d71cad4574b78e430
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

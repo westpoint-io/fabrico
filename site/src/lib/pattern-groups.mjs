@@ -12,4 +12,5 @@ export const PATTERN_GROUPS = [
   ['Route events', ['route-by-content', 'split-traffic']],
   ['Pace and spread the work', ['parallel-workers', 'buffer-events', 'rate-limit', 'run-on-a-schedule']],
   ['Handle failures', ['dead-letter-queue', 'request-timeout', 'validate-webhook-payloads']],
+  ['Keep state', ['running-total']],
 ];

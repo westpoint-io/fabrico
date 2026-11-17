@@ -1,6 +1,6 @@
 ---
 title: Patterns
-description: "Recipes for common automation jobs, each with a running board: forward and fan out webhooks, shape and route events, pace the work, and handle failures."
+description: "Recipes for common automation jobs, each with a running board: forward and fan out webhooks, shape and route events, pace the work, handle failures and keep state."
 sidebar:
   order: 0
 ---
@@ -36,3 +36,7 @@ Each page in this section solves one common automation job with machines and bel
 - [Send failures to a dead letter queue](dead-letter-queue/): send each machine's faults to a Debug Sink you can read.
 - [Handle a request timeout](request-timeout/): see which fault a failed or unanswered call raises.
 - [Validate webhook payloads](validate-webhook-payloads/): send bad items to a quarantine Sink instead of on.
+
+## Keep state
+
+- [Keep a running total per key](running-total/): add up events per key in a Factory's state.

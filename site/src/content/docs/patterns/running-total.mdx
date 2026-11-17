@@ -1,0 +1,60 @@
+---
+title: Keep a running total per key
+description: "Count events and keep a running total per key in a Factory's ctx.state, which carries from one run to the next and goes into the save."
+searchPhrase: running total
+sidebar:
+  label: Keep a running total
+  order: 160
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A running total adds something up across many events, such as orders per customer or errors per service. A [Factory](../../reference/files/glossary/#term-factory) can keep one, because its state carries from one run to the next. Each [item](../../reference/files/glossary/#term-item) adds to the count for its key, and the Factory emits the new total.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), joined by [belts](../../reference/files/glossary/#term-belt). Four orders arrive, three from ada and one from bob, and the Factory keeps a total for each customer.
+
+<Board name="docs-patterns-running-total" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory adds ada's first order to her total, which starts at 30, and sends the new total on to the Debug Sink.
+2. Tick 103: Bob has no total yet, so the Factory starts his total at the amount of his first order, 12. Ada's total stays at 30.
+3. Tick 183: Ada's third order adds 5 to her total of 50, so the Factory sends a total of 55 for ada.
+
+By its last tick the effect log under the board shows four rows: `t84  DEBUG  {"customer":"ada","total":30}`, `t124  DEBUG  {"customer":"bob","total":12}`, `t164  DEBUG  {"customer":"ada","total":50}` and `t204  DEBUG  {"customer":"ada","total":55}`. The Factory's state at the end is `{"totals":{"ada":55,"bob":12}}`.
+
+## The Factory code
+
+The Factory runs this code once for each order that reaches it:
+
+```js title="Factory code"
+// add each order to its customer's total
+export default function (input, ctx) {
+  const totals = ctx.state.totals || {};
+  totals[input.customer] =
+    (totals[input.customer] || 0) + input.total;
+  ctx.state.totals = totals;
+  ctx.emit(0, {
+    customer: input.customer,
+    total: totals[input.customer],
+  });
+}
+```
+
+The line `(totals[input.customer] || 0) + input.total` adds the order to its customer's total. A customer with no total yet counts from 0, so a first order sets the total to its own amount, which is why bob's row reads 12.
+
+## Trade-offs
+
+- <Fact id="factory.ctx.state" /> goes from one run to the next as JSON. When a run throws, the Factory drops what that run emitted and the state keeps the value it had before the run, so a failed order doesn't change any total. [Factory API](../../reference/code-and-http/factory-api/) says how the state carries over.
+- The state goes into the save with the rest of the board, so the totals are still there after you save the project and open it again. [The event log and save files](../../concepts/event-log-and-save-files/) lists what a save writes.
+- Each Factory keeps its own state, so two Factories don't share a total. Keep the counts for one set of keys in one Factory.
+- The state gets an entry for each new key, and this code never removes one, so with many keys it keeps growing. [Factory API](../../reference/code-and-http/factory-api/#limits) lists the memory and work limits on one run.
+
+## Related pages
+
+- [Transform a JSON payload](../transform-json-payload/): reshape each item in a Factory before you count it.
+- [Factory API](../../reference/code-and-http/factory-api/): what `ctx.state` keeps, when it rolls back, and the limits on one run.
+- [The event log and save files](../../concepts/event-log-and-save-files/): what a save writes, each Factory's state included.
