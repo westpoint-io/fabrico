@@ -395,6 +395,15 @@ describe('effects', () => {
     ]);
   });
 
+  it('decodes the Inbound outcome (tag 3) that a Request carries', () => {
+    const post = [...new TextEncoder().encode('POST')];
+    // tick 40, Request with correlation 1, POST, the path "/", Inbound.
+    const bytes = new Uint8Array([1, 40, 4, 1, post.length, ...post, 1, 0x2f, 3]);
+    expect(decodePlayerEffects(bytes)).toEqual([
+      { tick: 40, effect: { kind: 'Request', correlation: 1, method: 'POST', path: '/' }, answer: { outcome: 'Inbound' } },
+    ]);
+  });
+
   it('refuses an unknown kind, an unknown verb and bytes left over', () => {
     expect(() => decodePlayerEffects(new Uint8Array([1, 1, 9]))).toThrow(/PlayerEffectKind discriminant 9/);
     expect(() => decodePlayerEffects(new Uint8Array([1, 1, 0, 0, 9]))).toThrow(/HttpMethod discriminant 9/);

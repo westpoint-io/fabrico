@@ -74,6 +74,55 @@ describe('FAULT rows', () => {
   });
 });
 
+describe('ROUTE and REPLY rows', () => {
+  const requestAt = (tick: number, correlation: number, method: string, path: string): PlayerEffect => ({
+    tick,
+    effect: { kind: 'Request', correlation, method, path },
+    answer: { outcome: 'Inbound' },
+  });
+  const replyAt = (tick: number, correlation: number, payload: string): PlayerEffect => ({
+    tick,
+    effect: { kind: 'Reply', correlation, payload: bytes(payload) },
+    answer: { outcome: 'Reply', afterTicks: 1 },
+  });
+
+  it('a Request gives one ROUTE row, request 0: POST /endpoint/hello, with no outcome and the Inbound answer ignored', () => {
+    expect(effectRows([requestAt(40, 0, 'POST', '/endpoint/hello')])).toEqual([
+      {
+        kind: 'request',
+        tick: 't40',
+        method: 'ROUTE',
+        target: 'request 0: POST /endpoint/hello',
+        outcome: '',
+        failed: false,
+        title: 'Request 0 reached the Route: POST /endpoint/hello',
+      },
+    ]);
+  });
+
+  it('a Reply whose payload holds a numeric status shows request 3: status 201, and the status in its title', () => {
+    const [row] = effectRows([replyAt(41, 3, '{"status":201,"headers":{},"body":"x"}')]);
+    expect([row.kind, row.tick, row.method, row.target, row.outcome]).toEqual(['reply', 't41', 'REPLY', 'request 3: status 201', 'ok']);
+    expect(row.title).toBe('Reply to request 3: status 201, answered at tick 42');
+  });
+
+  it('a Reply whose payload is not JSON, or is JSON with no numeric status, keeps request 3 and the title with no status', () => {
+    for (const payload of ['hello', '', '{"status":"201"}', '{"code":201}', '[201]', 'null', '201', '{"status":201']) {
+      const [row] = effectRows([replyAt(41, 3, payload)]);
+      expect(row.target, payload).toBe('request 3');
+      expect(row.title, payload).toBe('Reply to request 3, answered at tick 42');
+    }
+  });
+
+  it('ROUTE and REPLY rows stay in ink whatever status the Handler chose', () => {
+    const rows = effectRows([requestAt(120, 1, 'POST', '/endpoint/hello'), replyAt(121, 1, '{"status":500}')]);
+    expect(rows.map((r) => [r.method, r.target, r.failed])).toEqual([
+      ['ROUTE', 'request 1: POST /endpoint/hello', false],
+      ['REPLY', 'request 1: status 500', false],
+    ]);
+  });
+});
+
 /** A log well with scroll metrics jsdom doesn't compute: rows are 20 px, the well 160 px. */
 function measuredLog() {
   const log = createEffectLog();

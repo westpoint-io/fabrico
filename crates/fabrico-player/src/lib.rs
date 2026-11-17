@@ -980,6 +980,40 @@ mod tests {
         assert_eq!(kinds(&player), [&PlayerEffectKind::Debug { message: bytes }], "the path decides, never the bytes");
     }
 
+    const HANDLER_BOARD: &str = include_str!("../../../examples/boards/docs/machines-http-handler.board.ron");
+
+    #[test]
+    fn each_scripted_request_is_a_request_effect_numbered_from_0_ahead_of_its_ticks_effects() {
+        let mut player = Player::new(HANDLER_BOARD).expect("the board loads");
+        player.step(u32::MAX).expect("it steps to its end");
+        let requests: Vec<(u64, &PlayerEffectKind)> = player
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect.kind, PlayerEffectKind::Request { .. }))
+            .map(|effect| (effect.tick, &effect.kind))
+            .collect();
+        let request = |correlation: u64| PlayerEffectKind::Request {
+            correlation,
+            method: "POST".to_owned(),
+            path: "/endpoint/hello".to_owned(),
+        };
+        assert_eq!(requests, [(40, &request(0)), (120, &request(1))], "the board's two requests, numbered from 0");
+        // Each request comes before any effect of its own tick, and each reply names its request.
+        for (tick, kind) in &requests {
+            let first = player.effects.iter().position(|effect| effect.tick == *tick).expect("the tick has effects");
+            assert_eq!(&player.effects[first].kind, *kind, "tick {tick} opens with its request");
+        }
+        let replies: Vec<u64> = player
+            .effects
+            .iter()
+            .filter_map(|effect| match effect.kind {
+                PlayerEffectKind::Reply { correlation, .. } => Some(correlation),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replies, [0, 1], "each reply carries its request's number");
+    }
+
     #[test]
     fn a_restart_queues_a_keyframe_and_replays_the_same_run() {
         let mut once = stepped_one_call_board();
