@@ -1,0 +1,101 @@
+// A docs board for the pattern page Send failures to a dead letter queue. Two machines on it fail
+// on purpose, and each one's Fault port has a belt to its own dead letter Debug Sink, where the
+// fault can be read.
+//
+// Top row: one Source gets two webhooks, an order and a refund. A Router sends a body that starts
+// with {"type":"order" out its first output to a Debug Sink, and it has no default output, so the
+// refund matches nothing and leaves by the Fault port as a NoMatch fault. That fault keeps the
+// refund's bytes.
+//
+// Bottom row: a second Source gets one payment, a Factory keeps the fields the payment service
+// reads, and an HTTP Sink posts the result to https://example.com/payments. The executor block
+// below stands in for that service and answers with an error, so the Sink sends a CommandFailure
+// fault out of its Fault port. That fault keeps no item. No request leaves the computer.
+//
+// Each fault belt docks straight onto its own Debug Sink. A Debug Sink reached through a Merge
+// isn't at the end of a fault path, so its log would show the fault's raw bytes, not a FAULT row.
+//
+//   row 2:   SOURCE 0 -b8-> ROUTER 1 Out (emit 0) -b9-> SINK 2   (orders)
+//   row 4:                  ROUTER 1 Fault
+//   row 6:                    +-b10---------------> SINK 6   (the Router's faults)
+//
+//   row 9:   SOURCE 3 -b11-> FACTORY 4 -b12-> SINK 5   (HTTP, posts to https://example.com/payments)
+//   row 10:                                   SINK 5 Fault -b13-> SINK 7   (the HTTP Sink's faults)
+//
+// The Factory's Fault port stays undocked; its code doesn't throw on this board's payment.
+//
+// Handles mint in command order: the Source 0, the Router 1, the Sink 2, the Source 3, the
+// Factory 4, the Sinks 5, 6 and 7, then the belts 8 to 13. The 29 commands and the history seal
+// end the boot on tick 30.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, ROUTER=5, SINK=7. Dock `port` is the catalog port
+// index: SOURCE Out=0; ROUTER In=0, Out=1 (emit 0), Fault=4 (its bottom-left cell, facing south);
+// FACTORY In=0, Out=1; SINK In=0, Fault=1 (on the Sink's one cell, facing south).
+//
+// The route's `expect` is the UTF-8 bytes of {"type":"order" at offset 0, written as a number list
+// because RON has no byte strings.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Send failures to a dead letter queue",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE, orders and refunds
+        Place(kind: 5, cell_x: 6, cell_y: 1),        // 1: ROUTER, 2x3, no default output
+        Place(kind: 7, cell_x: 11, cell_y: 2),       // 2: SINK, Debug, gets the orders
+        Place(kind: 0, cell_x: 1, cell_y: 9),        // 3: SOURCE, payments
+        Place(kind: 2, cell_x: 5, cell_y: 8),        // 4: FACTORY, 3x3
+        Place(kind: 7, cell_x: 11, cell_y: 9),       // 5: SINK, set to HTTP below
+        Place(kind: 7, cell_x: 11, cell_y: 6),       // 6: SINK, Debug, the Router's dead letters
+        Place(kind: 7, cell_x: 15, cell_y: 10),      // 7: SINK, Debug, the HTTP Sink's dead letters
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2), (5, 2)]),                          // 8
+        DrawBelt(cells: [(8, 2), (9, 2), (10, 2)]),                                 // 9
+        DrawBelt(cells: [(6, 4), (6, 5), (6, 6), (7, 6), (8, 6), (9, 6), (10, 6)]), // 10
+        DrawBelt(cells: [(2, 9), (3, 9), (4, 9)]),                                  // 11
+        DrawBelt(cells: [(8, 9), (9, 9), (10, 9)]),                                 // 12
+        DrawBelt(cells: [(11, 10), (12, 10), (13, 10), (14, 10)]),                  // 13
+        Dock(belt: 8, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 8, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 9, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 10, endpoint: Tail, node: 1, port: 4),
+        Dock(belt: 10, endpoint: Head, node: 6, port: 0),
+        Dock(belt: 11, endpoint: Tail, node: 3, port: 0),
+        Dock(belt: 11, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 12, endpoint: Tail, node: 4, port: 1),
+        Dock(belt: 12, endpoint: Head, node: 5, port: 0),
+        Dock(belt: 13, endpoint: Tail, node: 5, port: 1),
+        Dock(belt: 13, endpoint: Head, node: 7, port: 0),
+        Configure(node: 1, config: Router(routes: [
+            ((offset: 0, expect: [123, 34, 116, 121, 112, 101, 34, 58, 34, 111, 114, 100, 101, 114, 34]), 0),
+        ], default: None)),
+        Configure(node: 4, config: Factory(source: r#"// keep the fields the payment service reads
+export default function (input, ctx) {
+  ctx.emit(0, { id: input.id, total: input.total });
+}"#)),
+        Configure(node: 5, config: Sink(target: Http(url: "https://example.com/payments", method: Post))),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"type":"order","id":1}"#)),
+        At(tick: 60, input: Webhook(source: 3, body: r#"{"id":3,"total":30}"#)),
+        At(tick: 100, input: Webhook(source: 0, body: r#"{"type":"refund","id":7}"#)),
+    ],
+    captions: [
+        // Measured: FAULTED tick=125 node=h5, after HTTP Post https://example.com/payments outcome=Error { after_ticks: 20 } on step 105
+        Caption(tick: 125, highlight: 5, text: "The HTTP Sink's call to the payment service came back as an error, so the Sink sent a CommandFailure fault out of its Fault port."),
+        // Measured: FAULTED tick=131 node=h1, router.faults=1
+        Caption(tick: 131, highlight: 1, text: "The refund matches no route, and the Router has no default output, so the Router sent it out of its Fault port as a NoMatch fault."),
+        // Measured: effect step_ends_on=155 DEBUG from=h7 fault_end=true | FAULT CommandFailure payload=""
+        Caption(tick: 155, highlight: 7, text: "The CommandFailure fault reached its dead letter Debug Sink. It carries no item, so the failed call left no body to read."),
+        // Measured: effect step_ends_on=185 DEBUG from=h6 fault_end=true | FAULT NoMatch payload="{\"type\":\"refund\",\"id\":7}"
+        Caption(tick: 185, highlight: 6, text: "The NoMatch fault reached the Router's dead letter Debug Sink, and it still carries the refund that matched no route."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/payments", outcome: Error(after_ticks: 20)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 400,
+)

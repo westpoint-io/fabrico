@@ -1,6 +1,6 @@
 ---
 title: Patterns
-description: "Recipes for common automation jobs, each with a running board: forward and fan out webhooks, shape and route events, and pace the work."
+description: "Recipes for common automation jobs, each with a running board: forward and fan out webhooks, shape and route events, pace the work, and handle failures."
 sidebar:
   order: 0
 ---
@@ -30,3 +30,7 @@ Each page in this section solves one common automation job with machines and bel
 - [Buffer events behind a slow step](buffer-events/): let a burst wait on a long belt.
 - [Rate limit with belt pace](rate-limit/): cap how fast items reach an HTTP Sink.
 - [Run on a schedule every N ticks](run-on-a-schedule/): make an item on a timer and act on it.
+
+## Handle failures
+
+- [Send failures to a dead letter queue](dead-letter-queue/): send each machine's faults to a Debug Sink you can read.

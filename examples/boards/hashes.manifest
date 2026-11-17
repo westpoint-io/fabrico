@@ -33,6 +33,7 @@ examples/boards/docs/machines-wire.board.ron 240 ab7bc3864429495a7d55a9d928c6472
 examples/boards/docs/patterns-buffer-events.board.ron 600 b1abbee0c3d52afe851382e137ccbb1487e40d13790f219c252e4e142e5ed77b
 examples/boards/docs/patterns-call-exactly-once.board.ron 200 09b5937fd36d617ec4f6ba4534be118a77f0bb6b107885a3f52abf7974b64fe0
 examples/boards/docs/patterns-combine-several-sources.board.ron 300 f3d1e1ee1f0c09cb417f9fc446c362a702a50bb39dfecac180894c1ae91b1e76
+examples/boards/docs/patterns-dead-letter-queue.board.ron 400 28427efce4d14ce0853a86f9aeb9e042dafb6cbedf756bdb2ad4534638d5e274
 examples/boards/docs/patterns-filter-events.board.ron 260 c80c17a2ae6ae7d2d07b31a489dc3a60acb931b45214c4707621289563c5e7c1
 examples/boards/docs/patterns-forward-a-webhook.board.ron 260 a00b62261c8d689a285702a9f6f6f7b2e8a23a2fe740d6b23d6e5954e060f41f
 examples/boards/docs/patterns-parallel-workers.board.ron 260 80e8556643a0da8202316da97503001d07820c81963807c32f1a1d9b1d59f50d

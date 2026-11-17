@@ -1,0 +1,61 @@
+---
+title: Send failures to a dead letter queue
+description: "Wire each machine's fault port to one Debug Sink, so a failed item lands where you can read it, and see which faults keep the item."
+searchPhrase: dead letter queue
+faults: 2
+sidebar:
+  label: Dead letter queue
+  order: 130
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A dead letter queue is where failed [items](../../reference/files/glossary/#term-item) wait so you can read them later. You build one by wiring the [fault port](../../reference/files/glossary/#term-fault-port) of each machine that can fail to a Debug Sink. A [fault](../../reference/files/glossary/#term-fault) is an item too, so it travels on a [belt](../../reference/files/glossary/#term-belt) like any other.
+
+The board below has two rows. On top, a [Source](../../reference/files/glossary/#term-source) gets orders and refunds, a Router with no default output sends the orders to a Debug [Sink](../../reference/files/glossary/#term-sink), and the Router's Fault port has a belt to a dead letter Debug Sink. Underneath, a second Source gets a payment, a [Factory](../../reference/files/glossary/#term-factory) builds the request body, and an HTTP Sink posts it to `https://example.com/payments`, where the scripted service answers with an error. The HTTP Sink's Fault port has a belt to a second dead letter Debug Sink.
+
+<Board name="docs-patterns-dead-letter-queue" faultsAbout="CommandFailure NoMatch" />
+
+## How the board works
+
+Press Play and the board stops on these four [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 125: The HTTP Sink's call to the payment service came back as an error, so the Sink sent a CommandFailure fault out of its Fault port.
+2. Tick 131: The refund matches no route, and the Router has no default output, so the Router sent it out of its Fault port as a NoMatch fault.
+3. Tick 155: The CommandFailure fault reached its dead letter Debug Sink. It carries no item, so the failed call left no body to read.
+4. Tick 185: The NoMatch fault reached the Router's dead letter Debug Sink, and it still carries the refund that matched no route.
+
+By its last tick the effect log under the board shows {frontmatter.faults} FAULT rows, in the order the faults arrived: `t154  FAULT  CommandFailure`, the reason alone, and `t184  FAULT  NoMatch: {"type":"refund","id":7}`, with the refund inside. The row `t104  POST  https://example.com/payments  error` above them is the failed call itself, and it doesn't count as a fault.
+
+## The Factory code
+
+The Factory runs this code once for each payment that reaches it:
+
+```js title="Factory code"
+// keep the fields the payment service reads
+export default function (input, ctx) {
+  ctx.emit(0, { id: input.id, total: input.total });
+}
+```
+
+The code only builds the body the payment service reads. The dead letter queue comes from the wiring: dock a belt on each Fault port and lead it to its own Debug Sink, and the faults that machine raises reach that Sink's log.
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- What a fault keeps depends on its reason. <Fact id="fault.NoMatch" /> keeps the item, so the refund is there to read. <Fact id="fault.FactoryError" /> keeps the error message from the code. <Fact id="fault.CommandFailure" /> and <Fact id="fault.CommandTimeout" /> keep nothing, so a failed call leaves no body to inspect. [Fault reasons](../../reference/board/fault-reasons/) lists what each reason keeps.
+- Faults wait at a machine's Fault port until its belt takes them, up to <Fact id="limit.fault_queue_cap" />. A fault past that is dropped and nothing counts it, though the machine still shows as faulted. On this board the faults come on different ticks, so neither queue gets near the cap. [Limits](../../reference/board/limits/#queues) lists the queue caps.
+- Each fault belt on this board docks straight onto its own Debug Sink. The effect log under a board names a fault only when the Sink sits at the end of belts that run straight from a Fault port, so a Debug Sink that gets faults through another machine shows them as DEBUG rows of raw bytes.
+- The Factory has no belt on its Fault port. If its code failed, the fault would stay at the Factory and go no further, so dock a belt on every Fault port whose faults you want to read. [Faults are items](../../concepts/faults-are-items/) follows one fault from a Factory to a Debug Sink.
+- The app makes one attempt per call and doesn't retry it, and a board can't resend a failed call yet. The dead letter Sink records that the call failed, and since a CommandFailure fault keeps no body, the board has nothing left to send again.
+
+## Related pages
+
+- [Fault reasons](../../reference/board/fault-reasons/): every reason, what makes a machine give it, and what the fault keeps.
+- [Faults are items](../../concepts/faults-are-items/): how a fault leaves by the fault port and travels on a belt.
+- [Fault reasons](../../troubleshooting/fault-reasons/): what to change when you see each reason.

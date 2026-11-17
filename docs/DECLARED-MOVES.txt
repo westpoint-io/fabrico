@@ -147,10 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board on the pattern page Call an API exactly
-# once (examples/boards/docs/patterns-call-exactly-once.board.ron). The 46 older lines are
-# unchanged.
-examples/boards/hashes.manifest d5a0f24973c58e66532b5724a870e904b245e4c5fa78ee99b92bde87a2c62ed0
+# One new line, written by the generator, for the board on the pattern page Send failures to a
+# dead letter queue (examples/boards/docs/patterns-dead-letter-queue.board.ron). The 47 older
+# lines are unchanged.
+examples/boards/hashes.manifest ed09a642a06c003822769ee50397a869d5ec32454447cb0baaad8ac236585334
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the
