@@ -11,7 +11,7 @@ import { Aside } from '@astrojs/starlight/components';
 import Board from '../../../components/Board.astro';
 import Fact from '../../../components/Fact.astro';
 
-A request timeout happens when an HTTP [Sink](../../reference/files/glossary/#term-sink) sends a call and the answer doesn't come back in time. The engine waits a fixed number of [ticks](../../reference/files/glossary/#term-tick) for each call, and the app's HTTP client gives up after a fixed number of seconds. Either way the Sink sends a [fault](../../reference/files/glossary/#term-fault) out of its [fault port](../../reference/files/glossary/#term-fault-port), and you decide where that fault goes.
+A request timeout happens when an HTTP [Sink](../../reference/files/glossary/#term-sink) sends a call and the answer doesn't come back in time. The engine waits a fixed number of [ticks](../../reference/files/glossary/#term-tick) for each call, and the app's HTTP client gives up after a fixed number of seconds. Either way the Sink sends a [fault](../../reference/files/glossary/#term-fault) out of its [fault port](../../reference/files/glossary/#term-fault-port) and you decide where that fault goes.
 
 The board below has a [Source](../../reference/files/glossary/#term-source), a [Factory](../../reference/files/glossary/#term-factory) with two outputs and two HTTP Sinks, left to right. The Factory sends a stock check to the top Sink, which posts to `https://example.com/slow`, where the scripted service never answers. It sends a price check to the lower Sink, which posts to `https://example.com/broken`, where the scripted service answers with an error. Each HTTP Sink's Fault port has a [belt](../../reference/files/glossary/#term-belt) to its own dead letter Debug Sink on the right.
 
