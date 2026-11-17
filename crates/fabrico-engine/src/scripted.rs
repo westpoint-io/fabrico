@@ -54,6 +54,23 @@ pub struct EffectRecord {
     pub outcome: OutboundOutcome,
 }
 
+/// One request the script sent in through a Route, as [`BoardRun`] turned it into a wire request.
+///
+/// A request isn't a command, so it never reaches the executor or [`EffectRecord`]. The effect log
+/// reads these to show each request beside the reply that carries the same `correlation`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestRecord {
+    /// The tick the request entered the core on.
+    pub tick: u64,
+    /// The correlation id the request took, counting from 0 as the host's counter does. The
+    /// Handler's reply carries the same id.
+    pub correlation: u64,
+    /// The verb, as the script spells it.
+    pub method: String,
+    /// The path, as the script spells it.
+    pub path: String,
+}
+
 /// What a command asked the outside world to do, as plain data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectSummary {
@@ -270,6 +287,8 @@ pub struct BoardRun {
     cursor: usize,
     /// The next correlation id a request takes.
     correlation: u64,
+    /// Every request the script sent in so far, in the order the run turned them into requests.
+    requests: Vec<RequestRecord>,
     /// The error that stopped this run. A failed step may have enqueued some of its tick's edits,
     /// so stepping again would apply them twice. Every later step returns this instead.
     failed: Option<BoardError>,
@@ -300,7 +319,7 @@ impl BoardRun {
         let mut engine = Engine::from_core(core);
         let minted = boot_engine(&mut engine, &board)?;
         let executor = ScriptedExecutor::new(board.executor.clone());
-        Ok(Self { engine, minted, board, executor, cursor: 0, correlation: 0, failed: None })
+        Ok(Self { engine, minted, board, executor, cursor: 0, correlation: 0, requests: Vec::new(), failed: None })
     }
 
     /// Run one tick, in the order the module docs give, and return what it folded.
@@ -332,6 +351,18 @@ impl BoardRun {
                 apply_gesture(&mut self.engine, cmd.clone(), |h| minted_node(minted, h))
                     .map_err(|source| BoardError::ScriptEditRefused { tick, source })?;
             } else if let Some(payload) = script_payload(&entry.input, tick, &self.minted, &mut self.correlation)? {
+                // The correlation comes from the payload `script_payload` built, so the record and
+                // the request can't number apart.
+                if let (ScriptInput::Request { method, path, .. }, EventPayload::WireRequest { correlation, .. }) =
+                    (&entry.input, &payload)
+                {
+                    self.requests.push(RequestRecord {
+                        tick,
+                        correlation: *correlation,
+                        method: method.clone(),
+                        path: path.clone(),
+                    });
+                }
                 ingress.push(payload);
             }
             self.cursor += 1;
@@ -377,6 +408,12 @@ impl BoardRun {
     #[must_use]
     pub fn effects(&self) -> &[EffectRecord] {
         self.executor.effects()
+    }
+
+    /// Every request the script sent in through a Route so far, in the order this run numbered them.
+    #[must_use]
+    pub fn requests(&self) -> &[RequestRecord] {
+        &self.requests
     }
 
     /// The minted nodes in handle order: handle `h` is element `h`.

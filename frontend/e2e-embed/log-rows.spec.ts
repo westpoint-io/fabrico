@@ -11,16 +11,19 @@ import {
   WHOLE_PAGE_VIEWPORT,
 } from './support/health.ts';
 
-// The effect log's FAULT rows on log-rows.html. A fault that reaches a dead letter Debug Sink, a
-// Debug Sink at the end of a fault path, prints as `FAULT <Reason>` where it used to print the
-// fault's raw bytes. The player decides which Debug messages are faults, by the engine's own
-// fault-path rule, so this spec only reads the rows the page shows.
+// The effect log's FAULT, ROUTE and REPLY rows on log-rows.html. A fault that reaches a dead letter
+// Debug Sink, a Debug Sink at the end of a fault path, prints as `FAULT <Reason>` where it used to
+// print the fault's raw bytes. The player decides which Debug messages are faults, by the engine's
+// own fault-path rule, so this spec only reads the rows the page shows. Each request the script
+// sends in through a Route prints as a ROUTE row, and the Handler's reply as a REPLY row with the
+// status it carries, both numbered by the request's correlation id from 0.
 
 const PAGE = pageUrl('log-rows.html');
 // Every board on this page runs at once, so the viewport holds the whole page.
 test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 const TIMEOUT = 'docs-faults-command-timeout';
-const BOARDS = [TIMEOUT] as const;
+const HANDLER = 'docs-machines-http-handler';
+const BOARDS = [TIMEOUT, HANDLER] as const;
 /** The C0 control characters a row must never print, leaving out tab and the line breaks. */
 const CONTROL = /[\u0000-\u0008\u000e-\u001f]/;
 
@@ -93,5 +96,31 @@ test('a CommandTimeout that reaches a dead letter Debug Sink reads as one FAULT 
   expect(look.failure, 'the timed-out call shows its outcome in the destructive colour').not.toBe('');
   expect(look.method, 'FAULT is in the destructive colour').toBe(look.failure);
   expect(look.target, 'the reason stays in ink').not.toBe(look.failure);
+  await finish();
+});
+
+test('each request a Route takes is a ROUTE row, paired by number with a REPLY row that shows the Handler\'s status', async ({ page }) => {
+  test.setTimeout(120_000);
+  const finish = await openPage(page);
+  const end = await runToEnd(page, HANDLER);
+  console.log(`${HANDLER} at its end: ${end.effectRows.map((r) => r.cells.join('  ')).join(' | ')}`);
+
+  const routes = end.effectRows.filter((r) => r.cells[1] === 'ROUTE');
+  const replies = end.effectRows.filter((r) => r.cells[1] === 'REPLY');
+  expect(routes.length, 'the script sends requests in').toBeGreaterThan(0);
+  const numbers: number[] = [];
+  for (const route of routes) {
+    const match = /^request (\d+): [A-Z]+ \/endpoint\/\S+$/.exec(route.cells[2]);
+    expect(match, `ROUTE target ${route.cells[2]}`).not.toBeNull();
+    expect(route.cells[3], 'a ROUTE row has no outcome').toBe('');
+    const n = Number(match?.[1]);
+    numbers.push(n);
+    const paired = replies.filter((r) => r.cells[2].startsWith(`request ${n}: status `));
+    expect(paired, `exactly one REPLY row answers request ${n}`).toHaveLength(1);
+    expect(paired[0].cells[2]).toMatch(new RegExp(`^request ${n}: status \\d+$`));
+    expect(paired[0].title).toMatch(new RegExp(`^Reply to request ${n}: status \\d+, answered at tick \\d+$`));
+  }
+  expect(Math.min(...numbers), 'requests are numbered from 0').toBe(0);
+  expect(replies, 'every REPLY row pairs with a ROUTE row').toHaveLength(routes.length);
   await finish();
 });

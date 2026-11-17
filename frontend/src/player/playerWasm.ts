@@ -53,11 +53,12 @@ export type PlayerEffectKind =
   | { kind: 'Request'; correlation: number; method: string; path: string }
   | { kind: 'Fault'; reason: string; payload: Uint8Array };
 
-/** How the board's script answered a command. */
+/** How the board's script answered a command. `Inbound` marks a request, which nothing answers. */
 export type PlayerEffectOutcome =
   | { outcome: 'Reply'; afterTicks: number }
   | { outcome: 'Error'; afterTicks: number }
-  | { outcome: 'Timeout' };
+  | { outcome: 'Timeout' }
+  | { outcome: 'Inbound' };
 
 /** One outbound command a board's run emitted, and its answer. */
 export interface PlayerEffect {
@@ -111,6 +112,8 @@ function readEffectOutcome(r: PostcardReader): PlayerEffectOutcome {
       return { outcome: 'Error', afterTicks: r.varintU() };
     case 2:
       return { outcome: 'Timeout' };
+    case 3:
+      return { outcome: 'Inbound' };
     default:
       throw new DecodeError(`unknown PlayerEffectOutcome discriminant ${tag}`);
   }

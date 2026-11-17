@@ -31,7 +31,9 @@ use fabrico_core::state::{HttpMethod, Node};
 use fabrico_engine::board::{BoardError, OutboundOutcome, minted_node, parse_board, reverse_same_tick_runs};
 use fabrico_engine::gesture::kind_byte;
 use fabrico_engine::render_packet::RenderPacketBuilder;
-use fabrico_engine::scripted::{BoardRun, EffectRecord, EffectSummary, fault_in, fault_paths, fault_reason_name};
+use fabrico_engine::scripted::{
+    BoardRun, EffectRecord, EffectSummary, RequestRecord, fault_in, fault_paths, fault_reason_name,
+};
 use serde::Serialize;
 
 /// The call succeeded.
@@ -158,6 +160,9 @@ pub enum PlayerEffectOutcome {
     },
     /// No answer, so the call runs into its deadline.
     Timeout,
+    /// A request that came in through a Route; the script gives it no answer. Only
+    /// [`PlayerEffectKind::Request`] carries it.
+    Inbound,
 }
 
 /// The nodes at the end of a fault path on the run's current tick: every node a fault belt hands
@@ -201,6 +206,19 @@ fn player_effect(record: &EffectRecord, fault_ends: &BTreeSet<NodeId>) -> Player
         OutboundOutcome::Timeout => PlayerEffectOutcome::Timeout,
     };
     PlayerEffect { tick: record.tick, kind, outcome }
+}
+
+/// A request the script sent in, as an effect the log can pair with its reply.
+fn request_effect(record: &RequestRecord) -> PlayerEffect {
+    PlayerEffect {
+        tick: record.tick,
+        kind: PlayerEffectKind::Request {
+            correlation: record.correlation,
+            method: record.method.clone(),
+            path: record.path.clone(),
+        },
+        outcome: PlayerEffectOutcome::Inbound,
+    }
 }
 
 /// Convert the records the run's last step added, `records`, with the grid state that step left.
@@ -313,6 +331,8 @@ pub struct Player {
     packets: VecDeque<Vec<u8>>,
     /// How many of the run's effect records have been converted into `effects`.
     records_seen: usize,
+    /// How many of the run's request records have been converted into `effects`.
+    requests_seen: usize,
     /// The effects converted after each step and not taken yet.
     effects: Vec<PlayerEffect>,
     /// Read once at boot, so the answer doesn't change as the run goes on.
@@ -359,6 +379,7 @@ impl Player {
             builder,
             packets,
             records_seen: 0,
+            requests_seen: 0,
             effects: Vec::new(),
             info,
         };
@@ -366,9 +387,14 @@ impl Player {
         Ok(player)
     }
 
-    /// Convert the effect records the run added since the last call, with the grid state it is in
-    /// now. Called after every step, so a record meets the topology of the tick it was emitted on.
+    /// Convert the request and effect records the run added since the last call, with the grid
+    /// state it is in now. Called after every step, so a record meets the topology of the tick it
+    /// was emitted on, and a tick's requests come before its effects.
     fn convert_new_effects(&mut self) {
+        let requests = self.run.requests();
+        let new = requests.get(self.requests_seen..).unwrap_or_default();
+        self.effects.extend(new.iter().map(request_effect));
+        self.requests_seen = requests.len();
         let records = self.run.effects();
         let new = records.get(self.records_seen..).unwrap_or_default();
         self.effects.extend(tick_effects(&self.run, new));
@@ -998,6 +1024,14 @@ mod tests {
             path: "/endpoint/hello".to_owned(),
         };
         assert_eq!(requests, [(40, &request(0)), (120, &request(1))], "the board's two requests, numbered from 0");
+        assert!(
+            player
+                .effects
+                .iter()
+                .all(|effect| matches!(effect.kind, PlayerEffectKind::Request { .. })
+                    == (effect.outcome == PlayerEffectOutcome::Inbound)),
+            "a request, and only a request, carries Inbound"
+        );
         // Each request comes before any effect of its own tick, and each reply names its request.
         for (tick, kind) in &requests {
             let first = player.effects.iter().position(|effect| effect.tick == *tick).expect("the tick has effects");

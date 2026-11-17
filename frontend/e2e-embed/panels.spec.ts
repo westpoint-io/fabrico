@@ -14,7 +14,8 @@ import {
 // The code view and the effect log on panels.html. The code view shows each Factory's and HTTP
 // Handler's JavaScript as text, with tabs `Factory 1` and `Handler 1` in board order and no tab
 // row for one machine; markup in a source stays text. The effect log lists each call the run would
-// make with its tick, method, URL and `ok`, `error` or `timeout`, never a status code, cuts a long
+// make with its tick, method, URL and `ok`, `error` or `timeout`, never a status code on a call
+// row (only a REPLY row shows the status the Handler chose), cuts a long
 // URL with an ellipsis, and follows the newest row unless the reader scrolls up. The page loads
 // nothing after itself: the request recorder sees only the page's own URL.
 
@@ -242,7 +243,8 @@ test('the effect log names each scripted call with ok, error or timeout and neve
   );
   await expect.poll(async () => (await readProbe(page, OUTCOMES)).endHash, { timeout: 60_000 }).not.toBeNull();
   const end = await readProbe(page, OUTCOMES);
-  const calls = end.effectRows.filter((r) => r.cells[1] !== 'DEBUG');
+  // Call rows are the outbound calls; the other row kinds name a note, a fault, a request or a reply.
+  const calls = end.effectRows.filter((r) => !['DEBUG', 'FAULT', 'ROUTE', 'REPLY'].includes(r.cells[1]));
   console.log(`${OUTCOMES} at its end: ${end.effectRows.length} rows, calls ${calls.map((r) => r.cells.join(' ')).join(' | ')}`);
   const find = (path: string) => calls.find((r) => r.cells[2] === `https://example.com${path}`);
   expect(find('/slow')?.cells.slice(1)).toEqual(['POST', 'https://example.com/slow', 'ok']);
@@ -251,13 +253,17 @@ test('the effect log names each scripted call with ok, error or timeout and neve
   const slowTick = Number(find('/slow')?.cells[0].slice(1));
   expect(find('/slow')?.title).toBe(`https://example.com/slow, answered at tick ${slowTick + 40}`);
   expect(find('/lost')?.title).toBe('https://example.com/lost, no answer, so it timed out');
-  const reply = calls.find((r) => r.cells[1] === 'REPLY');
-  expect(reply?.cells[2]).toMatch(/^request \d+$/);
+  const reply = end.effectRows.find((r) => r.cells[1] === 'REPLY');
+  // A REPLY row shows the status the Handler chose, and only a REPLY row may.
+  expect(reply?.cells[2]).toMatch(/^request \d+(: status \d+)?$/);
   expect(reply?.cells[3]).toBe('ok');
   for (const r of end.effectRows) {
     expect(r.cells[0]).toMatch(/^t\d+$/);
     expect(['ok', 'error', 'timeout', '']).toContain(r.cells[3]);
-    expect(`${r.cells[1]} ${r.cells[3]}`, 'no status code in a row').not.toMatch(/\d/);
+  }
+  expect(calls.length, 'the board makes its three calls').toBeGreaterThanOrEqual(3);
+  for (const r of calls) {
+    expect(`${r.cells[1]} ${r.cells[3]}`, 'no status code in a call row').not.toMatch(/\d/);
   }
   const debug = end.effectRows.filter((r) => r.cells[1] === 'DEBUG');
   expect(debug.length, 'the Debug sink and its timer leave muted rows').toBeGreaterThan(0);

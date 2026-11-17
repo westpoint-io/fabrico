@@ -7,13 +7,19 @@
 // Row shapes, in a four-column grid (tick, method, target, outcome):
 //   Http   `t300  POST    https://example.com/slow  ok`, title `<url>, answered at tick 340`
 //          or `<url>, no answer, so it timed out`
-//   Reply  `t251  REPLY   request 7                 ok`
+//   Route  `t40   ROUTE   request 0: POST /endpoint/hello`, a request the script sent in through a
+//          Route, with no outcome; title `Request 0 reached the Route: POST /endpoint/hello`
+//   Reply  `t41   REPLY   request 0: status 200     ok`, the status the Handler's reply carries,
+//          read from its JSON; `request 0` alone when the payload has no numeric status. The
+//          number is the request's correlation id, so a ROUTE row and its REPLY row share it.
 //   Fault  `t689  FAULT   CommandTimeout`, or `FAULT  NoMatch: <first line of the payload>`, with
 //          no outcome; title `<Reason> fault, keeps no payload` or `<Reason> fault, payload:
 //          <whole payload>`. The player decides which Debug messages are faults, by the engine's
 //          fault-path rule, so this file never sniffs bytes.
 //   Debug  `t301  DEBUG   <message>`, a muted row with no outcome
 //   Noop   no row
+//
+// ROUTE and REPLY rows stay in ink whatever the status.
 //
 // The well follows the newest row unless the reader has scrolled up, and then stays where the
 // reader left it. Restart clears it. Until the first call it shows one line, chosen by whether the
@@ -29,15 +35,18 @@ export const NO_CALLS_LINE = 'This board makes no outbound calls.';
 const FOLLOW_SLACK_PX = 2;
 
 export interface EffectRow {
-  /** `call` for Http, `reply` for Reply, `fault` for Fault, `debug` for Debug. */
-  kind: 'call' | 'reply' | 'fault' | 'debug';
+  /** `call` for Http, `request` for Request, `reply` for Reply, `fault` for Fault, `debug` for Debug. */
+  kind: 'call' | 'request' | 'reply' | 'fault' | 'debug';
   /** `t300`. */
   tick: string;
-  /** `POST`, `REPLY`, `FAULT` or `DEBUG`. */
+  /** `POST`, `ROUTE`, `REPLY`, `FAULT` or `DEBUG`. */
   method: string;
-  /** The URL, `request <n>`, the fault reason and its payload's first line, or the Debug message. */
+  /**
+   * The URL, `request <n>: <METHOD> <path>`, `request <n>` with `: status <code>` when the reply
+   * has one, the fault reason and its payload's first line, or the Debug message.
+   */
   target: string;
-  /** `ok`, `error` or `timeout`; empty on a Fault or Debug row. */
+  /** `ok`, `error` or `timeout`; empty on a Route, Fault or Debug row. */
   outcome: string;
   /** Whether the outcome is a failure, shown in the destructive colour. */
   failed: boolean;
@@ -47,13 +56,33 @@ export interface EffectRow {
 
 const MESSAGE = new TextDecoder('utf-8', { fatal: false });
 
+/**
+ * The status a Handler's reply carries: its payload is the JSON object the Handler passed to
+ * `ctx.command`, so a whole-number `status` there is the status the caller gets. Anything else,
+ * including bytes that aren't JSON, gives null and the row keeps `request <n>` alone.
+ */
+function replyStatus(payload: Uint8Array): number | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(MESSAGE.decode(payload));
+  } catch {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const status: unknown = (value as { status?: unknown }).status;
+  return typeof status === 'number' && Number.isInteger(status) ? status : null;
+}
+
 /** The rows for a batch of effects, in order. Noop has none. */
 export function effectRows(effects: readonly PlayerEffect[]): EffectRow[] {
   const rows: EffectRow[] = [];
   for (const { tick, effect, answer } of effects) {
     const t = `t${tick}`;
-    const outcome = answer.outcome === 'Reply' ? 'ok' : answer.outcome === 'Error' ? 'error' : 'timeout';
-    const when = answer.outcome === 'Timeout' ? 'no answer, so it timed out' : `answered at tick ${tick + answer.afterTicks}`;
+    const outcome = answer.outcome === 'Reply' ? 'ok' : answer.outcome === 'Error' ? 'error' : answer.outcome === 'Timeout' ? 'timeout' : '';
+    const when =
+      answer.outcome === 'Reply' || answer.outcome === 'Error'
+        ? `answered at tick ${tick + answer.afterTicks}`
+        : 'no answer, so it timed out';
     switch (effect.kind) {
       case 'Http':
         rows.push({
@@ -66,8 +95,22 @@ export function effectRows(effects: readonly PlayerEffect[]): EffectRow[] {
           title: `${effect.url}, ${when}`,
         });
         break;
+      case 'Request': {
+        const asked = `${effect.method} ${effect.path}`;
+        rows.push({
+          kind: 'request',
+          tick: t,
+          method: 'ROUTE',
+          target: `request ${effect.correlation}: ${asked}`,
+          outcome: '',
+          failed: false,
+          title: `Request ${effect.correlation} reached the Route: ${asked}`,
+        });
+        break;
+      }
       case 'Reply': {
-        const target = `request ${effect.correlation}`;
+        const status = replyStatus(effect.payload);
+        const target = `request ${effect.correlation}${status === null ? '' : `: status ${status}`}`;
         rows.push({ kind: 'reply', tick: t, method: 'REPLY', target, outcome, failed: outcome !== 'ok', title: `Reply to ${target}, ${when}` });
         break;
       }
