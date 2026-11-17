@@ -60,4 +60,4 @@ examples/boards/docs/start-first-factory-1.board.ron 260 742b038793adac867983258
 examples/boards/docs/start-first-factory-2.board.ron 260 f4b14002cc83e74679403486e3b4615887ef7831b19891d1fe8e7f648d8b9362
 examples/boards/docs/start-first-factory-3.board.ron 260 0e883182e9390be2e6572124c845288263c25a0e30419fd90b6dd56e6b7e043c
 examples/boards/lessons/belts-that-join.board.ron 360 8214579d11c769d64559ed9136b9d6b2c5fdf382ca4f9f5a35c105d2011b31ee
-examples/boards/order_processing.board.ron 1200 668d0400451aafaa4d4749650c0165727c3f67d66f631c9a46a68863cb9c0830
+examples/boards/order_processing.board.ron 600 d3b4f35128f789b2d3f0ca042b7468390b39e64db12db2696ade9097825b126e

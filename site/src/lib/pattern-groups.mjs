@@ -13,5 +13,5 @@ export const PATTERN_GROUPS = [
   ['Pace and spread the work', ['parallel-workers', 'buffer-events', 'rate-limit', 'run-on-a-schedule']],
   ['Handle failures', ['dead-letter-queue', 'request-timeout', 'validate-webhook-payloads']],
   ['Keep state', ['running-total', 'deduplicate-events', 'batch-events']],
-  ['HTTP and whole flows', ['local-http-endpoint', 'mock-api-server', 'call-exactly-once']],
+  ['HTTP and whole flows', ['local-http-endpoint', 'mock-api-server', 'call-exactly-once', 'order-processing']],
 ];

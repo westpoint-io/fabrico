@@ -147,11 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# Two new lines, written by the generator, for the boards on the pattern pages Serve a local HTTP
-# endpoint (examples/boards/docs/patterns-local-http-endpoint.board.ron) and Run a mock API server
-# for testing (examples/boards/docs/patterns-mock-api-server.board.ron). The 53 older lines are
-# unchanged.
-examples/boards/hashes.manifest e3bee8b40062a7de6a5de98b47977633aa6cc406c415f38c1ab7d099115258ae
+# The order board's line (examples/boards/order_processing.board.ron) moved, written by the
+# generator: its end tick went from 1200 to 600, so its tick and hash changed. Its commands, script
+# and seed are unchanged, and the other 54 lines are unchanged.
+examples/boards/hashes.manifest b0631d74dda2e4e7e85e0c5acfcbcc0d2594c5e38d2ed9d2b4593a73ede7f910
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

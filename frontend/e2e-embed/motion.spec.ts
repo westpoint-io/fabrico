@@ -23,8 +23,10 @@ import {
 // loads paused with Play showing and holds its tick for two seconds; Play runs it at the selected
 // speed, and Restart takes it back to its boot tick and leaves it paused.
 //
-// Neither test presses Continue for the reader, so each waits until a board is past its captions
-// before it measures, or measures before the first one.
+// The hidden-tab test presses Continue at each caption of the demo board and of order_processing
+// until both are past their last one, then measures; order_processing runs to tick 600, so it is
+// still playing then and again once the tab is back. The reduced-motion test measures before the
+// first caption.
 
 const PAGE = pageUrl('three-boards.html');
 const BOARDS = ['demo_scene', 'order_processing', 'advanced'] as const;
@@ -57,15 +59,22 @@ test('a hidden tab pauses every board, and showing it resumes only the ones that
   for (const name of BOARDS) {
     await expect.poll(async () => (await readProbe(page, name)).state, { timeout: 20_000 }).toBe('running');
   }
-  // Past the demo board's last caption, so no caption pauses a board during the test.
-  const lastCaption = Math.max(...fileCaptions('demo_scene').map((c) => c.tick));
+  // Past the last caption of both captioned boards, pressing Continue at each one, so no caption
+  // pauses a board during the test.
+  const CAPTIONED = ['demo_scene', 'order_processing'] as const;
+  const lastCaption: Record<string, number> = {};
+  for (const name of CAPTIONED) lastCaption[name] = Math.max(...fileCaptions(name).map((c) => c.tick));
   await expect
     .poll(async () => {
-      const p = await readProbe(page, 'demo_scene');
-      if (p.caption !== null) await control(page, 'demo_scene', 'play').click();
-      return p.tick;
-    }, { timeout: 30_000, intervals: [100], message: 'the demo board passes its last caption' })
-    .toBeGreaterThan(lastCaption + 5);
+      const behind: string[] = [];
+      for (const name of CAPTIONED) {
+        const p = await readProbe(page, name);
+        if (p.caption !== null) await control(page, name, 'play').click();
+        if (p.tick <= lastCaption[name] + 5) behind.push(`${name} at tick ${p.tick}`);
+      }
+      return behind.join(', ') || 'both past';
+    }, { timeout: 30_000, intervals: [100], message: 'the demo board and order_processing pass their last captions' })
+    .toBe('both past');
 
   // The reader pauses one board.
   await control(page, 'advanced', 'play').click();

@@ -57,7 +57,10 @@
 // the field is inert host-side, authored Post so data == behavior).
 // Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
 // and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
-// sentence about what the board does on that tick.
+// sentence about what the board does on that tick. The four captions follow the first order
+// through the board and stop once more when the second order is done; the scripted run ends on
+// tick 600, well after the last item reaches its Sink on tick 243. The app ignores the captions
+// and `end_tick`, as it does the script.
 Board(
     format: 2,
     title: "Order processing",
@@ -134,8 +137,19 @@ export default function (input, ctx) {
         At(tick: 60, input: Webhook(source: 0, body: r#"{"id":"ord-1","items":[{"sku":"widget","qty":2,"price":5}]}"#)),
         At(tick: 120, input: Webhook(source: 0, body: r#"{"id":"ord-2","items":[{"sku":"gadget","qty":1,"price":9}]}"#)),
     ],
-    captions: [],
+    captions: [
+        // Measured: h1 Factory WORKING[83,143], factory.faults=0; the first order reaches it on 83.
+        Caption(tick: 83, highlight: 1, text: "The validate Factory checks the first order and splits it into an invoice job and a fulfillment job, one on each output."),
+        // Measured: h2 Factory WORKING[145,205] and h3 Factory WORKING[145,205].
+        Caption(tick: 145, highlight: 2, text: "The invoice Factory adds up the first order's items, and the fulfillment Factory below it gets the order ready to ship."),
+        // Measured: effect step_ends_on=183 DEBUG from=h4 {"order":"ord-1","total":10} and HTTP Post
+        // http://localhost:8799/fulfillment, h4 and h5 Sink WORKING[183,243].
+        Caption(tick: 183, highlight: 5, text: "The HTTP Sink sends the first order's fulfillment as a POST, and the Debug Sink above it shows the invoice, with a total of 10."),
+        // Measured: effect step_ends_on=243 DEBUG from=h4 {"order":"ord-2","total":9} and HTTP Post
+        // http://localhost:8799/fulfillment; nothing moves after 243.
+        Caption(tick: 243, highlight: 4, text: "The second order is done. The Debug Sink shows its invoice, with a total of 9, and the HTTP Sink has sent its fulfillment."),
+    ],
     executor: Executor(default: Reply(after_ticks: 1), rules: []),
     view: View(fit: Board),
-    end_tick: 1200,
+    end_tick: 600,
 )

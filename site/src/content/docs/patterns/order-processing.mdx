@@ -1,0 +1,80 @@
+---
+title: Order processing end to end
+description: "Follow a whole order workflow on one board: a webhook comes in, a Factory checks and splits it, and two branches make an invoice and post the shipment."
+searchPhrase: order processing
+sidebar:
+  order: 220
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+
+Order processing is the workflow the app ships as an example. An order arrives as a webhook, a [Factory](../../reference/files/glossary/#term-factory) checks it and splits it in two, one branch builds an invoice, and an HTTP [Sink](../../reference/files/glossary/#term-sink) at the end of the other branch posts the order on. This page walks the whole workflow on one board, so you can see how the smaller patterns fit together.
+
+The board below is the Order processing example from the app. A [Source](../../reference/files/glossary/#term-source) on the left feeds the validate Factory, which has two outputs. The top branch runs the invoice Factory into a Debug Sink, and the bottom branch runs the fulfillment Factory into an HTTP Sink that posts to `http://localhost:8799/fulfillment`. [Belts](../../reference/files/glossary/#term-belt) join them all, and the script sends two orders, on ticks 60 and 120.
+
+<Board name="order_processing" />
+
+## How the board works
+
+Press Play and the board stops on these four [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 83: The validate Factory checks the first order and splits it into an invoice job and a fulfillment job, one on each output.
+2. Tick 145: The invoice Factory adds up the first order's items, and the fulfillment Factory below it gets the order ready to ship.
+3. Tick 183: The HTTP Sink sends the first order's fulfillment as a POST, and the Debug Sink above it shows the invoice, with a total of 10.
+4. Tick 243: The second order is done. The Debug Sink shows its invoice, with a total of 9, and the HTTP Sink has sent its fulfillment.
+
+The second order takes the same path 60 ticks after the first: the validate Factory runs on tick 143 and both branch Factories on tick 205. By its last tick the effect log under the board shows four rows: `t182  DEBUG  {"order":"ord-1","total":10}`, `t182  POST  http://localhost:8799/fulfillment  ok`, `t242  DEBUG  {"order":"ord-2","total":9}` and `t242  POST  http://localhost:8799/fulfillment  ok`. The DEBUG rows are the two invoices, and the POST rows are the two fulfillment calls, which this site's scripted reply answers 1 tick later.
+
+## The Factory code
+
+Each Factory runs its own code once for each [item](../../reference/files/glossary/#term-item) that reaches it. The validate Factory checks the order and splits it:
+
+```js title="Factory code"
+// validate and split the order
+export default function (input, ctx) {
+  if (!input || !input.id || !Array.isArray(input.items)) { throw new Error("not an order"); }
+  ctx.emit(0, { kind: "invoice", order: input.id, items: input.items });
+  ctx.emit(1, { kind: "fulfillment", order: input.id, items: input.items });
+}
+```
+
+The invoice Factory adds up the price of each line:
+
+```js title="Factory code"
+// build the invoice
+export default function (input, ctx) {
+  var total = 0;
+  for (var i = 0; i < input.items.length; i++) { total += input.items[i].qty * input.items[i].price; }
+  ctx.emit(0, { order: input.order, total: total });
+}
+```
+
+The fulfillment Factory keeps the order id and the items to ship:
+
+```js title="Factory code"
+// prepare fulfillment
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, ship: input.items });
+}
+```
+
+In the validate code, the two `ctx.emit` lines send one job out of each output, so each good order becomes one invoice and one fulfillment call. An order with no `id` or no `items` list hits the `throw` line instead, and the Factory sends nothing on.
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- The validate Factory's Fault port has no belt docked on it, so a bad order's [fault](../../reference/files/glossary/#term-fault) goes nowhere and the board keeps no copy of the order. [Send failures to a dead letter queue](../dead-letter-queue/) shows how to dock a Debug Sink on a Fault port so you can read what failed.
+- In the app this HTTP Sink really posts to `http://localhost:8799/fulfillment`, and whatever listens on that port on your computer gets each order. Change the Sink's URL in the inspector before you send an order if another program uses that port.
+- The app ignores the script, so in the app nothing moves on this board until you send it a real order. The Source's URL is in the inspector, and [Webhook ingress](../../reference/code-and-http/webhook-ingress/) shows how to send a webhook to it with curl.
+- Both orders on this board are good, so it shows no faults. [Validate webhook payloads](../validate-webhook-payloads/) checks each order first and sends a bad one to a Sink where you can read it.
+
+## Related pages
+
+- [Validate webhook payloads](../validate-webhook-payloads/): check each payload in a Factory and quarantine the bad ones on a second output.
+- [Send failures to a dead letter queue](../dead-letter-queue/): send each machine's faults to a Debug Sink you can read.
+- [Factory](../../reference/machines/factory/): the machine that runs your JavaScript on each item and sends out what the code emits.
+- [Sink](../../reference/machines/sink/): the target field, the HTTP methods and what a failed call becomes.
