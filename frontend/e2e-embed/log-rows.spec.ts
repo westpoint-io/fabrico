@@ -16,14 +16,17 @@ import {
 // print the fault's raw bytes. The player decides which Debug messages are faults, by the engine's
 // own fault-path rule, so this spec only reads the rows the page shows. Each request the script
 // sends in through a Route prints as a ROUTE row, and the Handler's reply as a REPLY row with the
-// status it carries, both numbered by the request's correlation id from 0.
+// status it carries, both numbered by the request's correlation id from 0. On a board that calls
+// out, the empty line goes when the first row of any kind lands, a DEBUG row included.
 
 const PAGE = pageUrl('log-rows.html');
 // Every board on this page runs at once, so the viewport holds the whole page.
 test.use({ viewport: WHOLE_PAGE_VIEWPORT });
 const TIMEOUT = 'docs-faults-command-timeout';
 const HANDLER = 'docs-machines-http-handler';
-const BOARDS = [TIMEOUT, HANDLER] as const;
+const DEBUG_FIRST = 'debug-first';
+const BOARDS = [TIMEOUT, HANDLER, DEBUG_FIRST] as const;
+const EMPTY_LINE = 'No outbound calls yet. Each call this board makes shows up here with its tick and its scripted result.';
 /** The C0 control characters a row must never print, leaving out tab and the line breaks. */
 const CONTROL = /[\u0000-\u0008\u000e-\u001f]/;
 
@@ -122,5 +125,35 @@ test('each request a Route takes is a ROUTE row, paired by number with a REPLY r
   }
   expect(Math.min(...numbers), 'requests are numbered from 0').toBe(0);
   expect(replies, 'every REPLY row pairs with a ROUTE row').toHaveLength(routes.length);
+  await finish();
+});
+
+test('the empty line on a board that calls out goes when its first row lands, though that row is DEBUG', async ({ page }) => {
+  test.setTimeout(120_000);
+  const finish = await openPage(page);
+  const b = board(page, DEBUG_FIRST);
+  await b.scrollIntoViewIfNeeded();
+  await b.locator('button[data-control="restart"]').click();
+  await expect(b.locator('.log-well .note')).toHaveText(EMPTY_LINE);
+
+  // The rows and the note, read in one go, the moment the first row is there.
+  const read = () =>
+    b.evaluate((el) => {
+      const well = (el.shadowRoot as ShadowRoot).querySelector('.log-well') as HTMLElement;
+      return {
+        rows: [...well.querySelectorAll('.row')].map((r) => r.children[1]?.textContent ?? ''),
+        note: well.querySelector('.note')?.textContent ?? null,
+      };
+    });
+  await expect.poll(async () => (await read()).rows.length, { message: 'the first row lands', timeout: 30_000 }).toBeGreaterThan(0);
+  const first = await read();
+  console.log(`${DEBUG_FIRST} at its first row: rows ${first.rows.join(', ')}; note ${JSON.stringify(first.note)}`);
+  expect(first.rows, 'only the DEBUG row has landed, before the call').toEqual(['DEBUG']);
+  expect(first.note, 'the empty line is gone').toBeNull();
+
+  await expect.poll(async () => (await readProbe(page, DEBUG_FIRST)).endHash, { timeout: 60_000 }).not.toBeNull();
+  const end = await read();
+  expect(end.rows, 'the call follows the DEBUG row').toEqual(['DEBUG', 'POST']);
+  expect(end.note).toBeNull();
   await finish();
 });

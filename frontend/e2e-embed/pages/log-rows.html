@@ -22,7 +22,47 @@
     <h2>An HTTP Handler</h2>
     <div class="narrow" data-col="docs-machines-http-handler"><fabrico-board name="docs-machines-http-handler"></fabrico-board></div>
   </section>
+  <section>
+    <h2>A Debug row before the first call</h2>
+    <div class="narrow" data-col="debug-first"><fabrico-board name="debug-first"></fabrico-board></div>
+  </section>
 </main>
+<!-- Two rows of one Source and one Sink. The top Sink is a Debug Sink and gets a webhook on tick
+     60; the bottom Sink posts to https://example.com/ and gets one on tick 150, which the executor
+     answers, so nothing is sent. The log's first row is DEBUG and its first call comes later. -->
+<script type="text/x-fabrico-board" id="debug-first">
+Board(
+    format: 2,
+    title: "A Debug row before the first call",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),
+        Place(kind: 7, cell_x: 5, cell_y: 2),
+        Place(kind: 0, cell_x: 1, cell_y: 5),
+        Place(kind: 7, cell_x: 5, cell_y: 5),
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),
+        DrawBelt(cells: [(2, 5), (3, 5), (4, 5)]),
+        Dock(belt: 4, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 4, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 5, endpoint: Tail, node: 2, port: 0),
+        Dock(belt: 5, endpoint: Head, node: 3, port: 0),
+        Configure(node: 3, config: Sink(target: Http(url: "https://example.com/later", method: Post))),
+    ],
+    script: [
+        At(tick: 60, input: Webhook(source: 0, body: r#"{"note":"first"}"#)),
+        At(tick: 150, input: Webhook(source: 2, body: r#"{"order":1}"#)),
+    ],
+    captions: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/", outcome: Reply(after_ticks: 2)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 240,
+)
+</script>
 <!-- fabrico:bundle -->
+<script>
+  window.FabricoEmbed.registerBoard('debug-first', document.getElementById('debug-first').textContent);
+</script>
 </body>
 </html>

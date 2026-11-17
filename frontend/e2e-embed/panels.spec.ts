@@ -303,6 +303,44 @@ test('the effect log names each scripted call with ok, error or timeout and neve
   await finish();
 });
 
+test('a reader scrolled above the newest row keeps their place while rows land, and the log follows again from the bottom', async ({ page }) => {
+  test.setTimeout(180_000);
+  const finish = await openPage(page);
+  const b = board(page, OUTCOMES);
+  await b.scrollIntoViewIfNeeded();
+  await b.locator('select').selectOption({ label: '4x' });
+  await b.locator('button[data-control="restart"]').click();
+  const well = b.locator('.log-well');
+  const rowCount = async (): Promise<number> => (await readProbe(page, OUTCOMES)).effectRows.length;
+  await expect.poll(rowCount, { message: 'two rows land', timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  // Scrolling up needs rows above the fold; on a slow runner the well can take seconds to fill.
+  await expect
+    .poll(() => well.evaluate((w) => w.scrollHeight - w.clientHeight), { message: 'the log overflows its well', timeout: 60_000 })
+    .toBeGreaterThan(2);
+
+  // The reader scrolls to the top, more than 2 px above the bottom.
+  await well.evaluate((w) => {
+    w.scrollTop = 0;
+  });
+  const held = await well.evaluate((w) => w.scrollTop);
+  const rowsAtScroll = await rowCount();
+  await expect.poll(rowCount, { message: 'three more rows land', timeout: 60_000 }).toBeGreaterThanOrEqual(rowsAtScroll + 3);
+  const after = await well.evaluate((w) => w.scrollTop);
+  console.log(`scrolled to ${held} at ${rowsAtScroll} rows; read ${after} at ${await rowCount()} rows`);
+  expect(Math.abs(after - held), 'the well stays where the reader left it').toBeLessThanOrEqual(2);
+
+  // Back at the bottom, the next row brings the well to the new bottom.
+  await well.evaluate((w) => {
+    w.scrollTop = w.scrollHeight;
+  });
+  const rowsAtBottom = await rowCount();
+  await expect.poll(rowCount, { message: 'the next row lands', timeout: 60_000 }).toBeGreaterThan(rowsAtBottom);
+  await expect
+    .poll(() => well.evaluate((w) => w.scrollHeight - w.scrollTop - w.clientHeight), { message: 'the well follows the newest row again' })
+    .toBeLessThanOrEqual(2);
+  await finish();
+});
+
 test('the log stays where the reader scrolled it, and a long URL is cut on one line', async ({ page }) => {
   test.setTimeout(180_000);
   const finish = await openPage(page);

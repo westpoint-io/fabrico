@@ -22,12 +22,14 @@
 // ROUTE and REPLY rows stay in ink whatever the status.
 //
 // The well follows the newest row unless the reader has scrolled up, and then stays where the
-// reader left it. Restart clears it. Until the first call it shows one line, chosen by whether the
-// board calls out at all. Every word goes in with `textContent`.
+// reader left it. Restart clears it. On a board that calls out, `EMPTY_LINE` shows only while the
+// well holds no row, so the first row of any kind removes it; a board with no outbound machine
+// keeps `NO_CALLS_LINE` above its DEBUG and FAULT rows, since that stays true. Every word goes in
+// with `textContent`.
 
 import { decodePlayerEffects, type PlayerEffect } from '../player/playerWasm';
 
-/** The empty line on a board that calls out, before its first call. */
+/** The empty line on a board that calls out, while the well holds no row. */
 export const EMPTY_LINE = 'No outbound calls yet. Each call this board makes shows up here with its tick and its scripted result.';
 /** The line on a board with no outbound machine. */
 export const NO_CALLS_LINE = 'This board makes no outbound calls.';
@@ -186,10 +188,9 @@ export function createEffectLog(): EffectLog {
     follow = well.scrollHeight - well.scrollTop - well.clientHeight <= FOLLOW_SLACK_PX;
   });
 
-  /** The empty line shows until the first call or reply, and always on a board that calls nothing. */
+  /** The empty line shows until the first row of any kind, and always on a board that calls nothing. */
   const syncNote = (): void => {
-    const hasCall = shown.some((r) => r.kind !== 'debug');
-    const text = callsOut === null ? null : callsOut ? (hasCall ? null : EMPTY_LINE) : NO_CALLS_LINE;
+    const text = callsOut === null ? null : callsOut ? (shown.length === 0 ? EMPTY_LINE : null) : NO_CALLS_LINE;
     if (text === null) {
       note?.remove();
       note = null;

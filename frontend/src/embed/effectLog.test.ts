@@ -159,22 +159,28 @@ describe('the log well', () => {
     expect(top(), 'back at the bottom, it follows again').toBe(22 * 20 - 160);
   });
 
-  it('shows the empty line chosen by calls_out until a call arrives, and Restart clears it', () => {
+  it('shows the empty line on a board that calls out until the first row of any kind, and Restart brings it back', () => {
     const { log, well } = measuredLog();
     log.setCallsOut(true);
     expect(well.textContent).toBe(EMPTY_LINE);
     log.append(effectRows([debugAt(5)]));
-    expect(well.querySelector('.note')?.textContent, 'a Debug row is not a call').toBe(EMPTY_LINE);
+    expect(well.querySelector('.note'), 'a DEBUG row removes the empty line too').toBeNull();
     log.append(effectRows([{ tick: 9, effect: { kind: 'Http', url: URL, method: 'Post', body: bytes('') }, answer: { outcome: 'Timeout' } }]));
     expect(well.querySelector('.note')).toBeNull();
     expect(log.rows()).toHaveLength(2);
     log.clear();
     expect(log.rows()).toHaveLength(0);
     expect(well.textContent).toBe(EMPTY_LINE);
+  });
 
-    const quiet = measuredLog();
-    quiet.log.setCallsOut(false);
-    expect(quiet.well.textContent).toBe(NO_CALLS_LINE);
+  it('keeps the no-calls line above DEBUG and FAULT rows on a board with no outbound machine', () => {
+    const { log, well } = measuredLog();
+    log.setCallsOut(false);
+    expect(well.textContent).toBe(NO_CALLS_LINE);
+    log.append(effectRows([debugAt(5), { tick: 7, effect: { kind: 'Fault', reason: 'NoMatch', payload: bytes('{}') }, answer: { outcome: 'Reply', afterTicks: 1 } }]));
+    expect(well.firstElementChild?.className).toBe('note');
+    expect(well.querySelector('.note')?.textContent).toBe(NO_CALLS_LINE);
+    expect(log.rows().map((r) => r.method)).toEqual(['DEBUG', 'FAULT']);
   });
 
   it('puts board text in cells as text', () => {
