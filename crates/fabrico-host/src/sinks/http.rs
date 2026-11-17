@@ -53,8 +53,9 @@ fn carries_body(method: HttpMethod) -> bool {
     }
 }
 
-/// The default request timeout for the HTTP sink.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+/// The default request timeout for the HTTP sink. `pub` so the docs site's facts read it
+/// (`examples/docs_facts.rs`) instead of a page typing the number.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Build the shared reqwest client (built once, reused for every dispatch).
 ///

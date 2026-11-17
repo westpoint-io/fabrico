@@ -484,6 +484,17 @@
       "unit": "ticks a slot",
       "value": 2
     },
+    "limit.command_deadline_ticks": {
+      "also": [
+        "ticks after",
+        "ticks later"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-core/src/tick.rs",
+      "symbol": "DEFAULT_SINK_DEADLINE",
+      "unit": "ticks after the call",
+      "value": 600
+    },
     "limit.default_arity": {
       "also": [],
       "kind": "quantity",
@@ -587,6 +598,17 @@
       "symbol": "GRID_MIN",
       "unit": "on each axis",
       "value": -512
+    },
+    "limit.http_client_timeout_secs": {
+      "also": [
+        "seconds of real time",
+        "s"
+      ],
+      "kind": "quantity",
+      "source": "crates/fabrico-host/src/sinks/http.rs",
+      "symbol": "DEFAULT_TIMEOUT",
+      "unit": "seconds",
+      "value": 30
     },
     "limit.label_max_h": {
       "also": [

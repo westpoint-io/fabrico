@@ -49,8 +49,12 @@
 //! exported as `limit.factory_stack_desktop` only, and pages give the browser limit in prose.
 //!
 //! These stay prose on the pages too, because the constant is private to its module or isn't a
-//! single constant: the webhook body limit, the delivery-id header name, the 30 s Sink timeout,
-//! the 600-tick Sink deadline and the default Factory source.
+//! single constant: the webhook body limit, the delivery-id header name and the default Factory
+//! source.
+//!
+//! The Sink's call deadline is private to the core's placement fold, so it isn't read from its
+//! constant: the run places one HTTP Sink through the board commands a docs board uses and reads
+//! the deadline the fold gave it (`limit.command_deadline_ticks`).
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -72,18 +76,21 @@ use fabrico_core::factory::{
 use fabrico_core::fault::FaultReason;
 use fabrico_core::rng::SimRng;
 use fabrico_core::state::{
-    GRID_MAX, GRID_MIN, HttpMethod, LabelColour, MAX_FOOTPRINT_DIM, Medium, Role, Side,
+    GRID_MAX, GRID_MIN, HttpMethod, LabelColour, MAX_FOOTPRINT_DIM, Medium, Node, Role, Side,
     SinkTemplate,
 };
 use fabrico_core::tick::DEFAULT_ARITY;
 use fabrico_core::wire::{DEFAULT_WIRE_BUDGET, WIRE_INFLIGHT_CAP};
+use fabrico_engine::board::parse_board;
 use fabrico_engine::envelope::DEFAULT_ENDPOINT_DEADLINE_TICKS;
+use fabrico_engine::scripted::BoardRun;
 use fabrico_host::ingress::endpoint::ENDPOINT_INGRESS_CAPACITY;
 use fabrico_host::project::{
     MAX_PROJECT_BYTES, PRE_SLOT_CHANGE_PROJECT_VERSION, PRE_SPEED_CHANGE_PROJECT_VERSION,
     PROJECT_FILE_VERSION,
 };
 use fabrico_host::sim_loop::TICK_PAUSE;
+use fabrico_host::sinks::http::DEFAULT_TIMEOUT;
 // The four machine states are consts in a module, not an enum, so no match can catch a fifth.
 // frontend/e2e-docs/reference.spec.ts counts the consts in `pub mod state_tag` and fails when the
 // count differs from the state.* facts this file writes.
@@ -104,6 +111,7 @@ const ENDPOINT_INGRESS: &str = "crates/fabrico-host/src/ingress/endpoint.rs";
 const PROJECT: &str = "crates/fabrico-host/src/project.rs";
 const TICK: &str = "crates/fabrico-core/src/tick.rs";
 const SIM_LOOP: &str = "crates/fabrico-host/src/sim_loop.rs";
+const HTTP_SINK: &str = "crates/fabrico-host/src/sinks/http.rs";
 const PROTOCOL: &str = "crates/fabrico-protocol/src/lib.rs";
 
 /// Every machine kind, by the name pages use and its kind number. A kind with a port catalog arm
@@ -175,6 +183,41 @@ const MIB: i64 = 1024 * 1024;
 
 /// One limit: its id after `limit.`, value, unit, other spellings, source file and constant.
 type LimitRow<'a> = (&'a str, i64, &'a str, &'a [&'a str], &'a str, &'a str);
+
+/// One HTTP Sink, placed and configured with the commands a docs board uses.
+const ONE_HTTP_SINK: &str = r#"Board(
+    format: 2,
+    title: "One HTTP Sink",
+    seed: 1,
+    commands: [
+        Place(kind: 7, cell_x: 1, cell_y: 1),
+        Configure(node: 0, config: Sink(target: Http(url: "https://example.com/facts", method: Post))),
+    ],
+    script: [],
+    captions: [],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 10,
+)"#;
+
+/// The deadline, in ticks after the call, that the core's placement fold gives an HTTP Sink. Its
+/// constant is private to the fold, so this boots [`ONE_HTTP_SINK`] and reads the Sink back.
+fn sink_deadline_ticks() -> Result<i64, String> {
+    let board = parse_board(ONE_HTTP_SINK).map_err(|e| format!("the one-Sink board doesn't parse: {e}"))?;
+    let run = BoardRun::boot(board).map_err(|e| format!("the one-Sink board doesn't boot: {e}"))?;
+    let state = &run.engine().core().state;
+    let deadlines: Vec<u64> = state
+        .node_ids()
+        .filter_map(|id| match state.node(id) {
+            Some(Node::Sink(sink)) => Some(sink.deadline_ticks),
+            _ => None,
+        })
+        .collect();
+    match deadlines.as_slice() {
+        [ticks] => num(*ticks, "DEFAULT_SINK_DEADLINE"),
+        other => Err(format!("the one-Sink board holds {} Sinks, not 1", other.len())),
+    }
+}
 
 /// The limits. Each unit is specific enough that a plain count in a tutorial (`2 ticks`,
 /// `16 items`) doesn't read as the fact to the literal lint.
@@ -389,6 +432,22 @@ fn limits(facts: &mut Facts) -> Result<(), String> {
             &["ticks for a reply"],
             ENVELOPE,
             "DEFAULT_ENDPOINT_DEADLINE_TICKS",
+        ),
+        (
+            "command_deadline_ticks",
+            sink_deadline_ticks()?,
+            "ticks after the call",
+            &["ticks after", "ticks later"],
+            TICK,
+            "DEFAULT_SINK_DEADLINE",
+        ),
+        (
+            "http_client_timeout_secs",
+            num(DEFAULT_TIMEOUT.as_secs(), "DEFAULT_TIMEOUT")?,
+            "seconds",
+            &["seconds of real time", "s"],
+            HTTP_SINK,
+            "DEFAULT_TIMEOUT",
         ),
         (
             "endpoint_ingress_capacity",

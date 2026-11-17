@@ -22,15 +22,15 @@ On the board below, the top Sink sends each item it takes as a POST request, and
 
 ## Logged once, never sent again on replay
 
-When a Sink takes an item, the engine turns it into one call and logs it. The app sends the call, and the answer comes back as an event at a later tick, which goes in the log too. When the app replays the board, as it does when you open a project file, it mutes outbound calls: the Sink takes the same item on the same tick, and the logged answer reaches it again, but no request goes out. [The event log and save files](../event-log-and-save-files/) covers what the log holds.
+When a Sink takes an item, the engine turns it into one call and logs it. The app sends the call, and the answer comes back as an event at a later tick, which goes in the log too. Opening a project file puts back the state saved in it, so usually nothing replays. If the file's saved snapshot is older than a call, the app replays that call from the log with outbound calls muted: the Sink takes the same item on the same tick, and the logged answer reaches it again. In both cases the app sends no request when you open the file. [The event log and save files](../event-log-and-save-files/) covers what the log holds.
 
-Checked by <code>replay_dispatches_zero</code> in [crates/fabrico-host/tests/driver.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-host/tests/driver.rs).
+Checked by <code>one_dispatch_across_save_and_open</code> in [crates/fabrico-host/tests/exactly_once_replay.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-host/tests/exactly_once_replay.rs).
 
 A save waits while a call is still out. A file saved with a call waiting would reopen with that call timed out, even if it had worked, so the app holds the save until the answer is in, and reports Save failed if it hasn't come after a few seconds.
 
 ## One attempt, no retry
 
-The app sends each request once. If the receiver answers with an error status, the connection fails, or no answer comes within 30 seconds of real time, the app doesn't try again: the Sink sends a <Fact id="fault.CommandFailure" /> fault out of its Fault port. If the engine's own deadline passes first, 600 ticks after the call left, the Sink sends a <Fact id="fault.CommandTimeout" /> fault. [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/) gives the full list.
+The app sends each request once. If the receiver answers with an error status, the connection fails, or no answer comes within <Fact id="limit.http_client_timeout_secs" /> of real time, the app doesn't try again: the Sink sends a <Fact id="fault.CommandFailure" /> fault out of its Fault port. If the engine's own deadline passes first, <Fact id="limit.command_deadline_ticks" />, the Sink sends a <Fact id="fault.CommandTimeout" /> fault. [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/) gives the full list.
 
 ## A timed-out call may still have arrived
 
@@ -38,7 +38,7 @@ A timeout means the answer didn't come back in time. It doesn't mean the request
 
 <Board name="docs-faults-command-timeout" faultsAbout="CommandTimeout" />
 
-The Sink sends the item when the tick counter reads 43. The deadline passes 600 ticks later, on tick 643, and the Sink sends a <Fact id="fault.CommandTimeout" /> fault out of its Fault port; a belt carries it to a Debug Sink, which takes it when the counter reads 689. The fault carries no item, and the app doesn't send the request again by itself. If the slow service did act on it, it acted once. If you then send the same data in again, that's a new call on a later tick, with a new key. [Fault reasons](../../troubleshooting/fault-reasons/#fault-command-timeout) says how to deal with a slow service.
+The Sink sends the item when the tick counter reads 43. The deadline passes <Fact id="limit.command_deadline_ticks" />, on tick 643, and the Sink sends a <Fact id="fault.CommandTimeout" /> fault out of its Fault port; a belt carries it to a Debug Sink, which takes it when the counter reads 689. The fault carries no item, and the app doesn't send the request again by itself. If the slow service did act on it, it acted once. If you then send the same data in again, that's a new call on a later tick, with a new key. [Fault reasons](../../troubleshooting/fault-reasons/#fault-command-timeout) says how to deal with a slow service.
 
 ## The Idempotency-Key header
 

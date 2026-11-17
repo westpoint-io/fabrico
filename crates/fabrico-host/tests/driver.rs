@@ -11,8 +11,10 @@
 //!   entry, so no Timeout is synthesized for it (Pitfall 5).
 //! - `http_result_folds_back`: a loopback http command driven end-to-end through
 //!   `run()` folds its Outcome::Success back as a logged CommandResult (EXEC-02).
-//! - `replay_dispatches_zero`: replaying the produced log through `recover()`
-//!   re-emits the same N commands but dispatches ZERO (REPLAY-04).
+//! - `recover_re_emits_the_logged_commands_and_restores_state`: replaying the
+//!   produced log through `recover()` re-emits the same N commands and rebuilds the
+//!   live state byte for byte. That nothing re-emitted is dispatched is checked on the
+//!   production dispatch path by `tests/exactly_once_replay.rs`.
 //! - `recovery_no_double_send`: a crash mid-flight, rebuilt from log + ledger,
 //!   re-dispatches nothing and times out at the deadline instead (EXEC-04).
 
@@ -375,9 +377,11 @@ fn http_result_folds_back() {
 }
 
 #[test]
-fn replay_dispatches_zero() {
-    // Replaying the produced log through recover() re-emits the same N commands
-    // but dispatches ZERO (REPLAY-04): live dispatches N, replay dispatches 0.
+fn recover_re_emits_the_logged_commands_and_restores_state() {
+    // Replaying the produced log through recover() re-emits the same N commands the
+    // live run dispatched and rebuilds the live state byte for byte. recover() returns
+    // those commands and hands none of them to an executor; the count of what reaches
+    // the dispatch closure across a save and an open is in tests/exactly_once_replay.rs.
     let dir = tempfile::tempdir().expect("tempdir");
     let log_path = dir.path().join("log.redb");
     let ledger_path = dir.path().join("ledger.redb");
@@ -412,7 +416,7 @@ fn replay_dispatches_zero() {
         // SEVERAL ticks, not one. Since 71-03 (ruling R-12) a source fires ONE item per
         // pass and a sink consumes ONE item per pass, so the three items reach the
         // executor over successive ticks instead of all in the tick they were injected.
-        // The claim under test - live dispatches N, replay dispatches 0, and the two
+        // The claim under test - live dispatches N, the replay re-emits N, and the two
         // states are byte-equal - is untouched by the pacing.
         //
         // The loop runs to QUIESCENCE rather than to a fixed budget, and the stopping
@@ -457,18 +461,12 @@ fn replay_dispatches_zero() {
     let ledger = DispatchLedger::open(&ledger_path).expect("reopen ledger");
     let mut host = Host::new(core, store, ledger, None).expect("open host");
 
-    let replay = CountingExecutor::default();
     let emitted = host.recover().expect("recover");
 
     assert_eq!(
         emitted.len(),
         live_count,
         "the muted replay re-emitted the same N commands"
-    );
-    assert_eq!(
-        replay.count(),
-        0,
-        "the executor is muted on replay — zero dispatches (REPLAY-04)"
     );
     assert_eq!(
         host.snapshot_bytes(),

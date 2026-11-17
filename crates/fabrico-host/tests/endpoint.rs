@@ -374,9 +374,9 @@ fn timeout_then_late_reply_single_write() {
 /// contains a REAL command-emitting scenario: the Debug sink emits an `Effect::Debug`
 /// command the live executor dispatches (a genuine side effect). On recover, the muted
 /// two-log replay RE-EMITS that command — `recover()` RETURNS it — but the driver
-/// dispatches NONE of the returned commands (the `driver.rs` recover contract, the
-/// `replay_dispatches_zero` / CountingExecutor analog: returning-not-dispatching IS
-/// the mute). We assert `recover()` returned a NON-EMPTY command set (proving the log
+/// dispatches NONE of the returned commands (the `driver.rs` recover contract, also used
+/// by `recover_re_emits_the_logged_commands_and_restores_state` in `tests/driver.rs`:
+/// returning-not-dispatching IS the mute). We assert `recover()` returned a NON-EMPTY command set (proving the log
 /// really would re-run a side effect if muting were broken) yet zero were dispatched,
 /// so the collecting reply probe stays silent. The endpoint `WireRequest` proves the
 /// registry-empty half: a parked socket cannot survive the restart.

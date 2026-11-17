@@ -76,9 +76,9 @@ In the example below, the Sink posts the item to an address, and the script that
 
 ## `CommandTimeout`
 
-An HTTP Sink gives this reason when its request is still waiting for an answer at its deadline, 600 ticks after the Sink sent it. The deadline is a tick count, so the fault comes on the same tick on every run. The fault leaves by the Sink's Fault port and carries no item.
+An HTTP Sink gives this reason when its request is still waiting for an answer at its deadline, <Fact id="limit.command_deadline_ticks" />. The deadline is a tick count, so the fault comes on the same tick on every run. The fault leaves by the Sink's Fault port and carries no item.
 
-In the example below, the scripted service never answers, so the Sink faults 600 ticks after it sends the request. That makes this example longer than the others.
+In the example below, the scripted service never answers, so the Sink faults <Fact id="limit.command_deadline_ticks" />. That makes this example longer than the others.
 
 <Board name="docs-faults-command-timeout" faultsAbout="CommandTimeout" />
 

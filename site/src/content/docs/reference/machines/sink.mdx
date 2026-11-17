@@ -33,7 +33,7 @@ An HTTP Sink in the app sends a real request to its target. Boards on this site 
 
 A Sink takes one item each time it runs and sends one request for it. The other machines keep running while the request is out, and the reply comes back on a later tick. In this example, both requests to the top Sink get their reply 20 ticks after they leave.
 
-A request that comes back with a status outside 200 to 299, or gets no answer within 30 seconds, becomes a <Fact id="fault.CommandFailure" /> fault. A request still waiting when its deadline passes, 600 ticks after it left, becomes a <Fact id="fault.CommandTimeout" /> fault. Either way the Sink shows as faulted. Dock a belt on its Fault port to carry those faults to another Sink where you can read them. The troubleshooting entries for [CommandFailure](../../../troubleshooting/fault-reasons/#fault-command-failure) and [CommandTimeout](../../../troubleshooting/fault-reasons/#fault-command-timeout) say how to fix each one.
+A request that comes back with a status outside 200 to 299, or gets no answer within <Fact id="limit.http_client_timeout_secs" />, becomes a <Fact id="fault.CommandFailure" /> fault. A request still waiting when its deadline passes, <Fact id="limit.command_deadline_ticks" />, becomes a <Fact id="fault.CommandTimeout" /> fault. Either way the Sink shows as faulted. Dock a belt on its Fault port to carry those faults to another Sink where you can read them. The troubleshooting entries for [CommandFailure](../../../troubleshooting/fault-reasons/#fault-command-failure) and [CommandTimeout](../../../troubleshooting/fault-reasons/#fault-command-timeout) say how to fix each one.
 
 ## Related pages
 

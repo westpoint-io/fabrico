@@ -58,6 +58,13 @@ Determinism ends at the memory and stack limits and at the `**` operator. Code t
 | Wire-to-wire forwards | <Fact id="limit.wire_budget" /> | A request that would make one more forward faults with `WireOverflow`. [How to fix](../../../troubleshooting/fault-reasons/#fault-wire-overflow) |
 | Requests on one wire | <Fact id="limit.wire_inflight_cap" /> | The next request faults with `WireOverflow` instead of joining the wire. [How to fix](../../../troubleshooting/fault-reasons/#fault-wire-overflow) |
 
+## HTTP Sinks
+
+| Limit | Value | What happens at the limit |
+|---|---|---|
+| Wait for an answer | <Fact id="limit.http_client_timeout_secs" /> | The app's network client stops waiting, in real time on your computer, and the Sink faults with `CommandFailure`. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-failure) |
+| Deadline for a call | <Fact id="limit.command_deadline_ticks" /> | A call with no answer by then faults with `CommandTimeout`. The deadline counts engine ticks, so it falls on the same tick on every run. The app doesn't send the call again. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-timeout) |
+
 ## Labels
 
 | Limit | Value | What happens at the limit |

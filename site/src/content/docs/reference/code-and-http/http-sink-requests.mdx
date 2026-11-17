@@ -44,10 +44,10 @@ The Sink takes one item each time it runs and sends its request, and the other m
 | What comes back | What it becomes |
 |---|---|
 | A status from 200 to 299 | Success. The Sink doesn't read the reply's body. |
-| Any other status, a connection error, or no answer within 30 seconds | A <Fact id="fault.CommandFailure" /> fault. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-failure) |
-| Nothing by the deadline, 600 ticks after the request left | A <Fact id="fault.CommandTimeout" /> fault. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-timeout) |
+| Any other status, a connection error, or no answer within <Fact id="limit.http_client_timeout_secs" /> | A <Fact id="fault.CommandFailure" /> fault. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-failure) |
+| Nothing by the deadline, <Fact id="limit.command_deadline_ticks" /> | A <Fact id="fault.CommandTimeout" /> fault. [How to fix](../../../troubleshooting/fault-reasons/#fault-command-timeout) |
 
-The 30 seconds are real time on your computer, measured by the app's network client. The 600 ticks are ticks of the engine. Both faults rest on the Sink's Fault port, where a docked belt can carry them to another Sink.
+The <Fact id="limit.http_client_timeout_secs" /> are real time on your computer, measured by the app's network client. The deadline counts ticks of the engine, so it falls on the same tick on every run. Both faults rest on the Sink's Fault port, where a docked belt can carry them to another Sink.
 
 In the example, the second Sink's request leaves on tick 172 and its failure comes back three ticks later, so the Sink shows <Fact id="fault.CommandFailure" /> from tick 176. The third Sink's request leaves on tick 222 and gets no answer, so the Sink shows <Fact id="fault.CommandTimeout" /> from tick 823. A request that timed out may still have reached its target; [Side effects and delivery](../../../concepts/side-effects-and-delivery/#a-timed-out-call-may-still-have-arrived) covers that case.
 
