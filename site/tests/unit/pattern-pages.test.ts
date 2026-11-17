@@ -10,7 +10,11 @@
 // - a `Factory code` block differs from the board's Factory source, or the page has none outside
 //   MDX comments;
 // - the How the board works steps differ from the board's captions. A numbered line inside an MDX
-//   comment, a code block or inline code isn't a step.
+//   comment, a code block or inline code isn't a step;
+// - a page's board has faultsAbout and the page has no `faults` in its frontmatter, so the docs suite
+//   would have no count to compare with the board's effect log;
+// - a page with `faults` types a count such as "2 faults" in its body, outside code, instead of
+//   writing {frontmatter.faults}, so the text could drift from the number the suite checks.
 // The last two are here because page text drifted from the code it describes more than once. The
 // board file is read with a small RON reader below, not a pattern, so a caption or Factory written
 // with a trailing comma, fields in another order, a r##"..."## string, a comment around it or,
@@ -588,4 +592,45 @@ test('the code block reader skips a Factory code block in a comment or inside an
     { line: 1, code: 'shown()' },
     { line: 14, code: 'if (x) {/* not a comment */}' },
   ]);
+});
+
+test('each pattern page whose board has faultsAbout states faults in its frontmatter', () => {
+  const problems: string[] = [];
+  for (const file of patternFiles()) {
+    const { field, body } = readPage(file);
+    if (field('faults') !== '') continue;
+    for (const tag of boardTagsOf(body).shown) {
+      if (!/\bfaultsAbout=/.test(tag)) continue;
+      const id = /\bname="([^"]*)"/.exec(tag)?.[1] ?? '';
+      problems.push(
+        `${shown(file)}: board "${id}" has faultsAbout, and the page has no faults in its frontmatter. Add faults: with the number of FAULT rows the board's effect log shows at its end tick.`,
+      );
+    }
+  }
+  noProblems(problems);
+});
+
+/** A typed fault count in a page body: a number, a space and "fault" or "faults", in any case. */
+const TYPED_COUNT = /\b\d+ faults?\b/gi;
+
+test('a pattern page with faults writes the count as {frontmatter.faults}, never as a typed number', () => {
+  const problems: string[] = [];
+  for (const file of patternFiles()) {
+    const { field, body } = readPage(file);
+    if (field('faults') === '') continue;
+    for (const match of blankHidden(body, 'blank').matchAll(TYPED_COUNT)) {
+      problems.push(
+        `${shown(file)} types "${match[0]}" in its body. Write the count as {frontmatter.faults} so the page and the docs suite read the same number.`,
+      );
+    }
+  }
+  noProblems(problems);
+});
+
+test('the typed-count check reads prose and skips code, inline code and comments', () => {
+  const body = ['It shows 2 faults.', '`3 faults`', '{/* 4 faults */}', '```text', '5 faults', '```', 'and 1 FAULT row, then {frontmatter.faults} faults.'].join('\n');
+  assert.deepEqual(
+    [...blankHidden(body, 'blank').matchAll(TYPED_COUNT)].map((m) => m[0]),
+    ['2 faults', '1 FAULT'],
+  );
 });

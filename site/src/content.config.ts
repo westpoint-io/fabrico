@@ -30,9 +30,18 @@ export const collections = {
   // `searchPhrase` is the words a reader types into a search to find a pattern page. Only pattern
   // pages carry it, so it's optional here; tests/unit/pattern-pages.test.ts requires it on them.
   // `min(1)` makes an empty phrase fail the build.
+  // `faults` is how many FAULT rows the effect log of the page's failure board shows at its end tick.
+  // Board.astro writes it on that board's slot and in the line under it, and the docs suite compares
+  // it with the log. It must be a whole number above 0, so 0, 1.5 or a string fails the build.
   docs: defineCollection({
     loader: docsPages,
-    schema: docsSchema({ extend: z.object({ description, searchPhrase: z.string().min(1).optional() }) }),
+    schema: docsSchema({
+      extend: z.object({
+        description,
+        searchPhrase: z.string().min(1).optional(),
+        faults: z.number().int().positive().optional(),
+      }),
+    }),
   }),
   // The site's own interface strings (search, edit link, pagination): src/content/i18n/en.json.
   i18n: defineCollection({ loader: i18nLoader(), schema: i18nSchema() }),

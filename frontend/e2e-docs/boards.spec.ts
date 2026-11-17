@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import {
   autoContinueCaptions,
@@ -15,6 +17,10 @@ import { boardNames, docsRoot, fetchText, sitemapPages } from './support/site.ts
 // hash equals the manifest's, and its badge reads "match". The page logs no error while it runs.
 // A board whose slot carries data-faults-about (a <Board faultsAbout> on the page) must have entered
 // FAULTED at least once by its end tick, by the probe's count; any other board must show zero faults.
+// A slot that also carries data-faults (the page sets `faults: <n>` in its frontmatter) must end with
+// exactly that many FAULT rows in its effect log. The page's source file is read too: a page whose
+// frontmatter sets faults must have a slot carrying that number, so a schema or Board.astro that
+// drops the count fails here instead of falling back to the "at least one fault" check.
 //
 // The pages come from the site's own sitemap, so a page added to the site is checked with no change
 // here. One test per page that holds a board, plus one that fails when the site holds no board at
@@ -27,6 +33,30 @@ for (const url of await sitemapPages()) {
 }
 
 const pathOf = (url: string): string => url.slice(docsRoot().length - '/fabrico/'.length);
+
+const CONTENT_DIR = path.resolve(import.meta.dirname, '../../site/src/content/docs');
+
+/** A page's source file, from its path under /fabrico/ (`''` is the root, `concepts/` a section). As static.spec.ts maps it. */
+function sourceOf(pagePath: string): string {
+  const slug = pagePath.replace(/\/$/, '');
+  const candidates =
+    slug === ''
+      ? ['index.mdx', 'index.md']
+      : [`${slug}/index.mdx`, `${slug}/index.md`, `${slug}.mdx`, `${slug}.md`];
+  for (const rel of candidates) {
+    const file = path.join(CONTENT_DIR, rel);
+    if (fs.existsSync(file)) return file;
+  }
+  throw new Error(`/fabrico/${pagePath} has no source file under site/src/content/docs/ (tried ${candidates.join(', ')})`);
+}
+
+/** The `faults` value in a page source's frontmatter, as written, or null when the page doesn't set it. */
+function frontmatterFaults(file: string): string | null {
+  const match = /^---\n([\s\S]*?)\n---\n/.exec(fs.readFileSync(file, 'utf8'));
+  if (match === null) throw new Error(`${file} has no frontmatter`);
+  const line = /^faults:\s*(.*)$/m.exec(match[1]);
+  return line === null ? null : line[1].trim().replace(/^(["'])(.*)\1$/, '$2');
+}
 
 test('the site holds at least one board', () => {
   const total = pages.reduce((n, p) => n + p.boards.length, 0);
@@ -45,12 +75,29 @@ for (const { url, boards } of pages) {
     await page.goto(url);
     // Tag each board with its place on the page, so two boards of one name stay apart, and read the
     // fault reasons each board's slot says it shows on purpose (null when it says none).
-    const faultsAbout = await page.evaluate(() => {
+    // The fault count each slot states (null when it states none) comes from the same read.
+    const slots = await page.evaluate(() => {
       const all = document.querySelectorAll('fabrico-board');
       all.forEach((el, i) => el.setAttribute('data-docs-board', String(i)));
-      return [...all].map((el) => el.closest('.fab-board-slot')?.getAttribute('data-faults-about') ?? null);
+      return [...all].map((el) => {
+        const slot = el.closest('.fab-board-slot');
+        return { about: slot?.getAttribute('data-faults-about') ?? null, faults: slot?.getAttribute('data-faults') ?? null };
+      });
     });
+    const faultsAbout = slots.map((s) => s.about);
+    const faultCounts = slots.map((s) => s.faults);
     expect(faultsAbout.length, `${pathOf(url)}: boards in the page`).toBe(boards.length);
+
+    const source = sourceOf(url.slice(docsRoot().length));
+    const stated = frontmatterFaults(source);
+    if (stated !== null) {
+      expect(
+        faultCounts,
+        `${pathOf(url)}: ${path.relative(path.resolve(CONTENT_DIR, '../../../..'), source)} sets faults: ${stated} in its frontmatter, ` +
+          'and no board slot on the page carries data-faults with that number. The schema in site/src/content.config.ts ' +
+          'or site/src/components/Board.astro dropped the count.',
+      ).toContain(stated);
+    }
 
     for (const [i, id] of boards.entries()) {
       const selector = `fabrico-board[data-docs-board="${i}"]`;
@@ -79,9 +126,11 @@ for (const { url, boards } of pages) {
         .toBe(expected.endTick);
       const end = await readProbeAt(page, selector);
       const about = faultsAbout[i];
+      const count = faultCounts[i];
+      const faultRows = end.effectRows.filter((r) => r.cells[1] === 'FAULT').length;
       console.log(
         `${label}: end tick ${end.endTick}, hash ${end.endHash}, frames ${end.frames}, verdict ${end.verdict}, ` +
-          `faults ${end.faultEntries} on ${end.faultedNodes} nodes, faultsAbout ${about ?? 'none'}`,
+          `faults ${end.faultEntries} on ${end.faultedNodes} nodes, faultsAbout ${about ?? 'none'}, faultRows ${faultRows}`,
       );
       expect(end.endHash, `${label} at tick ${expected.endTick}: the end hash`).toBe(expected.hash);
       expect(end.verdict, `${label}: the badge's verdict`).toBe('match');
@@ -96,6 +145,12 @@ for (const { url, boards } of pages) {
           end.faultEntries,
           `${label} says it faults on purpose with ${about}, and it entered FAULTED ${end.faultEntries} times`,
         ).toBeGreaterThan(0);
+      }
+      if (count !== null) {
+        expect(
+          faultRows,
+          `${label}: the page states ${count} faults in its frontmatter, and the effect log shows ${faultRows} FAULT rows at tick ${expected.endTick}.`,
+        ).toBe(Number(count));
       }
     }
 

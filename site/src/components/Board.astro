@@ -11,6 +11,14 @@
 // have it. The slot then carries data-faults-about, which the docs suite reads (a board without it
 // must show zero faults, one with it at least one), and a line under the board tells the reader the
 // fault is intended.
+//
+// A page can also say how many FAULT rows its failure board's effect log shows at the end tick, as
+// `faults: 2` in its frontmatter (src/content.config.ts). On a board with faultsAbout the slot then
+// carries data-faults, the line under the board adds the count, and the docs suite checks that the
+// log shows exactly that many FAULT rows. A board without faultsAbout gets neither, so a page can
+// hold a failure board and a zero-fault board. A pattern page whose board has faultsAbout must set
+// faults, or the build fails; site/tests/unit/fault-counts.test.ts fails a page that sets faults
+// and has no board with faultsAbout.
 import facts from '../generated/facts.json';
 import {
   FAULTS_MANIFEST,
@@ -33,7 +41,9 @@ interface Props {
 }
 
 const { name, height, noCode, order, faultsAbout } = Astro.props;
-const page = `site/${Astro.locals.starlightRoute.entry.filePath}`;
+const entry = Astro.locals.starlightRoute.entry;
+const page = `site/${entry.filePath}`;
+const pageFaults: number | undefined = entry.data.faults;
 
 // Every board file on disk, by repo path. Only the keys matter here.
 const files = import.meta.glob('../../../examples/boards/**/*.board.ron', { query: '?raw', import: 'default', eager: true });
@@ -69,10 +79,26 @@ const manifests = Object.values(
 );
 if (manifests.length !== 1) throw new Error(`[Board] ${FAULTS_MANIFEST} is missing; the build needs it to check faultsAbout.`);
 checkFaultsAbout(page, board.id, faultNames, declaredFaultsOf(manifests[0]));
+
+// The count only goes on a board that faults on purpose. A pattern page whose board does must state
+// it, so a pattern page can't fall back to the docs suite's weaker "at least one fault" check.
+const faults = faultNames === null ? undefined : pageFaults;
+if (faultNames !== null && pageFaults === undefined && /(^|\/)src\/content\/docs\/patterns\//.test(entry.filePath)) {
+  throw new Error(
+    `[Board] ${page}: board "${board.id}" has faultsAbout, and the page has no faults in its frontmatter. ` +
+      "Add faults: with the number of FAULT rows the board's effect log shows at its end tick.",
+  );
+}
+const countSentence =
+  faults === undefined ? null : ` By its last tick its effect log shows ${faults} FAULT ${faults === 1 ? 'row' : 'rows'}.`;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
-<div class="fab-board-slot not-content" data-faults-about={faultNames === null ? undefined : faultNames.join(' ')}>
+<div
+  class="fab-board-slot not-content"
+  data-faults-about={faultNames === null ? undefined : faultNames.join(' ')}
+  data-faults={faults === undefined ? undefined : String(faults)}
+>
   <fabrico-board name={board.id} height={height} no-code={noCode ? '' : undefined} order={order}>
     <img
       src={`${base}/boards/${board.id}.png`}
@@ -93,7 +119,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
             {part.after}
           </>
         ))}
-        .
+        .{countSentence}
       </p>
     )
   }
