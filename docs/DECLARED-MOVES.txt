@@ -147,10 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# Two new lines, written by the generator, for the boards on the pattern pages Deduplicate events
-# (examples/boards/docs/patterns-deduplicate-events.board.ron) and Batch events into groups of N
-# (examples/boards/docs/patterns-batch-events.board.ron). The 51 older lines are unchanged.
-examples/boards/hashes.manifest fae25f63e54baf8f81547e67a460b368eb2da9d3594ef492233222ef5eb79b01
+# One new line, written by the generator, for the board on the pattern page Serve a local HTTP
+# endpoint (examples/boards/docs/patterns-local-http-endpoint.board.ron). The 53 older lines are
+# unchanged.
+examples/boards/hashes.manifest 975aec627f55cd65e964d594008c4cabe0f30b4ed013662881a1148730e39047
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

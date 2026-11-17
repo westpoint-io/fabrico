@@ -1,0 +1,59 @@
+---
+title: Serve a local HTTP endpoint
+description: "Build a tiny HTTP API on your own machine: a Route takes a POST request, a Handler builds a JSON reply, and the caller gets it back."
+searchPhrase: local http endpoint
+sidebar:
+  order: 190
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To serve a local HTTP endpoint, put a [Route](../../reference/files/glossary/#term-route) on the board and wire it to an [HTTP Handler](../../reference/files/glossary/#term-http-handler) that runs your code. A program on your machine sends a POST request to the Route's URL, the Handler's code reads it and replies, and the caller gets the reply. That's enough for a tiny API that a script or another app can call.
+
+The board below has a Route at the path `/price`, wired to an HTTP Handler, and a Debug [Sink](../../reference/files/glossary/#term-sink) on the Handler's Fault [port](../../reference/files/glossary/#term-port). The script sends two POST requests, each with a quantity and a price, and the Handler answers each one with their total.
+
+<Board name="docs-patterns-local-http-endpoint" />
+
+## How the board works
+
+Press Play and the board stops on these four [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 41: The Route takes request 0, a POST to /endpoint/price with a quantity of 2 and a price of 5, and passes it down the wire to the Handler.
+2. Tick 42: The Handler multiplies the quantity by the price and replies with status 200 and a JSON body holding a total of 10.
+3. Tick 43: The reply reaches the Route, which hands it back to the caller that sent request 0.
+4. Tick 122: Request 1 asks for a quantity of 3 at a price of 4, so the Handler replies with status 200 and a total of 12.
+
+By its last tick the effect log under the board shows a ROUTE row for each request and a REPLY row for each reply, numbered from 0: `t40  ROUTE  request 0: POST /endpoint/price`, `t41  REPLY  request 0: status 200  ok`, `t120  ROUTE  request 1: POST /endpoint/price` and `t121  REPLY  request 1: status 200  ok`. A REPLY row has the same number as the request it answers. The two reply bodies are `{"total":10}` and `{"total":12}`. The Debug Sink stays empty, because the code never throws.
+
+## The Handler code
+
+The Handler runs this code once for each request the Route sends it:
+
+```js title="Handler code"
+// price an order and answer with JSON
+export default function (input, ctx) {
+  const order = JSON.parse(input.body);
+  const total = order.qty * order.price;
+  ctx.command({
+    status: 200,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ total: total }),
+  }, 0);
+}
+```
+
+The `ctx.command({ ... }, 0)` call is the reply. Its `status` is the status the caller gets, its `headers` go out with it, and its `body` is text, so the code turns the total into JSON with `JSON.stringify` before it sends it.
+
+## Trade-offs
+
+- A Route takes POST requests only, at `/endpoint/` followed by its path, on 127.0.0.1 only, so only programs on the same computer can call it. The app picks the port each time it starts, so copy the URL from the inspector after each launch. [Webhook ingress](../../reference/code-and-http/webhook-ingress/) has the loopback address and the port.
+- The Handler has <Fact id="limit.endpoint_deadline_ticks" />, counted from when the request arrives. When no reply reaches the Route in that time, the caller gets a 504. [Handler requests and replies](../../reference/code-and-http/handler-requests-and-replies/#when-no-good-reply-comes) lists the statuses the caller gets when no good reply comes.
+- You can wire only one Route to each Handler, because the app refuses a second Route's wire into a Handler that already has one. To serve two paths, give each Route its own Handler. [Route](../../reference/machines/route/) describes the wire.
+- The board takes each request on the tick its script gives, one after another, and the same requests in the same order get the same replies on every run. [Determinism and replay](../../concepts/determinism-and-replay/) says why.
+
+## Related pages
+
+- [Route](../../reference/machines/route/): the machine that takes HTTP requests at a path and sends each one down its wire.
+- [HTTP Handler](../../reference/machines/http-handler/): the machine that runs your code on each request and sends back a reply.
+- [Handler requests and replies](../../reference/code-and-http/handler-requests-and-replies/): the fields of a request and a reply, and the status the caller gets when something goes wrong.

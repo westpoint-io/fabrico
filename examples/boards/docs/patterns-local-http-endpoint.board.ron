@@ -1,0 +1,60 @@
+// A docs board for the Serve a local HTTP endpoint pattern. A Route at the path /price is wired to
+// an HTTP Handler whose code reads a quantity and a price from each request's body and replies
+// with status 200 and a JSON body holding their product as the total. The script sends two POST
+// requests, which get the totals 10 and 12. The run makes no outbound call.
+//
+//   row 2:    ROUTE 0, path /price ===> HTTP HANDLER 1
+//   rows 4-5:                              Fault -b3---> SINK 2
+//
+// The Handler's Fault port, on its bottom middle cell facing south, has a belt to a Debug Sink,
+// where a request whose code throws would go. This code never throws, so that belt stays empty.
+// The Handler's Out port stays undocked.
+//
+// One DrawWire mints both cables, request first. Handles mint in command order: the Route 0, the
+// Handler 1, the Sink 2, the belt 3, then the cables 4 (request) and 5 (reply). The 9 commands
+// and the history seal end the boot on tick 10.
+//
+// machine_kind u8 legend: ROUTE=9, HTTP HANDLER=10, SINK=7. DrawWire and Dock ports are catalog
+// indexes: Route In=0, Out=1; HTTP Handler In=0, Out=1, Fault=2; SINK In=0.
+Board(
+    format: 2,
+    title: "Serve a local HTTP endpoint",
+    seed: 97,
+    commands: [
+        Place(kind: 9, cell_x: 2, cell_y: 2),
+        Place(kind: 10, cell_x: 6, cell_y: 1),
+        Place(kind: 7, cell_x: 10, cell_y: 5),
+        DrawBelt(cells: [(7, 4), (7, 5), (8, 5), (9, 5)]),
+        Dock(belt: 3, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 3, endpoint: Head, node: 2, port: 0),
+        Configure(node: 0, config: Endpoint(path: "/price")),
+        Configure(node: 1, config: Factory(source: r#"// price an order and answer with JSON
+export default function (input, ctx) {
+  const order = JSON.parse(input.body);
+  const total = order.qty * order.price;
+  ctx.command({
+    status: 200,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ total: total }),
+  }, 0);
+}"#)),
+        DrawWire(from_node: 0, from_port: 1, to_node: 1, to_port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Request(route: 0, method: "POST", path: "/endpoint/price", body: r#"{"qty":2,"price":5}"#)),
+        At(tick: 120, input: Request(route: 0, method: "POST", path: "/endpoint/price", body: r#"{"qty":3,"price":4}"#)),
+    ],
+    captions: [
+        // Measured: the script sends request 0 on tick 40 (ROUTE row t40) and the request cable works on 41 and 42.
+        Caption(tick: 41, highlight: 0, text: "The Route takes request 0, a POST to /endpoint/price with a quantity of 2 and a price of 5, and passes it down the wire to the Handler."),
+        // Measured: Factory WORKING[42,...]; REPLY corr=0 step_ends_on=42 with status 200 and body total 10.
+        Caption(tick: 42, highlight: 1, text: "The Handler multiplies the quantity by the price and replies with status 200 and a JSON body holding a total of 10."),
+        // Measured: Route WORKING[43,...]; the reply cable works on 42 and 43.
+        Caption(tick: 43, highlight: 0, text: "The reply reaches the Route, which hands it back to the caller that sent request 0."),
+        // Measured: Factory WORKING[...,122]; REPLY corr=1 step_ends_on=122 with status 200 and body total 12.
+        Caption(tick: 122, highlight: 1, text: "Request 1 asks for a quantity of 3 at a price of 4, so the Handler replies with status 200 and a total of 12."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 200,
+)
