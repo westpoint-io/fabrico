@@ -45,6 +45,7 @@ examples/boards/docs/patterns-send-to-multiple-urls.board.ron 300 d0caa04515daed
 examples/boards/docs/patterns-split-an-array.board.ron 260 cdddee03f5f425dce0c2a86d94053841feff73d25f639d1e71c6c98e8537baf8
 examples/boards/docs/patterns-split-traffic.board.ron 300 1641719892112b7fe8272da88671203a68621a407a89cec5d88ae709d4f70955
 examples/boards/docs/patterns-transform-json-payload.board.ron 240 0f5f7dae00171479daeb24202ff5733a15077d880b8a26f4fe86448c884acdf6
+examples/boards/docs/patterns-validate-webhook-payloads.board.ron 300 fcb190c93ce5db7594579e6eb40dd73c178b3c6cb44770b6616e426e27d8b6fd
 examples/boards/docs/rules-docking.board.ron 360 37b3e037a1a2197e1b5c772a238c90931124b99bbc748330b2ee975a7cfacee4
 examples/boards/docs/rules-machine-states.board.ron 260 44124ce6ae6fd32adf0e0295ee928f4cd4eed11ba5d8b2ffe0ce860933cd26a7
 examples/boards/docs/rules-ports.board.ron 240 da2e3fce9b232146abecc1046ef67d7366ab7668b913d7a8a58629ba86a9ada8

@@ -11,5 +11,5 @@ export const PATTERN_GROUPS = [
   ['Shape events', ['transform-json-payload', 'filter-events', 'split-an-array']],
   ['Route events', ['route-by-content', 'split-traffic']],
   ['Pace and spread the work', ['parallel-workers', 'buffer-events', 'rate-limit', 'run-on-a-schedule']],
-  ['Handle failures', ['dead-letter-queue', 'request-timeout']],
+  ['Handle failures', ['dead-letter-queue', 'request-timeout', 'validate-webhook-payloads']],
 ];

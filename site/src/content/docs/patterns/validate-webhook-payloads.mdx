@@ -1,0 +1,59 @@
+---
+title: Validate webhook payloads
+description: "Check each webhook payload in a Factory, send good items on, quarantine bad ones on a second output, and see what happens to a body that isn't JSON."
+searchPhrase: validate webhook payload
+faults: 1
+sidebar:
+  order: 150
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To validate webhook payloads, check each one before the rest of the board acts on it. A [Factory](../../reference/files/glossary/#term-factory) reads each payload and sends good [items](../../reference/files/glossary/#term-item) on, and it sends bad ones out of a second output to a quarantine [Sink](../../reference/files/glossary/#term-sink) where you can read them. A body that isn't JSON never reaches the code. It [faults](../../reference/files/glossary/#term-fault) first and goes to a dead letter Sink.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory with two outputs and three Debug Sinks, joined by [belts](../../reference/files/glossary/#term-belt). Output 0 leads to the good orders Sink at the top, output 1 to the quarantine Sink under it, and the Factory's [fault port](../../reference/files/glossary/#term-fault-port) to the dead letter Sink at the bottom. Four webhooks arrive: two good orders, an order with a total below 0, and a body that isn't JSON.
+
+<Board name="docs-patterns-validate-webhook-payloads" faultsAbout="FactoryError" />
+
+## How the board works
+
+Press Play and the board stops on these four [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory checks order 1. Its id and total are numbers and the total is above 0, so the Factory sends it out of output 0 to the good orders Debug Sink.
+2. Tick 103: Order 2 has a total below 0, so the Factory sends it out of output 1 to the quarantine Debug Sink, where it can be read.
+3. Tick 143: The third body isn't JSON, so the Factory faults before its code runs and sends a FactoryError fault out of its Fault port.
+4. Tick 205: The FactoryError fault reached the dead letter Debug Sink. It holds the parse error message, not the body that was sent.
+
+By its last tick the effect log under the board shows four rows: `t92  DEBUG  {"id":1,"total":30}` and `t212  DEBUG  {"id":4,"total":12}` from the good orders Sink, `t132  DEBUG  {"id":2,"total":-5}` from the quarantine Sink, and `t204  FAULT  FactoryError: Error: unexpected token: 'order'` from the dead letter Sink. The three DEBUG rows are orders, and only the {frontmatter.faults} FAULT row counts as a fault. The body that was sent, `order 3, total 12`, doesn't appear in any row, because the dead letter Sink gets the error message instead of the body.
+
+## The Factory code
+
+The Factory runs this code once for each body it can read as JSON:
+
+```js title="Factory code"
+// good orders go on, bad ones to quarantine
+export default function (input, ctx) {
+  const ok = typeof input.id === "number"
+    && typeof input.total === "number"
+    && input.total > 0;
+  ctx.emit(ok ? 0 : 1, input);
+}
+```
+
+This Factory has two outputs. A Factory starts with output 0, and pressing + Add output in the inspector, the panel on the right, adds output 1. `ctx.emit(ok ? 0 : 1, input)` sends the order out of output 0 when it passes and out of output 1 when it doesn't.
+
+An order passes when its id and its total are both numbers and the total is above 0, so an order with a total of 0 goes to quarantine as well.
+
+## Trade-offs
+
+- A body that isn't JSON faults before the code runs, so the code can't quarantine it. The Factory reads each body as JSON first, and a body it can't read gives a <Fact id="fault.FactoryError" /> fault that keeps the error message and not the body. [Fault reasons](../../reference/board/fault-reasons/) lists what each reason keeps.
+- A thrown error's fault also keeps the message and not the item, and a run that throws sends nothing. A Factory that threw on a bad order would leave you only the message, so this board sends bad orders out of a second output and the quarantine Sink gets the whole order. [Factory API](../../reference/code-and-http/factory-api/) covers outputs and what a failed run drops.
+- A body that is JSON but not an object, such as `null`, does reach the code, and reading `input.id` from it throws. On a copy of this board that sent `null` as the third body, the Factory faulted with `Error: cannot read property 'id' of null` instead of quarantining it. To quarantine bodies like that, check that `input` is an object before reading its fields.
+
+## Related pages
+
+- [Send failures to a dead letter queue](../dead-letter-queue/): dock a Debug Sink on each Fault port and read the faults there.
+- [Transform a JSON payload](../transform-json-payload/): rename, add and drop fields once a payload has passed.
+- [Factory API](../../reference/code-and-http/factory-api/): `ctx.emit`, the outputs it sends on, and what a failed run drops.
+- [Fault reasons](../../reference/board/fault-reasons/): what makes a Factory give FactoryError and what the fault keeps.

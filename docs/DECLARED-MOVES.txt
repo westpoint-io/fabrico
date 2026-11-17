@@ -147,11 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# Two new lines, written by the generator, for the boards on the pattern pages Send failures to a
-# dead letter queue (examples/boards/docs/patterns-dead-letter-queue.board.ron) and Handle a
-# request timeout (examples/boards/docs/patterns-request-timeout.board.ron). The 47 older lines
+# One new line, written by the generator, for the board on the pattern page Validate webhook
+# payloads (examples/boards/docs/patterns-validate-webhook-payloads.board.ron). The 49 older lines
 # are unchanged.
-examples/boards/hashes.manifest 782763199306f0818b04910d1b845746a1e22a6ff41c7c4da79634c52e7bfddf
+examples/boards/hashes.manifest dfac3a8ea177a36d9b26745bd97b3eaa6d84425ed9b730720d77d489be54166d
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the
