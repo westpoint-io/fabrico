@@ -21,5 +21,6 @@ examples/boards/docs/faults-no-entry-wire.board.ron NoEntryWire
 examples/boards/docs/faults-no-match.board.ron NoMatch
 examples/boards/docs/faults-wire-overflow.board.ron WireOverflow
 examples/boards/docs/patterns-dead-letter-queue.board.ron CommandFailure NoMatch
+examples/boards/docs/patterns-request-timeout.board.ron CommandFailure CommandTimeout
 examples/boards/docs/rules-machine-states.board.ron NoMatch
 examples/boards/docs/script-outcomes.board.ron CommandFailure CommandTimeout

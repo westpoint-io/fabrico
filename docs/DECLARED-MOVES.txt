@@ -147,10 +147,11 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board on the pattern page Send failures to a
-# dead letter queue (examples/boards/docs/patterns-dead-letter-queue.board.ron). The 47 older
-# lines are unchanged.
-examples/boards/hashes.manifest ed09a642a06c003822769ee50397a869d5ec32454447cb0baaad8ac236585334
+# Two new lines, written by the generator, for the boards on the pattern pages Send failures to a
+# dead letter queue (examples/boards/docs/patterns-dead-letter-queue.board.ron) and Handle a
+# request timeout (examples/boards/docs/patterns-request-timeout.board.ron). The 47 older lines
+# are unchanged.
+examples/boards/hashes.manifest 782763199306f0818b04910d1b845746a1e22a6ff41c7c4da79634c52e7bfddf
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

@@ -1,0 +1,88 @@
+// A docs board for the pattern page Handle a request timeout. One Source gets two webhooks, a stock
+// check and a price check. A Factory with two outputs sends the stock check to an HTTP Sink that
+// posts to https://example.com/slow and the price check to an HTTP Sink that posts to
+// https://example.com/broken. The executor block below stands in for both services: the slow one
+// never answers, and the broken one answers with an error. So the lower Sink sends a
+// CommandFailure fault, and the top Sink sends a CommandTimeout fault once its call's deadline
+// passes. Each Sink's Fault port has a belt straight to its own dead letter Debug Sink. No request
+// leaves the computer.
+//
+// A Sink's call has a deadline 600 ticks after it is sent, so this run is longer than the other
+// boards: it ends on tick 760, after the CommandTimeout fault reaches its Debug Sink.
+//
+//   row 1:                                  +-b7-> SINK 2 (HTTP, posts to https://example.com/slow)
+//   row 2:   SOURCE 0 -b6-> FACTORY 1 emit 0 -+    SINK 2 Fault -b9-> SINK 4   (CommandTimeout)
+//   row 3:                  FACTORY 1 emit 1 -+
+//   row 4:                                  +-b8-> SINK 3 (HTTP, posts to https://example.com/broken)
+//   row 5:                                         SINK 3 Fault -b10-> SINK 5  (CommandFailure)
+//
+// The Factory starts with one output. AddPort gives it a second one, the way + Add output does in
+// the inspector: role 1 is an output, side 1 is east, medium 0 is a belt. The new output is catalog
+// port 3 and emit 1, and it seats below the first output, at world cell (7,3). The Factory's Fault
+// port stays undocked; the code never throws, so nothing goes there.
+//
+// Handles mint in command order: the Source 0, the Factory 1, the Sinks 2 to 5, then the belts 6
+// to 10. The 25 commands and the history seal end the boot on tick 26.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1 (emit 0), Fault=2, the added Out=3 (emit 1); SINK In=0,
+// Fault=1 (on the Sink's one cell, facing south).
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Handle a request timeout",
+    seed: 97,
+    commands: [
+        Place(kind: 0, cell_x: 1, cell_y: 2),        // 0: SOURCE
+        Place(kind: 2, cell_x: 5, cell_y: 1),        // 1: FACTORY, 3x3
+        Place(kind: 7, cell_x: 11, cell_y: 1),       // 2: SINK, set to HTTP below, /slow
+        Place(kind: 7, cell_x: 11, cell_y: 4),       // 3: SINK, set to HTTP below, /broken
+        Place(kind: 7, cell_x: 15, cell_y: 2),       // 4: SINK, Debug, the /slow Sink's dead letters
+        Place(kind: 7, cell_x: 15, cell_y: 5),       // 5: SINK, Debug, the /broken Sink's dead letters
+        AddPort(node: 1, role: 1, side: 1, medium: 0),
+        DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),                 // 6
+        DrawBelt(cells: [(8, 2), (9, 2), (9, 1), (10, 1)]),        // 7
+        DrawBelt(cells: [(8, 3), (9, 3), (9, 4), (10, 4)]),        // 8
+        DrawBelt(cells: [(11, 2), (12, 2), (13, 2), (14, 2)]),     // 9
+        DrawBelt(cells: [(11, 5), (12, 5), (13, 5), (14, 5)]),     // 10
+        Dock(belt: 6, endpoint: Tail, node: 0, port: 0),
+        Dock(belt: 6, endpoint: Head, node: 1, port: 0),
+        Dock(belt: 7, endpoint: Tail, node: 1, port: 1),
+        Dock(belt: 7, endpoint: Head, node: 2, port: 0),
+        Dock(belt: 8, endpoint: Tail, node: 1, port: 3),
+        Dock(belt: 8, endpoint: Head, node: 3, port: 0),
+        Dock(belt: 9, endpoint: Tail, node: 2, port: 1),
+        Dock(belt: 9, endpoint: Head, node: 4, port: 0),
+        Dock(belt: 10, endpoint: Tail, node: 3, port: 1),
+        Dock(belt: 10, endpoint: Head, node: 5, port: 0),
+        Configure(node: 1, config: Factory(source: r#"// send stock checks to one service, the rest to another
+export default function (input, ctx) {
+  ctx.emit(input.kind === "stock" ? 0 : 1, input);
+}"#)),
+        Configure(node: 2, config: Sink(target: Http(url: "https://example.com/slow", method: Post))),
+        Configure(node: 3, config: Sink(target: Http(url: "https://example.com/broken", method: Post))),
+    ],
+    script: [
+        At(tick: 40, input: Webhook(source: 0, body: r#"{"kind":"stock","sku":"widget"}"#)),
+        At(tick: 60, input: Webhook(source: 0, body: r#"{"kind":"price","sku":"widget"}"#)),
+    ],
+    captions: [
+        // Measured: effect step_ends_on=93 sinks_stepped=["h2"] HTTP Post https://example.com/slow outcome=Timeout
+        Caption(tick: 93, highlight: 2, text: "The top HTTP Sink sent the stock check as a POST to https://example.com/slow. The scripted service there will never answer."),
+        // Measured: effect step_ends_on=113 HTTP Post https://example.com/broken outcome=Error { after_ticks: 20 }; FAULTED tick=133 node=h3
+        Caption(tick: 133, highlight: 3, text: "The call to https://example.com/broken came back as an error, so the lower HTTP Sink sent a CommandFailure fault out of its Fault port."),
+        // Measured: FAULTED tick=693 node=h2
+        Caption(tick: 693, highlight: 2, text: "The top call's deadline passed with no answer, so the top HTTP Sink sent a CommandTimeout fault out of its Fault port."),
+        // Measured: effect step_ends_on=723 DEBUG from=h4 fault_end=true | FAULT CommandTimeout payload=""
+        Caption(tick: 723, highlight: 4, text: "The CommandTimeout fault reached its dead letter Debug Sink. Like the CommandFailure fault below it, it carries no item."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/slow", outcome: Timeout),
+        Rule(url_prefix: "https://example.com/broken", outcome: Error(after_ticks: 20)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 760,
+)

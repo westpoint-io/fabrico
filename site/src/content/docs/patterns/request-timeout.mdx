@@ -1,0 +1,60 @@
+---
+title: Handle a request timeout
+description: "See what happens when an HTTP Sink's call fails or gets no answer, which fault each case raises, and which limits you can't change yet."
+searchPhrase: request timeout
+faults: 2
+sidebar:
+  order: 140
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A request timeout happens when an HTTP [Sink](../../reference/files/glossary/#term-sink) sends a call and the answer doesn't come back in time. The engine waits a fixed number of [ticks](../../reference/files/glossary/#term-tick) for each call, and the app's HTTP client gives up after a fixed number of seconds. Either way the Sink sends a [fault](../../reference/files/glossary/#term-fault) out of its [fault port](../../reference/files/glossary/#term-fault-port), and you decide where that fault goes.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a [Factory](../../reference/files/glossary/#term-factory) with two outputs and two HTTP Sinks, left to right. The Factory sends a stock check to the top Sink, which posts to `https://example.com/slow`, where the scripted service never answers. It sends a price check to the lower Sink, which posts to `https://example.com/broken`, where the scripted service answers with an error. Each HTTP Sink's Fault port has a [belt](../../reference/files/glossary/#term-belt) to its own dead letter Debug Sink on the right.
+
+<Board name="docs-patterns-request-timeout" faultsAbout="CommandFailure CommandTimeout" />
+
+## How the board works
+
+Press Play and the board stops on these four ticks:
+
+1. Tick 93: The top HTTP Sink sent the stock check as a POST to https://example.com/slow. The scripted service there will never answer.
+2. Tick 133: The call to https://example.com/broken came back as an error, so the lower HTTP Sink sent a CommandFailure fault out of its Fault port.
+3. Tick 693: The top call's deadline passed with no answer, so the top HTTP Sink sent a CommandTimeout fault out of its Fault port.
+4. Tick 723: The CommandTimeout fault reached its dead letter Debug Sink. Like the CommandFailure fault below it, it carries no item.
+
+The top call left on tick 93 and its Sink faulted on tick 693, which is why this board runs longer than the others. By its last tick the effect log under the board shows four rows: `t92  POST  https://example.com/slow  timeout`, `t112  POST  https://example.com/broken  error`, `t162  FAULT  CommandFailure` and `t722  FAULT  CommandTimeout`. The two POST rows are the failed calls, and only the {frontmatter.faults} FAULT rows count as faults.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// send stock checks to one service, the rest to another
+export default function (input, ctx) {
+  ctx.emit(input.kind === "stock" ? 0 : 1, input);
+}
+```
+
+The first argument to `ctx.emit` picks the output: 0 for a stock check, which goes to the slow service, and 1 for anything else. A new Factory has one output, so this one got its second output from + Add output in the inspector.
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- A call still waiting when its deadline passes, <Fact id="limit.command_deadline_ticks" />, becomes a <Fact id="fault.CommandTimeout" /> fault. The deadline counts ticks of the engine, so it falls on the same tick on every run, though how long that takes in seconds depends on how fast the board runs. [Ticks](../../concepts/ticks/#ticks-and-seconds) explains why ticks only approximate seconds.
+- The app's HTTP client gives up on a call after <Fact id="limit.http_client_timeout_secs" /> of real time, and that arrives as a <Fact id="fault.CommandFailure" /> fault, the same reason an error status gives. Scripted replies on this site never run into that timeout, and in the app it raises the same fault as the lower Sink's error.
+- You can't set either limit. A Sink's config takes only a target, the URL and method, so every HTTP Sink gets the same deadline and the same client timeout. [Sink](../../reference/machines/sink/) lists what you can set.
+- The app makes one attempt per call and doesn't retry it, and a board can't resend a failed call yet. A call that timed out may still have reached the service; [Side effects and delivery](../../concepts/side-effects-and-delivery/#a-timed-out-call-may-still-have-arrived) covers that case.
+
+## Related pages
+
+- [Send failures to a dead letter queue](../dead-letter-queue/): send each machine's faults to a Debug Sink you can read, and see what each fault keeps.
+- [Sink](../../reference/machines/sink/): the target field, the HTTP methods and what a failed call becomes.
+- [HTTP Sink requests](../../reference/code-and-http/http-sink-requests/): what each request carries and how long the Sink waits for an answer.
+- [Ticks](../../concepts/ticks/#ticks-and-seconds): why a number of ticks only approximates a number of seconds.
