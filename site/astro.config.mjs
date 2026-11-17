@@ -29,36 +29,22 @@ const group = (label, directory) => ({ label, items: [{ autogenerate: { director
 
 /**
  * A sidebar group that links to its folder's index page, then lists subgroups, each
- * `[label, folder]` under src/content/docs/. The subgroups start closed, and Starlight opens the one
- * holding the current page. Starlight 0.42 has no `{ label, autogenerate }` group shape (removed in
- * 0.39), so each subgroup wraps its autogenerate in `items`.
+ * `[label, folder]` under src/content/docs/ or `[label, slugs]` with every slug a page in this
+ * group's folder. The subgroups start closed, and Starlight opens the one holding the current page.
+ * Starlight 0.42 has no `{ label, autogenerate }` group shape (removed in 0.39), so a folder subgroup
+ * wraps its autogenerate in `items`. A slug entry shows the page's sidebar.label, or its title, and
+ * the page keeps its URL, `<directory>/<slug>`.
  */
 const nestedGroup = (label, directory, subgroups) => ({
   label,
   items: [
     { slug: directory },
-    ...subgroups.map(([sublabel, subdirectory]) => ({
+    ...subgroups.map(([sublabel, pages]) => ({
       label: sublabel,
       collapsed: true,
-      items: [{ autogenerate: { directory: subdirectory } }],
-    })),
-  ],
-});
-
-/**
- * A sidebar group that links to its folder's index page, then lists subgroups, each
- * `[label, slugs]` with every slug a page in that folder. The subgroups start closed, and Starlight
- * opens the one holding the current page. A slug entry shows the page's sidebar.label, or its title.
- * The pages keep their URLs, `<directory>/<slug>`.
- */
-const slugGroup = (label, directory, subgroups) => ({
-  label,
-  items: [
-    { slug: directory },
-    ...subgroups.map(([sublabel, slugs]) => ({
-      label: sublabel,
-      collapsed: true,
-      items: slugs.map((slug) => ({ slug: `${directory}/${slug}` })),
+      items: Array.isArray(pages)
+        ? pages.map((slug) => ({ slug: `${directory}/${slug}` }))
+        : [{ autogenerate: { directory: pages } }],
     })),
   ],
 });
@@ -132,7 +118,7 @@ export default defineConfig({
           ['Code and HTTP', 'reference/code-and-http'],
           ['Commands and files', 'reference/files'],
         ]),
-        slugGroup('Patterns', 'patterns', PATTERN_GROUPS),
+        nestedGroup('Patterns', 'patterns', PATTERN_GROUPS),
         group('Troubleshooting', 'troubleshooting'),
         group('Contributing', 'contributing'),
       ],
