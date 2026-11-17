@@ -1,0 +1,64 @@
+---
+title: Call an API exactly once
+description: "What the app does to send each call once and never again on replay, and what the receiving service does with the Idempotency-Key."
+searchPhrase: exactly once
+sidebar:
+  order: 210
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To call an API exactly once, the app and the service you call each do half the work. The app sends each call it logged once and never sends it again when it replays the log, and each call carries an Idempotency-Key header. The service has to use that key to drop a duplicate, so exactly once needs both sides.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a [Factory](../../reference/files/glossary/#term-factory) and an HTTP [Sink](../../reference/files/glossary/#term-sink), left to right, joined by two [belts](../../reference/files/glossary/#term-belt). The Source turns one order webhook into an [item](../../reference/files/glossary/#term-item), the Factory builds a charge from it, and the HTTP Sink posts the charge to `https://example.com/charges`.
+
+<Board name="docs-patterns-call-exactly-once" />
+
+## How the board works
+
+Press Play and the board stops on these two [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory takes the order and builds one charge for it, with the order id and the amount.
+2. Tick 85: The HTTP Sink sends the charge to its URL as a POST. This is the one call the board makes.
+
+By its last tick the effect log under the board shows one row, `t84  POST  https://example.com/charges  ok`, and nothing else. This site's scripted reply stands in for the service and answers 20 ticks later, and pointing at the row shows the tick of the answer.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// charge the card for this order
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.id, amount: input.total });
+}
+```
+
+The `ctx.emit` line sends one charge for each order, so one webhook leads to one call. The code doesn't build a key. The app adds the `Idempotency-Key` header when the HTTP Sink sends the request.
+
+## What happens on replay
+
+Opening a project file usually puts back the state saved in it and replays nothing, so the call isn't sent again. If the file's saved snapshot is older than the call, the app replays the call from the log with outbound calls muted: the logged answer reaches the Sink again and no request goes out. A save waits while the call is out, so you can't save a file with a call that went out and has no answer yet.
+
+Checked by <code>one_dispatch_across_save_and_open</code> in [crates/fabrico-host/tests/exactly_once_replay.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-host/tests/exactly_once_replay.rs).
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- You only get exactly once if the service drops a duplicate. Each request carries an `Idempotency-Key` header built from the logged call, the same value every time the board makes that call, so a service that stores the keys it has handled can drop a request whose key it has seen. A service that ignores the key can act twice. [Side effects and delivery](../../concepts/side-effects-and-delivery/#the-idempotency-key-header) describes the key.
+- If you open a save taken before the call and play on, the Sink sends the call again, because the board reaches that tick a second time. The request carries the same `Idempotency-Key`, so a service that checks the key drops it.
+- For duplicates coming in, a sender can put a delivery id in the `x-delivery-id` header, and the app drops a webhook whose id it has already logged. That list starts empty when you open a project or restart the app, so a repeat that arrives after either makes an item again. A board script can't send a delivery id, so the board above can't show this check. [Webhook ingress](../../reference/code-and-http/webhook-ingress/#repeat-deliveries) has the rules.
+- A call that fails or gets no answer in time isn't sent again. The HTTP Sink sends a <Fact id="fault.CommandFailure" /> or <Fact id="fault.CommandTimeout" /> [fault](../../reference/files/glossary/#term-fault) out of its Fault port instead, and [Handle a request timeout](../request-timeout/) shows both.
+
+## Related pages
+
+- [Forward a webhook to another URL](../forward-a-webhook/): the same Source, Factory and HTTP Sink line, posting each webhook on.
+- [Deduplicate events](../deduplicate-events/): a Factory that drops events whose id it has seen.
+- [Handle a request timeout](../request-timeout/): which fault a failed or unanswered call raises.
+- [Side effects and delivery](../../concepts/side-effects-and-delivery/): why each call is logged once, tried once and never sent again on replay.
+- [Webhook ingress](../../reference/code-and-http/webhook-ingress/): the `x-delivery-id` header and the app's check for repeat deliveries.

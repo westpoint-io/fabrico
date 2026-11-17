@@ -55,5 +55,6 @@ The `return` drops a repeat, because a run that emits nothing sends nothing on. 
 
 - [Keep a running total per key](../running-total/): another Factory that keeps state from one event to the next.
 - [Batch events into groups of N](../batch-events/): a Factory that keeps items in its state until it has 3, then sends them on as one.
+- [Call an API exactly once](../call-exactly-once/): the other direction, where the service you call drops a repeat request by its Idempotency-Key.
 - [Webhook ingress](../../reference/code-and-http/webhook-ingress/): the `x-delivery-id` header and the app's own check for repeat deliveries.
 - [Factory API](../../reference/code-and-http/factory-api/): what `ctx.state` keeps, when it rolls back, and the limits on one run.
