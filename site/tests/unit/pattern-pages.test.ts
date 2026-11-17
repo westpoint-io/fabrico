@@ -6,9 +6,10 @@
 //   fewer than MIN_PATTERN_PAGES of them;
 // - a page has no searchPhrase, or the phrase is in neither its title nor its description;
 // - a page has no <Board>, more than one, or one named for another page, or its one <Board> sits
-//   inside an MDX comment, a code block or a {...} expression, where a reader never sees it;
-// - a `Factory code` block differs from the board's Factory source, or the page has none outside
-//   MDX comments;
+//   inside an MDX comment, a code block or a {...} expression, where a reader never sees it. The one
+//   exception is reproduce-a-bug.mdx, which shows its board twice: exactly two tags, both naming it;
+// - a `Factory code` or `Handler code` block differs from the board's Factory sources (a Handler's
+//   code is a Factory source in the board file), or the page has none outside MDX comments;
 // - the How the board works steps differ from the board's captions. A numbered line inside an MDX
 //   comment, a code block or inline code isn't a step;
 // - a page's board has faultsAbout and the page has no `faults` in its frontmatter, so the docs suite
@@ -52,11 +53,29 @@ function plain(text: string): string {
 /** The page's path as the failure messages name it. */
 const shown = (file: string): string => `site/src/content/docs/patterns/${file}`;
 
-/** The board id a page must show, from its file stem: `forward-a-webhook.mdx` shows `docs-patterns-forward-a-webhook`. */
-const boardIdOf = (file: string): string => `docs-patterns-${file.replace(/\.mdx$/, '')}`;
+/**
+ * Pages that show a shipped example board instead of a docs board of their own, by file name. The
+ * order processing page shows the whole-workflow example the app ships under Examples, so the page
+ * and the app run the same board.
+ */
+const SHIPPED_BOARDS: Record<string, string> = { 'order-processing.mdx': 'order_processing' };
+
+/**
+ * The board id a page must show, from its file stem: `forward-a-webhook.mdx` shows
+ * `docs-patterns-forward-a-webhook`, and a page in SHIPPED_BOARDS shows the board named there.
+ */
+const boardIdOf = (file: string): string => SHIPPED_BOARDS[file] ?? `docs-patterns-${file.replace(/\.mdx$/, '')}`;
 
 /** The board file behind a board id, as `boardPathOf` in the embed suite maps it. */
-const boardFileOf = (id: string): string => path.join(BOARDS, `${id.replace(/^docs-/, '')}.board.ron`);
+const boardFileOf = (id: string): string =>
+  Object.values(SHIPPED_BOARDS).includes(id) ? path.resolve(BOARDS, '..', `${id}.board.ron`) : path.join(BOARDS, `${id.replace(/^docs-/, '')}.board.ron`);
+
+/** The board file behind a board id as the failure messages name it, from the repo root. */
+const boardShown = (id: string): string => path.relative(path.resolve(SITE, '..'), boardFileOf(id)).split(path.sep).join('/');
+
+/** The one page that shows its board twice, and how many <Board> tags every other page shows. */
+const TWO_BOARD_PAGE = 'reproduce-a-bug.mdx';
+const boardTagsFor = (file: string): number => (file === TWO_BOARD_PAGE ? 2 : 1);
 
 /** Every pattern page file name, sorted, leaving out index.mdx and test pages whose name starts with _. */
 function patternFiles(): string[] {
@@ -141,7 +160,7 @@ function blankHidden(text: string, code: 'blank' | 'keep'): string {
 }
 
 /**
- * Each fenced js block titled `Factory code` a reader sees, with the list indent it sits under
+ * Each fenced js block titled `Factory code` or `Handler code` a reader sees, with the list indent it sits under
  * removed, and the line it starts on. A block inside an MDX comment, or inside another fenced
  * block, doesn't count.
  */
@@ -158,7 +177,7 @@ function pageCodeBlocks(mdx: string): { line: number; code: string }[] {
     for (; i < lines.length && !close.test(lines[i]); i += 1) {
       body.push(lines[i].startsWith(indent) ? lines[i].slice(indent.length) : lines[i].trimStart());
     }
-    if (open[2] === '```' && /^js title="Factory code"\s*$/.test(open[3])) {
+    if (open[2] === '```' && /^js title="(Factory|Handler) code"\s*$/.test(open[3])) {
       blocks.push({ line: start + 1, code: tidy(body.join('\n')) });
     }
     start = i;
@@ -389,7 +408,7 @@ function boardOf(file: string): { id: string; ron: string | null; problem: strin
   const id = boardIdOf(file);
   const boardFile = boardFileOf(id);
   if (!fs.existsSync(boardFile)) {
-    return { id, ron: null, problem: `${shown(file)}: examples/boards/docs/${id.replace(/^docs-/, '')}.board.ron doesn't exist. A pattern page's board file is named after the page.` };
+    return { id, ron: null, problem: `${shown(file)}: ${boardShown(id)} doesn't exist. A pattern page's board file is named after the page.` };
   }
   return { id, ron: fs.readFileSync(boardFile, 'utf8'), problem: null };
 }
@@ -445,26 +464,33 @@ test("each pattern page's searchPhrase is in its title or its description", () =
   noProblems(problems);
 });
 
-test('each pattern page shows exactly one board, named for the page', () => {
+test('each pattern page shows exactly one board, named for the page, and the bug page shows its board twice', () => {
   const problems: string[] = [];
   for (const file of patternFiles()) {
     const { shown: tags, all } = boardTagsOf(readPage(file).body);
-    if (tags.length !== 1 || all !== 1) {
+    const want = boardTagsFor(file);
+    if (tags.length !== want || all !== want) {
+      const rule =
+        want === 1
+          ? `A pattern page shows its pattern running on exactly one board (only ${TWO_BOARD_PAGE} shows two)`
+          : `${TWO_BOARD_PAGE} shows its board exactly twice`;
       problems.push(
-        `${shown(file)} has ${tags.length} <Board> tags a reader sees and ${all} in the file. A pattern page shows its pattern running on exactly one board, written as \`<Board name="..." />\` on a line of its own, outside comments, code blocks and {...}.`,
+        `${shown(file)} has ${tags.length} <Board> tags a reader sees and ${all} in the file. ${rule}, written as \`<Board name="..." />\` on a line of its own, outside comments, code blocks and {...}.`,
       );
       continue;
     }
-    const name = /\bname="([^"]*)"/.exec(tags[0])?.[1] ?? '';
     const id = boardIdOf(file);
-    if (name !== id) {
-      problems.push(`${shown(file)} shows the board "${name}". Its board is ${id}, from examples/boards/docs/${id.replace(/^docs-/, '')}.board.ron.`);
+    for (const tag of tags) {
+      const name = /\bname="([^"]*)"/.exec(tag)?.[1] ?? '';
+      if (name !== id) {
+        problems.push(`${shown(file)} shows the board "${name}". Its board is ${id}, from ${boardShown(id)}.`);
+      }
     }
   }
   noProblems(problems);
 });
 
-test("each pattern page's Factory code blocks equal its board's Factory sources", () => {
+test("each pattern page's Factory code and Handler code blocks equal its board's Factory sources", () => {
   const problems: string[] = [];
   for (const file of patternFiles()) {
     const board = boardOf(file);
@@ -473,26 +499,26 @@ test("each pattern page's Factory code blocks equal its board's Factory sources"
       continue;
     }
     const blocks = pageCodeBlocks(readPage(file).text);
-    const boardName = board.id.replace(/^docs-/, '');
+    const boardFile = boardShown(board.id);
     let sources: string[];
     try {
-      sources = boardSources(board.ron, `examples/boards/docs/${boardName}.board.ron`);
+      sources = boardSources(board.ron, boardFile);
     } catch (error) {
       problems.push(`${shown(file)}: ${(error as Error).message}`);
       continue;
     }
     if (blocks.length === 0) {
-      problems.push(`${shown(file)} has no js block titled "Factory code".`);
+      problems.push(`${shown(file)} has no js block titled "Factory code" or "Handler code".`);
       continue;
     }
     for (const block of blocks) {
       if (!sources.includes(block.code)) {
-        problems.push(`${shown(file)}: its Factory code block on line ${block.line} doesn't match any Factory in examples/boards/docs/${boardName}.board.ron. Copy the source from the board file.`);
+        problems.push(`${shown(file)}: its code block on line ${block.line} doesn't match any Factory in ${boardFile}. Copy the source from the board file.`);
       }
     }
     for (const source of new Set(sources)) {
       if (!blocks.some((b) => b.code === source)) {
-        problems.push(`${shown(file)} has no Factory code block for the Factory source starting "${source.split('\n')[0]}" in examples/boards/docs/${boardName}.board.ron. Copy the source from the board file.`);
+        problems.push(`${shown(file)} has no Factory code or Handler code block for the Factory source starting "${source.split('\n')[0]}" in ${boardFile}. Copy the source from the board file.`);
       }
     }
   }
@@ -507,17 +533,17 @@ test("each pattern page's How the board works steps restate its board's captions
       problems.push(board.problem!);
       continue;
     }
-    const boardName = board.id.replace(/^docs-/, '');
+    const boardFile = boardShown(board.id);
     const steps = stepsOf(readPage(file).body);
     let captions: { tick: number; text: string }[];
     try {
-      captions = captionsOf(board.ron, `examples/boards/docs/${boardName}.board.ron`);
+      captions = captionsOf(board.ron, boardFile);
     } catch (error) {
       problems.push(`${shown(file)}: ${(error as Error).message}`);
       continue;
     }
     if (steps.length !== captions.length) {
-      problems.push(`${shown(file)}: How the board works has ${steps.length} steps and examples/boards/docs/${boardName}.board.ron has ${captions.length} captions.`);
+      problems.push(`${shown(file)}: How the board works has ${steps.length} steps and ${boardFile} has ${captions.length} captions.`);
       continue;
     }
     captions.forEach((caption, i) => {
@@ -569,7 +595,7 @@ test('the step reader skips numbered lines in a comment, a code block or inline 
   assert.deepEqual(stepsOf('{/*\n## How the board works\n\n1. Tick 1: a\n*/}'), []);
 });
 
-test('the code block reader skips a Factory code block in a comment or inside another fenced block', () => {
+test('the code block reader takes Factory code and Handler code blocks and skips one in a comment or inside another fenced block', () => {
   const page = [
     '```js title="Factory code"',
     'shown()',
@@ -587,10 +613,17 @@ test('the code block reader skips a Factory code block in a comment or inside an
     '```js title="Factory code"',
     'if (x) {/* not a comment */}',
     '```',
+    '```js title="Handler code"',
+    'handler()',
+    '```',
+    '```js title="Other code"',
+    'other()',
+    '```',
   ].join('\n');
   assert.deepEqual(pageCodeBlocks(page), [
     { line: 1, code: 'shown()' },
     { line: 14, code: 'if (x) {/* not a comment */}' },
+    { line: 17, code: 'handler()' },
   ]);
 });
 
@@ -625,6 +658,15 @@ test('a pattern page with faults writes the count as {frontmatter.faults}, never
     }
   }
   noProblems(problems);
+});
+
+test('a shipped board page maps to its example board file, and every other page to its docs board', () => {
+  assert.equal(boardIdOf('order-processing.mdx'), 'order_processing');
+  assert.equal(boardShown(boardIdOf('order-processing.mdx')), 'examples/boards/order_processing.board.ron');
+  assert.equal(boardShown(boardIdOf('rate-limit.mdx')), 'examples/boards/docs/patterns-rate-limit.board.ron');
+  assert.ok(fs.existsSync(boardFileOf('order_processing')), 'examples/boards/order_processing.board.ron is missing');
+  assert.equal(boardTagsFor('reproduce-a-bug.mdx'), 2);
+  assert.equal(boardTagsFor('rate-limit.mdx'), 1);
 });
 
 test('the typed-count check reads prose and skips code, inline code and comments', () => {

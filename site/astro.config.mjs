@@ -2,6 +2,7 @@
 // the public repository, so every page URL starts with /fabrico/.
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { PATTERN_GROUPS } from './src/lib/pattern-groups.mjs';
 
 const SITE = 'https://westpoint-io.github.io';
 const BASE = '/fabrico';
@@ -40,6 +41,24 @@ const nestedGroup = (label, directory, subgroups) => ({
       label: sublabel,
       collapsed: true,
       items: [{ autogenerate: { directory: subdirectory } }],
+    })),
+  ],
+});
+
+/**
+ * A sidebar group that links to its folder's index page, then lists subgroups, each
+ * `[label, slugs]` with every slug a page in that folder. The subgroups start closed, and Starlight
+ * opens the one holding the current page. A slug entry shows the page's sidebar.label, or its title.
+ * The pages keep their URLs, `<directory>/<slug>`.
+ */
+const slugGroup = (label, directory, subgroups) => ({
+  label,
+  items: [
+    { slug: directory },
+    ...subgroups.map(([sublabel, slugs]) => ({
+      label: sublabel,
+      collapsed: true,
+      items: slugs.map((slug) => ({ slug: `${directory}/${slug}` })),
     })),
   ],
 });
@@ -101,7 +120,9 @@ export default defineConfig({
       // a match in that paragraph counts twice, which put it 3rd on the same copy.
       pagefind: { ranking: { termFrequency: 1.0, pageLength: 0.75, termSaturation: 1.4, metaWeights: { lead: 2 } } },
       // Six groups in a fixed order, each listing its folder's pages. Groups start expanded. Reference
-      // links to its index page and then holds four subgroups that start closed.
+      // links to its index page and then holds four subgroups that start closed. Patterns links to
+      // its index page and then holds the subgroups src/lib/pattern-groups.mjs lists by slug, which
+      // also start closed.
       sidebar: [
         group('Get started', 'get-started'),
         group('Concepts', 'concepts'),
@@ -111,7 +132,7 @@ export default defineConfig({
           ['Code and HTTP', 'reference/code-and-http'],
           ['Commands and files', 'reference/files'],
         ]),
-        group('Patterns', 'patterns'),
+        slugGroup('Patterns', 'patterns', PATTERN_GROUPS),
         group('Troubleshooting', 'troubleshooting'),
         group('Contributing', 'contributing'),
       ],
