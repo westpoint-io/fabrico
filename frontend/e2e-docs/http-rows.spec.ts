@@ -22,6 +22,7 @@ import { docsUrl } from './support/site.ts';
 
 const PAGES: { page: string; board: string }[] = [
   { page: 'patterns/local-http-endpoint/', board: 'docs-patterns-local-http-endpoint' },
+  { page: 'patterns/mock-api-server/', board: 'docs-patterns-mock-api-server' },
 ];
 
 /** The number of `Request(...)` entries in a board file's script. */

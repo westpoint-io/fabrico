@@ -1,0 +1,74 @@
+// A docs board for the Run a mock API server for testing pattern. A Route at the path /users is
+// wired to an HTTP Handler whose code acts as a pretend users API. A request whose body has op
+// create gets the next id, and the Handler keeps the user in its state; a request with an id gets
+// that user back, or a 404 when no user has it. The script creates Ada and Bob, asks for id 1 and
+// then for id 9, so the replies carry the statuses 201, 201, 200 and 404. The run makes no
+// outbound call.
+//
+//   row 2:    ROUTE 0, path /users ===> HTTP HANDLER 1
+//   rows 4-5:                              Fault -b3---> SINK 2
+//
+// The Handler's Fault port, on its bottom middle cell facing south, has a belt to a Debug Sink,
+// where a request whose code throws would go. This code never throws, so that belt stays empty.
+// The Handler's Out port stays undocked.
+//
+// One DrawWire mints both cables, request first. Handles mint in command order: the Route 0, the
+// Handler 1, the Sink 2, the belt 3, then the cables 4 (request) and 5 (reply). The 9 commands
+// and the history seal end the boot on tick 10.
+//
+// machine_kind u8 legend: ROUTE=9, HTTP HANDLER=10, SINK=7. DrawWire and Dock ports are catalog
+// indexes: Route In=0, Out=1; HTTP Handler In=0, Out=1, Fault=2; SINK In=0.
+Board(
+    format: 2,
+    title: "Run a mock API server for testing",
+    seed: 97,
+    commands: [
+        Place(kind: 9, cell_x: 2, cell_y: 2),
+        Place(kind: 10, cell_x: 6, cell_y: 1),
+        Place(kind: 7, cell_x: 10, cell_y: 5),
+        DrawBelt(cells: [(7, 4), (7, 5), (8, 5), (9, 5)]),
+        Dock(belt: 3, endpoint: Tail, node: 1, port: 2),
+        Dock(belt: 3, endpoint: Head, node: 2, port: 0),
+        Configure(node: 0, config: Endpoint(path: "/users")),
+        Configure(node: 1, config: Factory(source: r#"// a pretend users API that remembers
+export default function (input, ctx) {
+  const req = JSON.parse(input.body);
+  const users = ctx.state.users || {};
+  let reply;
+  if (req.op === "create") {
+    const id = (ctx.state.next || 0) + 1;
+    ctx.state.next = id;
+    users[id] = { id: id, name: req.name };
+    reply = { status: 201, body: users[id] };
+  } else if (users[req.id]) {
+    reply = { status: 200, body: users[req.id] };
+  } else {
+    reply = { status: 404, body: { error: "no such user" } };
+  }
+  ctx.state.users = users;
+  ctx.command({
+    status: reply.status,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(reply.body),
+  }, 0);
+}"#)),
+        DrawWire(from_node: 0, from_port: 1, to_node: 1, to_port: 0),
+    ],
+    script: [
+        At(tick: 40, input: Request(route: 0, method: "POST", path: "/endpoint/users", body: r#"{"op":"create","name":"Ada"}"#)),
+        At(tick: 80, input: Request(route: 0, method: "POST", path: "/endpoint/users", body: r#"{"op":"create","name":"Bob"}"#)),
+        At(tick: 120, input: Request(route: 0, method: "POST", path: "/endpoint/users", body: r#"{"op":"get","id":1}"#)),
+        At(tick: 160, input: Request(route: 0, method: "POST", path: "/endpoint/users", body: r#"{"op":"get","id":9}"#)),
+    ],
+    captions: [
+        // Measured: Factory WORKING[42,...]; REPLY corr=0 step_ends_on=42, status 201, body id 1 name Ada.
+        Caption(tick: 42, highlight: 1, text: "The Handler, a pretend users API, gives Ada the id 1, keeps her in its state and replies with status 201."),
+        // Measured: Factory WORKING[...,122,...]; REPLY corr=2 step_ends_on=122, status 200, body id 1 name Ada.
+        Caption(tick: 122, highlight: 1, text: "Request 2 asks for id 1, so the Handler finds Ada in its state and replies with status 200 and the same user."),
+        // Measured: Factory WORKING[...,162]; REPLY corr=3 step_ends_on=162, status 404, body error no such user; end state holds users 1 and 2.
+        Caption(tick: 162, highlight: 1, text: "No user has id 9, so the Handler replies with status 404 and an error, and its state still holds Ada and Bob."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: []),
+    view: View(fit: Board),
+    end_tick: 240,
+)

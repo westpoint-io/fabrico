@@ -1,0 +1,72 @@
+---
+title: Run a mock API server for testing
+description: "Stand up a mock API server with a Handler that hands out ids and returns what it stored, so the same requests get the same replies."
+searchPhrase: mock api server
+sidebar:
+  label: Mock API server
+  order: 200
+---
+
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+A mock API server stands in for a real service while you test the code that calls it. An [HTTP Handler](../../reference/files/glossary/#term-http-handler) that keeps state between requests can be one. It hands out ids, keeps what each request stored, and gives the same replies to the same requests on every run.
+
+The board below has a [Route](../../reference/files/glossary/#term-route) at the path `/users`, wired to an HTTP Handler, and a Debug [Sink](../../reference/files/glossary/#term-sink) on the Handler's Fault [port](../../reference/files/glossary/#term-port). The script sends four POST requests: it creates the users Ada and Bob, asks for the user with id 1, and then asks for id 9, which nobody has.
+
+<Board name="docs-patterns-mock-api-server" />
+
+## How the board works
+
+Press Play and the board stops on these three [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 42: The Handler, a pretend users API, gives Ada the id 1, keeps her in its state and replies with status 201.
+2. Tick 122: Request 2 asks for id 1, so the Handler finds Ada in its state and replies with status 200 and the same user.
+3. Tick 162: No user has id 9, so the Handler replies with status 404 and an error, and its state still holds Ada and Bob.
+
+Bob's request, request 1, gets the id 2 and its own 201 on tick 82. By its last tick the effect log under the board shows a ROUTE row and a REPLY row for each of the four requests, and the REPLY rows read `request 0: status 201`, `request 1: status 201`, `request 2: status 200` and `request 3: status 404`. The four reply bodies are `{"id":1,"name":"Ada"}`, `{"id":2,"name":"Bob"}`, `{"id":1,"name":"Ada"}` and `{"error":"no such user"}`.
+
+## The Handler code
+
+The Handler runs this code once for each request the Route sends it:
+
+```js title="Handler code"
+// a pretend users API that remembers
+export default function (input, ctx) {
+  const req = JSON.parse(input.body);
+  const users = ctx.state.users || {};
+  let reply;
+  if (req.op === "create") {
+    const id = (ctx.state.next || 0) + 1;
+    ctx.state.next = id;
+    users[id] = { id: id, name: req.name };
+    reply = { status: 201, body: users[id] };
+  } else if (users[req.id]) {
+    reply = { status: 200, body: users[req.id] };
+  } else {
+    reply = { status: 404, body: { error: "no such user" } };
+  }
+  ctx.state.users = users;
+  ctx.command({
+    status: reply.status,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(reply.body),
+  }, 0);
+}
+```
+
+The code tells a create from a get by the `op` field in the request's body: `"create"` makes a user, and anything else looks one up by its `id`. The users and the last id handed out live in `ctx.state`, which the Handler keeps from one request to the next, so the next create gets the next id.
+
+## Trade-offs
+
+- A Route takes POST requests only, at `/endpoint/` followed by its path, on 127.0.0.1 only, so the code you test has to run on the same computer and send every call as a POST. The app picks the port each time it starts, so the URL changes at each launch. [Webhook ingress](../../reference/code-and-http/webhook-ingress/) has the loopback address and the port.
+- The same requests in the same order get the same replies on every run, because the Handler's state starts empty and the engine is deterministic. [Determinism and replay](../../concepts/determinism-and-replay/) says why.
+- The users live in the Handler's state, which goes into the save, so a saved project reopens with the users it had. [The event log and save files](../../concepts/event-log-and-save-files/) says what a save keeps.
+- The Handler has <Fact id="limit.endpoint_deadline_ticks" />, counted from when the request arrives. When no reply reaches the Route in that time, the caller gets a 504. [Handler requests and replies](../../reference/code-and-http/handler-requests-and-replies/#when-no-good-reply-comes) lists the other statuses.
+
+## Related pages
+
+- [Serve a local HTTP endpoint](../local-http-endpoint/): one Route and one Handler answering POST requests, without state.
+- [Keep a running total per key](../running-total/): a Factory that keeps state from one event to the next.
+- [HTTP Handler](../../reference/machines/http-handler/): the machine that runs your code on each request and sends back a reply.
+- [Determinism and replay](../../concepts/determinism-and-replay/): why the same events give the same result on every run.

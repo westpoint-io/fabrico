@@ -147,10 +147,11 @@
 # =====================================================================================
 
 [fixtures]
-# One new line, written by the generator, for the board on the pattern page Serve a local HTTP
-# endpoint (examples/boards/docs/patterns-local-http-endpoint.board.ron). The 53 older lines are
+# Two new lines, written by the generator, for the boards on the pattern pages Serve a local HTTP
+# endpoint (examples/boards/docs/patterns-local-http-endpoint.board.ron) and Run a mock API server
+# for testing (examples/boards/docs/patterns-mock-api-server.board.ron). The 53 older lines are
 # unchanged.
-examples/boards/hashes.manifest 975aec627f55cd65e964d594008c4cabe0f30b4ed013662881a1148730e39047
+examples/boards/hashes.manifest e3bee8b40062a7de6a5de98b47977633aa6cc406c415f38c1ab7d099115258ae
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

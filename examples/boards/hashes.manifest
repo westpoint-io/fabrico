@@ -39,6 +39,7 @@ examples/boards/docs/patterns-deduplicate-events.board.ron 260 d59e7a6070ae4d7f3
 examples/boards/docs/patterns-filter-events.board.ron 260 c80c17a2ae6ae7d2d07b31a489dc3a60acb931b45214c4707621289563c5e7c1
 examples/boards/docs/patterns-forward-a-webhook.board.ron 260 a00b62261c8d689a285702a9f6f6f7b2e8a23a2fe740d6b23d6e5954e060f41f
 examples/boards/docs/patterns-local-http-endpoint.board.ron 200 e146851ea6de756ff5dbe3be34be29ef1bc82e7deaf07047fbd88ba70ed443d5
+examples/boards/docs/patterns-mock-api-server.board.ron 240 7000fe64c2e1cf375f0021322617371edca5d11affe9a821f5e176b4f0bf6cb9
 examples/boards/docs/patterns-parallel-workers.board.ron 260 80e8556643a0da8202316da97503001d07820c81963807c32f1a1d9b1d59f50d
 examples/boards/docs/patterns-rate-limit.board.ron 400 e060533933957629e36d5239d3f6b8cdc4444a061dca46384ad917befef49d49
 examples/boards/docs/patterns-request-timeout.board.ron 760 75ab81d652f332942886161a5969e3428f555c297e086264258da760857126ba
