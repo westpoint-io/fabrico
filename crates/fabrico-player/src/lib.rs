@@ -22,15 +22,16 @@
 #![warn(clippy::all)]
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use fabrico_core::factory::DEFAULT_STACK_LIMIT;
+use fabrico_core::ids::{Item, NodeId};
 use fabrico_core::state::{HttpMethod, Node};
 use fabrico_engine::board::{BoardError, OutboundOutcome, minted_node, parse_board, reverse_same_tick_runs};
 use fabrico_engine::gesture::kind_byte;
 use fabrico_engine::render_packet::RenderPacketBuilder;
-use fabrico_engine::scripted::{BoardRun, EffectRecord, EffectSummary};
+use fabrico_engine::scripted::{BoardRun, EffectRecord, EffectSummary, fault_in, fault_paths, fault_reason_name};
 use serde::Serialize;
 
 /// The call succeeded.
@@ -76,8 +77,10 @@ fn encode(packet: &impl Serialize) -> Result<Vec<u8>, PlayerError> {
 
 /// One outbound command a board's run emitted, and how the board's script answered it.
 ///
-/// This mirrors the engine's `EffectRecord`, which has no `Serialize`. An effect stays a record
-/// here: the player has no route to a network, so nothing it emits ever leaves the module.
+/// This mirrors the engine's `EffectRecord`, which has no `Serialize`, and adds what the effect log
+/// needs that a record doesn't say: whether a Debug message is a fault that reached a dead letter
+/// Sink. An effect stays a record here: the player has no route to a network, so nothing it emits
+/// ever leaves the module.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlayerEffect {
     /// The tick the command was emitted on.
@@ -115,6 +118,28 @@ pub enum PlayerEffectKind {
         /// The reply's bytes.
         payload: Vec<u8>,
     },
+    /// A request the board's script sent in through a Route. It is not a command: the player
+    /// writes one for each request so the effect log can pair it with its [`Reply`](Self::Reply)
+    /// by `correlation`, which counts from 0 as the host's counter does.
+    Request {
+        /// The request's correlation id, the one its reply carries.
+        correlation: u64,
+        /// The verb, as the script spells it.
+        method: String,
+        /// The path, as the script spells it.
+        path: String,
+    },
+    /// A Debug message that is a fault: the Debug Sink that emitted it sits at the end of a fault
+    /// path on the tick it ran (`fault_paths`), and its bytes decode as a fault and encode back to
+    /// the same bytes (`fault_in`). Any other Debug message stays [`Debug`](Self::Debug), even when
+    /// its bytes happen to decode as a fault.
+    Fault {
+        /// The reason's name, as `fault_reason_name` writes it: `CommandTimeout`, `NoMatch`.
+        reason: String,
+        /// The fault's payload: the item for `NoMatch`, the error message for a Factory fault,
+        /// nothing for a command fault.
+        payload: Vec<u8>,
+    },
 }
 
 /// How a board's script answered a command. The variant order is the wire format, and
@@ -135,25 +160,55 @@ pub enum PlayerEffectOutcome {
     Timeout,
 }
 
-impl From<&EffectRecord> for PlayerEffect {
-    fn from(record: &EffectRecord) -> Self {
-        let kind = match &record.effect {
-            EffectSummary::Http { url, method, body } => {
-                PlayerEffectKind::Http { url: url.clone(), method: *method, body: body.clone() }
+/// The nodes at the end of a fault path on the run's current tick: every node a fault belt hands
+/// its items to, whatever the port.
+fn fault_end_nodes(run: &BoardRun) -> BTreeSet<NodeId> {
+    let state = &run.engine().core().state;
+    let ids: Vec<NodeId> = state.node_ids().collect();
+    let (_, ends) = fault_paths(state, &ids);
+    ends.into_iter().map(|(node, _)| node).collect()
+}
+
+/// Convert one record, with the nodes at a fault-path end on the tick it was emitted. A Debug
+/// message becomes [`PlayerEffectKind::Fault`] only when its emitter is one of `fault_ends` and its
+/// bytes pass `fault_in`; every other record converts field for field.
+fn player_effect(record: &EffectRecord, fault_ends: &BTreeSet<NodeId>) -> PlayerEffect {
+    let kind = match &record.effect {
+        EffectSummary::Http { url, method, body } => {
+            PlayerEffectKind::Http { url: url.clone(), method: *method, body: body.clone() }
+        }
+        EffectSummary::Debug { message } => {
+            let fault = fault_ends
+                .contains(&record.command_id.1)
+                .then(|| fault_in(&Item(message.clone())))
+                .flatten();
+            match fault {
+                Some(fault) => PlayerEffectKind::Fault {
+                    reason: fault_reason_name(&fault.reason).to_owned(),
+                    payload: fault.payload,
+                },
+                None => PlayerEffectKind::Debug { message: message.clone() },
             }
-            EffectSummary::Debug { message } => PlayerEffectKind::Debug { message: message.clone() },
-            EffectSummary::Noop => PlayerEffectKind::Noop,
-            EffectSummary::Reply { correlation, payload } => {
-                PlayerEffectKind::Reply { correlation: *correlation, payload: payload.clone() }
-            }
-        };
-        let outcome = match record.outcome {
-            OutboundOutcome::Reply { after_ticks } => PlayerEffectOutcome::Reply { after_ticks },
-            OutboundOutcome::Error { after_ticks } => PlayerEffectOutcome::Error { after_ticks },
-            OutboundOutcome::Timeout => PlayerEffectOutcome::Timeout,
-        };
-        Self { tick: record.tick, kind, outcome }
-    }
+        }
+        EffectSummary::Noop => PlayerEffectKind::Noop,
+        EffectSummary::Reply { correlation, payload } => {
+            PlayerEffectKind::Reply { correlation: *correlation, payload: payload.clone() }
+        }
+    };
+    let outcome = match record.outcome {
+        OutboundOutcome::Reply { after_ticks } => PlayerEffectOutcome::Reply { after_ticks },
+        OutboundOutcome::Error { after_ticks } => PlayerEffectOutcome::Error { after_ticks },
+        OutboundOutcome::Timeout => PlayerEffectOutcome::Timeout,
+    };
+    PlayerEffect { tick: record.tick, kind, outcome }
+}
+
+/// Convert the records the run's last step added, `records`, with the grid state that step left.
+/// The fault-path walk runs only when a Debug message is among them, so a quiet tick costs nothing.
+fn tick_effects(run: &BoardRun, records: &[EffectRecord]) -> Vec<PlayerEffect> {
+    let has_debug = records.iter().any(|record| matches!(record.effect, EffectSummary::Debug { .. }));
+    let fault_ends = if has_debug { fault_end_nodes(run) } else { BTreeSet::new() };
+    records.iter().map(|record| player_effect(record, &fault_ends)).collect()
 }
 
 /// What a page needs about a board that its render packets don't carry. The field order is the wire
@@ -256,8 +311,10 @@ pub struct Player {
     end_tick: u64,
     builder: RenderPacketBuilder,
     packets: VecDeque<Vec<u8>>,
-    /// How many of the run's effects `take_effects` has handed out.
-    effects_taken: u32,
+    /// How many of the run's effect records have been converted into `effects`.
+    records_seen: usize,
+    /// The effects converted after each step and not taken yet.
+    effects: Vec<PlayerEffect>,
     /// Read once at boot, so the answer doesn't change as the run goes on.
     info: BoardInfo,
 }
@@ -294,7 +351,28 @@ impl Player {
 
         let mut packets = VecDeque::new();
         packets.push_back(encode(&keyframe)?);
-        Ok(Self { board_text: board_text.to_owned(), order, run, end_tick, builder, packets, effects_taken: 0, info })
+        let mut player = Self {
+            board_text: board_text.to_owned(),
+            order,
+            run,
+            end_tick,
+            builder,
+            packets,
+            records_seen: 0,
+            effects: Vec::new(),
+            info,
+        };
+        player.convert_new_effects();
+        Ok(player)
+    }
+
+    /// Convert the effect records the run added since the last call, with the grid state it is in
+    /// now. Called after every step, so a record meets the topology of the tick it was emitted on.
+    fn convert_new_effects(&mut self) {
+        let records = self.run.effects();
+        let new = records.get(self.records_seen..).unwrap_or_default();
+        self.effects.extend(tick_effects(&self.run, new));
+        self.records_seen = records.len();
     }
 
     /// Run up to `ticks` ticks, stopping at the board's end tick, and queue one packet per tick. A
@@ -308,6 +386,7 @@ impl Player {
                 break;
             }
             self.run.step()?;
+            self.convert_new_effects();
             let packet = self.builder.build(self.run.engine());
             self.packets.push_back(encode(&packet)?);
         }
@@ -325,11 +404,8 @@ impl Player {
     /// # Errors
     /// [`PlayerError::Encode`] if the effects failed to encode, and they stay untaken.
     pub fn take_effects(&mut self) -> Result<Vec<u8>, PlayerError> {
-        let effects = self.run.effects();
-        let new: Vec<PlayerEffect> =
-            effects.iter().skip(self.effects_taken as usize).map(PlayerEffect::from).collect();
-        let bytes = encode(&new)?;
-        self.effects_taken = len_u32(effects.len());
+        let bytes = encode(&self.effects)?;
+        self.effects.clear();
         Ok(bytes)
     }
 
@@ -830,7 +906,8 @@ mod tests {
         assert_eq!(player.take_effects().expect("it encodes"), empty_bytes);
 
         player.step(200).expect("it steps");
-        let effects = player.run.effects().iter().map(PlayerEffect::from).collect::<Vec<_>>();
+        let effects =
+            player.run.effects().iter().map(|record| player_effect(record, &BTreeSet::new())).collect::<Vec<_>>();
         assert_eq!(effects.len(), 1, "the board makes one call");
         assert!(matches!(
             &effects[0],
@@ -842,6 +919,65 @@ mod tests {
         ));
         assert_eq!(player.take_effects().expect("it encodes"), postcard::to_allocvec(&effects).expect("it encodes"));
         assert_eq!(player.take_effects().expect("it encodes"), empty_bytes);
+    }
+
+    const TIMEOUT_BOARD: &str = include_str!("../../../examples/boards/docs/faults-command-timeout.board.ron");
+
+    /// The effects a player has converted and not handed out yet.
+    fn kinds(player: &Player) -> Vec<&PlayerEffectKind> {
+        player.effects.iter().map(|effect| &effect.kind).collect()
+    }
+
+    #[test]
+    fn a_command_timeout_reaching_a_dead_letter_sink_is_one_fault_effect_with_no_payload() {
+        let mut player = Player::new(TIMEOUT_BOARD).expect("the board loads");
+        player.step(u32::MAX).expect("it steps to its end");
+        let kinds = kinds(&player);
+        let faults: Vec<_> = kinds.iter().filter(|kind| matches!(kind, PlayerEffectKind::Fault { .. })).collect();
+        assert_eq!(
+            faults,
+            [&&PlayerEffectKind::Fault { reason: "CommandTimeout".to_owned(), payload: Vec::new() }],
+            "the one fault reads as CommandTimeout: {kinds:?}"
+        );
+        assert!(
+            !kinds.iter().any(|kind| matches!(kind, PlayerEffectKind::Debug { .. })),
+            "the dead letter Sink's message is no longer a Debug effect: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn fault_bytes_on_a_debug_sink_off_every_fault_path_stay_a_debug_effect() {
+        // A fault's bytes, sent in as a webhook body to a Debug Sink that no fault port reaches.
+        let probe = Player::new(TIMEOUT_BOARD).expect("the board loads");
+        let source = probe.run.minted()[1];
+        let bytes = fabrico_core::fault::Fault::command(source, fabrico_core::fault::FaultReason::CommandTimeout, Vec::new())
+            .encode()
+            .0;
+        assert!(fault_in(&Item(bytes.clone())).is_some(), "the bytes decode as a fault");
+        assert!(bytes.iter().all(u8::is_ascii), "the bytes fit a board string: {bytes:?}");
+        let body: String = bytes.iter().map(|byte| format!("\\u{{{byte:x}}}")).collect();
+        let board = format!(
+            r#"Board(
+        format: 2,
+        title: "Fault bytes on a plain Debug Sink",
+        seed: 7,
+        commands: [
+            Place(kind: 0, cell_x: 1, cell_y: 2),
+            Place(kind: 7, cell_x: 5, cell_y: 2),
+            DrawBelt(cells: [(2, 2), (3, 2), (4, 2)]),
+            Dock(belt: 2, endpoint: Tail, node: 0, port: 0),
+            Dock(belt: 2, endpoint: Head, node: 1, port: 0),
+        ],
+        script: [At(tick: 20, input: Webhook(source: 0, body: "{body}"))],
+        captions: [],
+        executor: Executor(default: Reply(after_ticks: 1), rules: []),
+        view: View(fit: Board),
+        end_tick: 100,
+    )"#
+        );
+        let mut player = Player::new(&board).expect("the board loads");
+        player.step(u32::MAX).expect("it steps to its end");
+        assert_eq!(kinds(&player), [&PlayerEffectKind::Debug { message: bytes }], "the path decides, never the bytes");
     }
 
     #[test]

@@ -43,6 +43,37 @@ describe('effectRows', () => {
   });
 });
 
+describe('FAULT rows', () => {
+  const faultAt = (tick: number, reason: string, payload: string): PlayerEffect => ({
+    tick,
+    effect: { kind: 'Fault', reason, payload: bytes(payload) },
+    answer: { outcome: 'Reply', afterTicks: 1 },
+  });
+
+  it('a FAULT row with an empty payload shows the reason alone and says it keeps no payload', () => {
+    expect(effectRows([faultAt(689, 'CommandTimeout', '')])).toEqual([
+      { kind: 'fault', tick: 't689', method: 'FAULT', target: 'CommandTimeout', outcome: '', failed: false, title: 'CommandTimeout fault, keeps no payload' },
+    ]);
+  });
+
+  it('a FAULT row with a two-line payload shows the first line in its target and both lines in its title', () => {
+    const payload = "Error: unexpected token: 'order'\n    at <eval> (factory.js:3)";
+    const [row] = effectRows([faultAt(154, 'FactoryError', payload)]);
+    expect([row.tick, row.method, row.target, row.outcome]).toEqual(['t154', 'FAULT', "FactoryError: Error: unexpected token: 'order'", '']);
+    expect(row.title).toBe(`FactoryError fault, payload: ${payload}`);
+    expect(row.kind).toBe('fault');
+  });
+
+  it('a FAULT row lands in the well with the is-fault class and no outcome', () => {
+    const log = createEffectLog();
+    log.append(effectRows([faultAt(689, 'CommandTimeout', '')]));
+    const row = log.well.querySelector('.row') as HTMLElement;
+    expect(row.className).toBe('row is-fault');
+    expect([...row.children].map((c) => c.textContent)).toEqual(['t689', 'FAULT', 'CommandTimeout', '']);
+    expect(row.title).toBe('CommandTimeout fault, keeps no payload');
+  });
+});
+
 /** A log well with scroll metrics jsdom doesn't compute: rows are 20 px, the well 160 px. */
 function measuredLog() {
   const log = createEffectLog();

@@ -23,14 +23,15 @@
 //! Nothing here opens a socket, reads a clock or holds global state. An outbound call only ever
 //! becomes an [`EffectRecord`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fabrico_core::command::{Command, Effect, Outcome, ResultEvent};
 use fabrico_core::core::Core;
 use fabrico_core::event::{EventPayload, LogHeader, SCHEMA_VERSION};
 use fabrico_core::factory::FactoryLimits;
-use fabrico_core::ids::{CommandId, Item, NodeId};
-use fabrico_core::state::HttpMethod;
+use fabrico_core::fault::{FAULT_PORT, Fault, FaultReason};
+use fabrico_core::ids::{CommandId, Item, NodeId, PortId};
+use fabrico_core::state::{GridState, HttpMethod, Node};
 use fabrico_core::wire::DEFAULT_WIRE_BUDGET;
 
 use crate::board::{BoardError, BoardFile, ExecutorSpec, OutboundOutcome, ScriptInput, boot_engine, minted_node, validate};
@@ -79,6 +80,58 @@ pub enum EffectSummary {
         /// The reply's bytes.
         payload: Vec<u8>,
     },
+}
+
+/// The fault an item on a fault path holds: its bytes decode as a [`Fault`] and that fault encodes
+/// back to the same bytes. `Fault::decode` alone ignores trailing bytes, so a fault followed by
+/// trailing bytes is no fault.
+///
+/// Plenty of items decode as a fault by accident (a request envelope whose correlation id is 0 to 8
+/// does), so a caller reads only items on a path [`fault_paths`] names. The path decides what an item
+/// is, never its bytes.
+#[must_use]
+pub fn fault_in(item: &Item) -> Option<Fault> {
+    Fault::decode(item).ok().filter(|fault| fault.encode() == *item)
+}
+
+/// Where faults ride on this tick: every belt reachable from some node's fault port link,
+/// following belt-to-belt links, and the (node, port) inboxes those belts hand items to.
+///
+/// The walk stops at the first machine that isn't a belt, so a Debug Sink behind a Merge is not a
+/// fault-path end. `crates/fabrico-engine/tests/board_faults.rs` and the WebAssembly player both
+/// call this, so the fault check and the effect log read faults by one rule.
+#[must_use]
+pub fn fault_paths(state: &GridState, ids: &[NodeId]) -> (BTreeSet<NodeId>, BTreeSet<(NodeId, PortId)>) {
+    let is_belt = |id: NodeId| matches!(state.node(id), Some(Node::Belt(_)));
+    let mut belts: BTreeSet<NodeId> = BTreeSet::new();
+    let mut ends: BTreeSet<(NodeId, PortId)> = BTreeSet::new();
+    let mut frontier: Vec<(NodeId, PortId)> =
+        ids.iter().filter_map(|&id| state.link_target((id, FAULT_PORT))).collect();
+    while let Some((dest, port)) = frontier.pop() {
+        if !is_belt(dest) {
+            ends.insert((dest, port));
+        } else if belts.insert(dest) {
+            frontier.extend(state.links_from(dest).map(|(_, to)| to));
+        }
+    }
+    (belts, ends)
+}
+
+/// The reason's name as the faults manifest, the pages, `facts.json` and the effect log write it.
+/// No `_` arm: a new variant is a compile error here.
+#[must_use]
+pub fn fault_reason_name(reason: &FaultReason) -> &'static str {
+    match reason {
+        FaultReason::NoMatch => "NoMatch",
+        FaultReason::FactoryError => "FactoryError",
+        FaultReason::FactoryTimeout => "FactoryTimeout",
+        FaultReason::CommandTimeout => "CommandTimeout",
+        FaultReason::CommandFailure => "CommandFailure",
+        FaultReason::WireOverflow => "WireOverflow",
+        FaultReason::OutputRefused => "OutputRefused",
+        FaultReason::NoEntryWire => "NoEntryWire",
+        FaultReason::BranchBusy { branch: _ } => "BranchBusy",
+    }
 }
 
 /// Answers outbound commands from a board's [`ExecutorSpec`], on the ticks the spec says.

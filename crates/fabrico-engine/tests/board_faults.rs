@@ -23,6 +23,10 @@
 //! An item counts as a fault only if its bytes decode as one and encode back to the same bytes, so
 //! a fault followed by trailing bytes is no fault.
 //!
+//! The path rule ([`fault_paths`]), the decode check ([`fault_in`]) and the reason names
+//! ([`fault_reason_name`]) live in `fabrico_engine::scripted`, and the WebAssembly player calls the
+//! same three to turn a dead letter Debug Sink's effect into a FAULT row.
+//!
 //! Two producers drop a fault when nothing is docked on their Fault port, and each has a counter
 //! that only one reason raises: a Router's `faults` counts `NoMatch`, and a Tee's counts
 //! `BranchBusy`. A Factory's counter is no help, because a Factory can fault for several reasons and
@@ -42,10 +46,10 @@ use std::path::{Path, PathBuf};
 
 use fabrico_core::fault::{FAULT_PORT, Fault, FaultReason};
 use fabrico_core::ids::{Item, NodeId, PortId};
-use fabrico_core::state::{GridState, Node};
+use fabrico_core::state::Node;
 use fabrico_engine::board::{BoardFile, ScriptInput, parse_board};
 use fabrico_engine::render_packet::derive_state;
-use fabrico_engine::scripted::BoardRun;
+use fabrico_engine::scripted::{BoardRun, fault_in, fault_paths, fault_reason_name};
 use fabrico_protocol::state_tag;
 
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -55,22 +59,6 @@ const MANIFEST_PATH: &str = "examples/boards/faults.manifest";
 /// The fewest boards a walk may find. Fewer means the walk is broken, and an empty walk would
 /// otherwise pass.
 const BOARD_FLOOR: usize = 5;
-
-/// The reason's name as the manifest, the pages and `facts.json` write it. No `_` arm: a new
-/// variant is a compile error here.
-fn reason_name(reason: &FaultReason) -> &'static str {
-    match reason {
-        FaultReason::NoMatch => "NoMatch",
-        FaultReason::FactoryError => "FactoryError",
-        FaultReason::FactoryTimeout => "FactoryTimeout",
-        FaultReason::CommandTimeout => "CommandTimeout",
-        FaultReason::CommandFailure => "CommandFailure",
-        FaultReason::WireOverflow => "WireOverflow",
-        FaultReason::OutputRefused => "OutputRefused",
-        FaultReason::NoEntryWire => "NoEntryWire",
-        FaultReason::BranchBusy { branch: _ } => "BranchBusy",
-    }
-}
 
 /// What one run of a board showed.
 #[derive(Debug, Default)]
@@ -87,30 +75,6 @@ fn handle_of(run: &BoardRun, id: NodeId) -> String {
         .iter()
         .position(|&m| m == id)
         .map_or_else(|| format!("{id:?}"), |h| format!("handle {h}"))
-}
-
-/// The fault an item on a fault path holds: its bytes decode as a [`Fault`] and that fault encodes
-/// back to the same bytes. `Fault::decode` alone ignores trailing bytes.
-fn fault_in(item: &Item) -> Option<Fault> {
-    Fault::decode(item).ok().filter(|fault| fault.encode() == *item)
-}
-
-/// Where faults ride on this tick: every belt reachable from some node's fault port link,
-/// following belt-to-belt links, and the (node, port) inboxes those belts hand items to.
-fn fault_paths(state: &GridState, ids: &[NodeId]) -> (BTreeSet<NodeId>, BTreeSet<(NodeId, PortId)>) {
-    let is_belt = |id: NodeId| matches!(state.node(id), Some(Node::Belt(_)));
-    let mut belts: BTreeSet<NodeId> = BTreeSet::new();
-    let mut ends: BTreeSet<(NodeId, PortId)> = BTreeSet::new();
-    let mut frontier: Vec<(NodeId, PortId)> =
-        ids.iter().filter_map(|&id| state.link_target((id, FAULT_PORT))).collect();
-    while let Some((dest, port)) = frontier.pop() {
-        if !is_belt(dest) {
-            ends.insert((dest, port));
-        } else if belts.insert(dest) {
-            frontier.extend(state.links_from(dest).map(|(_, to)| to));
-        }
-    }
-    (belts, ends)
 }
 
 /// Play a board's text to its end tick and read every fault reason it raises.
@@ -131,7 +95,7 @@ fn observe_board(board: BoardFile) -> Result<Observed, String> {
 
     let note = |observed: &mut Observed, producers: &mut BTreeSet<NodeId>, item: &Item, tick: u64| {
         if let Some(fault) = fault_in(item) {
-            observed.reasons.entry(reason_name(&fault.reason)).or_insert(tick);
+            observed.reasons.entry(fault_reason_name(&fault.reason)).or_insert(tick);
             producers.insert(fault.source);
         }
     };
@@ -177,7 +141,7 @@ fn observe_board(board: BoardFile) -> Result<Observed, String> {
                 Some(Node::Router(router)) => {
                     let before = counters.insert(id, router.faults).unwrap_or(0);
                     if router.faults > before {
-                        observed.reasons.entry(reason_name(&FaultReason::NoMatch)).or_insert(tick);
+                        observed.reasons.entry(fault_reason_name(&FaultReason::NoMatch)).or_insert(tick);
                         producers.insert(id);
                     }
                 }
@@ -185,7 +149,7 @@ fn observe_board(board: BoardFile) -> Result<Observed, String> {
                     let before = counters.insert(id, tee.faults).unwrap_or(0);
                     if tee.faults > before {
                         let busy = FaultReason::BranchBusy { branch: Default::default() };
-                        observed.reasons.entry(reason_name(&busy)).or_insert(tick);
+                        observed.reasons.entry(fault_reason_name(&busy)).or_insert(tick);
                         producers.insert(id);
                     }
                 }
@@ -249,7 +213,7 @@ fn known_reasons() -> BTreeSet<&'static str> {
         FaultReason::BranchBusy { branch: Default::default() },
     ]
     .iter()
-    .map(reason_name)
+    .map(fault_reason_name)
     .collect()
 }
 

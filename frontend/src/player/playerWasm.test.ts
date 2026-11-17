@@ -366,6 +366,35 @@ describe('effects', () => {
     ]);
   });
 
+  it('decodes a Request (tag 4) and a Fault (tag 5), the two kinds appended after Reply', () => {
+    const enc = (text: string): number[] => [...new TextEncoder().encode(text)];
+    const post = enc('POST');
+    const path = enc('/endpoint/hello');
+    const reason = enc('CommandTimeout');
+    const bytes = new Uint8Array([
+      3,
+      // tick 40, Request with correlation 0, its verb and its path, Reply after 1.
+      40, 4, 0, post.length, ...post, path.length, ...path, 0, 1,
+      // tick 643, a Fault with its reason and an empty payload, Reply after 1.
+      0x83, 0x05, 5, reason.length, ...reason, 0, 0, 1,
+      // tick 7, a Fault whose payload holds 2 bytes, Reply after 1.
+      7, 5, 1, 0x4e, 2, 0x61, 0x62, 0, 1,
+    ]);
+    expect(decodePlayerEffects(bytes)).toEqual([
+      {
+        tick: 40,
+        effect: { kind: 'Request', correlation: 0, method: 'POST', path: '/endpoint/hello' },
+        answer: { outcome: 'Reply', afterTicks: 1 },
+      },
+      {
+        tick: 643,
+        effect: { kind: 'Fault', reason: 'CommandTimeout', payload: new Uint8Array([]) },
+        answer: { outcome: 'Reply', afterTicks: 1 },
+      },
+      { tick: 7, effect: { kind: 'Fault', reason: 'N', payload: new Uint8Array([0x61, 0x62]) }, answer: { outcome: 'Reply', afterTicks: 1 } },
+    ]);
+  });
+
   it('refuses an unknown kind, an unknown verb and bytes left over', () => {
     expect(() => decodePlayerEffects(new Uint8Array([1, 1, 9]))).toThrow(/PlayerEffectKind discriminant 9/);
     expect(() => decodePlayerEffects(new Uint8Array([1, 1, 0, 0, 9]))).toThrow(/HttpMethod discriminant 9/);

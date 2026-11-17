@@ -197,6 +197,8 @@ export const LAYOUT_CSS = `
 .row .outcome.is-failure { color: var(--fab-destructive); }
 /* A Debug row is a note, not a call: muted, on the label stone token (6.1:1 on the substrate). */
 .row.is-debug { color: var(--fab-label-stone); }
+/* A FAULT row: the word FAULT in the destructive colour, the reason and payload in ink. */
+.row.is-fault .method { color: var(--fab-destructive); }
 .stage {
   position: relative;
   width: 100%;

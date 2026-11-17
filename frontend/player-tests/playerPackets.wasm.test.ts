@@ -20,6 +20,7 @@ const BOARDS_DIR = 'examples/boards';
 const DEMO = `${BOARDS_DIR}/demo_scene.board.ron`;
 const ORDER = `${BOARDS_DIR}/order_processing.board.ron`;
 const OUTCOMES = `${BOARDS_DIR}/docs/script-outcomes.board.ron`;
+const TIMEOUT = `${BOARDS_DIR}/docs/faults-command-timeout.board.ron`;
 const ARRIVAL = `${BOARDS_DIR}/docs/arrival-order.board.ron`;
 
 /** The walk has to find at least this many, so an emptied folder can't pass. */
@@ -457,6 +458,24 @@ describe('the player interface', () => {
       expect(http?.effect).toMatchObject({ method: 'Post' });
       expect(effects.some(({ effect }) => effect.kind === 'Debug')).toBe(true);
       expect(effects.some(({ effect }) => effect.kind === 'Reply')).toBe(true);
+    },
+    BOARD_TIMEOUT_MS,
+  );
+
+  it(
+    'decodes the CommandTimeout that reaches the timeout board\'s dead letter Sink as one Fault with no payload',
+    () => {
+      const board = module.createBoard(repoFile(TIMEOUT));
+      const effects: PlayerEffect[] = [...decodePlayerEffects(board.takeEffects())];
+      while (board.tick() < board.endTick()) {
+        board.step(1);
+        effects.push(...decodePlayerEffects(board.takeEffects()));
+      }
+      board.destroy();
+
+      const faults = effects.filter(({ effect }) => effect.kind === 'Fault').map(({ effect }) => effect);
+      expect(faults).toEqual([{ kind: 'Fault', reason: 'CommandTimeout', payload: new Uint8Array([]) }]);
+      expect(effects.some(({ effect }) => effect.kind === 'Debug'), 'the dead letter Sink leaves no Debug effect').toBe(false);
     },
     BOARD_TIMEOUT_MS,
   );

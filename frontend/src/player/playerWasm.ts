@@ -40,12 +40,18 @@ export class PlayerTrapped extends Error {
 /** The HTTP verbs, in the order `HttpMethod` declares them in Rust, which is the wire format. */
 const HTTP_METHODS = ['Get', 'Post', 'Put', 'Patch', 'Delete'] as const;
 
-/** What a command asked the outside world to do. The player only records it. */
+/**
+ * What a command asked the outside world to do. The player only records it. Two kinds aren't
+ * commands: `Request` is a request the script sent in through a Route, and `Fault` is a Debug
+ * message the player found to be a fault reaching a dead letter Sink, with its reason named.
+ */
 export type PlayerEffectKind =
   | { kind: 'Http'; url: string; method: (typeof HTTP_METHODS)[number]; body: Uint8Array }
   | { kind: 'Debug'; message: Uint8Array }
   | { kind: 'Noop' }
-  | { kind: 'Reply'; correlation: number; payload: Uint8Array };
+  | { kind: 'Reply'; correlation: number; payload: Uint8Array }
+  | { kind: 'Request'; correlation: number; method: string; path: string }
+  | { kind: 'Fault'; reason: string; payload: Uint8Array };
 
 /** How the board's script answered a command. */
 export type PlayerEffectOutcome =
@@ -81,6 +87,15 @@ function readEffectKind(r: PostcardReader): PlayerEffectKind {
     case 3: {
       const correlation = r.varintU();
       return { kind: 'Reply', correlation, payload: readBytes(r) };
+    }
+    case 4: {
+      const correlation = r.varintU();
+      const method = r.str();
+      return { kind: 'Request', correlation, method, path: r.str() };
+    }
+    case 5: {
+      const reason = r.str();
+      return { kind: 'Fault', reason, payload: readBytes(r) };
     }
     default:
       throw new DecodeError(`unknown PlayerEffectKind discriminant ${tag}`);

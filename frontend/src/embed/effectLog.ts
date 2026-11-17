@@ -1,13 +1,17 @@
 // The effect log under a board: each outbound call the run would make, from the player's own
 // effect records (`decodePlayerEffects`). Nothing is sent. The player records each call and the
 // board file's executor scripts its answer, so a row says what the engine acted on: `ok`, `error`
-// or `timeout`. The board format has no HTTP status code, so a row never prints one; a printed
-// code could disagree with the path the engine took.
+// or `timeout`. The board format has no HTTP status code for an outbound call, so a call row never
+// prints one; a printed code could disagree with the path the engine took.
 //
 // Row shapes, in a four-column grid (tick, method, target, outcome):
 //   Http   `t300  POST    https://example.com/slow  ok`, title `<url>, answered at tick 340`
 //          or `<url>, no answer, so it timed out`
 //   Reply  `t251  REPLY   request 7                 ok`
+//   Fault  `t689  FAULT   CommandTimeout`, or `FAULT  NoMatch: <first line of the payload>`, with
+//          no outcome; title `<Reason> fault, keeps no payload` or `<Reason> fault, payload:
+//          <whole payload>`. The player decides which Debug messages are faults, by the engine's
+//          fault-path rule, so this file never sniffs bytes.
 //   Debug  `t301  DEBUG   <message>`, a muted row with no outcome
 //   Noop   no row
 //
@@ -25,15 +29,15 @@ export const NO_CALLS_LINE = 'This board makes no outbound calls.';
 const FOLLOW_SLACK_PX = 2;
 
 export interface EffectRow {
-  /** `call` for Http, `reply` for Reply, `debug` for Debug. */
-  kind: 'call' | 'reply' | 'debug';
+  /** `call` for Http, `reply` for Reply, `fault` for Fault, `debug` for Debug. */
+  kind: 'call' | 'reply' | 'fault' | 'debug';
   /** `t300`. */
   tick: string;
-  /** `POST`, `REPLY` or `DEBUG`. */
+  /** `POST`, `REPLY`, `FAULT` or `DEBUG`. */
   method: string;
-  /** The URL, `request <n>`, or the Debug message. */
+  /** The URL, `request <n>`, the fault reason and its payload's first line, or the Debug message. */
   target: string;
-  /** `ok`, `error` or `timeout`; empty on a Debug row. */
+  /** `ok`, `error` or `timeout`; empty on a Fault or Debug row. */
   outcome: string;
   /** Whether the outcome is a failure, shown in the destructive colour. */
   failed: boolean;
@@ -65,6 +69,14 @@ export function effectRows(effects: readonly PlayerEffect[]): EffectRow[] {
       case 'Reply': {
         const target = `request ${effect.correlation}`;
         rows.push({ kind: 'reply', tick: t, method: 'REPLY', target, outcome, failed: outcome !== 'ok', title: `Reply to ${target}, ${when}` });
+        break;
+      }
+      case 'Fault': {
+        const payload = MESSAGE.decode(effect.payload);
+        const firstLine = payload.split(/\r?\n/, 1)[0];
+        const target = payload === '' ? effect.reason : `${effect.reason}: ${firstLine}`;
+        const title = payload === '' ? `${effect.reason} fault, keeps no payload` : `${effect.reason} fault, payload: ${payload}`;
+        rows.push({ kind: 'fault', tick: t, method: 'FAULT', target, outcome: '', failed: false, title });
         break;
       }
       case 'Debug': {

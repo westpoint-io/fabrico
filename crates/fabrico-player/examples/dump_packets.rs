@@ -8,7 +8,9 @@
 //!
 //! - `<name>.packets`: each packet prefixed with its length as a little-endian `u32`.
 //! - `<name>.effects`: the same framing, holding that tick's `take_effects` bytes. A tick with no
-//!   effects holds the encoding of an empty list.
+//!   effects holds the encoding of an empty list. The bytes come from `Player`'s own per-tick
+//!   conversion, the one the wasm build runs, so a dead letter Debug Sink's fault is a `Fault`
+//!   effect here as it is in the page.
 //! - `<name>.hashes`: one `<tick> <hash>` line per record.
 //!
 //! Exits 1 naming any board that won't run, and 2 if the walk or a write fails.
