@@ -76,5 +76,6 @@ An HTTP Sink in the app sends a real request to its target. Boards on this site 
 
 - [Validate webhook payloads](../validate-webhook-payloads/): check each payload in a Factory and quarantine the bad ones on a second output.
 - [Send failures to a dead letter queue](../dead-letter-queue/): send each machine's faults to a Debug Sink you can read.
+- [Reproduce a bug from a save file](../reproduce-a-bug/): send this example a bad order, save before it faults, and see the fault again from the file.
 - [Factory](../../reference/machines/factory/): the machine that runs your JavaScript on each item and sends out what the code emits.
 - [Sink](../../reference/machines/sink/): the target field, the HTTP methods and what a failed call becomes.

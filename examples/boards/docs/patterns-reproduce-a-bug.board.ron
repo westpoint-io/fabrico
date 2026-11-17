@@ -1,0 +1,118 @@
+// A docs board for the pattern page Reproduce a bug from a save file. It is laid out like the
+// Order processing example: one Source gets two orders, and its belt carries each one into a
+// validate Factory with two outputs. A good order leaves as an invoice job on output 0 and a
+// fulfillment job on output 1. The invoice Factory adds up the total and sends it to a Debug Sink,
+// and the fulfillment Factory sends the order to an HTTP Sink that posts it to
+// https://example.com/fulfillment. The executor block below stands in for that service, so no
+// request leaves the computer.
+//
+// The second order lists its items as text, not a list. The validate code throws on it, and the
+// Factory sends a FactoryError fault out of its Fault port. Unlike the shipped example, this
+// board docks a belt on that port and carries the fault to a dead letter Debug Sink, so the bug
+// leaves a row in the effect log.
+//
+//   row 3:                     +-b8--> FACTORY 2 (invoice) ----b10--> SINK 4   (Debug, invoices)
+//   row 6:   SOURCE 0 -b7-> FACTORY 1 (validate)
+//   row 10:                    +-b9--> FACTORY 3 (fulfillment) -b11--> SINK 5   (HTTP)
+//   row 12:          (Fault) -b12-> SINK 6   (Debug, dead letters)
+//
+// The validate Factory starts with one output. AddPort gives it a second one, the way + Add output
+// does in the inspector: role 1 is an output, side 1 is east, medium 0 is a belt. The new output
+// is catalog port 3 and emit 1, and it seats below the first output, at world cell (7,7). The
+// Fault port sits on the Factory's bottom middle cell, facing south, so its belt starts at (6,8).
+//
+// Handles mint in command order: the Source 0, the Factories 1 to 3, the Sinks 4 to 6, then the
+// belts 7 to 12. The 32 commands and the history seal end the boot on tick 33.
+//
+// machine_kind u8 legend: SOURCE=0, FACTORY=2, SINK=7. Dock `port` is the catalog port index:
+// SOURCE Out=0; FACTORY In=0, Out=1 (emit 0), Fault=2, the added Out=3 (emit 1); SINK In=0.
+//
+// Format 2 adds two fields a page reads and the core never does: `title`, the name a page shows,
+// and `captions`, the ticks a viewer pauses on, each with the machine it highlights and one
+// sentence about what the board does on that tick.
+Board(
+    format: 2,
+    title: "Reproduce a bug from a save file",
+    seed: 97,
+    commands: [
+    // ── Machines (handles 0..=6, mint order == Place order) ──────────────
+    Place(kind: 0, cell_x: 1,  cell_y: 6),   // 0: SOURCE, the webhook front door, 1x1
+    Place(kind: 2, cell_x: 5,  cell_y: 5),   // 1: FACTORY validate/split, 3x3
+    Place(kind: 2, cell_x: 13, cell_y: 2),   // 2: FACTORY invoice branch (upper corridor)
+    Place(kind: 2, cell_x: 13, cell_y: 9),   // 3: FACTORY fulfillment branch (lower corridor)
+    Place(kind: 7, cell_x: 21, cell_y: 3),   // 4: SINK Debug (shows each invoice arriving)
+    Place(kind: 7, cell_x: 21, cell_y: 10),  // 5: SINK HTTP (fulfillment API call)
+    Place(kind: 7, cell_x: 9, cell_y: 12),   // 6: SINK Debug, the dead letters
+
+    // ── Grow the splitter's second Out (UI: Ports section "+ output") ─────
+    // role 1 = Out, side 1 = E, medium 0 = Mechanical. Appends catalog 3 -> emit 1.
+    AddPort(node: 1, role: 1, side: 1, medium: 0),
+
+    // ── Drawn belts (handles 7..=12, mint order == DrawBelt order) ────────
+    // Both branch corridors leave the splitter heading E, then jog apart at x=9.
+    DrawBelt(cells: [(2, 6), (3, 6), (4, 6)]),                                           // 7: source -> splitter In
+    DrawBelt(cells: [(8, 6), (9, 6), (9, 5), (9, 4), (9, 3), (10, 3), (11, 3), (12, 3)]), // 8: splitter Out 1 -> invoice In
+    DrawBelt(cells: [(8, 7), (9, 7), (9, 8), (9, 9), (9, 10), (10, 10), (11, 10), (12, 10)]), // 9: splitter Out 2 -> fulfillment In
+    DrawBelt(cells: [(16, 3), (17, 3), (18, 3), (19, 3), (20, 3)]),                      // 10: invoice -> Debug Sink
+    DrawBelt(cells: [(16, 10), (17, 10), (18, 10), (19, 10), (20, 10)]),                 // 11: fulfillment -> HTTP Sink
+    DrawBelt(cells: [(6, 8), (6, 9), (6, 10), (6, 11), (6, 12), (7, 12), (8, 12)]),        // 12: validate Fault -> dead letters
+
+    // ── Docks (belt, endpoint, node, CATALOG port index) ──────────────────
+    Dock(belt: 7,  endpoint: Tail, node: 0, port: 0),  // Source Out -> belt 7
+    Dock(belt: 7,  endpoint: Head, node: 1, port: 0),  // belt 7 -> splitter In @ (5,6)
+    Dock(belt: 8,  endpoint: Tail, node: 1, port: 1),  // splitter Out 1 (catalog 1 -> emit 0) @ (7,6)
+    Dock(belt: 8,  endpoint: Head, node: 2, port: 0),  // belt 8 -> invoice In @ (13,3)
+    Dock(belt: 9,  endpoint: Tail, node: 1, port: 3),  // splitter Out 2 (catalog 3 -> emit 1) @ (7,7)
+    Dock(belt: 9,  endpoint: Head, node: 3, port: 0),  // belt 9 -> fulfillment In @ (13,10)
+    Dock(belt: 10,  endpoint: Tail, node: 2, port: 1),  // invoice Out (catalog 1 -> emit 0) @ (15,3)
+    Dock(belt: 10,  endpoint: Head, node: 4, port: 0),  // belt 10 -> Debug Sink In @ (21,3)
+    Dock(belt: 11, endpoint: Tail, node: 3, port: 1),  // fulfillment Out (catalog 1 -> emit 0) @ (15,10)
+    Dock(belt: 11, endpoint: Head, node: 5, port: 0),  // belt 11 -> HTTP Sink In @ (21,10)
+
+    // ── Configures (all panel-producible) ─────────────────────────────────
+    Configure(node: 0, config: Source(trigger: Webhook)),
+    // The validate Factory's Fault port (catalog 2) @ (6,7), docked to the dead letter Sink.
+    Dock(belt: 12, endpoint: Tail, node: 1, port: 2),
+    Dock(belt: 12, endpoint: Head, node: 6, port: 0),
+    // The validate code throws on a body with no `id` or no `items` list, so the Factory sends a
+    // FactoryError fault and nothing on its outputs. A good order leaves as one invoice job on
+    // emit 0 and one fulfillment job on emit 1.
+    Configure(node: 1, config: Factory(source: r#"// validate and split the order
+export default function (input, ctx) {
+  if (!input || !input.id || !Array.isArray(input.items)) { throw new Error("not an order"); }
+  ctx.emit(0, { kind: "invoice", order: input.id, items: input.items });
+  ctx.emit(1, { kind: "fulfillment", order: input.id, items: input.items });
+}"#)),
+    Configure(node: 2, config: Factory(source: r#"// build the invoice
+export default function (input, ctx) {
+  var total = 0;
+  for (var i = 0; i < input.items.length; i++) { total += input.items[i].qty * input.items[i].price; }
+  ctx.emit(0, { order: input.order, total: total });
+}"#)),
+    Configure(node: 3, config: Factory(source: r#"// prepare fulfillment
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, ship: input.items });
+}"#)),
+    Configure(node: 4, config: Sink(target: Debug)),
+    Configure(node: 5, config: Sink(target: Http(url: "https://example.com/fulfillment", method: Post))),
+    ],
+    // One good order and one bad order, so the board moves with no webhook. Handle 0 is the
+    // Source, and the boot ends on tick 33.
+    script: [
+        At(tick: 60, input: Webhook(source: 0, body: r#"{"id":"ord-1","items":[{"sku":"widget","qty":2,"price":5}]}"#)),
+        At(tick: 120, input: Webhook(source: 0, body: r#"{"id":"ord-2","items":"two gadgets"}"#)),
+    ],
+    captions: [
+        // Measured: h1 Factory WORKING[83]; h2 and h3 Factory WORKING[145]
+        Caption(tick: 83, highlight: 1, text: "The validate Factory checks order ord-1. It has an id and an items list, so the Factory splits it into an invoice job and a fulfillment job."),
+        // Measured: FAULTED tick=143 node=h1 (h1 FAULTED[143], the only red tick)
+        Caption(tick: 143, highlight: 1, text: "Order ord-2 lists its items as text, so the validate Factory throws and sends a FactoryError fault out of its Fault port. It is red on this tick only."),
+        // Measured: effect step_ends_on=197 DEBUG from=h6 fault_end=true | FAULT FactoryError payload="Error: not an order\n    at default (factory:3:71)\n"
+        Caption(tick: 197, highlight: 6, text: "The FactoryError fault reached the dead letter Debug Sink. It holds the error message, Error: not an order, and one stack line."),
+    ],
+    executor: Executor(default: Reply(after_ticks: 1), rules: [
+        Rule(url_prefix: "https://example.com/fulfillment", outcome: Reply(after_ticks: 20)),
+    ]),
+    view: View(fit: Board),
+    end_tick: 400,
+)

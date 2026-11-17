@@ -37,9 +37,9 @@ const BOARDS = path.resolve(SITE, '../examples/boards/docs');
 /**
  * The number of pattern pages the section holds now. Each change that adds pattern pages raises
  * it to the new page count in the same commit, so a glob that matches nothing, or a lost page,
- * can't pass. It ends at 23 once all twenty-three pattern pages are written.
+ * can't pass. The section ends here, at all twenty-three pattern pages.
  */
-const MIN_PATTERN_PAGES = 22;
+const MIN_PATTERN_PAGES = 23;
 
 /** Curly quotes made straight and runs of space made one, so markdown and HTML compare as text. */
 function plain(text: string): string {

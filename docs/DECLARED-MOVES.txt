@@ -147,10 +147,9 @@
 # =====================================================================================
 
 [fixtures]
-# The order board's line (examples/boards/order_processing.board.ron) moved, written by the
-# generator: its end tick went from 1200 to 600, so its tick and hash changed. Its commands, script
-# and seed are unchanged, and the other 54 lines are unchanged.
-examples/boards/hashes.manifest b0631d74dda2e4e7e85e0c5acfcbcc0d2594c5e38d2ed9d2b4593a73ede7f910
+# One board line added, written by the generator:
+# examples/boards/docs/patterns-reproduce-a-bug.board.ron. The other 55 lines are unchanged.
+examples/boards/hashes.manifest cd75d189e793fd7b6f8287cde3420b1e23c9f8c86f5d66cfd0f1c1a68c2d9191
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

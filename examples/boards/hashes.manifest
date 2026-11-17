@@ -42,6 +42,7 @@ examples/boards/docs/patterns-local-http-endpoint.board.ron 200 e146851ea6de756f
 examples/boards/docs/patterns-mock-api-server.board.ron 240 7000fe64c2e1cf375f0021322617371edca5d11affe9a821f5e176b4f0bf6cb9
 examples/boards/docs/patterns-parallel-workers.board.ron 260 80e8556643a0da8202316da97503001d07820c81963807c32f1a1d9b1d59f50d
 examples/boards/docs/patterns-rate-limit.board.ron 400 e060533933957629e36d5239d3f6b8cdc4444a061dca46384ad917befef49d49
+examples/boards/docs/patterns-reproduce-a-bug.board.ron 400 a02d8e09b1d1e251bb06fe055502e74d149a286303c14ff719585fc376ac1961
 examples/boards/docs/patterns-request-timeout.board.ron 760 75ab81d652f332942886161a5969e3428f555c297e086264258da760857126ba
 examples/boards/docs/patterns-route-by-content.board.ron 300 7c8c7281023e57dbc28689d0b169b3a9553c97d38c2ecf7b70767e168f7c4f91
 examples/boards/docs/patterns-run-on-a-schedule.board.ron 300 f448e1ccf70b65ae8c8f710ee157d6ffec8b134fb557605b6c7b29195a47e491

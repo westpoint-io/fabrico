@@ -1,0 +1,114 @@
+---
+title: Reproduce a bug from a save file
+description: "Save a board just before a bug, open the file and play it again: the same events give the same fault at the same tick."
+searchPhrase: reproduce a bug
+faults: 1
+sidebar:
+  label: Reproduce a bug
+  order: 230
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Board from '../../../components/Board.astro';
+import Fact from '../../../components/Fact.astro';
+
+To reproduce a bug, save the board just before it happens, then open the file and play it again. The engine is deterministic, so the same starting state and the same events give the same result on every replay, and the bug shows up at the same [tick](../../reference/files/glossary/#term-tick) each time. This works for any workflow, as long as you save before the bug.
+
+The board below is laid out like [Order processing end to end](../order-processing/). A [Source](../../reference/files/glossary/#term-source) feeds the validate [Factory](../../reference/files/glossary/#term-factory), whose two outputs lead to the invoice Factory and a Debug [Sink](../../reference/files/glossary/#term-sink) at the top and the fulfillment Factory and an HTTP Sink at the bottom. This board adds one thing, a [belt](../../reference/files/glossary/#term-belt) from the validate Factory's [fault port](../../reference/files/glossary/#term-fault-port) to a dead letter Debug Sink under it. The script sends a good order on tick 60 and a bad one on tick 120.
+
+<Board name="docs-patterns-reproduce-a-bug" faultsAbout="FactoryError" />
+
+The same board again, from the same file. Its badge checks the same end hash as the one above.
+
+<Board name="docs-patterns-reproduce-a-bug" faultsAbout="FactoryError" />
+
+## How the board works
+
+Press Play on either board and it stops on these three ticks:
+
+1. Tick 83: The validate Factory checks order ord-1. It has an id and an items list, so the Factory splits it into an invoice job and a fulfillment job.
+2. Tick 143: Order ord-2 lists its items as text, so the validate Factory throws and sends a FactoryError fault out of its Fault port. It is red on this tick only.
+3. Tick 197: The FactoryError fault reached the dead letter Debug Sink. It holds the error message, Error: not an order, and one stack line.
+
+Both boards end on tick 400 with the same three rows in the effect log: `t182  DEBUG  {"order":"ord-1","total":10}` and `t182  POST  https://example.com/fulfillment  ok` from the good order, and `t196  FAULT  FactoryError: Error: not an order` from the bad one. That is {frontmatter.faults} FAULT row on each board, on the same tick, and both badges read match, because both runs start from the same file and get the same events.
+
+## The Factory code
+
+Each Factory runs its own code once for each [item](../../reference/files/glossary/#term-item) that reaches it. The validate Factory checks the order and splits it:
+
+```js title="Factory code"
+// validate and split the order
+export default function (input, ctx) {
+  if (!input || !input.id || !Array.isArray(input.items)) { throw new Error("not an order"); }
+  ctx.emit(0, { kind: "invoice", order: input.id, items: input.items });
+  ctx.emit(1, { kind: "fulfillment", order: input.id, items: input.items });
+}
+```
+
+The invoice Factory adds up the price of each line:
+
+```js title="Factory code"
+// build the invoice
+export default function (input, ctx) {
+  var total = 0;
+  for (var i = 0; i < input.items.length; i++) { total += input.items[i].qty * input.items[i].price; }
+  ctx.emit(0, { order: input.order, total: total });
+}
+```
+
+The fulfillment Factory keeps the order id and the items to ship:
+
+```js title="Factory code"
+// prepare fulfillment
+export default function (input, ctx) {
+  ctx.emit(0, { order: input.order, ship: input.items });
+}
+```
+
+The bug is the `throw` line in the validate code. The second order's `items` is the text `"two gadgets"`, not a list, so `Array.isArray(input.items)` is false. The Factory sends a FactoryError [fault](../../reference/files/glossary/#term-fault) holding `Error: not an order` and sends nothing on either output.
+
+## Reproduce it in the app
+
+The app's Order processing example has the same validate Factory, so you can make the same bug happen there, save just before it, and watch it again from the file. You need curl, as in [Send your first webhook](../../get-started/first-webhook/).
+
+<Steps>
+
+1. Open Examples on the toolbar and load Order processing. The board starts playing.
+
+2. Click the Source on the left and copy its Webhook URL from the inspector, the panel on the right.
+
+3. Send one bad order with curl, with `PORT` and `ID` from the Webhook URL, and press Step, or <Fact id="shortcut.step" />, as soon as the order leaves the Source:
+
+   ```bash wrap
+   curl -X POST http://127.0.0.1:PORT/hook/src-ID \
+     -H 'x-delivery-id: bug-1' \
+     -d '{"id":"ord-2","items":"two gadgets"}'
+   ```
+
+   The order reaches the validate Factory about a third of a second after it leaves the Source, and Step stops the board with the order still on the first belt. If you miss it, send the order again with a new delivery id, such as `bug-2`. This order never reaches the HTTP Sink, so the app makes no call to localhost:8799.
+
+4. Press Save and choose a file. The board is paused, so the app saves it straight away, with the order on its belt.
+
+5. Press Step until the validate Factory turns red, and note the tick on the toolbar.
+
+6. Press Load and choose the file you saved. The board comes back paused at the tick you saved, with the order on its belt. Press Step until the Factory turns red. It turns red at the same tick.
+
+</Steps>
+
+## Trade-offs
+
+<Aside type="caution">
+An HTTP Sink in the app sends a real request to its target. Boards on this site use scripted replies and make no network calls.
+</Aside>
+
+- Save before the bug. A save taken after it reopens a board with nothing left to watch, because the example's validate Factory has no belt on its Fault port, so the fault is dropped and the board keeps no copy of the order. [Send failures to a dead letter queue](../dead-letter-queue/) shows how to keep one.
+- Pause, and Save on a playing board, both let the items on the belts finish before the board stops, so the order would run into the Factory and the bug would happen before the save. Step stops the board where it is. [Save, open and replay](../../get-started/save-open-replay/) says what each one saves.
+- The validate Factory is red for one tick only, so you won't catch it on a playing board. Step one tick at a time to find it. [Ticks](../../concepts/ticks/#ticks-and-seconds) says how long a tick lasts in the app.
+- The app's list of delivery ids starts empty when you open a file, so after a Load the same delivery id makes a new item again. [Webhook ingress](../../reference/code-and-http/webhook-ingress/#repeat-deliveries) explains the list.
+
+## Related pages
+
+- [Order processing end to end](../order-processing/): the example these steps use, with two good orders and no faults.
+- [Send failures to a dead letter queue](../dead-letter-queue/): send each machine's faults to a Debug Sink you can read.
+- [Save, open and replay](../../get-started/save-open-replay/): what a save holds and what opening the file replays.
+- [Determinism and replay](../../concepts/determinism-and-replay/): why the same start and the same events give the same result.
