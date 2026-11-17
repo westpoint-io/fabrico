@@ -30,6 +30,7 @@ examples/boards/docs/machines-sink.board.ron 260 4bbd9790d7cdf059e967d3d3988ea16
 examples/boards/docs/machines-source.board.ron 300 a4df1f32bfc2b6f11e398ab1116b15e8c3b869c8d629e9b5e08a378a7542d3bf
 examples/boards/docs/machines-tee.board.ron 260 6c26554a757f6d8446203664fd55af7761ca01fa805acb75a8c9b0ccf33d3b63
 examples/boards/docs/machines-wire.board.ron 240 ab7bc3864429495a7d55a9d928c64723759e81b61f1d19b90883412d73f1f523
+examples/boards/docs/patterns-batch-events.board.ron 260 330fb80b35ad93bc0fc2f0e37222a7de6d3aaffcf7d8a8e6671c88fa4510ecbb
 examples/boards/docs/patterns-buffer-events.board.ron 600 b1abbee0c3d52afe851382e137ccbb1487e40d13790f219c252e4e142e5ed77b
 examples/boards/docs/patterns-call-exactly-once.board.ron 200 09b5937fd36d617ec4f6ba4534be118a77f0bb6b107885a3f52abf7974b64fe0
 examples/boards/docs/patterns-combine-several-sources.board.ron 300 f3d1e1ee1f0c09cb417f9fc446c362a702a50bb39dfecac180894c1ae91b1e76

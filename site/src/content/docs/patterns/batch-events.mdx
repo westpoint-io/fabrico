@@ -1,0 +1,60 @@
+---
+title: Batch events into groups of N
+description: "Collect items in a Factory's ctx.state and emit one combined item every N, so a slow service gets fewer, bigger calls."
+searchPhrase: batch events
+sidebar:
+  label: Batch events
+  order: 180
+---
+
+import Board from '../../../components/Board.astro';
+
+To batch events, collect several [items](../../reference/files/glossary/#term-item) and send them on as one. A [Factory](../../reference/files/glossary/#term-factory) keeps each item in its state until it has N of them and then emits them as one combined item, so the service after it gets one call for every N events instead of N calls.
+
+The board below has a [Source](../../reference/files/glossary/#term-source), a Factory and a Debug [Sink](../../reference/files/glossary/#term-sink), joined by [belts](../../reference/files/glossary/#term-belt). Seven webhooks arrive 20 ticks apart, and the Factory groups them in threes.
+
+<Board name="docs-patterns-batch-events" />
+
+## How the board works
+
+Press Play and the board stops on these four [ticks](../../reference/files/glossary/#term-tick), the engine's steps:
+
+1. Tick 63: The Factory collects items in its state and sends one combined item for every 3. Item 1 is the first, so the Factory keeps it and sends nothing.
+2. Tick 103: Item 3 fills the batch, so the Factory sends items 1, 2 and 3 on as one item and starts an empty batch.
+3. Tick 163: Item 6 fills the second batch, so the Factory sends items 4, 5 and 6 on as one item.
+4. Tick 183: Item 7 starts a new batch. No more items come, so it waits in the Factory's state and never leaves.
+
+The Factory runs once for each of the seven items, but only the runs for items 3 and 6 send anything. By its last tick the effect log under the board shows two rows, each listing its items in the order they arrived: `t124  DEBUG  {"items":[{"id":1},{"id":2},{"id":3}]}` and `t184  DEBUG  {"items":[{"id":4},{"id":5},{"id":6}]}`. The Factory's state at the end is `{"batch":[{"id":7}]}`.
+
+## The Factory code
+
+The Factory runs this code once for each item that reaches it:
+
+```js title="Factory code"
+// send one item for every 3 that come in
+export default function (input, ctx) {
+  const batch = ctx.state.batch || [];
+  batch.push(input);
+  if (batch.length < 3) {
+    ctx.state.batch = batch;
+    return;
+  }
+  ctx.state.batch = [];
+  ctx.emit(0, { items: batch });
+}
+```
+
+The line `if (batch.length < 3) {` decides when a batch is full. While the batch holds fewer than 3 items, the run stores it and returns without sending anything. To send a different number of items in each batch, change the 3 on that line.
+
+## Trade-offs
+
+- A short last batch waits for more items, and nothing flushes it. The code runs only when an item reaches the Factory, so a batch that never gets to 3 items stays in the state and never leaves, as item 7 does on this board. [Factory API](../../reference/code-and-http/factory-api/) says when the code runs.
+- The batch lives in `ctx.state`, so it goes into the save with the rest of the board. When a run throws, the state keeps the batch it had before the run, so the item that run took isn't added to it. [Factory API](../../reference/code-and-http/factory-api/#ctxstate) says how the state rolls back.
+- A bigger N means a bigger batch in the state and a bigger combined item. Every run parses and saves the whole batch within the Factory's memory and work limits, and a Factory that reads the combined item parses it within its own. [Limits](../../reference/board/limits/#factories) lists them.
+
+## Related pages
+
+- [Keep a running total per key](../running-total/): another Factory that keeps state from one event to the next.
+- [Rate limit with belt pace](../rate-limit/): space out the calls to a slow service instead of combining them.
+- [Factory API](../../reference/code-and-http/factory-api/): what `ctx.state` keeps, when it rolls back, and the limits on one run.
+- [Limits](../../reference/board/limits/): the memory and work limits on one run of a Factory's code.
