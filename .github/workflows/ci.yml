@@ -1122,20 +1122,29 @@ jobs:
   # compiles the vendored QuickJS outside scripts/build-wasm.sh, which is why CC and AR for wasm32 are
   # in the job's `env`.
   #
-  # TIME LIMIT. A run adds up to about 204 seconds, so the limit is 1.76 times that. Measured on a
-  # developer machine: the cold scripts/build-wasm.sh on one core 67 seconds, with the corpus harness
-  # and its native tool in it, the six checks on two cores 9, the fence report and its prover on two
-  # cores 3, the toolchain pin check under 1, the cold wasm32 clippy on one core 34 (an upper bound,
+  # THE BROWSER, WITHOUT APT. The Playwright step installs Chromium with no `--with-deps`. The
+  # ubuntu-24.04 image already has every library Chromium links, so `--with-deps` only added nine
+  # font packages and four Mesa upgrades, 32.1 MB from the Ubuntu mirror. The player checks draw no
+  # canvas and read no text, so they use none of it. Runs 44405254645 and 44405292666 were cancelled
+  # at the old 6-minute limit with that fetch still going: their mirror (us-east-2.ec2) sent it at
+  # about 60 kB/s, where the azure mirror on run 44294890291 took 2 s. The same fetch took 200 to
+  # 682 s in about a third of the Chromium jobs on those runs. Playwright checks the libraries when
+  # it launches Chromium and names any that are missing, so an image that drops one fails by name.
+  #
+  # TIME LIMIT. A run adds up to about 265 seconds, so the limit is 1.81 times that, 8 minutes.
+  # Measured on a developer machine: the cold scripts/build-wasm.sh on one core 67 seconds, with the
+  # corpus harness and its native tool in it, the cold wasm32 clippy on one core 34 (an upper bound,
   # since that run also compiled the standard library), and scripts/install-wasm-opt.sh 6. Recorded
-  # on a GitHub run, 84 more: job setup and checkout 3, toolchain 9, Node 1, the determinism job's
-  # larger apt step 27 as a stand-in, the cargo cache 11 to restore and 9 to save, npm ci 5 and the
-  # Playwright browser 19.
+  # on GitHub, the slowest of runs 44294890291, 44405254645 and 44405292666, 158 more: job setup and
+  # checkout 8, toolchain 11, Node 7, the clang apt step 46 on the slow mirror, the cargo cache 11 to
+  # restore and 9 to save, npm ci 6, the Playwright browser 19, the artifact upload 3, the six checks
+  # 29, the fence report and its prover 8, and the toolchain pin check 1.
   wasm-player:
     name: the wasm player builds on the pinned compiler and passes its checks
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
       CC_wasm32_unknown_unknown: clang
@@ -1171,7 +1180,7 @@ jobs:
 
       - name: Install Playwright chromium
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Install the pinned wasm-opt
         run: bash scripts/install-wasm-opt.sh "${{ runner.temp }}/binaryen"

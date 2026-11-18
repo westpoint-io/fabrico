@@ -55,7 +55,9 @@ concurrency:
 
 jobs:
   # TIME LIMIT. No release has run yet. Its parts have: the pinned toolchain and the player build fit
-  # in wasm-player's 6 minutes in ci.yml, the embed build took 2 min 15 s in run 44294890291, and a
+  # in the 6 minutes wasm-player had in ci.yml before its limit went to 8 for the apt step it no
+  # longer runs (its whole job took 2 min 14 s in run 44294890291), the embed build took 2 min 15 s
+  # in run 44294890291, and a
   # Playwright install with its apt dependencies took 14 min 5 s that day on a slow Ubuntu mirror.
   # That is about 22.5 minutes; the limit is 2 times that, 45. Measure the first run and set it.
   build:
