@@ -268,26 +268,27 @@ fn scene_packet(id: SceneId) -> RenderPacket {
     pkt
 }
 
-/// The demo's two cables as the packet drew them at `PHASE92_START` (read off a keyframe of
-/// the demo genesis there and here): wire 31, the request from the caller Route's Out to the
-/// HTTP Handler's In, and wire 32, the reply back to the Route's In (92-MEASURE.md section 4:
-/// they cross no third machine).
-const DEMO_REQUEST: &[(i32, i32)] = &[(13, 6), (14, 6), (15, 6), (16, 6)];
+/// The demo's two cables as the packet draws them, read off a keyframe of the demo board:
+/// wire 31, the request from the caller Route's Out to the HTTP Handler's In, and wire 32, the
+/// reply back to the Route's In. Neither crosses a third machine. They took the same shape one
+/// row higher at `PHASE92_START` (92-MEASURE.md section 4); the pair has since moved one row
+/// down on the board, so the request runs along row 7 and the reply loops round along row 9.
+const DEMO_REQUEST: &[(i32, i32)] = &[(13, 7), (14, 7), (15, 7), (16, 7)];
 const DEMO_REPLY: &[(i32, i32)] = &[
-    (18, 6),
-    (19, 6),
+    (18, 7),
     (19, 7),
     (19, 8),
-    (18, 8),
-    (17, 8),
-    (16, 8),
-    (15, 8),
-    (14, 8),
-    (13, 8),
+    (19, 9),
+    (18, 9),
+    (17, 9),
+    (16, 9),
+    (15, 9),
+    (14, 9),
+    (13, 9),
+    (12, 9),
     (12, 8),
     (12, 7),
-    (12, 6),
-    (13, 6),
+    (13, 7),
 ];
 
 /// D-09, UI-SPEC 4.1 rule 2: a cable with no machine in its way takes exactly the path it
@@ -303,7 +304,7 @@ fn every_shipped_scene_routes_identically() {
     assert_eq!(
         paths,
         vec![DEMO_REQUEST.to_vec(), DEMO_REPLY.to_vec()],
-        "the demo's cables are the paths they took at PHASE92_START"
+        "the demo's cables are the measured paths for the Route at (13,7) and the Handler at (16,6)"
     );
     for id in [SceneId::OrderProcessing, SceneId::Advanced] {
         assert!(scene_packet(id).wires.is_empty(), "{id:?} holds no wire");

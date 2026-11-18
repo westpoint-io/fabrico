@@ -285,8 +285,20 @@ use fabrico_scenario::tick_hash;
 ///   HOLDS.
 ///   OLD `dcb2866b00baf40eb066cff261a57b9d7efd4151d9eef5fb3f9a7361cf6158a4`
 ///   NEW `ae70bc15f8d6d77e8d4cbfab7536c72404312c73e9bd73c10ccd0ae8a35a9cbe`
+///
+/// - The web request pair moves one row down. A LAYOUT EDIT, named: in
+///   `examples/boards/demo_scene.board.ron` the caller Route goes from (13,6) to (13,7) and
+///   the HTTP Handler from (16,5) to (16,6), so the Handler's name chip, which the embed
+///   draws on the row above the machine, no longer covers the "Audit copy" label on row 4.
+///   The request cable runs along row 7 and the reply loop along row 9. Two `Place` cells
+///   change and nothing else: no schema change, the same 67 commands in the same order, so
+///   every handle and the boot tick stay. The Order processing and Advanced boards don't
+///   change, and nothing pins them here. Both appliers fold the edited file, so THE
+///   TWO-APPLIER EQUALITY STILL HOLDS.
+///   OLD `ae70bc15f8d6d77e8d4cbfab7536c72404312c73e9bd73c10ccd0ae8a35a9cbe`
+///   NEW `dac15383037104ab8f58ce68cab97b3eeafde4b1ac8010413828f8f5b32bb423`
 const GOLDEN_TICK_HASH: &str =
-    "ae70bc15f8d6d77e8d4cbfab7536c72404312c73e9bd73c10ccd0ae8a35a9cbe";
+    "dac15383037104ab8f58ce68cab97b3eeafde4b1ac8010413828f8f5b32bb423";
 
 /// A third applier with no host at all: the board file, parsed and booted on a bare [`Engine`],
 /// lands on the pinned hash. So the host's boot and the headless boot build one board.

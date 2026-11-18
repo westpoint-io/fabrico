@@ -151,6 +151,11 @@
 # its caller Route from (13,6) to (13,7) and its HTTP Handler from (16,5) to (16,6). The other
 # 55 lines are unchanged.
 examples/boards/hashes.manifest e8d9a731fcbeb07d3ce8b83b24da713c0ab92dc71113430a2f3c80ed12abc3a1
+# The demo's caller Route moved from (13,6) to (13,7) and its HTTP Handler from (16,5) to
+# (16,6). Recorded on the old tick loop at bc20bb7 with the same two cell edits made to that
+# commit's crates/fabrico-host/src/scenes/demo_scene.ron; the two sibling fixtures it wrote are
+# byte-equal to the committed ones.
+crates/fabrico-host/tests/fixtures/host_parity/demo_scene.hashes d6765e2d85ed4dd505d5e2f4da6f6412bf2ae15892ab14fed1cb5f46a12e0348
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

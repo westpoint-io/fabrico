@@ -999,7 +999,8 @@ fn probe_d2_draw_wire_then_delete() {
 /// The slots the probes above name are the machines they mean, MEASURED on the demo board
 /// (a slot is its node's mint-order handle plus one). Re-measured by plan 85-08 when the
 /// demo gained its labels and lanes: the Factory, the Rejects sink and its fault belt, the
-/// Route, the HTTP Handler and the request cable.
+/// Route, the HTTP Handler and the request cable. The Handler's cell was measured again when
+/// the Route and the Handler moved one row down, so its name chip clears the Audit copy label.
 #[test]
 fn the_probe_slots_name_the_nodes_the_probes_mean() {
     let probe = demo_host();
@@ -1009,9 +1010,9 @@ fn the_probe_slots_name_the_nodes_the_probes_mean() {
     assert_eq!(at(6), "Sink@Some((5, 8))", "slot 6 is the Rejects sink");
     assert_eq!(at(23), "Belt@Some((5, 5))", "slot 23 is the fault belt into the Rejects sink");
     assert!(matches!(core.state.node(demo_id(&probe, 30)), Some(Node::Endpoint(_))), "slot 30 is the caller Route");
-    assert_eq!(at(31), "Factory@Some((16, 5))", "slot 31 is the HTTP Handler (a Handler folds to a Factory)");
+    assert_eq!(at(31), "Factory@Some((16, 6))", "slot 31 is the HTTP Handler (a Handler folds to a Factory)");
     assert!(
-        at(32).starts_with("Wire[") && at(32).contains("-> Factory@Some((16, 5)).0"),
+        at(32).starts_with("Wire[") && at(32).contains("-> Factory@Some((16, 6)).0"),
         "slot 32 is the request cable into the Handler's In: {}",
         at(32)
     );
