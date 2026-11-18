@@ -1,0 +1,222 @@
+# Fabrico release: attaches the offline examples file to a draft release and checks the copy it
+# attached.
+#
+# WHAT IT DOES. It builds the player, the embed bundle and the offline file
+# (frontend/dist-examples/fabrico-examples.html, the one HTML file that runs every example board from
+# disk) at this run's commit, creates a draft release for the tag if there isn't one, attaches the
+# file to it, downloads the attached copy back from the release, and opens that copy in Chromium,
+# strict Firefox and WebKitGTK with scripts/check-offline-browsers.sh. What a reader downloads is
+# what was checked.
+#
+# A DRAFT, NEVER A PUBLISHED RELEASE. A draft names its tag without creating it, and only people
+# with push access can see it. The maintainers write the notes and publish it by hand; publishing
+# creates the tag. This workflow never publishes, and when the tag's release is already published it
+# changes nothing: it downloads the published asset and checks it again.
+#
+# HOW TO RUN IT. Dispatch it on main (Actions, release, Run workflow) after main holds the same
+# workflow files as the commit you release. GitHub only offers workflow_dispatch for a workflow file
+# on the default branch, and the workflow token can't create a release whose target commit changes
+# anything under .github/workflows/ relative to the default branch. The draft targets this run's
+# commit. Pushing a tag such as v0.1.0 starts it too.
+#
+# WHY THREE JOBS. Only the attach job can write to the repository's releases, and it runs no package
+# code: it takes the built file as an artifact and uses gh, which the runner ships, and the
+# first-party artifact actions. The build job and the verify job run package installs and the
+# Rust and browser toolchains with a read-only token. A read-only token can't see a draft release,
+# so the attach job hands the downloaded copy to the verify job as an artifact.
+#
+# THE TAG reaches the scripts only through `env:`, never as an expression inside a script, and the
+# attach job refuses anything but vMAJOR.MINOR.PATCH before any release call.
+# `ci_wiring_parity.rs` pins all of this.
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag, vMAJOR.MINOR.PATCH (the version in crates/fabrico-app/Cargo.toml)
+        required: true
+        default: v0.1.0
+        type: string
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# The floor for every job. The attach job raises it in its own block.
+permissions:
+  contents: read
+
+# Two runs for one tag queue one after the other, so they never race on one draft. A run in progress
+# is never cancelled.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # TIME LIMIT. No release has run yet. Its parts have: the pinned toolchain and the player build fit
+  # in wasm-player's 6 minutes in ci.yml, the embed build took 2 min 15 s in run 44294890291, and a
+  # Playwright install with its apt dependencies took 14 min 5 s that day on a slow Ubuntu mirror.
+  # That is about 22.5 minutes; the limit is 2 times that, 45. Measure the first run and set it.
+  build:
+    name: the offline examples file builds at this commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
+      CC_wasm32_unknown_unknown: clang
+      AR_wasm32_unknown_unknown: llvm-ar
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install clang and llvm-ar for the wasm C build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Install the pinned wasm-opt
+        run: bash scripts/install-wasm-opt.sh "$RUNNER_TEMP/binaryen"
+
+      - name: Build the player
+        env:
+          WASM_OPT: ${{ runner.temp }}/binaryen/wasm-opt
+        run: bash scripts/build-wasm.sh
+
+      - name: Build the embed bundle and the offline file
+        run: bash scripts/build-embed.sh
+
+      - name: Keep the offline file for the attach job
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-built
+          path: frontend/dist-examples/fabrico-examples.html
+          if-no-files-found: error
+          retention-days: 7
+
+  # The one job that can write to releases. It runs gh and the artifact actions and nothing else.
+  # TIME LIMIT. No measurement yet: two artifact transfers and four gh calls on a file of about
+  # 3.8 MB. Measure the first run and set it.
+  attach:
+    name: the offline file is attached to the tag's draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Take the file the build job made
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-built
+          path: offline-built
+
+      - name: Attach it to the draft and download the attached copy
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release: the tag \"$TAG\" isn't vMAJOR.MINOR.PATCH, so nothing was created or uploaded." >&2
+            exit 1
+          fi
+          if state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>view-error.txt)"; then
+            if [ "$state" = "false" ]; then
+              echo "release: $TAG is already published. Leaving it unchanged and checking its asset again."
+              gh release download "$TAG" --pattern fabrico-examples.html --dir downloaded
+              sha256sum downloaded/fabrico-examples.html
+              exit 0
+            fi
+            echo "release: $TAG has a draft release; replacing its asset."
+          elif grep -q "release not found" view-error.txt; then
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" \
+              --notes "Draft. The maintainers write the notes when they publish it."
+            echo "release: created the draft for $TAG at $GITHUB_SHA."
+          else
+            cat view-error.txt >&2
+            exit 1
+          fi
+          gh release upload "$TAG" offline-built/fabrico-examples.html --clobber
+          gh release download "$TAG" --pattern fabrico-examples.html --dir downloaded
+          sha256sum offline-built/fabrico-examples.html downloaded/fabrico-examples.html
+          built="$(sha256sum < offline-built/fabrico-examples.html)"
+          attached="$(sha256sum < downloaded/fabrico-examples.html)"
+          if [ "$built" != "$attached" ]; then
+            echo "release: the copy downloaded from $TAG differs from the file the build job made." >&2
+            exit 1
+          fi
+
+      - name: Hand the attached copy to the verify job
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-attached
+          path: downloaded/fabrico-examples.html
+          if-no-files-found: error
+          retention-days: 7
+
+  # TIME LIMIT. The same installs and offline check as ci.yml's embed job, without the embed build
+  # and check. On the slow mirror day of run 44294890291 the Playwright install took 14 min 5 s and
+  # the WebKitGTK apt step 1 min 44 s, and the offline check took 12 min 1 s on the green run
+  # 43974435804: 27 min 50 s, and about 29 minutes with checkout, Node and the frontend install.
+  # The limit is 1.7 times that, 49.3 minutes, rounded up to 50.
+  verify:
+    name: the attached copy runs every board in Chromium, Firefox and WebKitGTK
+    needs: attach
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium and firefox
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Install WebKitGTK and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb python3-gi python3-gi-cairo gir1.2-webkit2-4.1 libgl1-mesa-dri
+
+      - name: Take the copy downloaded from the release
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-attached
+          path: offline-attached
+
+      - name: Open the attached copy in Chromium, strict Firefox and WebKitGTK
+        run: FABRICO_OFFLINE_FILE="$PWD/offline-attached/fabrico-examples.html" bash scripts/check-offline-browsers.sh

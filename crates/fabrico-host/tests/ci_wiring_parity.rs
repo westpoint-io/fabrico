@@ -73,6 +73,10 @@ const DECLARED_MOVES_BASE_SITES: usize = 2;
 /// source file: `crates/fabrico-host/tests/` -> `../../../` is the repository root.
 const CI_YML: &str = include_str!("../../../.github/workflows/ci.yml");
 
+/// `.github/workflows/release.yml`, embedded the same way. It attaches the offline file to a draft
+/// release; `release_wiring_wrong` pins its least-privilege split.
+const RELEASE_YML: &str = include_str!("../../../.github/workflows/release.yml");
+
 /// Scripts this workflow invokes that run `cargo clippy` THEMSELVES.
 ///
 /// THAW-10's requirement is that the pin check runs immediately before EVERY clippy
@@ -3775,3 +3779,293 @@ fn every_job_has_a_time_limit() {
     );
 }
 
+/// Every job in release.yml has its own time limit too.
+#[test]
+fn every_release_job_has_a_time_limit() {
+    let (jobs, wrong) = jobs_without_one_time_limit(RELEASE_YML);
+    assert!(
+        jobs >= 3,
+        "found {jobs} jobs under `jobs:` in .github/workflows/release.yml, expected at least 3; \
+         the job scan is not reading the workflow"
+    );
+    assert!(
+        wrong.is_empty(),
+        "every release job must carry its own `timeout-minutes:`:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// The one release job that may write to the repository.
+const RELEASE_ATTACH_JOB: &str = "attach";
+/// The release job that checks the attached copy.
+const RELEASE_VERIFY_JOB: &str = "verify";
+/// The tag filter: three-part version tags only, so `v13.0` and `public-base` never start a release.
+const RELEASE_TAG_FILTER: &str = "- 'v[0-9]+.[0-9]+.[0-9]+'";
+/// The concurrency group, keyed on the tag, and the rule that never cancels a run in progress.
+const RELEASE_CONCURRENCY: [&str; 2] = [
+    "group: release-${{ inputs.tag || github.ref_name }}",
+    "cancel-in-progress: false",
+];
+/// The verify job's run line: the offline check on the copy downloaded from the release.
+const RELEASE_VERIFY_RUN: &str = r#"run: FABRICO_OFFLINE_FILE="$PWD/offline-attached/fabrico-examples.html" bash scripts/check-offline-browsers.sh"#;
+/// The attach job's tag check, which must come before its first release call.
+const RELEASE_TAG_CHECK: &str = r#"if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then"#;
+/// Package and build tools the attach job must never run, as whole words.
+const RELEASE_ATTACH_FORBIDDEN: [&str; 3] = ["npm", "npx", "cargo"];
+
+/// Does `line` hold `word` as a whole word (no letter, digit, `_` or `-` on either side)?
+fn has_word(line: &str, word: &str) -> bool {
+    let is_part = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    line.match_indices(word).any(|(at, _)| {
+        let before = line[..at].chars().next_back();
+        let after = line[at + word.len()..].chars().next();
+        !before.is_some_and(is_part) && !after.is_some_and(is_part)
+    })
+}
+
+/// The lines of `yml` that are shell script: each `run:` line's own text after `run:`, and every
+/// line of a `run: |` block (the lines indented deeper than its `run:` key), with their line numbers.
+fn run_script_lines(yml: &str) -> Vec<(usize, &str)> {
+    let mut out: Vec<(usize, &str)> = Vec::new();
+    let mut block_indent: Option<usize> = None;
+    for (n, raw) in yml.lines().enumerate() {
+        let indent = raw.len() - raw.trim_start().len();
+        if let Some(key) = block_indent {
+            if raw.trim().is_empty() || indent > key {
+                out.push((n + 1, raw));
+                continue;
+            }
+            block_indent = None;
+        }
+        let trimmed = raw.trim_start();
+        let (key_indent, rest) = if let Some(rest) = trimmed.strip_prefix("- run:") {
+            (indent + 2, rest)
+        } else if let Some(rest) = trimmed.strip_prefix("run:") {
+            (indent, rest)
+        } else {
+            continue;
+        };
+        out.push((n + 1, rest));
+        let rest = rest.trim();
+        if rest.starts_with('|') || rest.starts_with('>') {
+            block_indent = Some(key_indent);
+        }
+    }
+    out
+}
+
+/// Everything wrong with release.yml's least-privilege split. Empty means right.
+fn release_wiring_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let code: Vec<&str> = yml
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let job_lines = |job: &str| -> Vec<&str> {
+        blocks
+            .iter()
+            .find(|(id, _)| *id == job)
+            .map(|(_, lines)| lines.clone())
+            .unwrap_or_default()
+    };
+
+    // The workflow-level floor: `permissions:` at column 0, then `contents: read` under it.
+    let raw: Vec<&str> = yml.lines().collect();
+    let floor = raw
+        .iter()
+        .position(|l| *l == "permissions:")
+        .is_some_and(|at| raw.get(at + 1) == Some(&"  contents: read"));
+    if !floor {
+        wrong.push(
+            "release.yml has no workflow-level `permissions:` block opening with `contents: read`. \
+             Without it every job inherits the repository's default token scope."
+                .to_string(),
+        );
+    }
+
+    // `contents: write` once, in the attach job.
+    let write_homes: Vec<&str> = blocks
+        .iter()
+        .filter(|(_, lines)| lines.contains(&"contents: write"))
+        .map(|(id, _)| *id)
+        .collect();
+    let writes = code.iter().filter(|l| **l == "contents: write").count();
+    if writes != 1 || write_homes != [RELEASE_ATTACH_JOB] {
+        wrong.push(format!(
+            "`contents: write` appears {writes} time(s) in release.yml, in job(s) {write_homes:?}, \
+             expected once, in job `{RELEASE_ATTACH_JOB}` only. The other jobs run package code."
+        ));
+    }
+
+    // The attach job runs no package or build tool, and checks nothing out.
+    let attach = job_lines(RELEASE_ATTACH_JOB);
+    if attach.is_empty() {
+        wrong.push(format!("release.yml has no job `{RELEASE_ATTACH_JOB}`."));
+    }
+    for line in &attach {
+        for word in RELEASE_ATTACH_FORBIDDEN {
+            if has_word(line, word) {
+                wrong.push(format!(
+                    "job `{RELEASE_ATTACH_JOB}` carries `{line}`, which names `{word}`. The job \
+                     that holds `contents: write` must run no package or build tool."
+                ));
+            }
+        }
+        if step_key(line).starts_with("uses: actions/checkout") {
+            wrong.push(format!(
+                "job `{RELEASE_ATTACH_JOB}` carries `{line}`. It takes the built file as an \
+                 artifact and needs no checkout."
+            ));
+        }
+    }
+    // Its tag check comes before its first release call.
+    let check_at = attach.iter().position(|l| *l == RELEASE_TAG_CHECK);
+    let call_at = attach.iter().position(|l| l.contains("gh release"));
+    match (check_at, call_at) {
+        (Some(c), Some(g)) if c < g => {}
+        _ => wrong.push(format!(
+            "job `{RELEASE_ATTACH_JOB}` doesn't run `{RELEASE_TAG_CHECK}` before its first `gh \
+             release` call (tag check at {check_at:?}, first call at {call_at:?})."
+        )),
+    }
+
+    // The tag filter, exactly, once.
+    let filters = code.iter().filter(|l| **l == RELEASE_TAG_FILTER).count();
+    if filters != 1 {
+        wrong.push(format!(
+            "`{RELEASE_TAG_FILTER}` appears {filters} time(s) in release.yml, expected 1. Only a \
+             three-part version tag may start a release."
+        ));
+    }
+
+    // The concurrency group and its rule, each once.
+    for line in RELEASE_CONCURRENCY {
+        let found = code.iter().filter(|l| **l == line).count();
+        if found != 1 {
+            wrong.push(format!(
+                "`{line}` appears {found} time(s) in release.yml, expected 1. Two runs for one tag \
+                 must queue, never race or cancel each other."
+            ));
+        }
+    }
+
+    // The verify job checks the downloaded copy.
+    let verify_runs = job_lines(RELEASE_VERIFY_JOB)
+        .iter()
+        .filter(|l| step_key(l) == RELEASE_VERIFY_RUN)
+        .count();
+    let in_file = code.iter().filter(|l| step_key(l) == RELEASE_VERIFY_RUN).count();
+    if verify_runs != 1 || in_file != 1 {
+        wrong.push(format!(
+            "`{RELEASE_VERIFY_RUN}` appears {verify_runs} time(s) in job `{RELEASE_VERIFY_JOB}` and \
+             {in_file} time(s) in release.yml, expected 1 and 1."
+        ));
+    }
+
+    // No expression inside a script: values reach scripts through `env:` only.
+    for (n, line) in run_script_lines(yml) {
+        if line.contains("${{") {
+            wrong.push(format!(
+                "release.yml line {n} puts an expression inside a `run:` script: `{}`. Pass the value \
+                 through `env:` instead, so a typed input can't become shell code.",
+                line.trim()
+            ));
+        }
+    }
+    wrong
+}
+
+/// release.yml keeps the write token in the attach job, away from package code, takes only
+/// three-part tags, queues runs for one tag, checks the downloaded copy, and puts no expression in
+/// a script.
+#[test]
+fn the_release_workflow_keeps_the_write_token_away_from_package_code() {
+    let wrong = release_wiring_wrong(RELEASE_YML);
+    assert!(
+        wrong.is_empty(),
+        "release.yml isn't wired as it has to be:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// Assert that `release_wiring_wrong` (or, for a limit, the time-limit scan) names `must_name` on
+/// a copy of release.yml with one break planted in it, and print what it named.
+fn assert_release_plant_named(what: &str, yml: &str, must_name: &str) {
+    assert_ne!(yml, RELEASE_YML, "{what}: the plant landed");
+    let mut named = release_wiring_wrong(yml);
+    named.extend(jobs_without_one_time_limit(yml).1);
+    let named = named.join("\n");
+    println!("{what}: {named}");
+    assert!(
+        named.contains(must_name),
+        "{what}: expected `{must_name}` named, got: {named:?}"
+    );
+}
+
+/// An `npm ci` step in the attach job is named.
+#[test]
+fn the_release_check_names_npm_ci_in_the_attach_job() {
+    let step = "      - name: Hand the attached copy to the verify job\n";
+    assert_release_plant_named(
+        "`npm ci` in the attach job",
+        &RELEASE_YML.replace(step, &format!("      - name: Install\n        run: npm ci\n\n{step}")),
+        &format!("job `{RELEASE_ATTACH_JOB}` carries `run: npm ci`, which names `npm`."),
+    );
+}
+
+/// A job with no time limit is named.
+#[test]
+fn the_release_check_names_a_job_without_a_time_limit() {
+    assert_release_plant_named(
+        "the verify job's limit removed",
+        &RELEASE_YML.replace("    timeout-minutes: 50\n", ""),
+        &format!("job `{RELEASE_VERIFY_JOB}` has 0 job-level `timeout-minutes:` line(s), expected 1"),
+    );
+}
+
+/// A two-part tag filter is named.
+#[test]
+fn the_release_check_names_a_two_part_tag_filter() {
+    assert_release_plant_named(
+        "the tag filter `v[0-9]+.[0-9]+`",
+        &RELEASE_YML.replace(RELEASE_TAG_FILTER, "- 'v[0-9]+.[0-9]+'"),
+        &format!("`{RELEASE_TAG_FILTER}` appears 0 time(s) in release.yml, expected 1."),
+    );
+}
+
+/// `contents: write` given to the verify job is named.
+#[test]
+fn the_release_check_names_contents_write_in_the_verify_job() {
+    assert_release_plant_named(
+        "`contents: write` in the verify job",
+        &RELEASE_YML.replace(
+            "    timeout-minutes: 50\n",
+            "    timeout-minutes: 50\n    permissions:\n      contents: write\n",
+        ),
+        &format!(
+            "`contents: write` appears 2 time(s) in release.yml, in job(s) [\"{RELEASE_ATTACH_JOB}\", \"{RELEASE_VERIFY_JOB}\"], expected once"
+        ),
+    );
+}
+
+/// The tag input spliced into a script is named.
+#[test]
+fn the_release_check_names_an_expression_inside_a_run_script() {
+    let check = format!("          {RELEASE_TAG_CHECK}\n");
+    assert_release_plant_named(
+        "`echo ${{ inputs.tag }}` in a run line",
+        &RELEASE_YML.replace(&check, &format!("          echo ${{{{ inputs.tag }}}}\n{check}")),
+        "puts an expression inside a `run:` script: `echo ${{ inputs.tag }}`.",
+    );
+}
+
+/// `run_script_lines` reads both forms of `run:` and stops a block at the next key.
+#[test]
+fn the_run_script_reader_reads_single_lines_and_blocks() {
+    let yml = "jobs:\n  a:\n    steps:\n      - run: echo one\n      - name: two\n        run: |\n          echo two\n\n          echo three\n        env:\n          X: ${{ github.sha }}\n";
+    let lines: Vec<&str> = run_script_lines(yml).into_iter().map(|(_, l)| l.trim()).collect();
+    assert_eq!(lines, ["echo one", "|", "echo two", "", "echo three"]);
+}
