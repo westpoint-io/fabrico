@@ -118,8 +118,13 @@ const COLOUR_TOLERANCE = 8;
 const MIN_FAULT_PX = 200;
 /** Distinct frames by pixel hash. The prototype measured 95 of 95; this is that minus 10. */
 const MIN_DISTINCT = 85;
-/** The encoded file's ceiling in bytes. */
-const BYTE_BUDGET = 3_000_000;
+/**
+ * The encoded file's ceiling in bytes: the first measured size times 1.5, rounded up to the next
+ * 10,000, under the 3,000,000 cap. Measured 2026-11-18: 170,274 bytes, encoded by ImageMagick
+ * 7.1.2 with libwebp 1.6.0 on this machine. CI encodes with img2webp from Ubuntu 24.04's webp
+ * package (libwebp 1.3.2); read the HERO line of its first docs run against this number.
+ */
+const BYTE_BUDGET = 260_000;
 
 const STILL_FILE = 'fabrico-hero-still.png';
 const WEBP_FILE = 'fabrico-hero.webp';
