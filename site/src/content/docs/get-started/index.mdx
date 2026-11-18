@@ -35,6 +35,8 @@ The engine moves the whole board forward one tick at a time, and it logs every e
 
 Fabrico hasn't reached its 1.0 release, so the way it saves boards and the way machines behave can still change between versions. There is no download yet: to run the app you build it from source, as [Install Fabrico](install/) explains. The app listens for webhooks on 127.0.0.1, the loopback address, so only programs on the same computer can send it a webhook.
 
+When you press Apply, the app checks that a Factory's code compiles but doesn't run it, so code that compiles and then throws is accepted and faults on each item it gets. There's no library of ready-made connectors for other services: a board hears from a service through a webhook to a Source and calls one through an HTTP Sink, and any reshaping in between is a Factory's JavaScript. The app logs every event and edit and replays the log when it opens a file, but it has no control for stepping back through a run. A board runs in one app on one computer, and there's no way to spread a board across several computers.
+
 ## Where to go next
 
 <LinkCard title="Install Fabrico" href="install/" description="Build the app from source on Linux, macOS or Windows." />

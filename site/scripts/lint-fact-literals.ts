@@ -2,7 +2,10 @@
 //
 // Run it with `npm run lint:facts` from site/. Values from the code reach a page only through
 // <Fact id="..." />, so the page changes when the code does. This lint reads every tracked .md
-// and .mdx file under site/ (from `git ls-files`, so node_modules is never read) and reports:
+// and .mdx file under site/ (from `git ls-files`, so node_modules is never read), and the
+// repository's README.md when site/ sits at the top of the repository and git tracks the README
+// (`rootReadme` below). The README can't use <Fact>, so it must type no value from the code at
+// all. It reports:
 //   - a quantity fact's value followed by its unit or one of its other spellings, such as
 //     "60 ticks a second" or "1,024 tiles", with or without the thousands separator, in any case.
 //     A spelling in `also` that starts with a digit is a whole phrase, such as "8 MiB". A bare
@@ -16,8 +19,9 @@
 //
 // OUTPUT: one line per finding on stderr, in the docs site's message format, then one line on
 // stdout:
-//   FACT_LINT files=<n> facts=<n> findings=<n>
-// where facts counts the facts that made a pattern (quantities, and text longer than 20 characters).
+//   FACT_LINT files=<n> facts=<n> findings=<n> [readme=README.md]
+// where facts counts the facts that made a pattern (quantities, and text longer than 20
+// characters), and `readme=README.md` is there when the README was read (it counts in files).
 //
 // EXIT CODES
 //   0  no findings.
@@ -57,6 +61,25 @@ export interface Finding {
 }
 
 /** The text with frontmatter, fenced code and <Fact .../> elements turned to spaces, newlines kept. */
+/**
+ * The repository's README.md as a file to lint, reported as `README.md`, or null. Read only when
+ * `siteDir` is a folder named site at the top of a git checkout and git tracks README.md there,
+ * so a test's throwaway site folder without a README lints exactly what it did before. Both
+ * lints call this.
+ */
+export function rootReadme(siteDir: string): LintFile | null {
+  if (path.basename(siteDir) !== 'site') return null;
+  const repo = path.dirname(siteDir);
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: repo, encoding: 'utf8' });
+  if (top.error !== undefined || top.status !== 0) return null;
+  if (fs.realpathSync(top.stdout.trim()) !== fs.realpathSync(repo)) return null;
+  const tracked = spawnSync('git', ['ls-files', '-z', '--', 'README.md'], { cwd: repo, encoding: 'utf8' });
+  if (tracked.error !== undefined || tracked.status !== 0 || tracked.stdout !== 'README.md\0') return null;
+  const full = path.join(repo, 'README.md');
+  if (!fs.existsSync(full)) return null;
+  return { path: 'README.md', text: fs.readFileSync(full, 'utf8') };
+}
+
 export function blank(text: string): string {
   const spaces = (s: string): string => s.replace(/[^\n]/g, ' ');
   let out = text;
@@ -207,12 +230,14 @@ export function run(siteDir: string): RunResult {
   if (files.length < MIN_FILES) {
     return noCheck(`scanned ${files.length} files, fewer than ${MIN_FILES}. The scan set is broken, so this is no check.`);
   }
+  const readme = rootReadme(siteDir);
+  if (readme !== null) files.push(readme);
 
   const findings = lintFiles(files, facts);
   for (const f of findings) stderr.push(formatFinding(f));
   return {
     code: findings.length === 0 ? 0 : 1,
-    stdout: [`FACT_LINT files=${files.length} facts=${rulesOf(facts).length} findings=${findings.length}`],
+    stdout: [`FACT_LINT files=${files.length} facts=${rulesOf(facts).length} findings=${findings.length}${readme !== null ? ' readme=README.md' : ''}`],
     stderr,
   };
 }

@@ -1,7 +1,9 @@
 // lint-prose.ts - fails a docs page that holds an em dash or a banned phrase.
 //
 // Run it with `npm run lint:prose` from site/. It reads every tracked .md and .mdx file under
-// site/ (from `git ls-files`, so node_modules and build output are never read) and reports:
+// site/ (from `git ls-files`, so node_modules and build output are never read), and the
+// repository's README.md when site/ sits at the top of the repository and git tracks the README
+// (`rootReadme` in lint-fact-literals.ts), reported as README.md. It reports:
 //   - every em dash (U+2014), on any line: prose, frontmatter and fenced code alike. An en dash
 //     (U+2013) passes;
 //   - every phrase from BANNED_PHRASES in prose, in any letter case, with a straight or a curly
@@ -15,7 +17,8 @@
 //
 // OUTPUT: one line per finding on stderr, in the docs site's message format, then one line on
 // stdout:
-//   PROSE_LINT files=<n> findings=<n>
+//   PROSE_LINT files=<n> findings=<n> [readme=README.md]
+// where `readme=README.md` is there when the README was read (it counts in files).
 //
 // EXIT CODES
 //   0  no findings.
@@ -26,7 +29,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blank } from './lint-fact-literals.ts';
+import { blank, rootReadme } from './lint-fact-literals.ts';
 
 /** The fewest files a real scan reads. Fewer means the scan set is broken, not that pages are clean. */
 export const MIN_FILES = 8;
@@ -154,11 +157,13 @@ export function run(siteDir: string): RunResult {
   if (files.length < MIN_FILES) {
     return noCheck(`scanned ${files.length} files, fewer than ${MIN_FILES}. The scan set is broken, so this is no check.`);
   }
+  const readme = rootReadme(siteDir);
+  if (readme !== null) files.push(readme);
 
   const findings = lintFiles(files);
   return {
     code: findings.length === 0 ? 0 : 1,
-    stdout: [`PROSE_LINT files=${files.length} findings=${findings.length}`],
+    stdout: [`PROSE_LINT files=${files.length} findings=${findings.length}${readme !== null ? ' readme=README.md' : ''}`],
     stderr: findings.map(formatFinding),
   };
 }
