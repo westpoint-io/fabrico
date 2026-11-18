@@ -10,11 +10,13 @@ import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frame
 import { CELL } from '../shared/geometry';
 import { isRedPixel } from '../shared/redPixel';
 import {
+  DEMO_NODE_COUNT,
   cameraOf,
   captureClip,
   expectRenderLoopAlive,
   guardWillAsk,
   itemDotsPerCell,
+  loadDemoViaExamples,
   loadExample,
   nodeAtAnchor,
   pollScene,
@@ -91,6 +93,11 @@ import { curlArgs, parseFirstWebhookCurl } from './support/pageCurl';
 //   8. Play, and the tick rises, so the shared host is left running for the next spec (a host
 //      left paused by a passing test stalls the spec after it; `restoreHostAfterFailedTest`
 //      covers only a test that failed).
+//
+// On the way out an afterAll loads the demo back, as `17-order-example` does. The live project
+// runs one worker against one host, and this file sorts just before `11-machine-labels`, whose
+// first test expects the demo's section labels; with Order processing left loaded it failed and
+// the serial test after it never ran (phase 100 plan 10, the full live pass at cce5b4a).
 //
 // Render health: `watchPageErrors` before `goto`, `expectRenderLoopAlive` after each leg (the
 // held-board form once the board is held, since the render clock follows the sim clock), and the
@@ -316,6 +323,26 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await Promise.all(listeners.map((s) => new Promise<void>((resolve) => s.close(() => resolve()))));
   listeners.length = 0;
+});
+
+// Load the demo back so the next spec finds the board the suite starts from. This is an afterAll
+// rather than the end of the test so it also runs when the test fails part way. afterAll has no
+// `page` fixture, so it opens its own page at the project's baseURL; a fresh page has no unsaved
+// edits, so Examples asks nothing before it swaps the board.
+test.afterAll(async ({ browser }, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+  if (baseURL === undefined) return;
+  const page = await browser.newPage({ baseURL });
+  try {
+    await page.goto('/');
+    await waitForAppReady(page);
+    await loadDemoViaExamples(page);
+    await pollScene(page, (s) => s.nodes.length === DEMO_NODE_COUNT && s.wires.length === 2, {
+      message: 'the shared host is back on the demo after the reproduce-a-bug spec',
+    }).toBe(true);
+  } finally {
+    await page.close();
+  }
 });
 
 let savePath: string | null = null;
