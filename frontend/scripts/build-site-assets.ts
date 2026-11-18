@@ -6,6 +6,8 @@
 //
 //   - copies frontend/dist-embed/fabrico-board.js to site/public/embed/fabrico-board.js;
 //   - copies each board's poster, frontend/dist-embed/posters/<id>.png, to site/public/boards/<id>.png;
+//   - copies the README's hero, frontend/dist-hero/fabrico-hero.webp, fabrico-hero-still.png and
+//     hero.json (written by capture-hero.ts), to site/public/hero/;
 //   - writes site/src/generated/boards.json, `{ "boards": [ { id, path, title, posterAlt } ] }`
 //     sorted by id, which the site's <Board> component reads for each poster's alt text;
 //   - writes site/src/styles/generated/fab-tokens.css, the app's `--fab-*` custom properties from
@@ -26,17 +28,18 @@
 // alt text comes from the embed's own rule in src/embed/boardIds.ts. Every output is gitignored. It copies named files only, never a whole folder.
 //
 // OUTPUT, exactly one line on stdout:
-//   SITE_ASSETS boards=<n> posters=<n> bundle=<bytes> tokens=<n> fonts=<n>
-// tokens counts the `--fab-*` custom properties written to fab-tokens.css, and fonts the font files
-// copied (licence texts not counted).
+//   SITE_ASSETS boards=<n> posters=<n> bundle=<bytes> tokens=<n> fonts=<n> hero=<bytes>
+// tokens counts the `--fab-*` custom properties written to fab-tokens.css, fonts the font files
+// copied (licence texts not counted), and hero is the size of fabrico-hero.webp.
 //
 // ENVIRONMENT
 //   FABRICO_PLAYER_WASM  the built player module (scripts/build-wasm.sh writes it).
 //
 // EXIT CODES
 //   0  the files were copied and written, and the line was printed.
-//   2  nothing written: the bundle or a board's poster is missing (run scripts/build-embed.sh),
-//      FABRICO_PLAYER_WASM doesn't name a readable module, or a font or brand file is missing.
+//   2  nothing written: the bundle or a board's poster is missing (run scripts/build-embed.sh), a
+//      hero file is missing (run frontend/scripts/capture-hero.ts), FABRICO_PLAYER_WASM doesn't
+//      name a readable module, or a font or brand file is missing.
 //   Any other non-zero code is a thrown error (a board the player refuses, for example).
 
 import fs from 'node:fs';
@@ -50,12 +53,15 @@ const REPO = path.resolve(FRONTEND, '..');
 const SITE = path.join(REPO, 'site');
 const BUNDLE = path.join(FRONTEND, 'dist-embed', 'fabrico-board.js');
 const POSTERS = path.join(FRONTEND, 'dist-embed', 'posters');
+const HERO = path.join(FRONTEND, 'dist-hero');
 const FONTS = path.join(FRONTEND, 'src', 'assets', 'fonts');
 const BRAND = path.join(REPO, 'docs', 'brand');
 
 /** The font files the site serves from /fabrico/fonts/, and their licence texts. */
 const FONT_FILES = ['MartianMono.woff2', 'Sono.woff2'];
 const FONT_LICENCES = ['OFL-1.1-MartianMono.txt', 'OFL-1.1-Sono.txt'];
+/** The hero files the README shows from /fabrico/hero/, written by capture-hero.ts. */
+const HERO_FILES = ['fabrico-hero.webp', 'fabrico-hero-still.png', 'hero.json'];
 
 /** Brand files the site uses, each from docs/brand/ to its place under site/. */
 const BRAND_COPIES: readonly { from: string; to: string }[] = [
@@ -186,6 +192,10 @@ for (const { from } of BRAND_COPIES) {
 }
 
 if (!fs.existsSync(BUNDLE)) refuse(`${path.relative(REPO, BUNDLE)} is missing. Run scripts/build-embed.sh.`);
+const heroMissing = HERO_FILES.filter((name) => !fs.existsSync(path.join(HERO, name)));
+if (heroMissing.length > 0) {
+  refuse(`no ${heroMissing.join(', ')} in ${path.relative(REPO, HERO)}/. Run frontend/scripts/capture-hero.ts.`);
+}
 const files = exampleBoardFiles();
 const missing = files.filter((b) => !fs.existsSync(path.join(POSTERS, `${b.id}.png`))).map((b) => b.path);
 if (missing.length > 0) {
@@ -215,15 +225,18 @@ const generatedDir = path.join(SITE, 'src', 'generated');
 const stylesDir = path.join(SITE, 'src', 'styles', 'generated');
 const fontsDir = path.join(SITE, 'public', 'fonts');
 const assetsDir = path.join(SITE, 'src', 'assets', 'generated');
+const heroDir = path.join(SITE, 'public', 'hero');
 // Start each folder empty, so a board removed from examples/boards/ leaves no stale poster.
 fs.rmSync(boardsDir, { recursive: true, force: true });
-for (const dir of [embedDir, boardsDir, generatedDir, stylesDir, fontsDir, assetsDir]) {
+fs.rmSync(heroDir, { recursive: true, force: true });
+for (const dir of [embedDir, boardsDir, generatedDir, stylesDir, fontsDir, assetsDir, heroDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
 fs.copyFileSync(BUNDLE, path.join(embedDir, 'fabrico-board.js'));
 for (const b of boards) fs.copyFileSync(path.join(POSTERS, `${b.id}.png`), path.join(boardsDir, `${b.id}.png`));
 fs.writeFileSync(path.join(generatedDir, 'boards.json'), `${JSON.stringify({ boards }, null, 2)}\n`);
+for (const name of HERO_FILES) fs.copyFileSync(path.join(HERO, name), path.join(heroDir, name));
 
 // The app's tokens, declared on :root. The site's theme.css maps Starlight's variables onto them.
 const tokens = skinToCssVars(LOCKED_SKIN, 1, ':root');
@@ -250,5 +263,5 @@ for (const { from, to } of BRAND_COPIES) {
 
 console.log(
   `SITE_ASSETS boards=${boards.length} posters=${boards.length} bundle=${fs.statSync(BUNDLE).size} ` +
-    `tokens=${tokenCount} fonts=${FONT_FILES.length}`,
+    `tokens=${tokenCount} fonts=${FONT_FILES.length} hero=${fs.statSync(path.join(HERO, HERO_FILES[0] as string)).size}`,
 );

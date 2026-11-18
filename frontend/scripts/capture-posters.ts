@@ -15,6 +15,11 @@
 // It exits non-zero, naming the board, when a board doesn't reach its end tick, ends on a hash
 // other than its pinned one, has a stage of another size, or comes out as a blank picture.
 //
+// Every `page.evaluate` runs through `evaluateWithin`, which fails the board by the step's name
+// when the page gives no answer in time, so a page stuck in a long task can't hang the build.
+// `capture-hero.ts` imports that helper and the constants and readers below rather than
+// restating them; importing this file doesn't run the capture.
+//
 // NO PATH INPUT. Every path comes from this file's own location, so it runs the same from the
 // repo root and from `frontend/`. Erasure-only TypeScript, so Node runs it as it is.
 
@@ -36,7 +41,7 @@ const CAPTURE_DIR = path.join(FRONTEND, 'dist-embed', 'capture');
 export const POSTER_WIDTH = 960;
 export const POSTER_HEIGHT = 600;
 /** The GL arguments every embed check launches Chromium with. */
-const GL_ARGS = ['--use-gl=angle', '--use-angle=swiftshader'];
+export const GL_ARGS = ['--use-gl=angle', '--use-angle=swiftshader'];
 /** A board's run at 4x is 1200 ticks in 5 s; this leaves room for a slow machine. */
 const RUN_TIMEOUT_MS = 120_000;
 /**
@@ -48,13 +53,19 @@ const RUN_TIMEOUT_MS = 120_000;
  */
 const PAGES_AT_ONCE = 4;
 /** The stage background, `--fab-substrate`. A poster with almost nothing else is a blank stage. */
-const SUBSTRATE = [0x1b, 0x1f, 0x27] as const;
+export const SUBSTRATE = [0x1b, 0x1f, 0x27] as const;
 /**
  * The share of a poster that has to differ from the substrate. It sits under the smallest board the
  * folder ships, a lesson's prepared board drawn small on purpose, whose end-tick poster draws 4.4
  * percent. A stage that drew nothing shows only the substrate.
  */
-const MIN_DRAWN_PERCENT = 4;
+export const MIN_DRAWN_PERCENT = 4;
+/**
+ * How long one `page.evaluate` may take. Every evaluate here reads or sets a few values, or clicks
+ * a button a few hundred times, and answers in milliseconds; one that takes this long means the
+ * page is stuck, and the capture should fail by name rather than wait for the run's own limit.
+ */
+export const EVALUATE_TIMEOUT_MS = 30_000;
 
 /** Every `*.board.ron` under `examples/boards/`, as board ids (`docs/x.board.ron` is `docs-x`). */
 export function boardIds(): string[] {
@@ -91,19 +102,61 @@ ${BUNDLE_MARKER}
 `;
 }
 
-type Probe = { state: string; tick: number; endTick: number; endHash: string | null; verdict: string | null; mounted: boolean };
-
-const probe = (page: Page): Promise<Probe> =>
-  page.evaluate(() => (document.querySelector('fabrico-board') as unknown as { fabricoProbe(): Probe }).fabricoProbe());
-
-const stageBox = (page: Page): Promise<{ x: number; y: number; width: number; height: number }> =>
-  page.evaluate(() => {
-    const el = document.querySelector('fabrico-board') as HTMLElement;
-    const r = ((el.shadowRoot as ShadowRoot).querySelector('.stage') as HTMLElement).getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width, height: r.height };
+/**
+ * Runs `fn` in the page with `arg`, and fails with an error naming `step` if the page gives no
+ * answer within `timeoutMs`. The evaluate it gave up on is left to the page, which the caller
+ * closes.
+ */
+export async function evaluateWithin<R, A>(
+  page: Page,
+  step: string,
+  fn: (arg: A) => R | Promise<R>,
+  arg: A,
+  timeoutMs: number = EVALUATE_TIMEOUT_MS,
+): Promise<R> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${step}: the page gave no answer within ${timeoutMs} ms`)), timeoutMs);
   });
+  try {
+    return await Promise.race([page.evaluate(fn as never, arg) as Promise<R>, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-async function waitFor<T>(what: string, read: () => Promise<T>, done: (v: T) => boolean, timeoutMs: number): Promise<T> {
+export type Probe = {
+  state: string;
+  tick: number;
+  endTick: number;
+  endHash: string | null;
+  verdict: string | null;
+  mounted: boolean;
+  /** Pixi ticker callbacks so far, so a caller can wait for the stage to draw again. */
+  frames: number;
+};
+
+export const probe = (page: Page): Promise<Probe> =>
+  evaluateWithin(
+    page,
+    'read the board probe',
+    () => (document.querySelector('fabrico-board') as unknown as { fabricoProbe(): Probe }).fabricoProbe(),
+    undefined,
+  );
+
+export const stageBox = (page: Page): Promise<{ x: number; y: number; width: number; height: number }> =>
+  evaluateWithin(
+    page,
+    'read the stage box',
+    () => {
+      const el = document.querySelector('fabrico-board') as HTMLElement;
+      const r = ((el.shadowRoot as ShadowRoot).querySelector('.stage') as HTMLElement).getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    },
+    undefined,
+  );
+
+export async function waitFor<T>(what: string, read: () => Promise<T>, done: (v: T) => boolean, timeoutMs: number): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   let last = await read();
   while (!done(last)) {
@@ -127,9 +180,14 @@ async function capture(page: Page, id: string, url: string): Promise<Buffer> {
 
   // The frame's padding sits around the stage; widen the wrapper so the stage itself is 960 wide.
   const first = await stageBox(page);
-  await page.evaluate((w) => {
-    (document.getElementById('wrap') as HTMLElement).style.width = `${w}px`;
-  }, POSTER_WIDTH + (POSTER_WIDTH - first.width));
+  await evaluateWithin(
+    page,
+    `${id}: widen the wrapper`,
+    (w: number) => {
+      (document.getElementById('wrap') as HTMLElement).style.width = `${w}px`;
+    },
+    POSTER_WIDTH + (POSTER_WIDTH - first.width),
+  );
 
   const board = page.locator('fabrico-board');
   await board.locator('select').selectOption({ label: '4x' });
@@ -206,4 +264,12 @@ async function main(): Promise<void> {
   console.log(`POSTERS wrote=${ids.length} dir=dist-embed/posters`);
 }
 
-await main();
+/** Is this file the script Node was asked to run, rather than a module another script imported? */
+function isMain(): boolean {
+  const main = (import.meta as ImportMeta & { main?: boolean }).main;
+  if (typeof main === 'boolean') return main;
+  const script = process.argv[1];
+  return script !== undefined && path.resolve(script) === fileURLToPath(import.meta.url);
+}
+
+if (isMain()) await main();
