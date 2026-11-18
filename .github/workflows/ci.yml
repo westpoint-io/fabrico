@@ -1246,14 +1246,20 @@ jobs:
   # boards Chromium took 3.2 s a board, Firefox 4.7 s and WebKitGTK about 3.1 s. Firefox runs about
   # 1.2 times slower on GitHub and Chromium 2.2 times, so the offline check comes to about 12 min
   # there (about 20 s a board) and the job to about 17.5 min, or 20.3 min if Firefox runs 2 and
-  # WebKitGTK 3 times slower. The limit is 35 minutes, 2.0 times the estimate. Each new board adds
-  # about 20 s, so measure again after about 15 more boards.
+  # WebKitGTK 3 times slower. That set a 35-minute limit. Run 44294890291 on 5404975 was cancelled
+  # at 35 minutes by the Ubuntu mirror, not by a test: the Playwright install took 14 min 5 s, of
+  # which 13 min 6 s was apt fetching Firefox's 59.8 MB of dependencies at 76 kB/s, so the job
+  # reached the offline check after 23 min 12 s. The offline check took 12 min 1 s on the green run
+  # 43974435804, so a run that slow on both comes to 35 min 13 s end to end. The limit is 1.7
+  # times that, 59.9 minutes, rounded up to 60. Caching the browsers wouldn't help: their download
+  # took 10 s of the 14 minutes. Each new board adds about 20 s, so measure again after about 15
+  # more boards.
   embed:
     name: the read-only board embed runs from disk in a browser
     needs: [changes, wasm-player]
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
     steps:
@@ -1417,6 +1423,105 @@ jobs:
           name: fabrico-hero
           path: site/dist/hero/
           if-no-files-found: error
+          retention-days: 14
+
+      # Only a push to main hands the site on to the pages job, and only once the docs suite above
+      # has passed on this same folder: a failed step stops the job before this one.
+      - name: Upload the checked site for Pages
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/dist
+
+  # THE DOCS SITE ON GITHUB PAGES, at https://westpoint-io.github.io/fabrico/. This job deploys the
+  # site/dist folder the docs job just built and checked, which that job uploads as the Pages
+  # artifact on a push to main only. Pull requests, other branches and workflow_dispatch never
+  # deploy.
+  #
+  # WHY deploy-pages AND NOT A BRANCH. actions/deploy-pages publishes the uploaded artifact with a
+  # short-lived OIDC token (the id-token scope) and the pages scope, so no job here holds a
+  # token that can push to the repository, and Pages runs no Jekyll pass that would drop Astro's
+  # `_astro` folder. This job runs one first-party action and no package code, so it is the only job
+  # that holds either scope; `ci_wiring_parity.rs` refuses them anywhere else.
+  #
+  # BEFORE THE FIRST DEPLOY, Pages must be switched on for the repository with GitHub Actions as its
+  # source (Settings, Pages, Source). With Pages off this job fails and the site isn't published.
+  #
+  # CONCURRENCY. Deploys queue in the `pages` group and a deploy in progress is never cancelled, so a
+  # newer push waits for the older deploy to finish instead of cutting it off half way.
+  #
+  # TIME LIMIT. 10 minutes is a starting figure with no measurement behind it yet; measure the first
+  # deploys and set it to 1.5 to 2 times the slowest.
+  pages:
+    name: the checked docs site deploys to GitHub Pages
+    needs: docs
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy the site the docs suite checked
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  # THE LIVE DOCS SITE, checked after each deploy. scripts/check-pages-smoke.sh runs the Pages smoke
+  # (frontend/e2e-smoke/) against the live address. It first polls build.json, which the site build
+  # writes with the commit it came from, with a query no cache has seen, until it names this run's
+  # commit; Pages serves the previous deployment for a while after a deploy, so the smoke never
+  # checks yesterday's site. Then it opens one page per docs section and runs its boards to their
+  # manifest hashes with a healthy render, checks both sitemaps list every page, fetches the hero
+  # and checks its sidecar names this commit's demo board, and fetches every absolute README link.
+  # It builds nothing and runs neither the site build nor the docs suite.
+  #
+  # TIME LIMIT. The build.json poll gives up after 15 minutes, the boards on six pages take a few
+  # minutes more, and the Playwright install with its apt dependencies took 14 min 5 s on the slow
+  # mirror day of run 44294890291 (Chromium only is less). 30 minutes covers all three; measure the
+  # first runs and set it from them.
+  pages-smoke:
+    name: the live docs site serves this commit's pages, boards, sitemap and hero
+    needs: pages
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke-test the live docs site
+        env:
+          FABRICO_DOCS_URL: https://westpoint-io.github.io/fabrico/
+          FABRICO_SMOKE_SHA: ${{ github.sha }}
+        run: bash scripts/check-pages-smoke.sh
+
+      - name: Keep the smoke's test results when it fails
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-smoke-results
+          path: frontend/test-results/smoke/
           retention-days: 14
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"

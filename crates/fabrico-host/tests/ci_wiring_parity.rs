@@ -426,8 +426,9 @@ const HEAVY_GATE: &str = "if: ${{ !cancelled() && needs.changes.outputs.docs_onl
 const HEAVY_NEEDS: &str = "needs: changes";
 
 /// The docs job's gate: skip only on the exact string `false`, which the classifier writes only
-/// for a change made entirely of root markdown. A failed classifier leaves the output empty, and
-/// empty runs the job.
+/// for a change made entirely of root markdown other than README.md (the docs suite checks the
+/// README, so a change to it runs the job). A failed classifier leaves the output empty, and empty
+/// runs the job.
 const DOCS_GATE: &str = "if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'false' }}";
 
 /// The job that builds the docs site and runs its suite.
@@ -436,6 +437,39 @@ const DOCS_JOB: &str = "docs";
 /// Jobs gated on the classifier's second output, `docs_suite`. Each carries `HEAVY_NEEDS` and
 /// `DOCS_GATE` and nothing else that reads the classifier.
 const DOCS_JOBS: [&str; 1] = [DOCS_JOB];
+
+/// The job that deploys the checked docs site to GitHub Pages.
+const PAGES_JOB: &str = "pages";
+/// The job that smoke-tests the live site after the deploy.
+const PAGES_SMOKE_JOB: &str = "pages-smoke";
+/// Jobs that publish the site the docs job checked, and check what was published. They read no
+/// classifier output: each runs only on a push to main, after the job before it.
+const DEPLOY_JOBS: [&str; 2] = [PAGES_JOB, PAGES_SMOKE_JOB];
+/// The condition every deploy job carries, and the docs job's Pages upload step: a push to main.
+/// Pull requests, other branches and `workflow_dispatch` never deploy.
+const MAIN_PUSH_IF: &str = "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+/// Each deploy job's exact `needs:` line: the deploy waits for the docs suite, the smoke for the deploy.
+const DEPLOY_NEEDS: [(&str, &str); 2] = [(PAGES_JOB, "needs: docs"), (PAGES_SMOKE_JOB, "needs: pages")];
+/// The two scopes deploy-pages needs. Only `PAGES_JOB` may carry them: it runs one first-party
+/// action and no package code, and every other job runs `npm ci` or `cargo`.
+const PAGES_SCOPES: [&str; 2] = ["pages: write", "id-token: write"];
+/// The docs job's step that hands the checked site to the deploy, and the folder it hands on.
+const PAGES_UPLOAD: &str = "uses: actions/upload-pages-artifact@v5";
+const PAGES_UPLOAD_PATH: &str = "path: site/dist";
+/// The deploy step in `PAGES_JOB`.
+const PAGES_DEPLOY: &str = "uses: actions/deploy-pages@v5";
+/// The lines of `PAGES_JOB` that queue deploys without cancelling one in progress, and name the
+/// Pages environment deploy-pages publishes to.
+const PAGES_JOB_LINES: [&str; 3] = ["group: pages", "cancel-in-progress: false", "name: github-pages"];
+/// The smoke's run line in `PAGES_SMOKE_JOB`, and the two env lines its step must carry.
+const PAGES_SMOKE_RUN: &str = "run: bash scripts/check-pages-smoke.sh";
+const PAGES_SMOKE_ENV: [&str; 2] = [
+    "FABRICO_DOCS_URL: https://westpoint-io.github.io/fabrico/",
+    "FABRICO_SMOKE_SHA: ${{ github.sha }}",
+];
+/// What a deploy job must never run: it deploys and checks the site the docs job built and checked,
+/// never one it built itself.
+const DEPLOY_FORBIDDEN: [&str; 2] = ["scripts/build-site.sh", "scripts/check-docs.sh"];
 
 /// The `embed` job's dependency: the classifier, and the job whose module it takes.
 const EMBED_NEEDS: &str = "needs: [changes, wasm-player]";
@@ -587,6 +621,7 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
     let mut expected_ids: Vec<&str> = HEAVY_JOBS
         .iter()
         .chain(DOCS_JOBS.iter())
+        .chain(DEPLOY_JOBS.iter())
         .chain(ALWAYS_ON_JOBS.iter())
         .copied()
         .collect();
@@ -597,8 +632,10 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
              Every job must be classified. A job that reads a markdown file at the \
              repository root is ALWAYS-ON (add it to ALWAYS_ON_JOBS, \
              no `needs: changes`, no gate). A job that checks the docs site is DOCS (add it to \
-             DOCS_JOBS and give it `{HEAVY_NEEDS}` and `{DOCS_GATE}`). Otherwise it is HEAVY \
-             (add it to HEAVY_JOBS and give it `{HEAVY_NEEDS}` and `{HEAVY_GATE}`)."
+             DOCS_JOBS and give it `{HEAVY_NEEDS}` and `{DOCS_GATE}`). A job that publishes the \
+             checked site or checks what was published is DEPLOY (add it to DEPLOY_JOBS and \
+             DEPLOY_NEEDS and give it its `needs:` line and `{MAIN_PUSH_IF}`). Otherwise it is \
+             HEAVY (add it to HEAVY_JOBS and give it `{HEAVY_NEEDS}` and `{HEAVY_GATE}`)."
         ));
     }
     for (id, lines) in &blocks {
@@ -635,6 +672,31 @@ fn job_classes_wrong(yml: &str) -> Vec<String> {
                 wrong.push(format!(
                     "docs job `{id}` carries `{line}`, which reads the classifier but is not the \
                      exact gate `{DOCS_GATE}`."
+                ));
+            }
+        }
+        if let Some((_, deploy_needs)) = DEPLOY_NEEDS.iter().find(|(job, _)| job == id) {
+            let needs_lines: Vec<&str> = lines
+                .iter()
+                .copied()
+                .filter(|line| line.starts_with("needs:"))
+                .collect();
+            let if_lines: Vec<&str> = lines
+                .iter()
+                .copied()
+                .filter(|line| line.starts_with("if:"))
+                .collect();
+            if needs_lines != [*deploy_needs] {
+                wrong.push(format!(
+                    "deploy job `{id}` has the needs line(s) {needs_lines:?}, expected exactly                      [\"{deploy_needs}\"]. The deploy must wait for the docs suite and the smoke \
+                     for the deploy."
+                ));
+            }
+            if !if_lines.contains(&MAIN_PUSH_IF) || has_gate || has_docs_gate {
+                wrong.push(format!(
+                    "deploy job `{id}` has the condition line(s) {if_lines:?}, which must include \
+                     `{MAIN_PUSH_IF}` and no classifier gate. Without it a pull request or another \
+                     branch would deploy or smoke-test the site."
                 ));
             }
         }
@@ -1409,6 +1471,265 @@ fn the_docs_hero_check_names_a_missing_hero_upload() {
     assert!(
         named.contains(&must_name),
         "expected `{must_name}` named, got: {named:?}"
+    );
+}
+
+/// The untrimmed lines of job `id` in `yml`, comments included, from the line after its header to
+/// the next job header. Used where indent matters: a job-level key has four spaces.
+fn raw_job_lines<'a>(yml: &'a str, id: &str) -> Vec<&'a str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut in_jobs = false;
+    let mut inside = false;
+    for raw in yml.lines() {
+        if !in_jobs {
+            in_jobs = raw == "jobs:";
+            continue;
+        }
+        if let Some(found) = job_id(raw) {
+            inside = found == id;
+            continue;
+        }
+        if inside {
+            out.push(raw);
+        }
+    }
+    out
+}
+
+/// Everything wrong with how `yml` deploys the docs site and smoke-tests it: the docs job hands
+/// `site/dist` to Pages only on a push to main and only after the docs suite; `PAGES_JOB` holds the
+/// two Pages scopes, queues without cancelling and deploys with deploy-pages; no other job holds
+/// either scope; `PAGES_SMOKE_JOB` runs the smoke against the live address at this run's commit;
+/// each deploy job's main-push condition is job-level; and no deploy job builds or checks a site of
+/// its own. Empty means right.
+fn deploy_jobs_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let code: Vec<&str> = yml
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let job_lines = |job: &str| -> Vec<&str> {
+        blocks
+            .iter()
+            .find(|(id, _)| *id == job)
+            .map(|(_, lines)| lines.clone())
+            .unwrap_or_default()
+    };
+
+    // The two scopes: each once in the whole file, and that once in the pages job.
+    for scope in PAGES_SCOPES {
+        let homes: Vec<&str> = blocks
+            .iter()
+            .filter(|(_, lines)| lines.contains(&scope))
+            .map(|(id, _)| *id)
+            .collect();
+        let in_file = code.iter().filter(|l| **l == scope).count();
+        if in_file != 1 || homes != [PAGES_JOB] {
+            wrong.push(format!(
+                "`{scope}` appears {in_file} time(s) in the workflow, in job(s) {homes:?}, expected \
+                 once, in job `{PAGES_JOB}` only. Any other job runs package code that would \
+                 inherit the scope."
+            ));
+        }
+    }
+
+    // Each deploy job's condition is the job's own, at four spaces, not a step's.
+    for job in DEPLOY_JOBS {
+        let job_level = raw_job_lines(yml, job)
+            .iter()
+            .filter(|l| **l == format!("    {MAIN_PUSH_IF}"))
+            .count();
+        if job_level != 1 {
+            wrong.push(format!(
+                "job `{job}` carries `{MAIN_PUSH_IF}` at job level {job_level} time(s), expected 1."
+            ));
+        }
+        for line in job_lines(job) {
+            if let Some(script) = DEPLOY_FORBIDDEN.iter().find(|s| line.contains(**s)) {
+                wrong.push(format!(
+                    "deploy job `{job}` carries `{line}`. A deploy job must not run `{script}`: it \
+                     deploys and checks the site the docs job built and checked."
+                ));
+            }
+        }
+    }
+
+    // The docs job's upload: once in the file, in the docs job, after the docs suite, main pushes
+    // only, of site/dist.
+    let docs = job_lines(DOCS_JOB);
+    let uploads_in_file = code.iter().filter(|l| step_key(l) == PAGES_UPLOAD).count();
+    match one_step_with(&docs, PAGES_UPLOAD, DOCS_JOB) {
+        Err(message) => wrong.push(format!(
+            "{message} The docs job hands the site it checked to the pages job."
+        )),
+        Ok((at, step)) => {
+            for key in [MAIN_PUSH_IF, PAGES_UPLOAD_PATH] {
+                if !step.iter().any(|l| step_key(l) == key) {
+                    wrong.push(format!(
+                        "the step carrying `{PAGES_UPLOAD}` in job `{DOCS_JOB}` has no `{key}` line. \
+                         Without it the docs job uploads the wrong folder or uploads on runs that \
+                         must not deploy."
+                    ));
+                }
+            }
+            let suite = docs.iter().position(|l| step_key(l) == DOCS_RUN_LINES[7]);
+            if suite.is_none_or(|s| s > at) {
+                wrong.push(format!(
+                    "job `{DOCS_JOB}` uploads the site for Pages before it runs `{}`.",
+                    DOCS_RUN_LINES[7]
+                ));
+            }
+        }
+    }
+    if uploads_in_file != 1 {
+        wrong.push(format!(
+            "`{PAGES_UPLOAD}` appears {uploads_in_file} time(s) in the workflow, expected 1, in job \
+             `{DOCS_JOB}`."
+        ));
+    }
+
+    // The pages job: the deploy step, the queue and the environment.
+    let pages = job_lines(PAGES_JOB);
+    let deploys_in_file = code.iter().filter(|l| step_key(l) == PAGES_DEPLOY).count();
+    let deploys_in_job = pages.iter().filter(|l| step_key(l) == PAGES_DEPLOY).count();
+    if deploys_in_file != 1 || deploys_in_job != 1 {
+        wrong.push(format!(
+            "`{PAGES_DEPLOY}` appears {deploys_in_job} time(s) in job `{PAGES_JOB}` and \
+             {deploys_in_file} time(s) in the workflow, expected 1 and 1."
+        ));
+    }
+    for line in PAGES_JOB_LINES {
+        if !pages.contains(&line) {
+            wrong.push(format!(
+                "job `{PAGES_JOB}` has no `{line}` line. It queues deploys in the `pages` group \
+                 without cancelling one in progress, in the `github-pages` environment."
+            ));
+        }
+    }
+
+    // The smoke: once in the file, in the smoke job, with the live address and this commit.
+    let smoke = job_lines(PAGES_SMOKE_JOB);
+    let smoke_in_file = code.iter().filter(|l| step_key(l) == PAGES_SMOKE_RUN).count();
+    match one_step_with(&smoke, PAGES_SMOKE_RUN, PAGES_SMOKE_JOB) {
+        Err(message) => wrong.push(message),
+        Ok((_, step)) => {
+            for key in PAGES_SMOKE_ENV {
+                if !step.contains(&key) {
+                    wrong.push(format!(
+                        "the step running `{PAGES_SMOKE_RUN}` in job `{PAGES_SMOKE_JOB}` has no \
+                         `{key}` line, so the smoke would check another address or another commit."
+                    ));
+                }
+            }
+        }
+    }
+    if smoke_in_file != 1 {
+        wrong.push(format!(
+            "`{PAGES_SMOKE_RUN}` appears {smoke_in_file} time(s) in the workflow, expected 1, in job \
+             `{PAGES_SMOKE_JOB}`."
+        ));
+    }
+    wrong.extend(step_guards_wrong(yml, PAGES_JOB, &[]));
+    wrong.extend(step_guards_wrong(yml, PAGES_SMOKE_JOB, &[PAGES_SMOKE_RUN]));
+    wrong
+}
+
+/// A push to main deploys exactly the site the docs suite passed, and then checks the live address
+/// serves it. Only the deploy job holds the Pages scopes.
+#[test]
+fn the_checked_site_deploys_to_pages_and_the_live_site_is_smoke_tested() {
+    let mut wrong = deploy_jobs_wrong(CI_YML);
+    wrong.extend(job_classes_wrong(CI_YML));
+    assert!(
+        wrong.is_empty(),
+        "the Pages deploy isn't wired as it has to be:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// Assert that `checker` names `must_name` on `yml`, a copy of the real workflow with one break
+/// planted in it, and print what it named so a run's log shows the message.
+fn assert_plant_named(what: &str, yml: &str, checker: fn(&str) -> Vec<String>, must_name: &str) {
+    assert_ne!(yml, CI_YML, "{what}: the plant landed");
+    let named = checker(yml).join("\n");
+    println!("{what}: {named}");
+    assert!(
+        named.contains(must_name),
+        "{what}: expected `{must_name}` named, got: {named:?}"
+    );
+}
+
+/// `deploy_jobs_wrong` names the pages job's missing OIDC scope.
+#[test]
+fn the_deploy_check_names_pages_without_id_token_write() {
+    assert_plant_named(
+        "`pages` without `id-token: write`",
+        &CI_YML.replace("      pages: write\n      id-token: write\n", "      pages: write\n"),
+        deploy_jobs_wrong,
+        &format!(
+            "`{}` appears 0 time(s) in the workflow, in job(s) [], expected once, in job `{PAGES_JOB}` only.",
+            PAGES_SCOPES[1]
+        ),
+    );
+}
+
+/// `job_classes_wrong` names the pages job without its main-push condition.
+#[test]
+fn the_deploy_check_names_pages_without_its_condition() {
+    assert_plant_named(
+        "`pages` without its `if:`",
+        &CI_YML.replace(&format!("    needs: docs\n    {MAIN_PUSH_IF}\n"), "    needs: docs\n"),
+        job_classes_wrong,
+        &format!("deploy job `{PAGES_JOB}` has the condition line(s) [], which must include `{MAIN_PUSH_IF}`"),
+    );
+}
+
+/// `job_classes_wrong` names a job that is in no class.
+#[test]
+fn the_deploy_check_names_a_job_in_no_class() {
+    assert_plant_named(
+        "an extra job in no class",
+        &CI_YML.replace(
+            "  pages-smoke:\n",
+            "  pages-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: echo hi\n\n  pages-smoke:\n",
+        ),
+        job_classes_wrong,
+        "Every job must be classified.",
+    );
+}
+
+/// `deploy_jobs_wrong` names the smoke job running the docs suite.
+#[test]
+fn the_deploy_check_names_pages_smoke_running_check_docs() {
+    let smoke_run = format!("        {PAGES_SMOKE_RUN}\n");
+    assert_plant_named(
+        "`pages-smoke` running `check-docs.sh`",
+        &CI_YML.replace(&smoke_run, &format!("{smoke_run}\n      - run: bash scripts/check-docs.sh\n")),
+        deploy_jobs_wrong,
+        &format!(
+            "deploy job `{PAGES_SMOKE_JOB}` carries `- run: bash scripts/check-docs.sh`. A deploy job must not run `scripts/check-docs.sh`"
+        ),
+    );
+}
+
+/// `deploy_jobs_wrong` names the OIDC scope given to the docs job, which runs package code.
+#[test]
+fn the_deploy_check_names_id_token_write_in_the_docs_job() {
+    let docs_header = "    name: the docs site builds and passes its checks\n";
+    assert_plant_named(
+        "`id-token: write` in the docs job",
+        &CI_YML.replace(
+            docs_header,
+            &format!("{docs_header}    permissions:\n      contents: read\n      id-token: write\n"),
+        ),
+        deploy_jobs_wrong,
+        &format!(
+            "`{}` appears 2 time(s) in the workflow, in job(s) [\"{DOCS_JOB}\", \"{PAGES_JOB}\"], expected once",
+            PAGES_SCOPES[1]
+        ),
     );
 }
 
@@ -3453,3 +3774,4 @@ fn every_job_has_a_time_limit() {
         "the scan must name job `b`, whose only limit is on a step"
     );
 }
+
