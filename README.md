@@ -56,9 +56,9 @@ The order shows up on the first belt as an amber dot and rides it into the valid
 splits it in two. One half reaches an HTTP Sink that posts to http://localhost:8799/fulfillment,
 and that call fails unless something on your computer listens there.
 
-If curl says the connection was refused, check the port in the Webhook URL.
-[Troubleshooting](https://westpoint-io.github.io/fabrico/troubleshooting/) covers this and other
-problems.
+If curl says it couldn't connect to the server, or that the connection was refused, check the port
+in the Webhook URL. [Troubleshooting](https://westpoint-io.github.io/fabrico/troubleshooting/)
+covers this and other problems.
 
 ## Links
 
