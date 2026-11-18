@@ -3,14 +3,14 @@
 The fonts documented in this file are the project's approved binary-asset
 exemption set: every embedded font binary must carry a provenance entry here
 (author, license, source, retrieval date, SHA-256, size). All fonts are loaded
-via `@font-face` (Vite-bundled, no runtime fetch). The retired pre-Phase-47
-pixel ttf was deleted in plan 47-03 together with its entry (its provenance
-lives in git history).
+via `@font-face` (Vite-bundled, no runtime fetch). The pixel ttf the app
+used before these two faces was deleted together with its entry (its
+provenance lives in git history).
 
 ## MartianMono.woff2
 
 - **Font:** Martian Mono, a monospaced grotesque typeface (variable, wght axis).
-  The Phase 47 body/HUD face: all chrome running text renders in it at the 12px
+  The body/HUD face: all chrome running text renders in it at the 12px
   base.
 - **Author:** Evil Martians (Roman Shamin et al.).
 - **License:** SIL Open Font License 1.1 (OFL-1.1).
@@ -47,7 +47,7 @@ with a modern Chrome User-Agent and take the `/* latin */` block's woff2 URL.
 ## Sono.woff2
 
 - **Font:** Sono, a monospaced-leaning soft sans (variable, wght + MONO axes).
-  The Phase 47 identity/title face: wordmark + panel titles, ALL-CAPS at 18px
+  The identity/title face: wordmark + panel titles, ALL-CAPS at 18px
   via the shared `.fab-title` class.
 - **Author:** Tyler Finck (sursly).
 - **License:** SIL Open Font License 1.1 (OFL-1.1).

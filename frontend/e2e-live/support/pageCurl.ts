@@ -1,11 +1,16 @@
-// pageCurl.ts - the one reader of the curl command on the "Send your first webhook" docs page
-// (`site/src/content/docs/get-started/first-webhook.mdx`).
+// pageCurl.ts - the one reader of the curl commands the docs teach: the "Send your first webhook"
+// page (`site/src/content/docs/get-started/first-webhook.mdx`), the "Reproduce a bug" page
+// (`site/src/content/docs/patterns/reproduce-a-bug.mdx`) and the repository README (`README.md`).
 //
-// Two suites use it. The first-webhook live spec reads the page at run time, takes the delivery
-// id and the body from the command, fills in the real port and Source id, and runs the real curl
-// binary against the live host. The docs suite runs the same parse on the same file, so a push
-// that changes only the docs site still fails if it breaks the command (the docs job runs on such
-// a push and the live job doesn't).
+// Three suites use it. The first-webhook and reproduce-a-bug live specs read their page at run
+// time, take the delivery id and the body from the command, fill in the real port and Source id,
+// and run the real curl binary against the live host. The docs suite runs the same parse on the
+// first-webhook page and on the README (`e2e-docs/readme.spec.ts`), so a push that changes only
+// the docs site or the README still fails if it breaks the command (the docs job runs on such a
+// push and the live job doesn't).
+//
+// A block counts as the command when its first non-empty line starts with `curl `. The README's
+// install block names the `curl` package on its apt line, so the word alone can't pick the block.
 //
 // THE PAGE TEXT NEVER REACHES A SHELL. The block is matched whole against one fixed form; what
 // comes back is a delivery id made of plain characters and a body that parsed as JSON. The caller
@@ -21,6 +26,9 @@ export const FIRST_WEBHOOK_PAGE = fileURLToPath(
   new URL('../../../site/src/content/docs/get-started/first-webhook.mdx', import.meta.url),
 );
 
+/** The repository README, whose quickstart ends with the same form of curl command. */
+export const README_PATH = fileURLToPath(new URL('../../../README.md', import.meta.url));
+
 /** The URL the block must POST to, with the two words the reader replaces. */
 export const URL_TEMPLATE = 'http://127.0.0.1:PORT/hook/src-ID';
 
@@ -34,14 +42,15 @@ export interface PageCurl {
   urlFor(port: number, id: number): string;
 }
 
-/** One fenced code block: its language word and its lines. */
-interface Fence {
+/** One fenced code block: its language word, its lines and the line its opening fence is on. */
+export interface Fence {
   lang: string;
   lines: string[];
   startLine: number;
 }
 
-function fencesOf(mdx: string): Fence[] {
+/** Every fenced code block in a Markdown or MDX file, in file order. */
+export function fencesOf(mdx: string): Fence[] {
   const out: Fence[] = [];
   const lines = mdx.split('\n');
   let open: Fence | null = null;
@@ -61,22 +70,27 @@ function fencesOf(mdx: string): Fence[] {
   return out;
 }
 
+/** The fenced `bash` blocks whose first non-empty line starts with `curl `, in file order. */
+export function curlBlocksOf(mdx: string): Fence[] {
+  return fencesOf(mdx).filter((f) => f.lang === 'bash' && /^\s*curl /.test(f.lines.find((l) => l.trim() !== '') ?? ''));
+}
+
 /** A delivery id the live spec can send back unchanged: letters, digits, dot, dash, underscore. */
 const DELIVERY_ID = /^[A-Za-z0-9._-]+$/;
 
 /**
- * Find the page's one fenced `bash` block that holds `curl`, check it is the command the page
- * teaches, and return what it sends. Throws a message naming what didn't match: no block, more
- * than one, a different start, the wrong URL or path, a missing or repeated header, a header
- * other than `x-delivery-id`, a missing or repeated body, a body that isn't JSON, or anything
- * left over after the body.
+ * Find the page's one fenced `bash` block whose first non-empty line starts with `curl `, check
+ * it is the command the page teaches, and return what it sends. Throws a message naming what
+ * didn't match: no block, more than one, a different start, the wrong URL or path, a missing or
+ * repeated header, a header other than `x-delivery-id`, a missing or repeated body, a body that
+ * isn't JSON, or anything left over after the body.
  */
 export function parseFirstWebhookCurl(mdx: string): PageCurl {
-  const blocks = fencesOf(mdx).filter((f) => f.lang === 'bash' && f.lines.some((l) => /\bcurl\b/.test(l)));
-  if (blocks.length === 0) throw new Error('pageCurl: the page has no fenced bash block holding curl');
+  const blocks = curlBlocksOf(mdx);
+  if (blocks.length === 0) throw new Error('pageCurl: the page has no fenced bash block that starts with curl');
   if (blocks.length > 1) {
     throw new Error(
-      `pageCurl: the page has ${blocks.length} fenced bash blocks holding curl (lines ${blocks.map((b) => b.startLine).join(', ')}), expected exactly 1`,
+      `pageCurl: the page has ${blocks.length} fenced bash blocks that start with curl (lines ${blocks.map((b) => b.startLine).join(', ')}), expected exactly 1`,
     );
   }
   // Join the line continuations: the spaces and backslash ending a line, then the next line's indent.
