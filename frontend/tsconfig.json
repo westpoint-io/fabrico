@@ -57,6 +57,7 @@
     "e2e-embed",
     "e2e-offline",
     "e2e-docs",
+    "e2e-smoke",
     "vite.config.ts",
     "vite.embed.config.ts",
     "vitest.config.ts",
@@ -69,6 +70,7 @@
     "playwright.walk.config.ts",
     "playwright.embed.config.ts",
     "playwright.offline.config.ts",
-    "playwright.docs.config.ts"
+    "playwright.docs.config.ts",
+    "playwright.smoke.config.ts"
   ]
 }

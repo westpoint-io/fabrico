@@ -8,6 +8,9 @@
 //   - copies each board's poster, frontend/dist-embed/posters/<id>.png, to site/public/boards/<id>.png;
 //   - copies the README's hero, frontend/dist-hero/fabrico-hero.webp, fabrico-hero-still.png and
 //     hero.json (written by capture-hero.ts), to site/public/hero/;
+//   - writes site/public/build.json, `{ "sha": "<40 hex>" }`, the commit the site was built from:
+//     GITHUB_SHA when it is set (CI), else `git rev-parse HEAD`. The Pages smoke
+//     (scripts/check-pages-smoke.sh) polls it to tell a new deploy from the one Pages still serves;
 //   - writes site/src/generated/boards.json, `{ "boards": [ { id, path, title, posterAlt } ] }`
 //     sorted by id, which the site's <Board> component reads for each poster's alt text;
 //   - writes site/src/styles/generated/fab-tokens.css, the app's `--fab-*` custom properties from
@@ -28,20 +31,25 @@
 // alt text comes from the embed's own rule in src/embed/boardIds.ts. Every output is gitignored. It copies named files only, never a whole folder.
 //
 // OUTPUT, exactly one line on stdout:
-//   SITE_ASSETS boards=<n> posters=<n> bundle=<bytes> tokens=<n> fonts=<n> hero=<bytes>
+//   SITE_ASSETS boards=<n> posters=<n> bundle=<bytes> tokens=<n> fonts=<n> hero=<bytes> build=<sha>
 // tokens counts the `--fab-*` custom properties written to fab-tokens.css, fonts the font files
-// copied (licence texts not counted), and hero is the size of fabrico-hero.webp.
+// copied (licence texts not counted), hero is the size of fabrico-hero.webp, and build is the sha
+// written to build.json.
 //
 // ENVIRONMENT
 //   FABRICO_PLAYER_WASM  the built player module (scripts/build-wasm.sh writes it).
+//   GITHUB_SHA           the commit to stamp in build.json. Unset outside CI, where the script
+//                        asks git for HEAD.
 //
 // EXIT CODES
 //   0  the files were copied and written, and the line was printed.
 //   2  nothing written: the bundle or a board's poster is missing (run scripts/build-embed.sh), a
 //      hero file is missing (run frontend/scripts/capture-hero.ts), FABRICO_PLAYER_WASM doesn't
-//      name a readable module, or a font or brand file is missing.
+//      name a readable module, a font or brand file is missing, or the commit sha (GITHUB_SHA or
+//      git's HEAD) isn't 40 hex characters.
 //   Any other non-zero code is a thrown error (a board the player refuses, for example).
 
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -196,6 +204,12 @@ const heroMissing = HERO_FILES.filter((name) => !fs.existsSync(path.join(HERO, n
 if (heroMissing.length > 0) {
   refuse(`no ${heroMissing.join(', ')} in ${path.relative(REPO, HERO)}/. Run frontend/scripts/capture-hero.ts.`);
 }
+// The commit this build comes from, for build.json. Read before anything is written, so a bad value
+// leaves site/ as it was.
+const buildSha = (process.env.GITHUB_SHA || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' })).trim();
+if (!/^[0-9a-f]{40}$/.test(buildSha)) {
+  refuse(`the commit sha for build.json is "${buildSha}", not 40 lowercase hex characters. Check GITHUB_SHA or git rev-parse HEAD.`);
+}
 const files = exampleBoardFiles();
 const missing = files.filter((b) => !fs.existsSync(path.join(POSTERS, `${b.id}.png`))).map((b) => b.path);
 if (missing.length > 0) {
@@ -237,6 +251,7 @@ fs.copyFileSync(BUNDLE, path.join(embedDir, 'fabrico-board.js'));
 for (const b of boards) fs.copyFileSync(path.join(POSTERS, `${b.id}.png`), path.join(boardsDir, `${b.id}.png`));
 fs.writeFileSync(path.join(generatedDir, 'boards.json'), `${JSON.stringify({ boards }, null, 2)}\n`);
 for (const name of HERO_FILES) fs.copyFileSync(path.join(HERO, name), path.join(heroDir, name));
+fs.writeFileSync(path.join(SITE, 'public', 'build.json'), `${JSON.stringify({ sha: buildSha })}\n`);
 
 // The app's tokens, declared on :root. The site's theme.css maps Starlight's variables onto them.
 const tokens = skinToCssVars(LOCKED_SKIN, 1, ':root');
@@ -263,5 +278,5 @@ for (const { from, to } of BRAND_COPIES) {
 
 console.log(
   `SITE_ASSETS boards=${boards.length} posters=${boards.length} bundle=${fs.statSync(BUNDLE).size} ` +
-    `tokens=${tokenCount} fonts=${FONT_FILES.length} hero=${fs.statSync(path.join(HERO, HERO_FILES[0] as string)).size}`,
+    `tokens=${tokenCount} fonts=${FONT_FILES.length} hero=${fs.statSync(path.join(HERO, HERO_FILES[0] as string)).size} build=${buildSha}`,
 );
