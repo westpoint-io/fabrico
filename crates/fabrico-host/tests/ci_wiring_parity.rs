@@ -1300,6 +1300,118 @@ fn the_docs_job_checks_name_each_way_of_switching_it_off() {
     );
 }
 
+/// The docs job's lines for the README's hero: the apt line that installs img2webp (Ubuntu's `webp`
+/// package) beside clang and llvm, and the three lines of the step that keeps `site/dist/hero/` as
+/// the `fabrico-hero` artifact. `scripts/build-site.sh` captures the hero, so `DOCS_RUN_LINES`
+/// already pins the run line; these pin the encoder it needs on the runner, which has no
+/// ImageMagick, and the upload a reviewer downloads the hero from.
+const DOCS_HERO_LINES: [&str; 4] = [
+    "sudo apt-get install -y --no-install-recommends clang llvm webp",
+    "uses: actions/upload-artifact@v4",
+    "name: fabrico-hero",
+    "path: site/dist/hero/",
+];
+/// The hero upload's condition: every run that isn't cancelled, a failed docs suite included.
+const DOCS_HERO_IF: &str = "if: ${{ !cancelled() }}";
+
+/// Everything wrong with how `yml` installs the hero's encoder and keeps the hero in the docs job.
+/// Empty means right.
+fn docs_hero_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+    let Some((_, docs)) = blocks.iter().find(|(id, _)| *id == DOCS_JOB) else {
+        return vec![format!("there is no job `{DOCS_JOB}` under `jobs:`.")];
+    };
+    let [apt, _, name, _] = DOCS_HERO_LINES;
+
+    let found = docs.iter().filter(|l| step_key(l) == apt).count();
+    if found != 1 {
+        wrong.push(format!(
+            "`{apt}` appears {found} time(s) in job `{DOCS_JOB}`, expected 1. Without the `webp` \
+             package the runner has no hero encoder, and the site build stops at the hero."
+        ));
+    }
+
+    match one_step_with(docs, name, DOCS_JOB) {
+        Err(message) => wrong.push(format!(
+            "{message} The docs job keeps the hero it made as the `fabrico-hero` artifact."
+        )),
+        Ok((at, step)) => {
+            for key in DOCS_HERO_LINES[1..]
+                .iter()
+                .copied()
+                .chain([DOCS_HERO_IF, "if-no-files-found: error"])
+            {
+                if !step.iter().any(|l| step_key(l) == key) {
+                    wrong.push(format!(
+                        "the step carrying `{name}` in job `{DOCS_JOB}` has no `{key}` line. \
+                         Without it a run keeps no hero, keeps the wrong folder, or keeps none \
+                         when the docs suite fails."
+                    ));
+                }
+            }
+            let suite = docs.iter().position(|l| step_key(l) == DOCS_RUN_LINES[7]);
+            if let Some(s) = suite
+                && s > at
+            {
+                wrong.push(format!(
+                    "job `{DOCS_JOB}` keeps the hero before it runs `{}`.",
+                    DOCS_RUN_LINES[7]
+                ));
+            }
+        }
+    }
+    wrong
+}
+
+/// The docs job installs img2webp beside clang and llvm, and keeps the hero its site build made as
+/// the `fabrico-hero` artifact on every run that isn't cancelled.
+#[test]
+fn the_docs_job_installs_the_hero_encoder_and_keeps_the_hero() {
+    let wrong = docs_hero_wrong(CI_YML);
+    assert!(
+        wrong.is_empty(),
+        "the docs job doesn't make and keep the README's hero as it has to:\n{}\n\
+         Update the WORKFLOW to match this test.",
+        wrong.join("\n")
+    );
+}
+
+/// `docs_hero_wrong` names the docs job's apt line when `webp` is taken off it.
+#[test]
+fn the_docs_hero_check_names_an_apt_line_without_webp() {
+    let yml = CI_YML.replace(
+        "--no-install-recommends clang llvm webp\n",
+        "--no-install-recommends clang llvm\n",
+    );
+    assert_ne!(yml, CI_YML, "the plant landed");
+    let named = docs_hero_wrong(&yml).join("\n");
+    let must_name = format!(
+        "`{}` appears 0 time(s) in job `{DOCS_JOB}`, expected 1.",
+        DOCS_HERO_LINES[0]
+    );
+    assert!(
+        named.contains(&must_name),
+        "expected `{must_name}` named, got: {named:?}"
+    );
+}
+
+/// `docs_hero_wrong` names the hero upload when its step is taken out of the docs job.
+#[test]
+fn the_docs_hero_check_names_a_missing_hero_upload() {
+    let yml = without_step(CI_YML, "      - name: Keep the hero this run made\n");
+    assert_ne!(yml, CI_YML, "the plant landed");
+    let named = docs_hero_wrong(&yml).join("\n");
+    let must_name = format!(
+        "`{}` appears 0 time(s) in job `{DOCS_JOB}`, expected 1.",
+        DOCS_HERO_LINES[2]
+    );
+    assert!(
+        named.contains(&must_name),
+        "expected `{must_name}` named, got: {named:?}"
+    );
+}
+
 /// Rule (f) of `ci_spend_controls_are_wired_fail_safe` over any workflow text: every non-comment
 /// line that reads the classifier's output is `HEAVY_GATE`, or is `DOCS_GATE` inside `DOCS_JOB`,
 /// and `DOCS_GATE` appears exactly once in the file. Empty means right.

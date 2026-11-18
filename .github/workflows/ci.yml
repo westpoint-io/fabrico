@@ -1302,6 +1302,15 @@ jobs:
   # this job. That is why it carries the same toolchain, clang and llvm, and wasm-opt steps as
   # wasm-player, and why it calls build-wasm.sh and build-embed.sh only through build-site.sh.
   #
+  # THE README'S HERO. build-site.sh also captures the README's animated hero from the demo board
+  # in this commit's embed bundle (frontend/scripts/capture-hero.ts), checks it, and puts it in
+  # site/dist/hero/. The capture encodes with img2webp, from Ubuntu's webp package, which the apt
+  # step installs beside clang and llvm; the runner has no ImageMagick. The last step keeps the
+  # three hero files as the fabrico-hero artifact on every run that isn't cancelled, a failed
+  # suite included, so a reviewer can download the hero CI made from a run on any ref. The hero
+  # is never committed. The capture adds about 20 s to the site build here; measure the job's time
+  # again after its first run on GitHub with the hero in.
+  #
   # NODE 24. astro 7.4.4 refuses Node 22 below 22.23.4, and the site's package.json asks for 24.
   #
   # GATE. It runs unless the classifier says the change is root markdown only: the gate skips only
@@ -1344,10 +1353,10 @@ jobs:
             frontend/package-lock.json
             site/package-lock.json
 
-      - name: Install clang and llvm-ar for the wasm C build
+      - name: Install clang and llvm-ar for the wasm C build, and img2webp for the hero
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm
+          sudo apt-get install -y --no-install-recommends clang llvm webp
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -1393,6 +1402,15 @@ jobs:
 
       - name: Run the docs suite over the built site
         run: bash scripts/check-docs.sh
+
+      - name: Keep the hero this run made
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fabrico-hero
+          path: site/dist/hero/
+          if-no-files-found: error
+          retention-days: 14
 
   # Frontend e2e gate (Phase 13-04, TEST-04) — the "one schema, two producers"
   # proof. Playwright drives the REAL Vite app and asserts the emitted GridCommand
