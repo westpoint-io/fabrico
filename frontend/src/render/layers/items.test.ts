@@ -665,7 +665,7 @@ describe('the per-bucket repaint keeps ONE texture and frees NOTHING', () => {
     // the thing it names is still there (61-CONTEXT.md H5).
     expect(() => createItemLayer(LOCKED_SKIN, () => 1)).toThrow(/DotTexturePainter/);
     expect(() => createItemLayer(LOCKED_SKIN, () => 1)).toThrow(/pixiDotPainter/);
-    expect(() => createItemLayer(LOCKED_SKIN, () => 1, () => 1, SHIPPED_DOTS)).toThrow(/VEC-01/);
+    expect(() => createItemLayer(LOCKED_SKIN, () => 1, () => 1, SHIPPED_DOTS)).toThrow(/drawn as a vector/);
   });
 
   it('a custom dots spec sizes the texture and STILL holds exactly one', () => {
