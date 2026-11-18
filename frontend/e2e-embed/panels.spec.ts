@@ -13,7 +13,9 @@ import {
 
 // The code view and the effect log on panels.html. The code view shows each Factory's and HTTP
 // Handler's JavaScript as text, with tabs `Factory 1` and `Handler 1` in board order and no tab
-// row for one machine; markup in a source stays text. The effect log lists each call the run would
+// row for one machine; markup in a source stays text. The column's heading names what the board
+// carries: FACTORY CODE, HANDLER CODE, or CODE for a board with both, and the tab list and the well
+// read the same words out in sentence case. The effect log lists each call the run would
 // make with its tick, method, URL and `ok`, `error` or `timeout`, never a status code on a call
 // row (only a REPLY row shows the status the Handler chose), cuts a long
 // URL with an ellipsis, and follows the newest row unless the reader scrolls up. The page loads
@@ -47,6 +49,14 @@ async function openPage(page: Page): Promise<() => Promise<void>> {
 }
 
 const board = (page: Page, name: string) => page.locator(`fabrico-board[name="${name}"]`);
+
+/** A board's code heading text and the aria-labels of its tab list and its well. */
+async function expectCodeHeading(page: Page, name: string, heading: string, label: string): Promise<void> {
+  const column = board(page, name).locator('.code-column');
+  await expect(column.locator('.panel-heading'), `${name}: the code heading`).toHaveText(heading);
+  await expect(column.locator('[role="tablist"]'), `${name}: the tab list's label`).toHaveAttribute('aria-label', label);
+  await expect(column.locator('.code-well'), `${name}: the well's label`).toHaveAttribute('aria-label', label);
+}
 
 /**
  * Turn the wheel up over a board's log until the log reads scrollTop 0, at most three turns, and
@@ -139,6 +149,10 @@ test('each board shows its Factory and Handler code as text, in tabs by board or
   expect(arrivalBoxes.code).toBeNull();
   expect(arrivalBoxes.stage.width, 'with no code column the stage takes the full width').toBeCloseTo(arrivalBoxes.frameContent, 0);
 
+  await expectCodeHeading(page, 'demo_scene', 'CODE', 'Code');
+  await expectCodeHeading(page, 'one-factory', 'FACTORY CODE', 'Factory code');
+  await expectCodeHeading(page, OUTCOMES, 'CODE', 'Code');
+
   const one = await readProbe(page, 'one-factory');
   expect(one.codeTabs, 'one Factory: no tab row').toEqual([]);
   expect(one.codeText).toContain('ctx.emit(0, input);');
@@ -180,6 +194,19 @@ test('each board shows its Factory and Handler code as text, in tabs by board or
   await page.evaluate((n) => document.querySelector(`fabrico-board[name="${n}"]`)?.removeAttribute('no-code'), OUTCOMES);
   expect((await readBoxes(page, OUTCOMES)).code).not.toBeNull();
   await finish();
+});
+
+test('a board whose only code is a Handler heads its code column HANDLER CODE', async ({ page }) => {
+  const handler = 'docs-machines-http-handler';
+  const errors = watchPageErrors(page);
+  const requests = recordRequests(page);
+  const logRows = pageUrl('log-rows.html');
+  await page.goto(logRows);
+  await expect.poll(async () => (await readProbe(page, handler)).state, { timeout: 20_000 }).toBe('running');
+  expect((await readProbe(page, handler)).codeTabs, 'one Handler: no tab row').toEqual([]);
+  await expectCodeHeading(page, handler, 'HANDLER CODE', 'Handler code');
+  expect(requests, 'the page made no request after itself').toEqual([logRows]);
+  errors.assertNone('on the log rows page');
 });
 
 test('the code column sits beside the stage at 720 px and wider and under the control bar below that', async ({ page }) => {

@@ -123,6 +123,18 @@ export function factoryLabels(factories: readonly BoardFactory[]): string[] {
   return factories.map((f) => (f.kind === HANDLER_KIND ? `Handler ${++handler}` : `Factory ${++factory}`));
 }
 
+/**
+ * The code column's heading and the label the tab list and the well read out: `HANDLER CODE` when
+ * every entry is a Handler, `FACTORY CODE` when every entry is a Factory, and `CODE` for a board
+ * with both. The label is the heading in sentence case.
+ */
+export function codeHeading(factories: readonly BoardFactory[]): { heading: string; label: string } {
+  const handlers = factories.filter((f) => f.kind === HANDLER_KIND).length;
+  if (handlers > 0 && handlers === factories.length) return { heading: 'HANDLER CODE', label: 'Handler code' };
+  if (handlers === 0) return { heading: 'FACTORY CODE', label: 'Factory code' };
+  return { heading: 'CODE', label: 'Code' };
+}
+
 export interface CodeView {
   root: HTMLDivElement;
   /** The board's Factories and Handlers. An empty list hides the column. */
@@ -178,6 +190,10 @@ export function createCodeView(): CodeView {
     setFactories(next): void {
       factories = [...next];
       root.hidden = factories.length === 0;
+      const { heading: headingText, label } = codeHeading(factories);
+      heading.textContent = headingText;
+      tablist.setAttribute('aria-label', label);
+      well.setAttribute('aria-label', label);
       const labels = factoryLabels(factories);
       tabs = factories.length < 2 ? [] : labels.map((label, i) => {
         const tab = document.createElement('button');

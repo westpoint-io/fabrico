@@ -77,7 +77,7 @@ The app's Order processing example has the same validate Factory, so you can mak
 
 2. Click the Source on the left and copy its Webhook URL from the inspector, the panel on the right.
 
-3. Send one bad order with curl, with `PORT` and `ID` from the Webhook URL, and press Step, or <Fact id="shortcut.step" />, as soon as the order leaves the Source:
+3. Rest the pointer on Step before you send anything, so one click stops the board in time. Then send one bad order with curl, with `PORT` and `ID` from the Webhook URL, and press Step, or <Fact id="shortcut.step" />, as soon as the order leaves the Source:
 
    ```bash wrap
    curl -X POST http://127.0.0.1:PORT/hook/src-ID \
