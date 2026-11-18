@@ -643,17 +643,58 @@ test('each pattern page whose board has faultsAbout states faults in its frontma
   noProblems(problems);
 });
 
-/** A typed fault count in a page body: a number, a space and "fault" or "faults", in any case. */
-const TYPED_COUNT = /\b\d+ faults?\b/gi;
+/** The number words a page can write a count in: zero to twenty, and "a single". */
+const COUNT_WORDS = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+  'a\\s+single',
+];
+
+/**
+ * A typed fault count in a page body: a number in digits or in words, then "fault", "faults",
+ * "FAULT row" or "FAULT rows", in any case. The plain-voice rules favour words for small numbers,
+ * so "two FAULT rows" needs catching as much as "2 faults". "a fault" and "no faults" don't
+ * count: on these pages they describe some other case, never the board's own count.
+ */
+const TYPED_COUNT = new RegExp(`\\b(?:\\d+|${COUNT_WORDS.join('|')})\\s+(?:fault\\s+rows?|faults?)\\b`, 'gi');
+
+/**
+ * Phrases on a page with faults that match TYPED_COUNT and aren't the board's count, by file. A
+ * match inside one of them passes. A test below fails an entry whose phrase has left its page or
+ * no longer matches, so the list can't hide a count.
+ */
+const TYPED_COUNT_ALLOWED: { file: string; phrase: string; why: string }[] = [
+  {
+    file: 'dead-letter-queue.mdx',
+    phrase: 'follows one fault from a Factory to a Debug Sink',
+    why: 'a Related link describing the concept page, which follows one fault in general',
+  },
+];
+
+/** The start and end of every place `phrase` appears in `text`. */
+function spansOf(text: string, phrase: string): [number, number][] {
+  const spans: [number, number][] = [];
+  for (let at = text.indexOf(phrase); at >= 0; at = text.indexOf(phrase, at + 1)) spans.push([at, at + phrase.length]);
+  return spans;
+}
+
+/** The typed counts a reader sees in `body`, minus the allowed phrases for `file`, spaces made one. */
+function typedCounts(file: string, body: string): string[] {
+  const visible = blankHidden(body, 'blank');
+  const allowed = TYPED_COUNT_ALLOWED.filter((a) => a.file === file).flatMap((a) => spansOf(visible, a.phrase));
+  return [...visible.matchAll(TYPED_COUNT)]
+    .filter((m) => !allowed.some(([start, end]) => m.index >= start && m.index + m[0].length <= end))
+    .map((m) => m[0].replace(/\s+/g, ' '));
+}
 
 test('a pattern page with faults writes the count as {frontmatter.faults}, never as a typed number', () => {
   const problems: string[] = [];
   for (const file of patternFiles()) {
     const { field, body } = readPage(file);
     if (field('faults') === '') continue;
-    for (const match of blankHidden(body, 'blank').matchAll(TYPED_COUNT)) {
+    for (const typed of typedCounts(file, body)) {
       problems.push(
-        `${shown(file)} types "${match[0]}" in its body. Write the count as {frontmatter.faults} so the page and the docs suite read the same number.`,
+        `${shown(file)} types "${typed}" in its body. Write the count as {frontmatter.faults} so the page and the docs suite read the same number.`,
       );
     }
   }
@@ -671,8 +712,49 @@ test('a shipped board page maps to its example board file, and every other page 
 
 test('the typed-count check reads prose and skips code, inline code and comments', () => {
   const body = ['It shows 2 faults.', '`3 faults`', '{/* 4 faults */}', '```text', '5 faults', '```', 'and 1 FAULT row, then {frontmatter.faults} faults.'].join('\n');
-  assert.deepEqual(
-    [...blankHidden(body, 'blank').matchAll(TYPED_COUNT)].map((m) => m[0]),
-    ['2 faults', '1 FAULT'],
-  );
+  assert.deepEqual(typedCounts('fixture.mdx', body), ['2 faults', '1 FAULT row']);
+});
+
+test('the typed-count check reads counts written as words, in any case', () => {
+  const body = [
+    'The log shows two FAULT rows.',
+    'then one fault,',
+    'a single fault,',
+    'TWENTY faults,',
+    'seventeen fault rows,',
+    'Zero faults and eleven',
+    'FAULT rows.',
+    'But a fault, no faults, {frontmatter.faults} FAULT rows, someone faults and twofold faults pass.',
+    '`two faults` {/* three faults */}',
+  ].join('\n');
+  assert.deepEqual(typedCounts('fixture.mdx', body), [
+    'two FAULT rows',
+    'one fault',
+    'a single fault',
+    'TWENTY faults',
+    'seventeen fault rows',
+    'Zero faults',
+    'eleven FAULT rows',
+  ]);
+});
+
+test('an allowed phrase passes only on its own page, and a count beside it still fails', () => {
+  const body = 'It follows one fault from a Factory to a Debug Sink, and the log shows two faults.';
+  assert.deepEqual(typedCounts('dead-letter-queue.mdx', body), ['two faults']);
+  assert.deepEqual(typedCounts('request-timeout.mdx', body), ['one fault', 'two faults']);
+});
+
+test('each allowed typed-count phrase is still on its page, which has faults, and still matches', () => {
+  const problems: string[] = [];
+  for (const { file, phrase } of TYPED_COUNT_ALLOWED) {
+    if (!fs.existsSync(path.join(PATTERNS, file))) {
+      problems.push(`TYPED_COUNT_ALLOWED names ${shown(file)}, which doesn't exist. Remove the entry.`);
+      continue;
+    }
+    const { field, body } = readPage(file);
+    if (field('faults') === '') problems.push(`TYPED_COUNT_ALLOWED names ${shown(file)}, which has no faults in its frontmatter. Remove the entry.`);
+    if (spansOf(blankHidden(body, 'blank'), phrase).length === 0) problems.push(`${shown(file)} no longer has "${phrase}" where a reader sees it. Remove the entry.`);
+    if (phrase.match(TYPED_COUNT) === null) problems.push(`"${phrase}" on ${shown(file)} has no typed count. Remove the entry.`);
+  }
+  noProblems(problems);
 });
