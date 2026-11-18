@@ -9,8 +9,9 @@
 # pushes change only markdown notes or the docs site, which no heavy job reads.
 #
 # WHAT DOCS-ONLY MEANS. The changed-path list is NON-EMPTY and every path is either at the
-# repository root (no `/` in it) and ends in `.md` (README.md, STATUS.md), or starts with
-# `site/` (the docs site). Case-sensitive: `.MD` is not docs, and neither is `Site/`.
+# repository root (no `/` in it) and ends in `.md` (README.md or any other root note), or
+# starts with `site/` (the docs site). Case-sensitive: `.MD` is not docs, and neither is
+# `Site/`.
 # NOT docs: anything under `docs/`, a root file or folder whose name only starts with
 # `site` (`site.txt`, `sites/`), any markdown under `crates/` or `frontend/`, any
 # non-markdown file at the root (PNG, SVG, JSON evidence), and every other path.
@@ -18,12 +19,18 @@
 # THE TWO OUTPUTS.
 #   docs_only   true when every changed path is docs as above. The heavy jobs skip only on
 #               the exact string `true`.
-#   docs_suite  false only when every changed path is root markdown, which the docs site
-#               doesn't read. The docs job skips only on the exact string `false`.
-# So the three outcomes are: root markdown only gives true/false (everything skips but the
-# always-on jobs); any change made of root markdown and `site/` paths with at least one
-# `site/` path gives true/true (the heavy jobs skip, the docs suite runs); anything else,
-# every fail-safe path included, gives false/true (everything runs, docs suite too).
+#   docs_suite  false only when every changed path is root markdown and none of them is
+#               README.md. The docs job skips only on the exact string `false`.
+# So the three outcomes are: root markdown only, without README.md, gives true/false
+# (everything skips but the always-on jobs); a change made of root markdown and `site/`
+# paths with README.md or at least one `site/` path among them gives true/true (the heavy
+# jobs skip, the docs suite runs); anything else, every fail-safe path included, gives
+# false/true (everything runs, docs suite too).
+#
+# WHY README.md RUNS THE DOCS SUITE. The docs suite checks the README
+# (`frontend/e2e-docs/readme.spec.ts`): its links against the tree and the built site, its
+# install commands against the install page, its pitch against the site's lead, and its curl
+# block through the same parser the live job runs (`frontend/e2e-live/support/pageCurl.ts`).
 #
 # THE MEASURED INVARIANT THIS RESTS ON (2026-09-30). No heavy job reads a markdown file
 # at the repository root; every hit of a search for such reads was a display string or a
@@ -32,9 +39,16 @@
 # for `site/` (2026-11-10): outside the docs suite, its build scripts and the always-on
 # residue gate, nothing under crates/, frontend/ or scripts/ reads a file there.
 #
-# THE RESIDUAL, stated plainly. If a heavy job ever starts reading such a file, or a file
-# under `site/`, a docs-only push that edits it skips that job. The next code push re-runs every heavy job
-# over the whole tree and surfaces the red then, one push late.
+# THE ONE EXCEPTION, README.md (2026-11-18). The live job's README quickstart spec reads
+# the README's curl block, so a heavy job now reads a root markdown file. The docs suite runs
+# the same parse through `readme.spec.ts`, so a README-only push that breaks the command
+# fails in the docs job, as a push that breaks the first-webhook page's command under
+# `site/` does. That is why README.md alone gives true/true and not true/false.
+#
+# THE RESIDUAL, stated plainly. If a heavy job ever starts reading another root markdown
+# file, or a file under `site/` that the docs suite doesn't check, a docs-only push that edits
+# it skips that job. The next code push re-runs every heavy job over the whole tree and
+# surfaces the red then, one push late.
 #
 # FAIL-SAFE DIRECTION. Every path through this script that is not a positive, complete
 # proof of docs-only decides `docs_only=false` and `docs_suite=true`, which runs everything:
@@ -107,6 +121,11 @@ is_root_md() {
         return 0
     fi
     return 1
+}
+
+# The README at the repository root, which the docs suite checks.
+is_readme() {
+    [ "$1" = "README.md" ]
 }
 
 # Root markdown, or anything under the docs site's folder.
@@ -183,10 +202,11 @@ if ! git diff --no-renames --name-only -z "$DIFF_FROM" "$TO" >"$PATHS_FILE" 2>/d
 fi
 
 # (6) and (7) Classify every path; the first non-docs path decides false/true, and the
-# first path that isn't root markdown means the docs suite has to run.
+# first path that isn't root markdown, or README.md, means the docs suite has to run.
 count=0
 first_non_docs=""
 first_non_root_md=""
+saw_readme=0
 listed=()
 while IFS= read -r -d '' path; do
     count=$((count + 1))
@@ -198,6 +218,9 @@ while IFS= read -r -d '' path; do
     fi
     if [ -z "$first_non_root_md" ] && ! is_root_md "$path"; then
         first_non_root_md="$path"
+    fi
+    if is_readme "$path"; then
+        saw_readme=1
     fi
 done <"$PATHS_FILE"
 
@@ -222,8 +245,13 @@ if [ -n "$first_non_docs" ]; then
     print_paths
     exit 0
 fi
+if [ -z "$first_non_root_md" ] && [ "$saw_readme" -eq 1 ]; then
+    decide true true "every changed path is markdown at the repository root, and README.md, which the docs suite checks, is among them"
+    print_paths
+    exit 0
+fi
 if [ -z "$first_non_root_md" ]; then
-    decide true false "every changed path is markdown at the repository root"
+    decide true false "every changed path is markdown at the repository root, and none is README.md"
     print_paths
     exit 0
 fi

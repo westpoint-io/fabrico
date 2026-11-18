@@ -30,9 +30,10 @@
 #   - a tracked file whose name says text but which holds a NUL byte. That is UTF-16 or a
 #     smuggled binary, and the byte search below cannot read either reliably.
 #
-# THE DOCS SITE FAMILY, for tracked files under `site/` only. The published docs pages are
-# written beside the private planning notes, which label their work with ids a reader of
-# the site can't look up. Under `site/` four more patterns must match nothing:
+# THE DOCS SITE FAMILY, for tracked files under `site/` and the root `README.md` only. The
+# published docs pages and the README, the repository's front page, are written beside the
+# private planning notes, which label their work with ids a reader can't look up. In those
+# files four more patterns must match nothing:
 #   - a phase id: "phase" in any letter case (`phase`, `Phase`, `PHASE`), an optional space or
 #     hyphen, then a digit;
 #   - a requirement id: two to eight capital letters, a hyphen and two digits, with no
@@ -47,11 +48,12 @@
 # run of letters, digits and hyphens on it that matches the pattern is exactly an allowed
 # token, so `UTF-16` beside `GATE-07` on one line still fails. Add a token there only
 # when it is a real name readers use, never to let a planning id through.
-# The family is scoped to `site/` because
+# The family is scoped to `site/` and `README.md` because
 # code comments elsewhere in the tree cite phase and plan ids on purpose, as a pointer to
 # the history of a rule; on a published page the same id is a dead reference. The run
-# prints how many `site/` files the family searched. It has no floor of its own, because a
-# tree with no `site/` is a legitimate tree; the main scan's floor still applies.
+# prints how many files under `site/` and named `README.md` the family searched. It has no
+# floor of its own, because a tree with no `site/` is a legitimate tree; the main scan's
+# floor still applies.
 #
 # The names are stored rot13-encoded and decoded when the script starts, so this file
 # does not itself spell them out. The encoding hides nothing from a reader; it only keeps
@@ -139,15 +141,17 @@ PATTERNS=(
     "first name, as a word	-	${WB}${P_FIRST}${NB}"
 )
 
-# The docs site family: searched only in tracked paths that start with `site/`. Same
-# `label<TAB>flags<TAB>ERE` form. See THE DOCS SITE FAMILY above.
+# The docs site family: searched only in tracked paths that start with `site/`, and in the
+# root README. Same `label<TAB>flags<TAB>ERE` form. See THE DOCS SITE FAMILY above.
 SITE_PREFIX="site/"
+SITE_README="README.md"
+SITE_FAMILY="${SITE_PREFIX} and ${SITE_README}"
 REQ_PREFIX='[A-Z]{2,8}'
 SITE_PATTERNS=(
-    "phase id under site/	-	[Pp][Hh][Aa][Ss][Ee][ -]?[0-9]"
-    "requirement id under site/	-	(^|[^A-Za-z0-9])${REQ_PREFIX}-[0-9]{2}([^A-Za-z0-9]|$)"
-    "plan id under site/	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
-    "decision id under site/	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
+    "phase id in site/ and README.md	-	[Pp][Hh][Aa][Ss][Ee][ -]?[0-9]"
+    "requirement id in site/ and README.md	-	(^|[^A-Za-z0-9])${REQ_PREFIX}-[0-9]{2}([^A-Za-z0-9]|$)"
+    "plan id in site/ and README.md	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
+    "decision id in site/ and README.md	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
 )
 
 # Real tokens of the requirement-id shape that a page may hold, space-separated. Each is
@@ -428,21 +432,21 @@ else
     echo "  text file holding NUL bytes: 0"
 fi
 
-# --- The docs site family, over tracked paths under site/ -----------------------------
+# --- The docs site family, over tracked paths under site/ and the root README.md -------
 SITE_SET="${SCAN_TMPDIR}/site.z"
 : >"$SITE_SET"
 site_count=0
 while IFS= read -r -d '' path; do
     case "$path" in
-        "$SITE_PREFIX"*)
+        "$SITE_PREFIX"* | "$SITE_README")
             printf '%s\0' "$path" >>"$SITE_SET"
             site_count=$((site_count + 1))
             ;;
     esac
 done <"$SCAN_SET"
-echo "site/ scan set: ${site_count} tracked file(s) under ${SITE_PREFIX} searched"
-echo "asserting ${#SITE_PATTERNS[@]} docs site pattern(s) match nothing under ${SITE_PREFIX}:"
-echo "allowed tokens under ${SITE_PREFIX}: ${SITE_ALLOWED_TOKENS}"
+echo "site/ and README.md scan set: ${site_count} tracked file(s) under ${SITE_PREFIX} or named ${SITE_README} searched"
+echo "asserting ${#SITE_PATTERNS[@]} docs site pattern(s) match nothing in ${SITE_FAMILY}:"
+echo "allowed tokens in ${SITE_FAMILY}: ${SITE_ALLOWED_TOKENS}"
 for entry in "${SITE_PATTERNS[@]}"; do
     assert_absent "$SITE_SET" "$site_count" "$entry" "$SITE_ALLOWED_TOKENS"
 done
@@ -461,5 +465,5 @@ if [ "$failed" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: no private residue in ${scan_count} tracked file(s), ${site_count} of them under ${SITE_PREFIX} also free of planning ids; positive control found in ${control_hits}."
+echo "OK: no private residue in ${scan_count} tracked file(s), ${site_count} of them in ${SITE_FAMILY} also free of planning ids; positive control found in ${control_hits}."
 exit 0

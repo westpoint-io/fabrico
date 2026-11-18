@@ -12,18 +12,20 @@
 # runs (the heavy gate skips only on the exact string `true`, the docs gate only on the
 # exact string `false`).
 #
-# EACH CASE EXPECTS A PAIR, docs_only/docs_suite: true/false (root markdown only),
-# true/true (root markdown and site/ paths, at least one under site/), or false/true
-# (anything else, and every fail-safe path).
+# EACH CASE EXPECTS A PAIR, docs_only/docs_suite: true/false (root markdown only, without
+# README.md), true/true (root markdown and site/ paths, with README.md or at least one path
+# under site/ among them), or false/true (anything else, and every fail-safe path).
 #
 # WHAT EACH CASE GROUP PROVES.
-#   R1-R9  HISTORY SHAPES built in a throwaway repository (a master line with a merged
+#   R1-R10 HISTORY SHAPES built in a throwaway repository (a master line with a merged
 #          feature branch), so the proof needs no particular history in this checkout.
-#          R1/R7 (a commit that changed only root markdown, as a push and as a
-#          pull_request) must be true/false; code, non-markdown evidence beside a root
-#          markdown file (R3), a PR merge commit, a multi-commit push and a code PR must be
-#          false/true; a push whose base is not an ancestor of its head (R8, force push)
-#          and an empty range (R9) must be false/true.
+#          R1/R7 (a commit that changed only a root markdown file other than README.md, the
+#          STATUS.md fixture, as a push and as a pull_request) must be true/false; R10 (a
+#          commit that changed README.md and STATUS.md) must be true/true, because the docs
+#          suite checks the README; code, non-markdown evidence beside a root markdown file
+#          (R3), a PR merge commit, a multi-commit push and a code PR must be false/true; a
+#          push whose base is not an ancestor of its head (R8, force push) and an empty
+#          range (R9) must be false/true.
 #   F1-F9  FAIL-SAFE paths. Each holds R1's docs-only SHAs in every variable it does not
 #          vary, so its expected false/true can only come from the one field under test:
 #          workflow_dispatch, schedule, an empty event, an empty / all-zero / missing /
@@ -33,11 +35,11 @@
 #          and the directory stays empty, so neither output line exists anywhere.
 #   S1-S5  SHAPES built in a second throwaway repository: a rename out of code into a
 #          root markdown file (false/true, only visible with --no-renames), a root README
-#          change (true/false), a docs/ markdown change (false/true), a markdown change
+#          change on its own (true/true), a docs/ markdown change (false/true), a markdown change
 #          under crates/ (false/true), and a depth-2 shallow clone over a root-README-only
 #          range (false/true, the shallow rule alone decides it).
 #   S6-S13 THE DOCS SITE, both directions: a change only under site/ (true/true), site/
-#          plus root markdown (true/true); site/ plus frontend/src (false/true), site/ plus
+#          plus README.md (true/true); site/ plus frontend/src (false/true), site/ plus
 #          crates/ (false/true), a rename from frontend/src into site/ (false/true, only
 #          visible with --no-renames), docs/site/x.md (false/true), a root file named
 #          site.txt (false/true) and a sites/ folder (false/true).
@@ -97,7 +99,7 @@ prover_on_exit remove_tmproot
 # shellcheck disable=SC2119  # no probes: this run writes only under mktemp -d
 prover_isolate_untracked
 
-DECLARED_TOTAL=33
+DECLARED_TOTAL=34
 executed=0
 saw_true=0
 saw_false=0
@@ -192,7 +194,8 @@ run_case() {
 
 # The history shapes, built in a throwaway repository: a base commit, a code commit (R2),
 # an evidence commit (R3), a feature branch with a code change merged with --no-ff (R4, the
-# branch tip is R6's code PR head), then a root-markdown-only commit (R1).
+# branch tip is R6's code PR head), a README.md and STATUS.md commit (R10), then a commit
+# that changes only STATUS.md, a root markdown fixture that isn't the README (R1).
 HIST="$TMPROOT/history"
 h() {
     git -C "$HIST" -c user.name=prove -c user.email=prove@invalid -c commit.gpgsign=false \
@@ -226,14 +229,18 @@ h merge -q --no-ff -m h4-merge feature >/dev/null || exit 2
 if ! H4="$(h rev-parse HEAD)"; then exit 2; fi
 printf '# readme\nmore\n' >"$HIST/README.md"
 printf '# status\nmeasured\nmore\n' >"$HIST/STATUS.md"
-if ! H5="$(hist_commit h5-root-markdown)"; then exit 2; fi
+if ! H5="$(hist_commit h5-readme-and-root-markdown)"; then exit 2; fi
+printf '# status\nmeasured\nmore\nagain\n' >"$HIST/STATUS.md"
+if ! H6="$(hist_commit h6-root-markdown-not-readme)"; then exit 2; fi
 if h cat-file -e "${MISSING_SHA}^{commit}" 2>/dev/null; then
     echo "prove-ci-classify-change: the missing-SHA probe $MISSING_SHA exists here; COULD NOT PROVE" >&2
     exit 2
 fi
 
-R1_BEFORE="$H4"          # parent of the root-markdown-only commit
-R1_AFTER="$H5"           # README.md and STATUS.md only
+R1_BEFORE="$H5"          # parent of the root-markdown-only commit
+R1_AFTER="$H6"           # STATUS.md only, no README.md
+R10_BEFORE="$H4"
+R10_AFTER="$H5"          # README.md and STATUS.md
 R2_BEFORE="$H0"
 R2_AFTER="$H1"           # frontend/g.ts
 R3_BEFORE="$H1"
@@ -252,6 +259,7 @@ run_case R6 false/true "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE="$R4
 run_case R7 true/false "$HIST" CLASSIFY_EVENT=pull_request CLASSIFY_PR_BASE="$R1_BEFORE" CLASSIFY_PR_HEAD="$R1_AFTER"
 run_case R8 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_AFTER" CLASSIFY_PUSH_AFTER="$R1_BEFORE"
 run_case R9 false/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R1_AFTER" CLASSIFY_PUSH_AFTER="$R1_AFTER"
+run_case R10 true/true "$HIST" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$R10_BEFORE" CLASSIFY_PUSH_AFTER="$R10_AFTER"
 
 echo "prove-ci-classify-change: fail-safe paths (R1's docs-only SHAs held everywhere else)"
 DOCS_ENV=(CLASSIFY_PR_BASE="$R1_BEFORE" CLASSIFY_PR_HEAD="$R1_AFTER"
@@ -325,7 +333,7 @@ printf '# not the site\n' >"$REPO/sites/x.md"
 if ! C13="$(commit_all c13-sites-folder)"; then exit 2; fi
 
 run_case S1 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C0" CLASSIFY_PUSH_AFTER="$C1"
-run_case S2 true/false "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C1" CLASSIFY_PUSH_AFTER="$C2"
+run_case S2 true/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C1" CLASSIFY_PUSH_AFTER="$C2"
 run_case S3 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C2" CLASSIFY_PUSH_AFTER="$C3"
 run_case S4 false/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C3" CLASSIFY_PUSH_AFTER="$C4"
 run_case S6 true/true "$REPO" CLASSIFY_EVENT=push CLASSIFY_PUSH_BEFORE="$C5" CLASSIFY_PUSH_AFTER="$C6"

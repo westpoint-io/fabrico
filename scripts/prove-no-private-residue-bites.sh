@@ -47,7 +47,10 @@
 #       requirement id with a prefix from another workstream (`GATE-07`) also exits 1; an
 #       allowed token (`UTF-16`) exits 0; the allowed token beside a requirement id on
 #       one line still exits 1; and a phase id in capitals (`PHASE 97`) exits 1, because the
-#       phase pattern matches any letter case.
+#       phase pattern matches any letter case. The family also covers the root README.md: a
+#       phase id there exits 1 and names `README.md`, and the same phase id in another root
+#       markdown file (`NOTES.md`) exits 0, because the README is the one root file the
+#       family reads.
 #   X   COULD NOT ASSERT. A scan set below the floor, a positive control that cannot be
 #       found, and a missing exclusion must each exit EXACTLY 2, never 0.
 #
@@ -107,7 +110,7 @@ HANDLE="$(rot13 'zniqv')"
 FIRST_UP="$(printf '%s' "$FIRST" | tr 'a-z' 'A-Z')"
 HOME_ROOT="/home"
 
-DECLARED_TOTAL=62
+DECLARED_TOTAL=64
 
 # The gate runs under a UTF-8 locale when this machine has one, as it does on CI's ubuntu
 # runners. That is the locale in which GNU grep classes a file holding one Latin-1 byte as
@@ -299,7 +302,7 @@ new_repo
 printf '%s\n' "Drafted with Claude." >"$REPO/untracked-probe.md"
 check E5 0 "-"
 
-echo "prove-no-private-residue-bites: the docs site family (site/ only)"
+echo "prove-no-private-residue-bites: the docs site family (site/ and README.md only)"
 new_repo
 track "site/src/content/docs/concepts/index.md" "The belt rules arrive in phase 97."
 check S1 1 "site/src/content/docs/concepts/index.md"
@@ -330,6 +333,12 @@ check S9 1 "site/src/content/docs/concepts/index.md"
 new_repo
 track "site/src/content/docs/reference/index.mdx" "PHASE 97 adds the machine pages."
 check S10 1 "site/src/content/docs/reference/index.mdx"
+new_repo
+track "README.md" "The quickstart landed in phase 101."
+check S11 1 "README.md:1:"
+new_repo
+track "NOTES.md" "The quickstart landed in phase 101."
+check S12 0 "-"
 
 echo "prove-no-private-residue-bites: could not assert"
 new_repo

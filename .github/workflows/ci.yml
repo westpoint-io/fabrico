@@ -88,12 +88,19 @@ jobs:
   # every other non-markdown file are NOT docs. `scripts/ci-classify-change.sh` decides it.
   #
   # THE SECOND OUTPUT, docs_suite, says whether the `docs` job runs. It is `false` only when
-  # every changed path is root markdown, which the docs site doesn't read. So root markdown
-  # only gives docs_only=true, docs_suite=false (only the always-on jobs run); a change
-  # made of root markdown and `site/` paths with at least one under `site/` gives
-  # true/true (the heavy jobs skip, the docs suite runs); anything else, and every
-  # fail-safe path, gives false/true (everything runs, the docs suite too). The classifier
-  # writes both lines in one write, so the output can't hold one without the other.
+  # every changed path is root markdown and none of them is README.md. So root markdown
+  # without README.md gives docs_only=true, docs_suite=false (only the always-on jobs run);
+  # a change made of root markdown and `site/` paths with README.md or at least one path
+  # under `site/` among them gives true/true (the heavy jobs skip, the docs suite runs);
+  # anything else, and every fail-safe path, gives false/true (everything runs, the docs
+  # suite too). The classifier writes both lines in one write, so the output can't hold one
+  # without the other.
+  #
+  # README.md RUNS THE DOCS SUITE because the docs suite checks it
+  # (`frontend/e2e-docs/readme.spec.ts`). The live job reads the README's curl block, and the
+  # docs suite runs the same parse (`frontend/e2e-live/support/pageCurl.ts`), so a README-only
+  # push that breaks the command fails in the docs job, as one that breaks the first-webhook
+  # page's command under `site/` does.
   #
   # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
   # embed, golden-corpus, e2e, e2e-live, e2e-live-verdict, e2e-walk, e2e-walk-verdict and
