@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import { idsIn, sitePatterns } from './support/residuePatterns.ts';
 
 // The built site holds nothing private. scripts/check-no-private-residue.sh reads tracked files
 // only, and site/dist/ and site/dist-fixtures/ are build output, so this spec reads them from disk
@@ -10,7 +11,8 @@ import { expect, test } from '@playwright/test';
 // built HTML and XML must also hold none of the planning ids the residue gate refuses under site/.
 //
 // The id patterns and the allowed tokens (real names such as `UTF-16` that have the requirement-id
-// shape) are read from the residue gate at run time, so the two can't drift apart. In the folder walk
+// shape) are read from the residue gate at run time, through support/residuePatterns.ts, so the two
+// can't drift apart. In the folder walk
 // they apply to HTML and XML only: minified JavaScript, a dependency's in particular, can hold a
 // string such as `D-10` as code. Two built files are scanned whole with the same patterns, whatever
 // their type, because they are ours and both are published: the board bundle the site serves,
@@ -19,7 +21,6 @@ import { expect, test } from '@playwright/test';
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const FOLDERS = [path.join(REPO, 'site/dist'), path.join(REPO, 'site/dist-fixtures')];
-const RESIDUE_GATE = path.join(REPO, 'scripts/check-no-private-residue.sh');
 
 /** The file extensions read as text. Everything else (images, fonts, the search index) is binary. */
 const TEXT_EXTENSIONS = new Set(['.html', '.js', '.mjs', '.css', '.json', '.xml', '.txt', '.svg', '.webmanifest']);
@@ -57,57 +58,6 @@ function walk(root: string): string[] {
 }
 
 /**
- * The residue gate's site/ id patterns, as `{ label, pattern }`, read from its SITE_PATTERNS array,
- * and its allowed tokens. Throws unless exactly four patterns and at least one token come out, so a
- * change to the gate's layout fails here loudly.
- *
- * The gate's ERE boundaries `(^|[^A-Za-z0-9])` and `([^A-Za-z0-9]|$)` become lookarounds here. As
- * written they take the character beside a match, so a global search would skip `GATE-07` right after
- * `UTF-16 ` (the space already taken), and the allowed token would hide the id beside it. The gate
- * reads whole lines with grep, which has no such gap.
- */
-function sitePatterns(): { patterns: { label: string; pattern: RegExp }[]; allowed: Set<string> } {
-  const gate = fs.readFileSync(RESIDUE_GATE, 'utf8');
-  const prefix = /^REQ_PREFIX='([^']+)'$/m.exec(gate);
-  const tokens = /^SITE_ALLOWED_TOKENS='([^']*)'$/m.exec(gate);
-  const block = /^SITE_PATTERNS=\(\n([\s\S]*?)\n\)$/m.exec(gate);
-  if (prefix === null || tokens === null || block === null) {
-    throw new Error(`${RESIDUE_GATE} has no REQ_PREFIX line, SITE_ALLOWED_TOKENS line or SITE_PATTERNS array to read`);
-  }
-  const patterns = block[1]
-    .split('\n')
-    .map((line) => /^\s*"([^\t"]+)\t([-i])\t(.+)"$/.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => ({
-      label: m[1],
-      pattern: new RegExp(
-        m[3]
-          .replaceAll('${REQ_PREFIX}', prefix[1])
-          .replaceAll('(^|[^A-Za-z0-9])', '(?<![A-Za-z0-9])')
-          .replaceAll('([^A-Za-z0-9]|$)', '(?![A-Za-z0-9])'),
-        m[2] === 'i' ? 'gim' : 'gm',
-      ),
-    }));
-  if (patterns.length !== 4) {
-    throw new Error(`read ${patterns.length} site/ patterns from ${RESIDUE_GATE}, expected 4`);
-  }
-  const allowed = new Set(tokens[1].split(/\s+/).filter((t) => t !== ''));
-  if (allowed.size === 0) throw new Error(`read no allowed token from ${RESIDUE_GATE}`);
-  return { patterns, allowed };
-}
-
-/**
- * True when a match is an allowed token standing alone, with no letter, digit or hyphen on either
- * side: the gate's rule, which excuses a whole run of letters, digits and hyphens and nothing else.
- */
-function isAllowedToken(text: string, index: number, token: string, allowed: Set<string>): boolean {
-  if (!allowed.has(token)) return false;
-  const before = index === 0 ? '' : text[index - 1];
-  const after = text[index + token.length] ?? '';
-  return !/[A-Za-z0-9-]/.test(before) && !/[A-Za-z0-9-]/.test(after);
-}
-
-/**
  * What one built file must not hold, as one line per finding. `rel` is the path under the build
  * folder, `shown` the path printed in the finding.
  */
@@ -119,19 +69,6 @@ function leaksIn(rel: string, shown: string, text: string, ids: ReturnType<typeo
   if (text.includes(REPO)) out.push(`${shown}: the repo path ${REPO}`);
   if (text.includes(PLANNING_PATH)) out.push(`${shown}: the private planning path ${PLANNING_PATH}`);
   if (ID_EXTENSIONS.has(path.extname(rel))) out.push(...idsIn(shown, text, ids));
-  return out;
-}
-
-/** Every planning id the site patterns find in `text`, as one line per match naming `shown`. */
-function idsIn(shown: string, text: string, ids: ReturnType<typeof sitePatterns>): string[] {
-  const out: string[] = [];
-  for (const { label, pattern } of ids.patterns) {
-    pattern.lastIndex = 0;
-    for (const m of text.matchAll(pattern)) {
-      if (isAllowedToken(text, m.index, m[0], ids.allowed)) continue;
-      out.push(`${shown}: ${label}: "${m[0].trim()}"`);
-    }
-  }
   return out;
 }
 

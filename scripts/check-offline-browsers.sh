@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Opens the offline examples file, frontend/dist-examples/fabrico-examples.html, from disk in three
-# browsers and checks every board in it. Build the file first with scripts/build-embed.sh.
+# browsers and checks every board in it. Build the file first with scripts/build-embed.sh, or name
+# another copy of it with FABRICO_OFFLINE_FILE.
 #
 #   1. Playwright (frontend/playwright.offline.config.ts) under xvfb-run: Chromium, and Firefox with
 #      its stock file:// policy. The Firefox offline tests depend on a canary that must see a sibling module
@@ -19,6 +20,11 @@
 #   WEBKIT_OFFLINE boards=<n> drawn=<n> matched=<n>     (printed by the WebKitGTK harness)
 #   OFFLINE playwright=<ok|fail> webkitgtk=<ok|fail>
 #
+# ENVIRONMENT
+#   FABRICO_OFFLINE_FILE  the offline file to open, such as a copy downloaded from a release.
+#                         Defaults to frontend/dist-examples/fabrico-examples.html. Both legs open
+#                         this one path; the board files it is compared with are this checkout's.
+#
 # NEEDS: Playwright's Chromium and Firefox (`npx playwright install chromium firefox`), xvfb-run,
 # /usr/bin/python3 with gi, cairo and WebKit2 4.1.
 #
@@ -30,7 +36,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-FILE="$ROOT/frontend/dist-examples/fabrico-examples.html"
+FILE="${FABRICO_OFFLINE_FILE:-$ROOT/frontend/dist-examples/fabrico-examples.html}"
+case "$FILE" in /*) ;; *) FILE="$PWD/$FILE" ;; esac
+# offline.spec.ts reads the same variable, so the Playwright leg opens this file too.
+export FABRICO_OFFLINE_FILE="$FILE"
 
 if [ ! -s "$FILE" ]; then
   echo "check-offline-browsers: $FILE is missing. Run scripts/build-embed.sh first." >&2

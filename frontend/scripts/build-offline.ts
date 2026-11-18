@@ -1,9 +1,10 @@
 // build-offline.ts - wraps the embed bundle into self-contained HTML pages.
 //
 // DEFAULT MODE (no arguments): writes `dist-examples/fabrico-examples.html`, the one file that runs
-// every example board when a reader opens it from disk. It holds the bundle, both fonts, the
-// lockup, page styles from the app's own tokens, a list of in-page links to the boards, and one
-// section per `*.board.ron` under `examples/boards/`, in path order. A section's id is the board
+// every example board when a reader opens it from disk. It holds the bundle, both fonts with
+// their two OFL licence texts, the lockup, page styles from the app's own tokens, a list of in-page
+// links to the boards, one section per `*.board.ron` under `examples/boards/`, in path order, and a
+// footer naming the licences. A section's id is the board
 // id (the path under `examples/boards/` without `.board.ron`, `/` turned into `-`), its heading is
 // the board's own `title`, and it ends with a link back to the list. A board added under
 // `examples/boards/` joins the file on the next build with no change here.
@@ -197,10 +198,60 @@ nav a, .back {
   min-height: var(--fab-min-target);
 }
 .back { margin-top: var(--fab-space-sm); }
+footer { margin-top: var(--fab-space-2xl); }
+footer p + p { margin-top: var(--fab-space-sm); }
 `;
 
 const INTRO =
   "Every example board in this release, running on the real engine inside this file. Press Play on any board. This page doesn't connect to the network.";
+
+/** Where the footer's links point: the licence files and the fonts folder on main. */
+const REPO_URL = 'https://github.com/westpoint-io/fabrico';
+export const LICENCE_LINKS = {
+  apache: `${REPO_URL}/blob/main/LICENSE-APACHE`,
+  mit: `${REPO_URL}/blob/main/LICENSE-MIT`,
+  fonts: `${REPO_URL}/tree/main/frontend/src/assets/fonts`,
+} as const;
+
+/**
+ * The page's last element inside `main`: which licences Fabrico and its two fonts come under. Fixed
+ * markup, never built from a board. A `<footer>`, not a `<section>`, because the offline check
+ * counts `main > section` against the board files.
+ */
+const FOOTER = `  <footer>
+    <p>Fabrico is licensed under the <a href="${LICENCE_LINKS.apache}">Apache License 2.0</a> or the <a href="${LICENCE_LINKS.mit}">MIT license</a>, at your option.</p>
+    <p>The fonts Martian Mono and Sono are licensed under the <a href="${LICENCE_LINKS.fonts}">SIL Open Font License 1.1</a>.</p>
+  </footer>`;
+
+/** The two fonts' licence texts, by file name under `src/assets/fonts/`, in the order the file carries them. */
+export const FONT_LICENCE_FILES = ['OFL-1.1-MartianMono.txt', 'OFL-1.1-Sono.txt'] as const;
+const FONTS_DIR = path.join(FRONTEND, 'src', 'assets', 'fonts');
+
+/**
+ * Both OFL texts, verbatim, inside one HTML comment, which the file carries beside its `@font-face`
+ * rules. The fonts themselves are `data:` URLs in that style block, and the licence asks that its
+ * text go with them. A text that would end the comment early is refused.
+ */
+export function fontLicenceComment(texts: readonly { name: string; text: string }[]): string {
+  if (texts.length === 0) throw new Error('build-offline: there are no font licence texts to carry');
+  for (const { name, text } of texts) {
+    if (text.trim() === '') throw new Error(`build-offline: the font licence ${name} is empty`);
+    if (text.includes('-->') || text.includes('--!>')) {
+      throw new Error(`build-offline: the font licence ${name} holds an HTML comment closer`);
+    }
+  }
+  const body = texts.map(({ name, text }) => `${name}\n\n${text}`).join('\n');
+  return `<!-- The licence of the two fonts in the style block below.\n\n${body}\n-->`;
+}
+
+/** Read both OFL texts from `src/assets/fonts/`, refusing to go on if either is missing. */
+function readFontLicences(): { name: string; text: string }[] {
+  return FONT_LICENCE_FILES.map((name) => {
+    const file = path.join(FONTS_DIR, name);
+    if (!fs.existsSync(file)) throw new Error(`build-offline: the font licence ${file} is missing`);
+    return { name, text: fs.readFileSync(file, 'utf8') };
+  });
+}
 
 /** What the offline file is made from. Everything is text; the function does no I/O. */
 export interface ExamplesPageParts {
@@ -208,6 +259,8 @@ export interface ExamplesPageParts {
   bundle: string;
   /** The `@font-face` rules, with both faces as `data:` URLs. */
   fontCss: string;
+  /** The fonts' licence texts, carried verbatim beside the `@font-face` rules. */
+  fontLicences: readonly { name: string; text: string }[];
   /** The `--fab-*` tokens under `:root`. */
   tokenCss: string;
   /** The lockup drawing's file text. */
@@ -242,6 +295,7 @@ export function examplesPage(parts: ExamplesPageParts): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fabrico examples</title>
+${fontLicenceComment(parts.fontLicences)}
 <style data-fabrico-fonts>
 ${parts.fontCss}
 </style>
@@ -264,6 +318,7 @@ ${links}
     </ul>
   </nav>
 ${sections}
+${FOOTER}
 </main>
 ${BUNDLE_MARKER}
 </body>
@@ -321,6 +376,7 @@ async function buildExamples(wasmPath: string): Promise<{ bytes: number; boards:
     boards,
     bundle: fs.readFileSync(BUNDLE_PATH, 'utf8'),
     fontCss: styles.FONT_FACE_CSS,
+    fontLicences: readFontLicences(),
     tokenCss: skinCss.skinToCssVars(locked.LOCKED_SKIN, 1, ':root'),
     lockupSvg: fs.readFileSync(LOCKUP_PATH, 'utf8'),
   });

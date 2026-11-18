@@ -15,17 +15,30 @@ import {
   shadowText,
   watchPageErrors,
 } from '../e2e-embed/support/health.ts';
+import { idsIn, sitePatterns } from '../e2e-docs/support/residuePatterns.ts';
 
 // The offline file, opened from disk the way a reader double-clicks it. It must hold one section
 // per board file under examples/boards/ (counted from the folder here, not from the file), link to
 // each and back, draw each board (frames rise and a screenshot of a belt region changes), end each
-// on its pinned hash, and ask for nothing but itself.
+// on its pinned hash, and ask for nothing but itself. It ends with a footer naming Fabrico's two
+// licences and the fonts' OFL, carries both OFL texts byte for byte, and holds none of the planning
+// ids the residue gate refuses under site/.
+//
+// FABRICO_OFFLINE_FILE names another copy of the file to check, such as one downloaded from a
+// release; scripts/check-offline-browsers.sh passes the same path to its WebKitGTK leg. The board
+// files it is compared with are always this checkout's.
 
-const FILE = fileURLToPath(new URL('../dist-examples/fabrico-examples.html', import.meta.url));
+const FILE =
+  process.env.FABRICO_OFFLINE_FILE !== undefined && process.env.FABRICO_OFFLINE_FILE !== ''
+    ? path.resolve(process.env.FABRICO_OFFLINE_FILE)
+    : fileURLToPath(new URL('../dist-examples/fabrico-examples.html', import.meta.url));
 const FILE_URL = pathToFileURL(FILE).href;
 const REPO = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '');
 const BOARDS_DIR = path.join(REPO, 'examples', 'boards');
 const LIST_ID = 'board-list';
+/** The fonts' licence texts the file must carry, from this checkout. */
+const FONTS_DIR = path.join(REPO, 'frontend', 'src', 'assets', 'fonts');
+const OFL_FILES = ['OFL-1.1-MartianMono.txt', 'OFL-1.1-Sono.txt'] as const;
 /** At 4x a 1200-tick board takes 5 s; a slow software renderer gets far more. */
 const END_TIMEOUT_MS = 120_000;
 
@@ -64,6 +77,45 @@ test('the file carries no source map reference and no build machine path', () =>
   expect(text.includes('sourceMappingURL'), 'a sourceMappingURL comment in the file').toBe(false);
   expect(text.includes(os.homedir()), `the home folder ${os.homedir()} in the file`).toBe(false);
   expect(text.includes(REPO), `the repo path ${REPO} in the file`).toBe(false);
+});
+
+test('the file holds none of the planning ids the residue gate refuses under site/', () => {
+  const found = idsIn(path.basename(FILE), readFileSync(FILE, 'utf8'), sitePatterns());
+  expect(found, `planning ids in ${FILE}:\n${found.join('\n')}`).toEqual([]);
+});
+
+test('the file carries both OFL licence texts byte for byte', () => {
+  const text = readFileSync(FILE, 'utf8');
+  for (const name of OFL_FILES) {
+    const licence = readFileSync(path.join(FONTS_DIR, name), 'utf8');
+    expect(licence.length, `${name} is not empty`).toBeGreaterThan(0);
+    expect(text.includes(licence), `${name}, byte for byte, in the file`).toBe(true);
+  }
+});
+
+test('a footer after the last board names the licences of Fabrico and its fonts', async ({ page, browserName }) => {
+  const errors = watchPageErrors(page);
+  const requests = recordRequests(page);
+  await page.goto(FILE_URL);
+  await expect(page.locator('main > section'), 'the footer is not a section').toHaveCount(IDS.length);
+  const footer = page.locator('main > footer');
+  await expect(footer).toHaveCount(1);
+  expect(
+    await page.locator('main > *').evaluateAll((els) => els[els.length - 1]?.tagName),
+    'the footer is the last element in main',
+  ).toBe('FOOTER');
+  await expect(footer.locator('p')).toHaveText([
+    'Fabrico is licensed under the Apache License 2.0 or the MIT license, at your option.',
+    'The fonts Martian Mono and Sono are licensed under the SIL Open Font License 1.1.',
+  ]);
+  const links = await footer.locator('a').evaluateAll((els) => els.map((a) => [a.textContent, a.getAttribute('href')]));
+  expect(links).toEqual([
+    ['Apache License 2.0', 'https://github.com/westpoint-io/fabrico/blob/main/LICENSE-APACHE'],
+    ['MIT license', 'https://github.com/westpoint-io/fabrico/blob/main/LICENSE-MIT'],
+    ['SIL Open Font License 1.1', 'https://github.com/westpoint-io/fabrico/tree/main/frontend/src/assets/fonts'],
+  ]);
+  errors.assertNone('on the offline file');
+  expectOnlyTheFile(requests, browserName);
 });
 
 test('one section and one link per board file, in path order', async ({ page, browserName }) => {
