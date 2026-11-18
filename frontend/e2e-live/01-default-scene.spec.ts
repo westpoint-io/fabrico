@@ -395,7 +395,7 @@ test.describe('E2E-02 cold boot: the SHIPPED default scene is faithful on the re
     // last two Places, are the catalog machines a user places from the palette.
     const route = mustNode(s, census.wire.from);
     expect(route.kind, 'the caller is a Route (kind 9)').toBe(KIND.ENDPOINT);
-    expect(route.cells, 'the caller Route sits at (13,6)').toEqual([[13, 6]]);
+    expect(route.cells, 'the caller Route sits at (13,7)').toEqual([[13, 7]]);
     expect(
       route.ports.map((p) => [p.index, p.role, p.medium, p.side]),
       'the Route carries an electrical In (0) facing W and an electrical Out (1) facing E on its one cell',
@@ -405,7 +405,7 @@ test.describe('E2E-02 cold boot: the SHIPPED default scene is faithful on the re
     ]);
     const handler = mustNode(s, census.wire.to);
     expect(handler.kind, 'the handler is an HTTP Handler (kind 10)').toBe(KIND.HANDLER);
-    expect(boxOf(handler), 'the HTTP Handler is the catalog 3x3 at (16,5)').toEqual({ anchor: [16, 5], w: 3, h: 3 });
+    expect(boxOf(handler), 'the HTTP Handler is the catalog 3x3 at (16,6)').toEqual({ anchor: [16, 6], w: 3, h: 3 });
     expect(
       handler.ports.map((p) => ({ role: p.role, medium: p.medium })),
       'the handler carries an ELECTRICAL In at index 0 and an ELECTRICAL Out (what is_handler_shape reads) and the catalog MECHANICAL Fault',
@@ -416,11 +416,11 @@ test.describe('E2E-02 cold boot: the SHIPPED default scene is faithful on the re
     ]);
     expect(
       handler.ports.map((p) => [p.cell_x, p.cell_y, p.side]),
-      'its In at (16,6) facing W, its Out at (18,6) facing E, its Fault at (17,7) facing S',
+      'its In at (16,7) facing W, its Out at (18,7) facing E, its Fault at (17,8) facing S',
     ).toEqual([
-      [16, 6, SIDE.W],
-      [18, 6, SIDE.E],
-      [17, 7, SIDE.S],
+      [16, 7, SIDE.W],
+      [18, 7, SIDE.E],
+      [17, 8, SIDE.S],
     ]);
 
     // The two electrical cables, dormant on cold boot (no pulse until a real POST energizes

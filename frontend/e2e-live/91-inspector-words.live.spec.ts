@@ -90,7 +90,7 @@ const DEMO_SOURCE_AT: [number, number] = [1, 3];
 const DEMO_TEE_AT: [number, number] = [9, 3];
 const DEMO_AUDIT_SINK_AT: [number, number] = [14, 4];
 const DEMO_ROUTER_AT: [number, number] = [14, 0];
-const DEMO_ROUTE_AT: [number, number] = [13, 6];
+const DEMO_ROUTE_AT: [number, number] = [13, 7];
 const DEMO_BELT21_MIDDLE: [number, number] = [12, 4];
 const DEMO_FLOOR: [number, number] = [11, 9];
 /** The Factory leg's drop cell: the 3x3 box (6..8, 11..13) is clear demo floor, and so is the
