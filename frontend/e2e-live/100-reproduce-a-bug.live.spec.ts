@@ -94,7 +94,9 @@ import { curlArgs, parseFirstWebhookCurl } from './support/pageCurl';
 //      left paused by a passing test stalls the spec after it; `restoreHostAfterFailedTest`
 //      covers only a test that failed).
 //
-// On the way out an afterAll loads the demo back, as `17-order-example` does. The live project
+// On the way out an afterAll loads the demo back, as `17-order-example` does, and waits for the
+// tick to rise so a host this spec left paused fails here. The afterEach first disarms the leg 2
+// Step watcher, so a failed test can't leave it to pause the host after the restore. The live project
 // runs one worker against one host, and this file sorts just before `11-machine-labels`, whose
 // first test expects the demo's section labels; with Order processing left loaded it failed and
 // the serial test after it never ran (phase 100 plan 10, the full live pass at cce5b4a).
@@ -329,6 +331,10 @@ test.afterAll(async () => {
 // rather than the end of the test so it also runs when the test fails part way. afterAll has no
 // `page` fixture, so it opens its own page at the project's baseURL; a fresh page has no unsaved
 // edits, so Examples asks nothing before it swaps the board.
+//
+// The tick must also rise. A demo load on a user-paused host swaps the board and stays at its
+// first tick (`restoreHostAfterFailedTest`), so the node and wire counts alone pass on a host
+// this spec left paused, and the spec after it waits for a tick that never comes.
 test.afterAll(async ({ browser }, testInfo) => {
   const baseURL = testInfo.project.use.baseURL;
   if (baseURL === undefined) return;
@@ -340,6 +346,10 @@ test.afterAll(async ({ browser }, testInfo) => {
     await pollScene(page, (s) => s.nodes.length === DEMO_NODE_COUNT && s.wires.length === 2, {
       message: 'the shared host is back on the demo after the reproduce-a-bug spec',
     }).toBe(true);
+    const demoTick = (await readScene(page)).tick;
+    await pollScene(page, (s) => s.tick, {
+      message: `the shared host plays on the demo after the reproduce-a-bug spec (the tick rises past ${demoTick})`,
+    }).toBeGreaterThan(demoTick);
   } finally {
     await page.close();
   }
@@ -347,7 +357,20 @@ test.afterAll(async ({ browser }, testInfo) => {
 
 let savePath: string | null = null;
 
+/** The test page's Step watcher (leg 2), as the page holds it on `window`. */
+type ReproHold = { at: number | null; stop: boolean };
+
 test.afterEach(async ({ page }, testInfo) => {
+  // Disarm the leg 2 Step watcher before the restore. A test that fails after arming it and
+  // before the order reaches the first belt leaves it running on this page, which stays open
+  // through afterEach. An order the host takes late would then press Step after the restore
+  // has resumed the host, and leave the shared host paused. The catch covers a closed page.
+  await page
+    .evaluate(() => {
+      const hold = (window as unknown as { __reproHold?: ReproHold }).__reproHold;
+      if (hold) hold.stop = true;
+    })
+    .catch(() => {});
   if (savePath !== null) rmSync(savePath, { force: true });
   savePath = null;
   await restoreHostAfterFailedTest(page, testInfo);
@@ -394,9 +417,9 @@ test.describe('100 live: Reproduce a bug from a save file, the page steps on the
     await page.evaluate((id) => {
       const w = window as unknown as {
         __fabrico: { scene(): { tick: number; belts: Array<{ id: number; items: number }> } };
-        __reproHold?: { at: number | null; stop: boolean };
+        __reproHold?: ReproHold;
       };
-      const latch: { at: number | null; stop: boolean } = { at: null, stop: false };
+      const latch: ReproHold = { at: null, stop: false };
       w.__reproHold = latch;
       const watch = (): void => {
         if (latch.stop) return;
@@ -418,7 +441,7 @@ test.describe('100 live: Reproduce a bug from a save file, the page steps on the
     }).trim();
     expect(status, 'curl prints 200: the app took the bad order').toBe('200');
     await expect
-      .poll(() => page.evaluate(() => (window as unknown as { __reproHold: { at: number | null } }).__reproHold.at), {
+      .poll(() => page.evaluate(() => (window as unknown as { __reproHold: ReproHold }).__reproHold.at), {
         timeout: addWaitBudget(tickBudgetMs(SLOW_BOARD * ARRIVE_TICKS) + frameBudgetMs(2), 'the order leaves the Source onto the first belt'),
         intervals: [20, 50, 100],
         message: 'the order reaches the first belt and Step is pressed',
