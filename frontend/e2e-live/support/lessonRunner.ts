@@ -9,7 +9,7 @@ import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import { BELT_ENDS, beltJoining, lineDoorstep, lineEndTile, nodeKey, watchedNames } from '../../src/tutorial/check';
 import { stageKey } from '../../src/tutorial/machine';
 import type { BindingName, Lesson, Stage, Step } from '../../src/tutorial/types';
-import { DOT_INK_MIN, isDotInk, railInk, ringOnCanvas } from './canvasDots';
+import { DOT_INK_MIN, railInk, ringOnCanvas } from './canvasDots';
 import { LESSON_WALKS, REFUSED_SENTENCES, type LessonWalk } from './lessonWalks';
 import {
   DRAWN_STATE_FRAMES,
@@ -696,23 +696,22 @@ function controlRow(
   return null;
 }
 
-/** Dot ink pixels in a capture, and the device pixel ratio it was taken at. */
-async function dotInkIn(page: Page, clip: { x: number; y: number; width: number; height: number }): Promise<{ ink: number; dpr: number }> {
-  const img = decodePngRows(await captureClip(page, clip), 0, Number.MAX_SAFE_INTEGER);
-  let ink = 0;
-  for (let y = 0; y < img.height; y++) {
-    for (let x = 0; x < img.width; x++) if (isDotInk(img.data, (y * img.width + x) * 4)) ink += 1;
-  }
-  return { ink, dpr: img.width / clip.width };
-}
-
 /**
  * The walk's read of what a person watches at the end of a lesson, off what's drawn: for each Sink the
  * step's check watches, the dots on the belt docked at its Head, one pair after the other, each message
  * naming that belt's binding. The model can claim items forever while the item layer draws nothing, so
- * this reads the layer, then the screen, then the render loop. An item can be on the Sink's tile for a
+ * this reads the layer, then the canvas, then the render loop. An item can be on the Sink's tile for a
  * few frames only, so the layer read runs on animation frames in the page rather than from polls that
  * could land between them.
+ *
+ * THE INK READ IS OFF THE CANVAS, IN THE PAGE. It used to be a screen capture of the belt's row, polled.
+ * On a slow page a capture took about 1 s and kept a frame from near its end, and a dot is on a 2-tile
+ * belt for about 200 ms of each 1 s Timer period, so the read looked at a 19% window once every 3 to 4 s.
+ * CI runs 44405254645 and 44405292666 missed it 14 times running on lesson-variants' free-end walk, and
+ * 5404975 failed the same way locally with Chromium on one core. `sampleFramesInPage` reads the frame
+ * Pixi just drew, back to back, about 300 ms apart on CI (the comet read, run 43670312713), so a dot on
+ * the row can't keep falling between reads. `expectOnTheBoard` checks that no panel covers the row,
+ * which the screen capture used to show as well.
  */
 export async function expectDotsRideBelt(page: Page, ctx: { label: string; sinks: readonly string[] }): Promise<void> {
   const { label } = ctx;
@@ -775,20 +774,40 @@ export async function expectDotsRideBelt(page: Page, ctx: { label: string; sinks
     const along = pair.tiles.map((t) => lay(t)[0]);
     const lineClip = clipOf(lay(pair.lastTile)[1], Math.min(...along), Math.max(...along));
     const strip = clipOf(control, span[0], span[1]);
+    const rectOf = (c: { x: number; y: number; width: number; height: number }): CaptureRect => ({ x0: c.x, y0: c.y, x1: c.x + c.width, y1: c.y + c.height });
+    const tileCentres = pair.tiles.map(([x, y]) => ({ x: (x + 0.5) * size + cam.x, y: (y + 0.5) * size + cam.y }));
+    await expectOnTheBoard(page, label, `the ${pair.beltName}'s tiles are`, tileCentres);
+    let reads = 0;
+    let cleared = 0;
+    let most = 0;
+    let litAt: number | null = null;
     await expect
       .poll(
         async () => {
-          const below = await dotInkIn(page, strip);
-          expect(below.ink, `${what}: the control ${strips} ${control}, empty on the board, holds no dot ink`).toBe(0);
-          const row = await dotInkIn(page, lineClip);
-          return row.ink >= DOT_INK_MIN * row.dpr * row.dpr ? 'ink' : `${row.ink} ink pixels on the ${pair.beltName}'s ${strips}`;
+          const [frame] = await sampleFramesInPage(page, { rects: [rectOf(strip), rectOf(lineClip)], windowMs: 0, maxFrames: 1 });
+          if (frame === undefined) throw new Error(`${what}: a canvas read returned no frame`);
+          reads += 1;
+          if (frame.flat) {
+            cleared += 1;
+            return `a cleared buffer on canvas read ${reads}`;
+          }
+          const below = frame.rects[0]!;
+          const row = frame.rects[1]!;
+          expect(below.warm, `${what}: the control ${strips} ${control}, empty on the board, holds no dot ink`).toBe(0);
+          most = Math.max(most, row.warm);
+          const k = row.w / lineClip.width;
+          if (row.warm < DOT_INK_MIN * k * k) return `${most} ink pixels at most on the ${pair.beltName}'s ${strips} over ${reads} canvas reads (${cleared} cleared)`;
+          litAt = frame.drawnAtTick;
+          return 'ink';
         },
         {
-          message: `${what}: a capture of the ${pair.beltName}'s ${strips} holds dot ink`,
-          timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), `the dots read on the ${pair.beltName}: ink in a capture`),
+          message: `${what}: a canvas read of the ${pair.beltName}'s ${strips} holds dot ink`,
+          intervals: [0],
+          timeout: addWaitBudget(frameBudgetMs(DOT_READ_FRAMES) + tickBudgetMs(DOT_READ_TICKS), `the dots read on the ${pair.beltName}: ink on the canvas`),
         },
       )
       .toBe('ink');
+    console.log(`MEASURE dots-canvas ${pair.beltName} reads=${reads} cleared=${cleared} lit_at=${litAt}`);
   }
 
   await expectRenderLoopAlive(page, `at ${label}`);
