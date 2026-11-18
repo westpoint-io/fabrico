@@ -10,8 +10,12 @@ import { expect, test } from '@playwright/test';
 // built HTML and XML must also hold none of the planning ids the residue gate refuses under site/.
 //
 // The id patterns and the allowed tokens (real names such as `UTF-16` that have the requirement-id
-// shape) are read from the residue gate at run time, so the two can't drift apart. They apply to HTML
-// and XML only: minified JavaScript, ours or a dependency's, can hold a string such as `D-10` as code.
+// shape) are read from the residue gate at run time, so the two can't drift apart. In the folder walk
+// they apply to HTML and XML only: minified JavaScript, a dependency's in particular, can hold a
+// string such as `D-10` as code. Two built files are scanned whole with the same patterns, whatever
+// their type, because they are ours and both are published: the board bundle the site serves,
+// site/dist/embed/fabrico-board.js, and the offline examples file a release attaches,
+// frontend/dist-examples/fabrico-examples.html.
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const FOLDERS = [path.join(REPO, 'site/dist'), path.join(REPO, 'site/dist-fixtures')];
@@ -20,8 +24,11 @@ const RESIDUE_GATE = path.join(REPO, 'scripts/check-no-private-residue.sh');
 /** The file extensions read as text. Everything else (images, fonts, the search index) is binary. */
 const TEXT_EXTENSIONS = new Set(['.html', '.js', '.mjs', '.css', '.json', '.xml', '.txt', '.svg', '.webmanifest']);
 
-/** The extensions the planning-id patterns apply to. */
+/** The extensions the planning-id patterns apply to in the folder walk. */
 const ID_EXTENSIONS = new Set(['.html', '.xml']);
+
+/** The built files scanned whole for planning ids, whatever their extension, by repo-relative path. */
+const WHOLE_FILES = ['site/dist/embed/fabrico-board.js', 'frontend/dist-examples/fabrico-examples.html'];
 
 /** The fewest HTML pages a real build of either folder holds. */
 const MIN_HTML = 8;
@@ -111,13 +118,18 @@ function leaksIn(rel: string, shown: string, text: string, ids: ReturnType<typeo
   if (home !== '' && home !== '/' && text.includes(home)) out.push(`${shown}: the home folder path ${home}`);
   if (text.includes(REPO)) out.push(`${shown}: the repo path ${REPO}`);
   if (text.includes(PLANNING_PATH)) out.push(`${shown}: the private planning path ${PLANNING_PATH}`);
-  if (ID_EXTENSIONS.has(path.extname(rel))) {
-    for (const { label, pattern } of ids.patterns) {
-      pattern.lastIndex = 0;
-      for (const m of text.matchAll(pattern)) {
-        if (isAllowedToken(text, m.index, m[0], ids.allowed)) continue;
-        out.push(`${shown}: ${label}: "${m[0].trim()}"`);
-      }
+  if (ID_EXTENSIONS.has(path.extname(rel))) out.push(...idsIn(shown, text, ids));
+  return out;
+}
+
+/** Every planning id the site patterns find in `text`, as one line per match naming `shown`. */
+function idsIn(shown: string, text: string, ids: ReturnType<typeof sitePatterns>): string[] {
+  const out: string[] = [];
+  for (const { label, pattern } of ids.patterns) {
+    pattern.lastIndex = 0;
+    for (const m of text.matchAll(pattern)) {
+      if (isAllowedToken(text, m.index, m[0], ids.allowed)) continue;
+      out.push(`${shown}: ${label}: "${m[0].trim()}"`);
     }
   }
   return out;
@@ -152,5 +164,15 @@ for (const folder of FOLDERS) {
     }
     console.log(`LEAK_SCAN ${name} text_files=${files.length} html=${html.length} findings=${found.length}`);
     expect(found, `${name} leaks:\n${found.join('\n')}`).toEqual([]);
+  });
+}
+
+for (const rel of WHOLE_FILES) {
+  test(`${rel} holds no planning id anywhere in the file`, () => {
+    const file = path.join(REPO, rel);
+    expect(fs.existsSync(file), `${rel} exists; run scripts/build-site.sh`).toBe(true);
+    const found = idsIn(rel, fs.readFileSync(file, 'utf8'), sitePatterns());
+    console.log(`LEAK_SCAN ${rel} whole_file findings=${found.length}`);
+    expect(found, `${rel} holds planning ids:\n${found.join('\n')}`).toEqual([]);
   });
 }

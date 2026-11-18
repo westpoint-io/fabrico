@@ -173,8 +173,53 @@ function embedGuardPlugin(): Plugin {
   };
 }
 
+/** An HTML comment and the whitespace after it. */
+const HTML_COMMENT = /<!--[\s\S]*?-->\s*/g;
+
+/**
+ * Takes the comments out of the SVG art the bundle inlines, and fails the build if one gets in.
+ *
+ * The machine and transport SVGs come in through `?raw` imports, and their leading comments are
+ * design notes that cite internal planning records. The bundle is published (the docs site serves
+ * it and the offline examples file inlines it), so its `load` hook reads each `.svg?raw` file
+ * itself and returns the text with every HTML comment and the whitespace after it removed. Only
+ * comments go: the `<svg>` element and everything in it stay byte for byte, so the drawn art and
+ * every board's hash are the same. A file with a comment opener and no closer is refused.
+ *
+ * `generateBundle` then reads every output chunk and throws if any still holds an HTML comment
+ * opener, so a new `?raw` import, or a change to how Vite names the import, can't put the notes
+ * back unnoticed.
+ *
+ * This is the embed build only. The app build (`vite.config.ts`) keeps its art as it is.
+ */
+function embedSvgStripPlugin(): Plugin {
+  return {
+    name: 'fab-embed-svg-strip',
+    apply: 'build',
+    enforce: 'pre',
+    load(id) {
+      const query = id.indexOf('?');
+      if (query === -1) return null;
+      const file = id.slice(0, query);
+      if (!file.endsWith('.svg') || !new URLSearchParams(id.slice(query + 1)).has('raw')) return null;
+      const stripped = fs.readFileSync(file, 'utf8').replace(HTML_COMMENT, '');
+      if (stripped.includes('<!--')) {
+        throw new Error(`fab-embed-svg-strip: ${path.relative(FRONTEND, file)} has a comment opener with no closer`);
+      }
+      return `export default ${JSON.stringify(stripped)};`;
+    },
+    generateBundle(_options, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type === 'chunk' && chunk.code.includes('<!--')) {
+          throw new Error(`fab-embed-svg-strip: ${chunk.fileName} still holds an HTML comment opener`);
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [embedDataPlugin(), embedGuardPlugin()],
+  plugins: [embedSvgStripPlugin(), embedDataPlugin(), embedGuardPlugin()],
   publicDir: false,
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),

@@ -18,8 +18,13 @@ import { CHROME_CSS } from '../../../chrome/chromeCss.ts';
  * Moved once: the lesson ring's opacity pulse, its two keyframes and the reduced-motion rule
  * were added to `HINT_CSS`. The stylesheet differs from the one measured before the move by
  * those eleven lines and nothing else.
+ *
+ * Moved twice: the CSS comments in `controlCss.ts`'s strings became JS comments beside them,
+ * so they no longer reach the board bundle. Only the comments, each with the one newline after
+ * it, left the strings; every rule's text and order is the same. Checked by removing those
+ * comments from the old `CHROME_CSS` and comparing it byte for byte with the new one.
  */
-const CHROME_CSS_SHA256 = '1a698ce5b00b8d77eba3c9e11cc6fda34e3851d8f1146a08ad0dc82a741b71f8';
+const CHROME_CSS_SHA256 = '03af01daac4f18b2f06e61aab275b9ef5503666e488dafea3649bb5b041d6f63';
 
 const GROUPS = Object.entries(controlCss).filter(
   (e): e is [string, string] => typeof e[1] === 'string',

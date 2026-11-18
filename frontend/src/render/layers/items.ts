@@ -485,11 +485,10 @@ export function pixiDotPainter(renderer: DotTextureRenderer): DotTexturePainter 
  */
 const unwiredDotPainter: DotTexturePainter = (): never => {
   throw new Error(
-    'createItemLayer: no DotTexturePainter was supplied. The item dot is VECTOR as of plan ' +
-      '61-05 (VEC-01), so the layer needs a renderer to rasterise it into a RenderTexture - ' +
-      'wire `pixiDotPainter(app.renderer)` at the call site. This throws rather than falling ' +
-      'back to a pixel bake, because a silent fallback is how a requirement gets reported ' +
-      'as met while the thing it names is still there.',
+    'createItemLayer: no DotTexturePainter was supplied. The item dot is drawn as a vector, ' +
+      'so the layer needs a renderer to rasterise it into a RenderTexture - wire ' +
+      '`pixiDotPainter(app.renderer)` at the call site. This throws rather than falling back ' +
+      'to a pixel bake, because a silent fallback would hide the missing painter.',
   );
 };
 
