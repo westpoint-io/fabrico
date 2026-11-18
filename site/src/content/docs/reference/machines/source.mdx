@@ -21,7 +21,7 @@ On the board below, the top Source makes an item from each of three webhooks and
 
 The <Fact id="config.Source.trigger" /> field says what makes the Source fire. A Source you place starts with the <Fact id="trigger.Webhook" /> trigger: each webhook it receives becomes one item, and the item's bytes are the request body as sent. The <Fact id="trigger.Timer" /> trigger fires on its own, once every <Fact id="trigger.Timer.interval_ticks" /> ticks, so a board can run with no outside input.
 
-Webhooks reach the app on your own machine only. If a call gets connection refused, the troubleshooting entry for [a refused webhook call](../../../troubleshooting/common-problems/#symptom-a-webhook-call-gets-connection-refused) says why.
+Webhooks reach the app on your own machine only. If a call can't connect, or gets connection refused, the troubleshooting entry for [a webhook call that can't connect](../../../troubleshooting/common-problems/#symptom-a-webhook-call-can-t-connect-or-gets-connection-refused) says why.
 
 ## When the belt is full
 

@@ -48,7 +48,7 @@ Each item takes about 70 [ticks](../../reference/files/glossary/#term-tick) to c
 
 ## If nothing arrives
 
-- If curl says the connection was refused, the app isn't listening at that address. See [A webhook call gets connection refused](../../troubleshooting/common-problems/#symptom-a-webhook-call-gets-connection-refused).
+- If curl says it couldn't connect to the server, or that the connection was refused, the app isn't listening at that address. See [A webhook call can't connect, or gets connection refused](../../troubleshooting/common-problems/#symptom-a-webhook-call-can-t-connect-or-gets-connection-refused).
 - If the app answers 503, the board is paused, or a save or a Load is under way. Press Play if the toolbar shows it, then send again.
 - If the app answers 404, no Source has that URL. The ID may belong to a Source you deleted. Copy the URL from the inspector again.
 - If the app answers 200 and no item appears, you've used that delivery id before. Change it and send again. [Webhook ingress](../../reference/code-and-http/webhook-ingress/#what-the-app-answers) lists every answer the app gives.

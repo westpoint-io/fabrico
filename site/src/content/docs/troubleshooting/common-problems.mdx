@@ -26,8 +26,8 @@ The board ended its run in a different state from the one this site pins for it,
 
 ## Webhooks and code
 
-<Fix symptom="A webhook call gets connection refused">
-Nothing is listening at that address. The app takes webhooks only while it is running, only on the loopback address 127.0.0.1, and on a port it picks each time it starts, so a URL copied from an earlier launch, or a call from another computer, finds nothing there. Start the app, select the Source, press Copy beside its webhook URL, and send to that URL from the same computer. [Send your first webhook](../../get-started/first-webhook/) walks through the copy and a curl call step by step. Keep the listener on loopback: don't forward its port to your network, because it has no sign-in of its own.
+<Fix symptom="A webhook call can't connect, or gets connection refused">
+Nothing is listening at that address. Newer curl says "Could not connect to server" and older curl says "Connection refused"; both mean the same thing. The app takes webhooks only while it is running, only on the loopback address 127.0.0.1, and on a port it picks each time it starts, so a URL copied from an earlier launch, or a call from another computer, finds nothing there. Start the app, select the Source, press Copy beside its webhook URL, and send to that URL from the same computer. [Send your first webhook](../../get-started/first-webhook/) walks through the copy and a curl call step by step. Keep the listener on loopback: don't forward its port to your network, because it has no sign-in of its own.
 </Fix>
 
 <Fix symptom="A Factory emits nothing">
