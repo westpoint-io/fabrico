@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { buildCode, createCodeView, factoryLabels, highlight } from './codeView';
+import type { BoardFactory } from '../player/playerWasm';
+import { buildCode, codeHeading, createCodeView, factoryLabels, highlight } from './codeView';
 
 describe('highlight', () => {
   it('splits a line into keyword, string, comment and plain tokens that join back to the input', () => {
@@ -96,5 +97,39 @@ describe('the code column', () => {
     const none = createCodeView();
     none.setFactories([]);
     expect(none.root.hidden).toBe(true);
+  });
+});
+
+describe('the code heading', () => {
+  const factory = (n: number): BoardFactory => ({ renderHandle: n, kind: 2, source: `f${n}` });
+  const handler = (n: number): BoardFactory => ({ renderHandle: n, kind: 10, source: `h${n}` });
+
+  it('reads FACTORY CODE over two Factories, with the label Factory code', () => {
+    expect(codeHeading([factory(1), factory(2)])).toEqual({ heading: 'FACTORY CODE', label: 'Factory code' });
+  });
+
+  it('reads HANDLER CODE over one Handler, with the label Handler code', () => {
+    expect(codeHeading([handler(1)])).toEqual({ heading: 'HANDLER CODE', label: 'Handler code' });
+  });
+
+  it('reads CODE over a Factory and a Handler, with the label Code', () => {
+    expect(codeHeading([factory(1), handler(2)])).toEqual({ heading: 'CODE', label: 'Code' });
+  });
+
+  it('follows each board swap in the heading and both aria-labels', () => {
+    const view = createCodeView();
+    // The heading, the tab list's label and the well's label, joined so a failure reads on one line.
+    const read = (): string =>
+      [
+        view.root.querySelector('.panel-heading')?.textContent,
+        view.root.querySelector('[role="tablist"]')?.getAttribute('aria-label'),
+        view.well().getAttribute('aria-label'),
+      ].join(' | ');
+    view.setFactories([handler(1)]);
+    expect(read()).toBe('HANDLER CODE | Handler code | Handler code');
+    view.setFactories([factory(1), handler(2)]);
+    expect(read()).toBe('CODE | Code | Code');
+    view.setFactories([factory(1), factory(2)]);
+    expect(read()).toBe('FACTORY CODE | Factory code | Factory code');
   });
 });
