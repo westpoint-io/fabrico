@@ -159,7 +159,10 @@ export function lintFiles(files: readonly LintFile[], facts: Record<string, Lint
         hits.push({
           start: m.index,
           end: m.index + m[0].length,
-          message: `"${shown}" types the generated fact ${rule.id} as prose. Write <Fact id="${rule.id}" /> so the page changes when the code does.`,
+          message:
+            file.path === 'README.md'
+              ? `"${shown}" types the generated fact ${rule.id} as prose. The README can't use <Fact>, so leave the value out and link the site page that states it.`
+              : `"${shown}" types the generated fact ${rule.id} as prose. Write <Fact id="${rule.id}" /> so the page changes when the code does.`,
         });
       }
     }
