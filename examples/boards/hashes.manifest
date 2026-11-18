@@ -7,7 +7,7 @@
 # Lines are sorted byte-wise by board path. A generator writes this file, so don't edit it by
 # hand. Lines that start with # are comments.
 examples/boards/advanced.board.ron 1200 8f05f1a6adc78b9dd1f910b76b690a9be2f00a56905f5545622226be6e7cc00c
-examples/boards/demo_scene.board.ron 1200 90fe484c14bd0332e332a54813cf7baaa129be40f6a871692779a3fe57738e69
+examples/boards/demo_scene.board.ron 1200 a1a5f2f20c98259a7bc7612902e8973c0e189bdce4a40dbe2cf044bebae3b07a
 examples/boards/docs/arrival-order.board.ron 300 69d1d19cf29254ca211cdb0cd2a4ddcfdd9f4464858bb0dedcc436220f4e68cd
 examples/boards/docs/code-factory-api.board.ron 320 e123720beba8a67bff5657e90b37a3895550cab836fe3783fb323028ab576249
 examples/boards/docs/faults-branch-busy.board.ron 240 5872a64d6f43e52918cfbbe124ad70342ef2a3a1bae379007bcae3112e6dae9d

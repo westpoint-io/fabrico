@@ -147,9 +147,10 @@
 # =====================================================================================
 
 [fixtures]
-# One board line added, written by the generator:
-# examples/boards/docs/patterns-reproduce-a-bug.board.ron. The other 55 lines are unchanged.
-examples/boards/hashes.manifest cd75d189e793fd7b6f8287cde3420b1e23c9f8c86f5d66cfd0f1c1a68c2d9191
+# The demo board's line, rewritten by the generator: examples/boards/demo_scene.board.ron moves
+# its caller Route from (13,6) to (13,7) and its HTTP Handler from (16,5) to (16,6). The other
+# 55 lines are unchanged.
+examples/boards/hashes.manifest e8d9a731fcbeb07d3ce8b83b24da713c0ab92dc71113430a2f3c80ed12abc3a1
 
 [source]
 # The player gains effects, restart and its stack limit export, for the byte comparison with the

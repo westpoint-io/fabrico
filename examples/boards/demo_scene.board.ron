@@ -172,9 +172,11 @@ export default function (input, ctx) {
     // cables dock separate nubs, and the reply cable loops round the pair exactly as it
     // does on a pair placed from the palette, because the Route's In and Out share one
     // cell and face opposite ways. Anchored so the reply loop passes below the pair
-    // on row 8, clear of every machine, belt and label.
-    Place(kind: 9, cell_x: 13, cell_y: 6),     // 29: the caller Route
-    Place(kind: 10, cell_x: 16, cell_y: 5),    // 30: the HTTP Handler, 3x3
+    // on row 9, clear of every machine, belt and label. The pair sits a row lower than the
+    // spacing alone needs, so the Handler's name chip, drawn on the row above its top edge,
+    // clears the Audit copy label's words on row 4.
+    Place(kind: 9, cell_x: 13, cell_y: 7),     // 29: the caller Route
+    Place(kind: 10, cell_x: 16, cell_y: 6),    // 30: the HTTP Handler, 3x3
     Configure(node: 30, config: Factory(source: r#"// answer every request with a short reply
 export default function (input, ctx) {
   ctx.command({
