@@ -146,12 +146,15 @@ PATTERNS=(
 SITE_PREFIX="site/"
 SITE_README="README.md"
 SITE_FAMILY="${SITE_PREFIX} and ${SITE_README}"
+# The labels below keep the words "under site/" for README.md hits too: the docs suite reads
+# these patterns, labels included, through frontend/e2e-docs/support/residuePatterns.ts, and
+# frontend/e2e-docs/leaks.spec.ts compares its findings against the label text.
 REQ_PREFIX='[A-Z]{2,8}'
 SITE_PATTERNS=(
-    "phase id in site/ and README.md	-	[Pp][Hh][Aa][Ss][Ee][ -]?[0-9]"
-    "requirement id in site/ and README.md	-	(^|[^A-Za-z0-9])${REQ_PREFIX}-[0-9]{2}([^A-Za-z0-9]|$)"
-    "plan id in site/ and README.md	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
-    "decision id in site/ and README.md	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
+    "phase id under site/	-	[Pp][Hh][Aa][Ss][Ee][ -]?[0-9]"
+    "requirement id under site/	-	(^|[^A-Za-z0-9])${REQ_PREFIX}-[0-9]{2}([^A-Za-z0-9]|$)"
+    "plan id under site/	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
+    "decision id under site/	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
 )
 
 # Real tokens of the requirement-id shape that a page may hold, space-separated. Each is
