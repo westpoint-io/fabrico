@@ -3,11 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { curlBlocksOf, fencesOf, parseFirstWebhookCurl, README_PATH, type Fence } from '../e2e-live/support/pageCurl.ts';
+import { idsIn, sitePatterns } from './support/residuePatterns.ts';
 import { PUBLISHED_ROOT } from './support/site.ts';
 
 // The repository README, held to what it points at and to the site it repeats.
 //
 // - Every relative link and image path is a file git tracks, so a clone or a fork shows it.
+// - No file the README links or shows carries a planning id, by the residue gate's site/ patterns
+//   (`support/residuePatterns.ts`). github.com serves those files as they are, comments included.
 // - Every link or image under the Pages address maps to a page, a file or an anchor in the built
 //   site in site/dist/ (build it first with scripts/build-site.sh).
 // - The README has exactly one bash block that starts with curl, and the parser the live specs
@@ -35,8 +38,21 @@ function targetsOf(md: string): string[] {
   const out: string[] = [];
   for (const m of md.matchAll(/\]\(([^)\s]+)\)/g)) out.push(m[1]);
   for (const m of md.matchAll(/<(https?:\/\/[^>\s]+)>/g)) out.push(m[1]);
-  for (const m of md.matchAll(/\b(?:src|href|srcset)="([^"]+)"/g)) out.push(m[1]);
+  for (const m of md.matchAll(/\b(?:src|href)="([^"]+)"/g)) out.push(m[1]);
+  // A srcset holds a comma-separated list of candidates, each a URL and an optional width or density.
+  for (const m of md.matchAll(/\bsrcset="([^"]+)"/g)) {
+    for (const candidate of m[1].split(',')) {
+      const url = candidate.trim().split(/\s+/)[0];
+      if (url !== undefined && url !== '') out.push(url);
+    }
+  }
   return out;
+}
+
+/** The README's relative link and image targets, without fragments, decoded, each once. */
+function relativeFilesOf(md: string): string[] {
+  const relative = targetsOf(md).filter((t) => !isAbsolute(t) && !t.startsWith('#'));
+  return [...new Set(relative.map((t) => decodeURIComponent(t.split('#')[0])))];
 }
 
 const isAbsolute = (target: string): boolean => /^[a-z][a-z0-9+.-]*:/i.test(target);
@@ -69,10 +85,9 @@ test.beforeAll(() => {
 });
 
 test('README: every relative link and image path is a file git tracks', () => {
-  const relative = [...new Set(targetsOf(README).filter((t) => !isAbsolute(t) && !t.startsWith('#')))];
+  const relative = relativeFilesOf(README);
   expect(relative.length, 'the README links at least one file in the repository').toBeGreaterThan(0);
-  for (const target of relative) {
-    const file = decodeURIComponent(target.split('#')[0]);
+  for (const file of relative) {
     let tracked = true;
     try {
       execFileSync('git', ['ls-files', '--error-unmatch', '--', file], { cwd: REPO, stdio: 'ignore' });
@@ -81,6 +96,19 @@ test('README: every relative link and image path is a file git tracks', () => {
     }
     expect(tracked, `README.md links ${file}, and no such file exists in the tree.`).toBe(true);
   }
+});
+
+test('README: no file the README links or shows carries a planning id', () => {
+  const files = relativeFilesOf(README);
+  expect(files, 'the README shows the lockup from docs/brand/').toContain('docs/brand/fabrico-lockup.svg');
+  const ids = sitePatterns();
+  const found: string[] = [];
+  for (const file of files) {
+    const abs = path.resolve(REPO, file);
+    expect(abs.startsWith(`${REPO}${path.sep}`), `README.md links ${file}, which resolves outside the repository.`).toBe(true);
+    found.push(...idsIn(file, fs.readFileSync(abs, 'utf8'), ids));
+  }
+  expect(found, `files the README links carry planning ids:\n${found.join('\n')}`).toEqual([]);
 });
 
 test('README: every link and image under the Pages address maps to a page, file or anchor in the built site', () => {
