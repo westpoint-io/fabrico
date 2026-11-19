@@ -3,8 +3,8 @@
 // Run it with `npm run lint:facts` from site/. Values from the code reach a page only through
 // <Fact id="..." />, so the page changes when the code does. This lint reads every tracked .md
 // and .mdx file under site/ (from `git ls-files`, so node_modules is never read), and the
-// repository's README.md when site/ sits at the top of the repository and git tracks the README
-// (`rootReadme` below). The README can't use <Fact>, so it must type no value from the code at
+// repository's README.md, which must sit beside site/ at the top of the repository with git
+// tracking it (`rootReadme` below); a run that can't read it exits 2. The README can't use <Fact>, so it must type no value from the code at
 // all. It reports:
 //   - a quantity fact's value followed by its unit or one of its other spellings, such as
 //     "60 ticks a second" or "1,024 tiles", with or without the thousands separator, in any case.
@@ -21,13 +21,14 @@
 // stdout:
 //   FACT_LINT files=<n> facts=<n> findings=<n> [readme=README.md]
 // where facts counts the facts that made a pattern (quantities, and text longer than 20
-// characters), and `readme=README.md` is there when the README was read (it counts in files).
+// characters), and `readme=README.md` says the README was read (it counts in files). Only a test
+// that passes `requireReadme: false` gets a line without it.
 //
 // EXIT CODES
 //   0  no findings.
 //   1  at least one finding.
-//   2  no check: fewer than 8 files scanned, git couldn't list them, or facts.json is missing or
-//      isn't the expected JSON.
+//   2  no check: fewer than 8 files scanned, git couldn't list them, facts.json is missing or
+//      isn't the expected JSON, or README.md couldn't be read (review 101 WR-02).
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -60,26 +61,51 @@ export interface Finding {
   message: string;
 }
 
-/** The text with frontmatter, fenced code and <Fact .../> elements turned to spaces, newlines kept. */
-/**
- * The repository's README.md as a file to lint, reported as `README.md`, or null. Read only when
- * `siteDir` is a folder named site at the top of a git checkout and git tracks README.md there,
- * so a test's throwaway site folder without a README lints exactly what it did before. Both
- * lints call this.
- */
-export function rootReadme(siteDir: string): LintFile | null {
-  if (path.basename(siteDir) !== 'site') return null;
-  const repo = path.dirname(siteDir);
-  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: repo, encoding: 'utf8' });
-  if (top.error !== undefined || top.status !== 0) return null;
-  if (fs.realpathSync(top.stdout.trim()) !== fs.realpathSync(repo)) return null;
-  const tracked = spawnSync('git', ['ls-files', '-z', '--', 'README.md'], { cwd: repo, encoding: 'utf8' });
-  if (tracked.error !== undefined || tracked.status !== 0 || tracked.stdout !== 'README.md\0') return null;
-  const full = path.join(repo, 'README.md');
-  if (!fs.existsSync(full)) return null;
-  return { path: 'README.md', text: fs.readFileSync(full, 'utf8') };
+/** The README read, or why it couldn't be read. */
+export type ReadmeRead = { file: LintFile; reason?: undefined } | { file: null; reason: string };
+
+/** What a lint's `run` may be told. */
+export interface RunOptions {
+  /**
+   * Whether the README beside site/ must be read (the default). When it must and `rootReadme`
+   * can't read it, the run exits 2 instead of linting site/ alone (review 101 WR-02). Only a
+   * caller that lints a folder with no README on purpose passes false.
+   */
+  requireReadme?: boolean;
 }
 
+/** The message a run prints when it must read the README and can't. */
+export function readmeNoCheck(reason: string): string {
+  return `README.md wasn't read: ${reason}. The README is part of this check, so this is no check. Run the lint in a checkout where git tracks README.md beside site/.`;
+}
+
+/**
+ * The repository's README.md as a file to lint, reported as `README.md`, or why it can't be read.
+ * Read only when `siteDir` is a folder named site at the top of a git checkout and git tracks
+ * README.md there. Both lints call this, and both exit 2 when it gives a reason, unless their
+ * caller passed `requireReadme: false`.
+ */
+export function rootReadme(siteDir: string): ReadmeRead {
+  const fail = (reason: string): ReadmeRead => ({ file: null, reason });
+  if (path.basename(siteDir) !== 'site') return fail(`${siteDir} isn't a folder named site`);
+  const repo = path.dirname(siteDir);
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: repo, encoding: 'utf8' });
+  if (top.error !== undefined || top.status !== 0) {
+    return fail(`git rev-parse --show-toplevel failed in ${repo}: ${top.error?.message ?? top.stderr.trim()}`);
+  }
+  const topDir = top.stdout.trim();
+  if (fs.realpathSync(topDir) !== fs.realpathSync(repo)) return fail(`${repo} isn't the top of its git checkout (${topDir} is)`);
+  const tracked = spawnSync('git', ['ls-files', '-z', '--', 'README.md'], { cwd: repo, encoding: 'utf8' });
+  if (tracked.error !== undefined || tracked.status !== 0) {
+    return fail(`git ls-files failed in ${repo}: ${tracked.error?.message ?? tracked.stderr.trim()}`);
+  }
+  if (tracked.stdout !== 'README.md\0') return fail(`git doesn't track README.md in ${repo}`);
+  const full = path.join(repo, 'README.md');
+  if (!fs.existsSync(full)) return fail(`git tracks README.md in ${repo}, but the file is missing from the working tree`);
+  return { file: { path: 'README.md', text: fs.readFileSync(full, 'utf8') } };
+}
+
+/** The text with frontmatter, fenced code and <Fact .../> elements turned to spaces, newlines kept. */
 export function blank(text: string): string {
   const spaces = (s: string): string => s.replace(/[^\n]/g, ' ');
   let out = text;
@@ -198,7 +224,7 @@ export interface RunResult {
 }
 
 /** The whole command over a site folder: list its tracked pages, read facts.json, lint, report. */
-export function run(siteDir: string): RunResult {
+export function run(siteDir: string, options: RunOptions = {}): RunResult {
   const stderr: string[] = [];
   const noCheck = (message: string): RunResult => ({ code: 2, stdout: [], stderr: [...stderr, `lint-fact-literals: ${message}`] });
 
@@ -233,7 +259,9 @@ export function run(siteDir: string): RunResult {
   if (files.length < MIN_FILES) {
     return noCheck(`scanned ${files.length} files, fewer than ${MIN_FILES}. The scan set is broken, so this is no check.`);
   }
-  const readme = rootReadme(siteDir);
+  const read = rootReadme(siteDir);
+  if (read.file === null && options.requireReadme !== false) return noCheck(readmeNoCheck(read.reason));
+  const readme = read.file;
   if (readme !== null) files.push(readme);
 
   const findings = lintFiles(files, facts);

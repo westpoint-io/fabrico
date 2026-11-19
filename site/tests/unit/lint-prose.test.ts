@@ -104,11 +104,13 @@ test('a clean page passes', () => {
 
 // The command around the check: scan set from git, exit codes.
 
-function siteRepo(pages: number, untracked = 0): string {
+/** A git repo with `pages` tracked pages under site/ and, unless `readme` is null, a tracked README.md beside site/. */
+function siteRepo(pages: number, untracked = 0, readme: string | null = 'Fabrico.\n'): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-prose-'));
   const site = path.join(root, 'site');
   fs.mkdirSync(path.join(site, 'src/content/docs'), { recursive: true });
   for (let i = 0; i < pages; i++) fs.writeFileSync(path.join(site, `src/content/docs/p${i}.mdx`), `Page ${i}.\n`);
+  if (readme !== null) fs.writeFileSync(path.join(root, 'README.md'), readme);
   const env = { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' };
   for (const args of [['init', '-q'], ['add', '.']]) {
     const r = spawnSync('git', args, { cwd: root, env, encoding: 'utf8' });
@@ -118,12 +120,12 @@ function siteRepo(pages: number, untracked = 0): string {
   return site;
 }
 
-test('a clean scan of 8 files exits 0 and prints the PROSE_LINT line', () => {
+test('a clean scan of 8 files and the README exits 0 and prints the PROSE_LINT line', () => {
   const site = siteRepo(8);
   try {
     const result = run(site);
     assert.equal(result.code, 0);
-    assert.deepEqual(result.stdout, ['PROSE_LINT files=8 findings=0']);
+    assert.deepEqual(result.stdout, ['PROSE_LINT files=9 findings=0 readme=README.md']);
   } finally {
     fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }
@@ -136,7 +138,7 @@ test('a finding exits 1 and prints the finding with the site/ path', () => {
     const result = run(site);
     assert.equal(result.code, 1);
     assert.deepEqual(result.stderr, [dash(1, 6, 'site/src/content/docs/p3.mdx')]);
-    assert.deepEqual(result.stdout, ['PROSE_LINT files=8 findings=1']);
+    assert.deepEqual(result.stdout, ['PROSE_LINT files=9 findings=1 readme=README.md']);
   } finally {
     fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }
@@ -147,7 +149,7 @@ test('an untracked page is not read', () => {
   try {
     const result = run(site);
     assert.equal(result.code, 0);
-    assert.deepEqual(result.stdout, ['PROSE_LINT files=8 findings=0']);
+    assert.deepEqual(result.stdout, ['PROSE_LINT files=9 findings=0 readme=README.md']);
   } finally {
     fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }
@@ -172,6 +174,60 @@ test('a folder git cannot list exits 2', () => {
     assert.equal(result.code, 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The README beside site/ (review 101 WR-02): read every time, and a run that can't read it is no check.
+
+test('an em dash in the README fails at its line and column under README.md', () => {
+  const site = siteRepo(8, 0, `# Fabrico\n\nBelts${EM}items.\n`);
+  try {
+    const result = run(site);
+    assert.equal(result.code, 1);
+    assert.deepEqual(result.stderr, [dash(3, 6, 'README.md')]);
+    assert.deepEqual(result.stdout, ['PROSE_LINT files=9 findings=1 readme=README.md']);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
+  }
+});
+
+test('a README git does not track exits 2 instead of linting site/ alone', () => {
+  const site = siteRepo(8, 0, null);
+  try {
+    fs.writeFileSync(path.join(path.dirname(site), 'README.md'), `Belts${EM}items.\n`);
+    const result = run(site);
+    assert.equal(result.code, 2);
+    assert.deepEqual(result.stdout, []);
+    assert.match(result.stderr.join('\n'), /README\.md wasn't read: git doesn't track README\.md in /);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
+  }
+});
+
+test('a site folder that is not at the top of its checkout exits 2', () => {
+  const site = siteRepo(8);
+  const nested = path.join(path.dirname(site), 'docs', 'site');
+  try {
+    fs.mkdirSync(path.dirname(nested), { recursive: true });
+    fs.renameSync(site, nested);
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' };
+    assert.equal(spawnSync('git', ['add', '-A'], { cwd: path.dirname(site), env }).status, 0);
+    const result = run(nested);
+    assert.equal(result.code, 2);
+    assert.match(result.stderr.join('\n'), /README\.md wasn't read: .* isn't the top of its git checkout/);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
+  }
+});
+
+test('requireReadme false lints site/ alone, as a caller has to ask for', () => {
+  const site = siteRepo(8, 0, null);
+  try {
+    const result = run(site, { requireReadme: false });
+    assert.equal(result.code, 0);
+    assert.deepEqual(result.stdout, ['PROSE_LINT files=8 findings=0']);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }
 });
 

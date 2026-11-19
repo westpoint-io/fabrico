@@ -105,12 +105,14 @@ test('a code fact in prose passes; only quantities and long text are checked', (
 
 // The command around the check: scan set from git, facts.json from disk, exit codes.
 
-function siteRepo(pages: number, factsText: string | null): string {
+/** A git repo with `pages` tracked pages under site/, facts.json, and, unless `readme` is null, a tracked README.md beside site/. */
+function siteRepo(pages: number, factsText: string | null, readme: string | null = 'Fabrico.\n'): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-facts-'));
   const site = path.join(root, 'site');
   fs.mkdirSync(path.join(site, 'src/content/docs'), { recursive: true });
   fs.mkdirSync(path.join(site, 'src/generated'), { recursive: true });
   for (let i = 0; i < pages; i++) fs.writeFileSync(path.join(site, `src/content/docs/p${i}.mdx`), `Page ${i}.\n`);
+  if (readme !== null) fs.writeFileSync(path.join(root, 'README.md'), readme);
   if (factsText !== null) fs.writeFileSync(path.join(site, 'src/generated/facts.json'), factsText);
   const env = { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' };
   for (const args of [['init', '-q'], ['add', '.']]) {
@@ -122,12 +124,12 @@ function siteRepo(pages: number, factsText: string | null): string {
 
 const FACTS_TEXT = `${JSON.stringify({ schema: 1, facts: FACTS, machines: [] })}\n`;
 
-test('a clean scan of 8 files exits 0 and prints the FACT_LINT line', () => {
+test('a clean scan of 8 files and the README exits 0 and prints the FACT_LINT line', () => {
   const site = siteRepo(8, FACTS_TEXT);
   try {
     const result = run(site);
     assert.equal(result.code, 0);
-    assert.deepEqual(result.stdout, ['FACT_LINT files=8 facts=6 findings=0']);
+    assert.deepEqual(result.stdout, ['FACT_LINT files=9 facts=6 findings=0 readme=README.md']);
   } finally {
     fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }
@@ -140,7 +142,7 @@ test('a finding exits 1 and prints the finding with the site/ path', () => {
     const result = run(site);
     assert.equal(result.code, 1);
     assert.deepEqual(result.stderr, [typed(1, 13, '60 ticks a second', 'embed.ticks_per_second', 'site/src/content/docs/p3.mdx')]);
-    assert.deepEqual(result.stdout, ['FACT_LINT files=8 facts=6 findings=1']);
+    assert.deepEqual(result.stdout, ['FACT_LINT files=9 facts=6 findings=1 readme=README.md']);
   } finally {
     fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }
@@ -183,6 +185,46 @@ test('a facts.json with no facts object exits 2', () => {
     const result = run(site);
     assert.equal(result.code, 2);
     assert.match(result.stderr.join('\n'), /no "facts" object/);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
+  }
+});
+
+// The README beside site/ (review 101 WR-02): read every time, and a run that can't read it is no check.
+
+test('a fact typed in the README fails under README.md', () => {
+  const site = siteRepo(8, FACTS_TEXT, '# Fabrico\n\nIt plays at 60 ticks a second.\n');
+  try {
+    const result = run(site);
+    assert.equal(result.code, 1);
+    assert.deepEqual(result.stderr, [
+      `README.md:3:13: "60 ticks a second" types the generated fact embed.ticks_per_second as prose. The README can't use <Fact>, so leave the value out and link the site page that states it.`,
+    ]);
+    assert.deepEqual(result.stdout, ['FACT_LINT files=9 facts=6 findings=1 readme=README.md']);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
+  }
+});
+
+test('a README git does not track exits 2 instead of linting site/ alone', () => {
+  const site = siteRepo(8, FACTS_TEXT, null);
+  try {
+    fs.writeFileSync(path.join(path.dirname(site), 'README.md'), 'It plays at 60 ticks a second.\n');
+    const result = run(site);
+    assert.equal(result.code, 2);
+    assert.deepEqual(result.stdout, []);
+    assert.match(result.stderr.join('\n'), /README\.md wasn't read: git doesn't track README\.md in /);
+  } finally {
+    fs.rmSync(path.dirname(site), { recursive: true, force: true });
+  }
+});
+
+test('requireReadme false lints site/ alone, as a caller has to ask for', () => {
+  const site = siteRepo(8, FACTS_TEXT, null);
+  try {
+    const result = run(site, { requireReadme: false });
+    assert.equal(result.code, 0);
+    assert.deepEqual(result.stdout, ['FACT_LINT files=8 facts=6 findings=0']);
   } finally {
     fs.rmSync(path.dirname(site), { recursive: true, force: true });
   }

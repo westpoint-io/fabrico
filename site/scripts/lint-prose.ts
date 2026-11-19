@@ -2,8 +2,9 @@
 //
 // Run it with `npm run lint:prose` from site/. It reads every tracked .md and .mdx file under
 // site/ (from `git ls-files`, so node_modules and build output are never read), and the
-// repository's README.md when site/ sits at the top of the repository and git tracks the README
-// (`rootReadme` in lint-fact-literals.ts), reported as README.md. It reports:
+// repository's README.md, which must sit beside site/ at the top of the repository with git
+// tracking it (`rootReadme` in lint-fact-literals.ts), reported as README.md. A run that can't
+// read the README exits 2. It reports:
 //   - every em dash (U+2014), on any line: prose, frontmatter and fenced code alike. An en dash
 //     (U+2013) passes;
 //   - every phrase from BANNED_PHRASES in prose, in any letter case, with a straight or a curly
@@ -18,18 +19,20 @@
 // OUTPUT: one line per finding on stderr, in the docs site's message format, then one line on
 // stdout:
 //   PROSE_LINT files=<n> findings=<n> [readme=README.md]
-// where `readme=README.md` is there when the README was read (it counts in files).
+// where `readme=README.md` says the README was read (it counts in files). Only a test that passes
+// `requireReadme: false` gets a line without it.
 //
 // EXIT CODES
 //   0  no findings.
 //   1  at least one finding.
-//   2  no check: fewer than 8 files scanned, or git couldn't list them.
+//   2  no check: fewer than 8 files scanned, git couldn't list them, or README.md couldn't be read
+//      (review 101 WR-02).
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blank, rootReadme } from './lint-fact-literals.ts';
+import { blank, readmeNoCheck, rootReadme, type RunOptions } from './lint-fact-literals.ts';
 
 /** The fewest files a real scan reads. Fewer means the scan set is broken, not that pages are clean. */
 export const MIN_FILES = 8;
@@ -138,7 +141,7 @@ export interface RunResult {
 }
 
 /** The whole command over a site folder: list its tracked pages, lint, report. */
-export function run(siteDir: string): RunResult {
+export function run(siteDir: string, options: RunOptions = {}): RunResult {
   const noCheck = (message: string): RunResult => ({ code: 2, stdout: [], stderr: [`lint-prose: ${message}`] });
 
   const listed = spawnSync('git', ['ls-files', '-z', '--', '*.md', '*.mdx'], { cwd: siteDir, encoding: 'utf8' });
@@ -157,7 +160,9 @@ export function run(siteDir: string): RunResult {
   if (files.length < MIN_FILES) {
     return noCheck(`scanned ${files.length} files, fewer than ${MIN_FILES}. The scan set is broken, so this is no check.`);
   }
-  const readme = rootReadme(siteDir);
+  const read = rootReadme(siteDir);
+  if (read.file === null && options.requireReadme !== false) return noCheck(readmeNoCheck(read.reason));
+  const readme = read.file;
   if (readme !== null) files.push(readme);
 
   const findings = lintFiles(files);
