@@ -339,11 +339,12 @@ test.describe('Config panel live per-port flow (PANEL-04)', () => {
     // Colour is never the sole cue: the In circle, the Out circle+stem and the
     // Fault circle+ring differ in SHAPE (child element count), and the glyph
     // itself is aria-hidden so the row text carries the whole meaning.
-    const shapeCount = async (label: string) =>
-      indicator(row(page, label)).locator('svg > *').count();
-    expect(await shapeCount('Input - Item')).toBe(1);
-    expect(await shapeCount('Output - Item')).toBe(2);
-    expect(await shapeCount('Fault - Item')).toBe(2);
+    // toHaveCount retries until the glyph is drawn; a bare count() reads the
+    // row before the SVG renders on a slow runner and sees 0 (CI 44435620359).
+    const shapes = (label: string) => indicator(row(page, label)).locator('svg > *');
+    await expect(shapes('Input - Item')).toHaveCount(1);
+    await expect(shapes('Output - Item')).toHaveCount(2);
+    await expect(shapes('Fault - Item')).toHaveCount(2);
 
     // ...and the Fault shape is a real ANNULUS, not a stroke restraddling its own
     // fill (51-UI-REVIEW fix 3). A child COUNT cannot tell those apart, which is
