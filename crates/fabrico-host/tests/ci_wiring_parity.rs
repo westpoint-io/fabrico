@@ -1500,6 +1500,128 @@ fn raw_job_lines<'a>(yml: &'a str, id: &str) -> Vec<&'a str> {
     out
 }
 
+/// One `permissions:` key in a workflow: the job it sits in (None above `jobs:`), its 1-based line,
+/// its indent, the value on its own line (empty for a block) and the trimmed entries of its block.
+struct PermissionsKey<'a> {
+    job: Option<&'a str>,
+    line: usize,
+    indent: usize,
+    inline: &'a str,
+    entries: Vec<&'a str>,
+}
+
+/// Every `permissions:` key in `yml`, at any indent, comments and blank lines skipped.
+fn permission_keys(yml: &str) -> Vec<PermissionsKey<'_>> {
+    let lines: Vec<&str> = yml.lines().collect();
+    let mut out: Vec<PermissionsKey<'_>> = Vec::new();
+    let mut in_jobs = false;
+    let mut job: Option<&str> = None;
+    for (n, raw) in lines.iter().enumerate() {
+        if *raw == "jobs:" {
+            in_jobs = true;
+            continue;
+        }
+        if in_jobs && let Some(id) = job_id(raw) {
+            job = Some(id);
+            continue;
+        }
+        let trimmed = raw.trim_start();
+        let Some(rest) = trimmed.strip_prefix("permissions:") else {
+            continue;
+        };
+        let indent = raw.len() - trimmed.len();
+        let inline = rest.split(" #").next().unwrap_or("").trim();
+        let mut entries: Vec<&str> = Vec::new();
+        for next in &lines[n + 1..] {
+            let t = next.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            if next.len() - next.trim_start().len() <= indent {
+                break;
+            }
+            entries.push(t.split(" #").next().unwrap_or("").trim());
+        }
+        out.push(PermissionsKey {
+            job: if in_jobs { job } else { None },
+            line: n + 1,
+            indent,
+            inline,
+            entries,
+        });
+    }
+    out
+}
+
+/// Everything wrong with the token scopes in `yml` (review 101 WR-03): the workflow level must be
+/// one block holding only `contents: read`; a job may set `permissions:` only as a block at four
+/// spaces (or the inline `{}` or `read-all`), never `write-all`; and a `<scope>: write` entry may
+/// sit only in the job `allowed_writes` pairs it with. Any entry that isn't read, write or none is
+/// named too. Empty means right.
+fn permissions_wrong(yml: &str, file: &str, allowed_writes: &[(&str, &str)]) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let keys = permission_keys(yml);
+    let workflow: Vec<&PermissionsKey<'_>> = keys.iter().filter(|k| k.job.is_none()).collect();
+    let floor_right = workflow.len() == 1
+        && workflow[0].indent == 0
+        && workflow[0].inline.is_empty()
+        && workflow[0].entries == ["contents: read"];
+    if !floor_right {
+        let found: Vec<String> = workflow
+            .iter()
+            .map(|k| format!("line {}: `permissions: {}` {:?}", k.line, k.inline, k.entries))
+            .collect();
+        wrong.push(format!(
+            "{file}'s workflow-level permissions are {found:?}, expected one block holding only \
+             `contents: read`. Every job inherits the floor, and the jobs run package code."
+        ));
+    }
+    for key in keys.iter().filter(|k| k.job.is_some()) {
+        let job = key.job.unwrap_or_default();
+        if key.indent != 4 {
+            wrong.push(format!(
+                "{file} line {}: job `{job}` has a `permissions:` key at indent {}, expected the \
+                 job level (4 spaces).",
+                key.line, key.indent
+            ));
+        }
+        if !key.inline.is_empty() && key.inline != "{}" && key.inline != "read-all" {
+            wrong.push(format!(
+                "{file} line {}: job `{job}` sets `permissions: {}`. Name each scope in a block. \
+                 `write-all` gives every write scope to a job that may run package code.",
+                key.line, key.inline
+            ));
+        }
+        for entry in &key.entries {
+            let (scope, level) = entry
+                .split_once(':')
+                .map_or((*entry, ""), |(s, l)| (s.trim(), l.trim()));
+            match level {
+                "read" | "none" => {}
+                "write" => {
+                    let normal = format!("{scope}: write");
+                    if !allowed_writes.contains(&(job, normal.as_str())) {
+                        wrong.push(format!(
+                            "{file} line {}: job `{job}` holds `{normal}`. The only write scopes \
+                             allowed are {allowed_writes:?}, each in its own job.",
+                            key.line
+                        ));
+                    }
+                }
+                _ => wrong.push(format!(
+                    "{file} line {}: job `{job}` has the permissions entry `{entry}`, which isn't \
+                     `<scope>: read`, `write` or `none`.",
+                    key.line
+                )),
+            }
+        }
+    }
+    wrong
+}
+
+/// The write scopes ci.yml may hold, each paired with its one job.
+const CI_ALLOWED_WRITES: [(&str, &str); 2] = [(PAGES_JOB, PAGES_SCOPES[0]), (PAGES_JOB, PAGES_SCOPES[1])];
+
 /// Everything wrong with how `yml` deploys the docs site and smoke-tests it: the docs job hands
 /// `site/dist` to Pages only on a push to main and only after the docs suite; `PAGES_JOB` holds the
 /// two Pages scopes, queues without cancelling and deploys with deploy-pages; no other job holds
@@ -1637,6 +1759,7 @@ fn deploy_jobs_wrong(yml: &str) -> Vec<String> {
     }
     wrong.extend(step_guards_wrong(yml, PAGES_JOB, &[]));
     wrong.extend(step_guards_wrong(yml, PAGES_SMOKE_JOB, &[PAGES_SMOKE_RUN]));
+    wrong.extend(permissions_wrong(yml, "ci.yml", &CI_ALLOWED_WRITES));
     wrong
 }
 
@@ -1734,6 +1857,42 @@ fn the_deploy_check_names_id_token_write_in_the_docs_job() {
             "`{}` appears 2 time(s) in the workflow, in job(s) [\"{DOCS_JOB}\", \"{PAGES_JOB}\"], expected once",
             PAGES_SCOPES[1]
         ),
+    );
+}
+
+/// `permissions: write-all` on the docs job, which runs npm ci and cargo, is named (review 101
+/// WR-03).
+#[test]
+fn the_deploy_check_names_write_all_in_the_docs_job() {
+    let docs_header = "    name: the docs site builds and passes its checks\n";
+    assert_plant_named(
+        "`permissions: write-all` in the docs job",
+        &CI_YML.replace(docs_header, &format!("{docs_header}    permissions: write-all\n")),
+        deploy_jobs_wrong,
+        &format!("job `{DOCS_JOB}` sets `permissions: write-all`."),
+    );
+}
+
+/// An unexpected write scope in the pages job, beside its two allowed ones, is named (review 101
+/// WR-03).
+#[test]
+fn the_deploy_check_names_an_extra_write_scope_in_the_pages_job() {
+    assert_plant_named(
+        "`actions: write` in the pages job",
+        &CI_YML.replace("      pages: write\n      id-token: write\n", "      pages: write\n      id-token: write\n      actions: write\n"),
+        deploy_jobs_wrong,
+        &format!("job `{PAGES_JOB}` holds `actions: write`"),
+    );
+}
+
+/// A write scope added to ci.yml's workflow-level floor is named (review 101 WR-03).
+#[test]
+fn the_deploy_check_names_a_write_scope_in_the_workflow_floor() {
+    assert_plant_named(
+        "`permissions: write-all` at workflow level",
+        &CI_YML.replacen("permissions:\n  contents: read\n", "permissions: write-all\n", 1),
+        deploy_jobs_wrong,
+        "ci.yml's workflow-level permissions are",
     );
 }
 
@@ -3930,6 +4089,10 @@ fn release_wiring_wrong(yml: &str) -> Vec<String> {
         );
     }
 
+    // Every other scope: no `write-all`, no write scope outside the attach job's one, nothing but
+    // `contents: read` at workflow level (review 101 WR-03).
+    wrong.extend(permissions_wrong(yml, "release.yml", &[(RELEASE_ATTACH_JOB, "contents: write")]));
+
     // `contents: write` once, in the attach job.
     let write_homes: Vec<&str> = blocks
         .iter()
@@ -4125,6 +4288,39 @@ fn the_release_check_names_an_expression_inside_a_run_script() {
         "`echo ${{ inputs.tag }}` in a run line",
         &RELEASE_YML.replace(&check, &format!("          echo ${{{{ inputs.tag }}}}\n{check}")),
         "puts an expression inside a `run:` script: `echo ${{ inputs.tag }}`.",
+    );
+}
+
+/// `permissions: write-all` on the release build job, which runs npm ci and cargo, is named
+/// (review 101 WR-03).
+#[test]
+fn the_release_check_names_write_all_in_the_build_job() {
+    let header = "    name: the offline examples file builds at this commit\n";
+    assert_release_plant_named(
+        "`permissions: write-all` in the build job",
+        &RELEASE_YML.replace(header, &format!("{header}    permissions: write-all\n")),
+        "job `build` sets `permissions: write-all`.",
+    );
+}
+
+/// A second write scope under release.yml's workflow-level floor is named (review 101 WR-03).
+#[test]
+fn the_release_check_names_a_write_scope_in_the_workflow_floor() {
+    assert_release_plant_named(
+        "`packages: write` under the workflow-level `permissions:`",
+        &RELEASE_YML.replacen("permissions:\n  contents: read\n", "permissions:\n  contents: read\n  packages: write\n", 1),
+        "release.yml's workflow-level permissions are",
+    );
+}
+
+/// An unexpected write scope in the attach job, beside its one allowed `contents: write`, is named
+/// (review 101 WR-03).
+#[test]
+fn the_release_check_names_an_extra_write_scope_in_the_attach_job() {
+    assert_release_plant_named(
+        "`actions: write` in the attach job",
+        &RELEASE_YML.replace("    permissions:\n      contents: write\n", "    permissions:\n      contents: write\n      actions: write\n"),
+        &format!("job `{RELEASE_ATTACH_JOB}` holds `actions: write`"),
     );
 }
 
