@@ -16,8 +16,15 @@
 # HOW TO RUN IT. Dispatch it on main (Actions, release, Run workflow) after main holds the same
 # workflow files as the commit you release. GitHub only offers workflow_dispatch for a workflow file
 # on the default branch, and the workflow token can't create a release whose target commit changes
-# anything under .github/workflows/ relative to the default branch. The draft targets this run's
-# commit. Pushing a tag such as v0.1.0 starts it too.
+# anything under .github/workflows/ relative to the default branch. Pushing a tag such as v0.1.0
+# starts it too.
+#
+# THE RELEASE NAMES THE COMMIT THAT WAS BUILT. The file is built at this run's commit, and the
+# attach job refuses, before any upload, a release that would carry it under another commit: a tag
+# that already exists at another commit, and, while there is no tag yet, a draft that targets
+# another commit (publishing it would create the tag there). A new draft targets this run's commit.
+# To release a tag that already exists, run the workflow on the tag's commit: push the tag, or pick
+# the tag under "Use workflow from" when you dispatch it.
 #
 # WHY THREE JOBS. Only the attach job can write to the repository's releases, and it runs no package
 # code: it takes the built file as an artifact and uses gh, which the runner ships, and the
@@ -26,7 +33,7 @@
 # so the attach job hands the downloaded copy to the verify job as an artifact.
 #
 # THE TAG reaches the scripts only through `env:`, never as an expression inside a script, and the
-# attach job refuses anything but vMAJOR.MINOR.PATCH before any release call.
+# attach job refuses anything but vMAJOR.MINOR.PATCH before any release or API call.
 # `ci_wiring_parity.rs` pins all of this.
 
 name: release
@@ -146,14 +153,53 @@ jobs:
             echo "release: the tag \"$TAG\" isn't vMAJOR.MINOR.PATCH, so nothing was created or uploaded." >&2
             exit 1
           fi
-          if state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>view-error.txt)"; then
-            if [ "$state" = "false" ]; then
+          # The file was built at this run's commit, so the release must name that commit too. An
+          # existing tag must point at it. An annotated tag points at a tag object, so peel it.
+          tag_commit=""
+          if ref="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha' 2>ref-error.txt)"; then
+            read -r kind tag_commit <<<"$ref"
+            peels=0
+            while [ "$kind" = "tag" ] && [ "$peels" -lt 5 ]; do
+              peeled="$(gh api "repos/$GH_REPO/git/tags/$tag_commit" --jq '.object.type + " " + .object.sha')"
+              read -r kind tag_commit <<<"$peeled"
+              peels=$((peels + 1))
+            done
+            if [ "$kind" != "commit" ]; then
+              echo "release: the tag $TAG ends at a $kind object, not a commit, so nothing was uploaded." >&2
+              exit 1
+            fi
+            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "release: the tag $TAG points at $tag_commit, but this run built $GITHUB_SHA, so nothing was uploaded. Run the workflow on the tag's commit: push the tag, or pick the tag under \"Use workflow from\" when you dispatch it." >&2
+              exit 1
+            fi
+            echo "release: the tag $TAG points at $GITHUB_SHA, the commit this run built."
+          elif grep -q "HTTP 404" ref-error.txt; then
+            echo "release: the tag $TAG doesn't exist yet."
+          else
+            cat ref-error.txt >&2
+            exit 1
+          fi
+          if state="$(gh release view "$TAG" --json isDraft,targetCommitish --jq '(.isDraft | tostring) + " " + .targetCommitish' 2>view-error.txt)"; then
+            read -r draft target <<<"$state"
+            if [ "$draft" = "false" ]; then
+              if [ -z "$tag_commit" ]; then
+                echo "release: $TAG is published but its tag is gone, so its asset can't be tied to a commit." >&2
+                exit 1
+              fi
               echo "release: $TAG is already published. Leaving it unchanged and checking its asset again."
               gh release download "$TAG" --pattern fabrico-examples.html --dir downloaded
               sha256sum downloaded/fabrico-examples.html
               exit 0
             fi
-            echo "release: $TAG has a draft release; replacing its asset."
+            # With no tag yet, publishing the draft creates the tag at the draft's target, so that
+            # target must be this run's commit. With a tag, the check above already tied it.
+            if [ -z "$tag_commit" ]; then
+              if [ "$target" != "$GITHUB_SHA" ]; then
+                echo "release: the draft for $TAG targets $target, but this run built $GITHUB_SHA, so nothing was uploaded. Publishing it would tag $target with this run's file. Delete the draft, or set its target to $GITHUB_SHA, and run again." >&2
+                exit 1
+              fi
+            fi
+            echo "release: $TAG has a draft release for $GITHUB_SHA; replacing its asset."
           elif grep -q "release not found" view-error.txt; then
             gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" \
               --notes "Draft. The maintainers write the notes when they publish it."

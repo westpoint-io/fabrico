@@ -3812,6 +3812,51 @@ const RELEASE_VERIFY_RUN: &str = r#"run: FABRICO_OFFLINE_FILE="$PWD/offline-atta
 const RELEASE_TAG_CHECK: &str = r#"if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then"#;
 /// Package and build tools the attach job must never run, as whole words.
 const RELEASE_ATTACH_FORBIDDEN: [&str; 3] = ["npm", "npx", "cargo"];
+/// How the attach job reads the commit an existing tag names (review 101 CR-01).
+const RELEASE_TAG_LOOKUP: &str = r#"gh api "repos/$GH_REPO/git/ref/tags/$TAG""#;
+/// The attach job's refusal when the tag already exists at a commit other than the one this run
+/// built. It must come before the first release call, because the published path exits early.
+const RELEASE_TAG_COMMIT_CHECK: &str = r#"if [ "$tag_commit" != "$GITHUB_SHA" ]; then"#;
+/// The attach job's refusal when no tag exists yet and the existing draft targets a commit other
+/// than the one this run built. Publishing that draft would create the tag at its target, carrying
+/// this run's file. It must come before the upload.
+const RELEASE_DRAFT_TARGET_CHECK: &str = r#"if [ "$target" != "$GITHUB_SHA" ]; then"#;
+/// The attach job's upload, which both refusals must come before.
+const RELEASE_UPLOAD: &str = "gh release upload";
+
+/// What is wrong with one refusal in the attach job's trimmed lines: `check` must appear once,
+/// before the first line containing `before`, with an `exit 1` between it and the `fi` that closes
+/// it. Empty means right.
+fn release_refusal_wrong(attach: &[&str], check: &str, before: &str, why: &str) -> Vec<String> {
+    let count = attach.iter().filter(|l| **l == check).count();
+    let Some(at) = attach.iter().position(|l| *l == check) else {
+        return vec![format!(
+            "job `{RELEASE_ATTACH_JOB}` runs `{check}` {count} time(s), expected 1. {why}"
+        )];
+    };
+    let mut wrong: Vec<String> = Vec::new();
+    if count != 1 {
+        wrong.push(format!(
+            "job `{RELEASE_ATTACH_JOB}` runs `{check}` {count} time(s), expected 1. {why}"
+        ));
+    }
+    let before_at = attach.iter().position(|l| l.contains(before));
+    if before_at.is_none_or(|b| b < at) {
+        wrong.push(format!(
+            "job `{RELEASE_ATTACH_JOB}` doesn't run `{check}` before its first `{before}` line \
+             (check at {at}, first `{before}` at {before_at:?}). {why}"
+        ));
+    }
+    let closes = attach[at + 1..].iter().position(|l| *l == "fi").map(|k| at + 1 + k);
+    let exits = closes.is_some_and(|fi| attach[at + 1..fi].contains(&"exit 1"));
+    if !exits {
+        wrong.push(format!(
+            "the `{check}` block in job `{RELEASE_ATTACH_JOB}` has no `exit 1` before its `fi`, so a \
+             mismatch would still upload. {why}"
+        ));
+    }
+    wrong
+}
 
 /// Does `line` hold `word` as a whole word (no letter, digit, `_` or `-` on either side)?
 fn has_word(line: &str, word: &str) -> bool {
@@ -3930,6 +3975,27 @@ fn release_wiring_wrong(yml: &str) -> Vec<String> {
              release` call (tag check at {check_at:?}, first call at {call_at:?})."
         )),
     }
+    // The asset is built at this run's commit, so the release must name that commit too (review
+    // 101 CR-01): an existing tag must point at it, and with no tag yet the draft must target it.
+    let lookup_at = attach.iter().position(|l| l.contains(RELEASE_TAG_LOOKUP));
+    if lookup_at.is_none() || call_at.is_some_and(|g| lookup_at.is_some_and(|k| k > g)) {
+        wrong.push(format!(
+            "job `{RELEASE_ATTACH_JOB}` doesn't read the tag's commit with `{RELEASE_TAG_LOOKUP}` \
+             before its first `gh release` call (lookup at {lookup_at:?}, first call at {call_at:?})."
+        ));
+    }
+    wrong.extend(release_refusal_wrong(
+        &attach,
+        RELEASE_TAG_COMMIT_CHECK,
+        "gh release",
+        "An existing tag at another commit would carry this run's file.",
+    ));
+    wrong.extend(release_refusal_wrong(
+        &attach,
+        RELEASE_DRAFT_TARGET_CHECK,
+        RELEASE_UPLOAD,
+        "A draft targeting another commit would be published with this run's file.",
+    ));
 
     // The tag filter, exactly, once.
     let filters = code.iter().filter(|l| **l == RELEASE_TAG_FILTER).count();
@@ -4059,6 +4125,75 @@ fn the_release_check_names_an_expression_inside_a_run_script() {
         "`echo ${{ inputs.tag }}` in a run line",
         &RELEASE_YML.replace(&check, &format!("          echo ${{{{ inputs.tag }}}}\n{check}")),
         "puts an expression inside a `run:` script: `echo ${{ inputs.tag }}`.",
+    );
+}
+
+/// The lines of release.yml from the one holding `check` to the `fi` that closes its block, so a
+/// plant can delete the whole refusal.
+fn release_refusal_block(check: &str) -> String {
+    let lines: Vec<&str> = RELEASE_YML.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.trim() == check)
+        .unwrap_or_else(|| panic!("release.yml has no `{check}` line to plant on"));
+    let fi = at
+        + lines[at..]
+            .iter()
+            .position(|l| l.trim() == "fi")
+            .expect("the refusal block closes with `fi`");
+    let mut block = lines[at..=fi].join("\n");
+    block.push('\n');
+    block
+}
+
+/// Deleting the refusal for a tag at another commit is named (review 101 CR-01).
+#[test]
+fn the_release_check_names_a_missing_tag_commit_refusal() {
+    assert_release_plant_named(
+        "the tag-commit refusal deleted",
+        &RELEASE_YML.replace(&release_refusal_block(RELEASE_TAG_COMMIT_CHECK), ""),
+        &format!("job `{RELEASE_ATTACH_JOB}` runs `{RELEASE_TAG_COMMIT_CHECK}` 0 time(s), expected 1."),
+    );
+}
+
+/// Deleting the refusal for a draft targeting another commit is named (review 101 CR-01).
+#[test]
+fn the_release_check_names_a_missing_draft_target_refusal() {
+    assert_release_plant_named(
+        "the draft-target refusal deleted",
+        &RELEASE_YML.replace(&release_refusal_block(RELEASE_DRAFT_TARGET_CHECK), ""),
+        &format!("job `{RELEASE_ATTACH_JOB}` runs `{RELEASE_DRAFT_TARGET_CHECK}` 0 time(s), expected 1."),
+    );
+}
+
+/// A tag-commit refusal that prints its message and carries on is named (review 101 CR-01).
+#[test]
+fn the_release_check_names_a_tag_commit_refusal_that_does_not_exit() {
+    let block = release_refusal_block(RELEASE_TAG_COMMIT_CHECK);
+    assert_release_plant_named(
+        "the tag-commit refusal's `exit 1` turned into `true`",
+        &RELEASE_YML.replace(&block, &block.replace("exit 1", "true")),
+        &format!(
+            "the `{RELEASE_TAG_COMMIT_CHECK}` block in job `{RELEASE_ATTACH_JOB}` has no `exit 1` before its `fi`"
+        ),
+    );
+}
+
+/// The draft-target refusal moved after the upload is named (review 101 CR-01).
+#[test]
+fn the_release_check_names_a_draft_target_refusal_after_the_upload() {
+    let block = release_refusal_block(RELEASE_DRAFT_TARGET_CHECK);
+    let upload = RELEASE_YML
+        .lines()
+        .find(|l| l.contains(RELEASE_UPLOAD))
+        .expect("release.yml uploads the file");
+    let moved = RELEASE_YML
+        .replace(&block, "")
+        .replace(&format!("{upload}\n"), &format!("{upload}\n{block}"));
+    assert_release_plant_named(
+        "the draft-target refusal moved after the upload",
+        &moved,
+        &format!("job `{RELEASE_ATTACH_JOB}` doesn't run `{RELEASE_DRAFT_TARGET_CHECK}` before its first `{RELEASE_UPLOAD}` line"),
     );
 }
 
