@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,7 +26,9 @@ import { readWebpInfo } from '../scripts/webp-info.ts';
 //   1. build.json names FABRICO_SMOKE_SHA. Pages serves the previous deployment for a while after a
 //      deploy, so the smoke polls build.json with a query no cache has seen until the sha matches,
 //      and fails after FABRICO_SMOKE_POLL_CEILING_S seconds naming both shas. Every later test
-//      checks that build, never the old one.
+//      checks that build, never the old one. When the site already serves a later commit (the next
+//      push deployed first), it fails at once instead of polling to the ceiling, and
+//      scripts/check-pages-smoke.sh turns that failure into its superseded exit 0 (review 101 WR-01).
 //   2. One test per section of site/coverage-manifest.json, read at run time: the first listed page
 //      whose HTML holds a <fabrico-board> runs each of its boards to the end tick hashes.manifest
 //      pins, ends on the manifest's hash, and draws (frames rise and belt pixels change between
@@ -88,6 +91,26 @@ const sections: Section[] = (
   JSON.parse(fs.readFileSync(path.join(REPO, 'site/coverage-manifest.json'), 'utf8')) as { sections: Section[] }
 ).sections;
 
+/**
+ * Whether `served` is a later commit than `sha` on the same history, that is, `sha` is its ancestor.
+ * A served commit git can't find locally (the CI checkout is shallow) is fetched from origin once.
+ */
+function isLaterCommit(sha: string, served: string, fetched: Set<string>): boolean {
+  const git = (args: string[]): boolean => {
+    try {
+      execFileSync('git', args, { cwd: REPO, stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!git(['cat-file', '-e', `${served}^{commit}`]) && !fetched.has(served)) {
+    fetched.add(served);
+    git(['fetch', '--quiet', '--no-tags', 'origin', served]);
+  }
+  return git(['merge-base', '--is-ancestor', sha, served]);
+}
+
 test('the site serves the build of this commit', async () => {
   const sha = expectedSha();
   const url = `${smokeRoot()}build.json`;
@@ -96,6 +119,7 @@ test('the site serves the build of this commit', async () => {
   const deadline = Date.now() + POLL_CEILING_S * 1000;
   let polls = 0;
   let servedSha = 'none';
+  const fetched = new Set<string>();
   for (;;) {
     polls += 1;
     try {
@@ -111,6 +135,9 @@ test('the site serves the build of this commit', async () => {
     }
     console.log(`pages-smoke: poll ${polls}: ${url} serves build ${servedSha}`);
     if (servedSha === sha) return;
+    if (/^[0-9a-f]{40}$/.test(servedSha) && isLaterCommit(sha, servedSha, fetched)) {
+      throw new Error(`pages-smoke: ${url} serves build ${servedSha}, a later commit than ${sha}. That commit's smoke checks it.`);
+    }
     if (Date.now() + POLL_INTERVAL_MS > deadline) break;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }

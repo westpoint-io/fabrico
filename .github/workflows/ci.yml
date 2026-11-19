@@ -1490,6 +1490,12 @@ jobs:
   # and checks its sidecar names this commit's demo board, and fetches every absolute README link.
   # It builds nothing and runs neither the site build nor the docs suite.
   #
+  # A LATER PUSH'S DEPLOY. This job isn't in the `pages` group, and putting it there wouldn't help:
+  # the next push's deploy is already waiting in that group and starts the moment this push's
+  # deploy ends. So the next deploy can go live while this smoke runs. When the smoke fails and
+  # build.json names a later commit that has this run's commit as an ancestor, the script exits 0
+  # with a notice instead, because that commit's own smoke checks the live site (review 101 WR-01).
+  #
   # TIME LIMIT. The build.json poll gives up after 15 minutes, the boards on six pages take a few
   # minutes more, and the Playwright install with its apt dependencies took 14 min 5 s on the slow
   # mirror day of run 44294890291 (Chromium only is less). 30 minutes covers all three; measure the
