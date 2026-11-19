@@ -33,7 +33,8 @@
 # so the attach job hands the downloaded copy to the verify job as an artifact.
 #
 # THE TAG reaches the scripts only through `env:`, never as an expression inside a script, and the
-# attach job refuses anything but vMAJOR.MINOR.PATCH before any release or API call.
+# attach job refuses anything but vMAJOR.MINOR.PATCH before any release or API call. The build job
+# refuses a tag that isn't v plus fabrico-app's version in crates/fabrico-app/Cargo.toml.
 # `ci_wiring_parity.rs` pins all of this.
 
 name: release
@@ -83,6 +84,23 @@ jobs:
         run: |
           rustup show
           rustup target add wasm32-unknown-unknown
+
+      # The tag must name the version the app reports, so a typo such as v0.1.1 against 0.1.0
+      # fails here, before anything is built or any release is touched.
+      - name: The tag names fabrico-app's version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "fabrico-app") | .version')"
+          if [ -z "$version" ]; then
+            echo "release: couldn't read fabrico-app's version from cargo metadata, so nothing was built." >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$version" ]; then
+            echo "release: the tag is $TAG, but crates/fabrico-app/Cargo.toml says version $version, so nothing was built. Release v$version, or change the version first." >&2
+            exit 1
+          fi
+          echo "release: the tag $TAG names fabrico-app $version."
 
       - name: Setup Node
         uses: actions/setup-node@v4

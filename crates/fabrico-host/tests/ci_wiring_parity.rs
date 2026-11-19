@@ -3982,36 +3982,38 @@ const RELEASE_TAG_COMMIT_CHECK: &str = r#"if [ "$tag_commit" != "$GITHUB_SHA" ];
 const RELEASE_DRAFT_TARGET_CHECK: &str = r#"if [ "$target" != "$GITHUB_SHA" ]; then"#;
 /// The attach job's upload, which both refusals must come before.
 const RELEASE_UPLOAD: &str = "gh release upload";
+/// The release job that builds the offline file.
+const RELEASE_BUILD_JOB: &str = "build";
+/// The build job's refusal when the tag doesn't name fabrico-app's version (review 101 WR-04).
+const RELEASE_VERSION_CHECK: &str = r#"if [ "$TAG" != "v$version" ]; then"#;
+/// The build job's first build step, which the version check must come before.
+const RELEASE_FIRST_BUILD: &str = "run: bash scripts/build-wasm.sh";
 
-/// What is wrong with one refusal in the attach job's trimmed lines: `check` must appear once,
-/// before the first line containing `before`, with an `exit 1` between it and the `fi` that closes
-/// it. Empty means right.
-fn release_refusal_wrong(attach: &[&str], check: &str, before: &str, why: &str) -> Vec<String> {
+/// What is wrong with one refusal in job `job`'s trimmed lines: `check` must appear once, before
+/// the first line containing `before`, with an `exit 1` between it and the `fi` that closes it.
+/// Empty means right.
+fn release_refusal_wrong(job: &str, attach: &[&str], check: &str, before: &str, why: &str) -> Vec<String> {
     let count = attach.iter().filter(|l| **l == check).count();
     let Some(at) = attach.iter().position(|l| *l == check) else {
-        return vec![format!(
-            "job `{RELEASE_ATTACH_JOB}` runs `{check}` {count} time(s), expected 1. {why}"
-        )];
+        return vec![format!("job `{job}` runs `{check}` {count} time(s), expected 1. {why}")];
     };
     let mut wrong: Vec<String> = Vec::new();
     if count != 1 {
-        wrong.push(format!(
-            "job `{RELEASE_ATTACH_JOB}` runs `{check}` {count} time(s), expected 1. {why}"
-        ));
+        wrong.push(format!("job `{job}` runs `{check}` {count} time(s), expected 1. {why}"));
     }
     let before_at = attach.iter().position(|l| l.contains(before));
     if before_at.is_none_or(|b| b < at) {
         wrong.push(format!(
-            "job `{RELEASE_ATTACH_JOB}` doesn't run `{check}` before its first `{before}` line \
-             (check at {at}, first `{before}` at {before_at:?}). {why}"
+            "job `{job}` doesn't run `{check}` before its first `{before}` line (check at {at}, \
+             first `{before}` at {before_at:?}). {why}"
         ));
     }
     let closes = attach[at + 1..].iter().position(|l| *l == "fi").map(|k| at + 1 + k);
     let exits = closes.is_some_and(|fi| attach[at + 1..fi].contains(&"exit 1"));
     if !exits {
         wrong.push(format!(
-            "the `{check}` block in job `{RELEASE_ATTACH_JOB}` has no `exit 1` before its `fi`, so a \
-             mismatch would still upload. {why}"
+            "the `{check}` block in job `{job}` has no `exit 1` before its `fi`, so a mismatch \
+             would carry on. {why}"
         ));
     }
     wrong
@@ -4148,16 +4150,28 @@ fn release_wiring_wrong(yml: &str) -> Vec<String> {
         ));
     }
     wrong.extend(release_refusal_wrong(
+        RELEASE_ATTACH_JOB,
         &attach,
         RELEASE_TAG_COMMIT_CHECK,
         "gh release",
         "An existing tag at another commit would carry this run's file.",
     ));
     wrong.extend(release_refusal_wrong(
+        RELEASE_ATTACH_JOB,
         &attach,
         RELEASE_DRAFT_TARGET_CHECK,
         RELEASE_UPLOAD,
         "A draft targeting another commit would be published with this run's file.",
+    ));
+
+    // The build job refuses a tag that isn't fabrico-app's version before it builds anything.
+    let build = job_lines(RELEASE_BUILD_JOB);
+    wrong.extend(release_refusal_wrong(
+        RELEASE_BUILD_JOB,
+        &build,
+        RELEASE_VERSION_CHECK,
+        RELEASE_FIRST_BUILD,
+        "A tag such as v0.1.1 against Cargo's 0.1.0 would name a release the binary disagrees with.",
     ));
 
     // The tag filter, exactly, once.
@@ -4340,6 +4354,27 @@ fn release_refusal_block(check: &str) -> String {
     let mut block = lines[at..=fi].join("\n");
     block.push('\n');
     block
+}
+
+/// Deleting the build job's version check is named (review 101 WR-04).
+#[test]
+fn the_release_check_names_a_missing_version_check() {
+    assert_release_plant_named(
+        "the tag-against-version check deleted",
+        &RELEASE_YML.replace(&release_refusal_block(RELEASE_VERSION_CHECK), ""),
+        &format!("job `{RELEASE_BUILD_JOB}` runs `{RELEASE_VERSION_CHECK}` 0 time(s), expected 1."),
+    );
+}
+
+/// A version check that prints its message and carries on is named (review 101 WR-04).
+#[test]
+fn the_release_check_names_a_version_check_that_does_not_exit() {
+    let block = release_refusal_block(RELEASE_VERSION_CHECK);
+    assert_release_plant_named(
+        "the version check's `exit 1` turned into `true`",
+        &RELEASE_YML.replace(&block, &block.replace("exit 1", "true")),
+        &format!("the `{RELEASE_VERSION_CHECK}` block in job `{RELEASE_BUILD_JOB}` has no `exit 1` before its `fi`"),
+    );
 }
 
 /// Deleting the refusal for a tag at another commit is named (review 101 CR-01).
