@@ -1,6 +1,6 @@
 <!--
   docs/brand/fabrico-lockup.svg - the Fabrico wordmark lockup, and the PRIMARY BRAND
-  ARTEFACT of the project (MARK-08, MARK-16). Every later surface is cut from this file.
+  ARTEFACT of the project. Every later surface is cut from this file.
   NOTHING IN THE APP IMPORTS IT: no component, no Vite input and no bundle reaches docs/,
   so this drawing is a brand source rather than a shipped asset.
 
@@ -8,7 +8,7 @@
   edited: run npm run build:lockup. frontend/src/render/assets/lockup.test.ts rebuilds it
   in memory and compares byte for byte, so a hand edit reddens the unit suite.
 
-  ART-04 PROVENANCE: authored from scratch, from the chosen Fabrico mark. No icon pack
+  PROVENANCE: authored from scratch, from the chosen Fabrico mark. No icon pack
   was consulted, copied, traced or redrawn. Nothing here derives from game-icons.net
   (CC-BY-3.0, which redrawing does not clear) or from Remix Icon, whose licence forbids
   logo and trademark use by name.
