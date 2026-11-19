@@ -4259,12 +4259,34 @@ fn the_release_check_names_npm_ci_in_the_attach_job() {
     );
 }
 
+/// release.yml with the verify job's own `timeout-minutes:` line replaced by `edit(line)`. The line
+/// is found from the job's header, not by its value, so retuning the limit leaves the plants that
+/// use it working (review 101 WR-06).
+fn release_with_verify_limit(edit: impl Fn(&str) -> String) -> String {
+    let mut out = String::new();
+    let mut in_verify = false;
+    let mut found = 0;
+    for line in RELEASE_YML.split_inclusive('\n') {
+        if let Some(id) = job_id(line.trim_end_matches('\n')) {
+            in_verify = id == RELEASE_VERIFY_JOB;
+        }
+        if in_verify && found == 0 && line.starts_with("    timeout-minutes:") {
+            out.push_str(&edit(line));
+            found += 1;
+            continue;
+        }
+        out.push_str(line);
+    }
+    assert_eq!(found, 1, "job `{RELEASE_VERIFY_JOB}` has a job-level `timeout-minutes:` line to plant on");
+    out
+}
+
 /// A job with no time limit is named.
 #[test]
 fn the_release_check_names_a_job_without_a_time_limit() {
     assert_release_plant_named(
         "the verify job's limit removed",
-        &RELEASE_YML.replace("    timeout-minutes: 50\n", ""),
+        &release_with_verify_limit(|_| String::new()),
         &format!("job `{RELEASE_VERIFY_JOB}` has 0 job-level `timeout-minutes:` line(s), expected 1"),
     );
 }
@@ -4284,10 +4306,7 @@ fn the_release_check_names_a_two_part_tag_filter() {
 fn the_release_check_names_contents_write_in_the_verify_job() {
     assert_release_plant_named(
         "`contents: write` in the verify job",
-        &RELEASE_YML.replace(
-            "    timeout-minutes: 50\n",
-            "    timeout-minutes: 50\n    permissions:\n      contents: write\n",
-        ),
+        &release_with_verify_limit(|line| format!("{line}    permissions:\n      contents: write\n")),
         &format!(
             "`contents: write` appears 2 time(s) in release.yml, in job(s) [\"{RELEASE_ATTACH_JOB}\", \"{RELEASE_VERIFY_JOB}\"], expected once"
         ),

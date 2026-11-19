@@ -245,15 +245,14 @@ jobs:
           retention-days: 7
 
   # TIME LIMIT. The same installs and offline check as ci.yml's embed job, without the embed build
-  # and check. On the slow mirror day of run 44294890291 the Playwright install took 14 min 5 s and
-  # the WebKitGTK apt step 1 min 44 s, and the offline check took 12 min 1 s on the green run
-  # 43974435804: 27 min 50 s, and about 29 minutes with checkout, Node and the frontend install.
-  # The limit is 1.7 times that, 49.3 minutes, rounded up to 50.
+  # and check. Before any release ran, the parts added up to about 29 minutes and the limit was 50.
+  # The first release run, 44405266323, took 2551 s (42.5 minutes) in this job, 85% of that limit.
+  # The limit is 1.7 times the measured run, 72.3 minutes, rounded up to 73 (review 101 WR-06).
   verify:
     name: the attached copy runs every board in Chromium, Firefox and WebKitGTK
     needs: attach
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 73
     steps:
       - name: Checkout
         uses: actions/checkout@v4

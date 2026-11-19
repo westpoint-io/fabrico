@@ -1345,14 +1345,16 @@ jobs:
   # 1.7 times that run, 15.8 minutes, rounded up to 16. Phases 98 and 99 grew the suite to 562
   # tests and 60 boards, and posters now render 4 at a time. Run 43965812382 on af97ffd was cut at
   # 16 min with the site build at 3 min 50 s and the docs suite still running after 11 min 11 s, so
-  # the job needs at least about 17 min. The limit is 1.7 times that, 29 minutes, rounded up to 30.
-  # Measure again when the suite grows a lot.
+  # the job needs at least about 17 min. The limit was 1.7 times that, 29 minutes, rounded up to 30.
+  # With the hero capture and the Pages upload in, run 44405254645 took 1448 s (24.1 minutes) on a
+  # slow Ubuntu mirror, 80% of that limit. The limit is 1.7 times that run, 41.0 minutes, rounded up
+  # to 42 (review 101 WR-06). Measure again when the suite grows a lot.
   docs:
     name: the docs site builds and passes its checks
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 42
     env:
       FABRICO_WASM_OUT: ${{ github.workspace }}/target/wasm-out
       CC_wasm32_unknown_unknown: clang
