@@ -28,7 +28,7 @@
 //   0  no findings.
 //   1  at least one finding.
 //   2  no check: fewer than 8 files scanned, git couldn't list them, facts.json is missing or
-//      isn't the expected JSON, or README.md couldn't be read (review 101 WR-02).
+//      isn't the expected JSON, or README.md couldn't be read.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -68,8 +68,8 @@ export type ReadmeRead = { file: LintFile; reason?: undefined } | { file: null; 
 export interface RunOptions {
   /**
    * Whether the README beside site/ must be read (the default). When it must and `rootReadme`
-   * can't read it, the run exits 2 instead of linting site/ alone (review 101 WR-02). Only a
-   * caller that lints a folder with no README on purpose passes false.
+   * can't read it, the run exits 2 instead of linting site/ alone. Only a caller that lints a
+   * folder with no README on purpose passes false.
    */
   requireReadme?: boolean;
 }

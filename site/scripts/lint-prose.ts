@@ -25,8 +25,7 @@
 // EXIT CODES
 //   0  no findings.
 //   1  at least one finding.
-//   2  no check: fewer than 8 files scanned, git couldn't list them, or README.md couldn't be read
-//      (review 101 WR-02).
+//   2  no check: fewer than 8 files scanned, git couldn't list them, or README.md couldn't be read.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';

@@ -190,7 +190,7 @@ test('a facts.json with no facts object exits 2', () => {
   }
 });
 
-// The README beside site/ (review 101 WR-02): read every time, and a run that can't read it is no check.
+// The README beside site/: read every time, and a run that can't read it is no check.
 
 test('a fact typed in the README fails under README.md', () => {
   const site = siteRepo(8, FACTS_TEXT, '# Fabrico\n\nIt plays at 60 ticks a second.\n');

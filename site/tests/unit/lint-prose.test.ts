@@ -177,7 +177,7 @@ test('a folder git cannot list exits 2', () => {
   }
 });
 
-// The README beside site/ (review 101 WR-02): read every time, and a run that can't read it is no check.
+// The README beside site/: read every time, and a run that can't read it is no check.
 
 test('an em dash in the README fails at its line and column under README.md', () => {
   const site = siteRepo(8, 0, `# Fabrico\n\nBelts${EM}items.\n`);
