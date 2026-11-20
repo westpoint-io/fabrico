@@ -1310,6 +1310,12 @@ jobs:
       - name: Open the offline examples file in Chromium, strict Firefox and WebKitGTK
         run: bash scripts/check-offline-browsers.sh
 
+      # The test antialiasing switch must not reach the docs embed. The bundle built above is
+      # a separate Vite build (library mode), so it gets its own absence check. The proof that
+      # the check can still fail runs in the unit job, on every commit.
+      - name: The embed bundle carries no test antialiasing switch
+        run: bash scripts/check-test-aa-switch-absent.sh frontend/dist-embed
+
   # THE DOCS SITE, in a job of its own. It regenerates the facts the pages quote and fails when the
   # committed site/src/generated/facts.json differs from what the code says now, runs the prose lint,
   # the fact-literal lint and the site's unit tests, builds the site with scripts/build-site.sh, and
@@ -2096,3 +2102,16 @@ jobs:
       - name: Art board structural gate
         working-directory: frontend
         run: npm run check:board
+
+      # The test antialiasing switch boots the board with antialiasing on in the Vite dev
+      # server only. `npm run check:board` above ran `npm run build`, so frontend/dist is the
+      # app bundle the desktop binary embeds, and this checks the switch's flag name isn't in
+      # it. That is an absence claim, and an absence claim is only worth the proof that it
+      # can still fail, so the next step builds the app with the DEV guard removed in a
+      # private worktree and checks the gate then fails and names the file. Both run on every
+      # commit. The embed job runs the same check over frontend/dist-embed.
+      - name: The app bundle carries no test antialiasing switch
+        run: bash scripts/check-test-aa-switch-absent.sh frontend/dist
+
+      - name: Test antialiasing switch absence check, non-vacuity proof
+        run: bash scripts/prove-test-aa-switch-absent-non-vacuous.sh
