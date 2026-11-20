@@ -2,8 +2,12 @@
 //
 // `collectCaptureFacts` is a self-contained in-page function (no imports, no outer variables), so
 // the same read can go to the real app through an inspector socket. It only reads: the read-only
-// `window.__fabrico` getters, the board canvas, the chrome panels' rectangles and the live WebGL
-// context's attributes. It calls no hook that writes and dispatches no event.
+// `window.__fabrico` getters, the board canvas, the chrome panels' and label words' rectangles and
+// the live WebGL context's attributes. It calls no hook that writes and dispatches no event.
+//
+// Besides where the machines are, it reads what can sit on top of a machine's outline, so the
+// measurer can keep those pixels out of a width: cables (drawn above machines), item dots, label
+// words (a DOM overlay) and the alert rings around faulted machines.
 
 export interface CaptureRect {
   left: number;
@@ -49,6 +53,14 @@ export interface CaptureFacts {
   panels: CaptureRect[];
   /** The live context's `getContextAttributes().antialias` and `SAMPLES`; null with no context. */
   gl: { antialias: boolean | null; samples: number | null };
+  /** `window.__fabrico.cablePolylines()`: each resting cable's plotted polyline, in world px. */
+  cables: { x: number; y: number }[][];
+  /** `window.__fabrico.itemDots()`: each item dot's centre as plotted, in world px. */
+  itemDots: { x: number; y: number }[];
+  /** Client rectangles of the label words overlay elements, in CSS px. */
+  labelWords: CaptureRect[];
+  /** `window.__fabrico.alertRingCentres()`: the alert rings around faulted machines, in world px. */
+  alertRings: { x: number; y: number }[];
 }
 
 /** Read every fact a capture is measured against. Read-only; see the file header. */
@@ -66,6 +78,9 @@ export function collectCaptureFacts(): CaptureFacts {
         label: unknown;
       }[];
     };
+    cablePolylines(): { x: number; y: number }[][];
+    itemDots(): { x: number; y: number }[];
+    alertRingCentres(): { x: number; y: number }[];
   };
   const hook = (window as unknown as { __fabrico?: Hook }).__fabrico;
   if (hook === undefined) throw new Error('collectCaptureFacts: window.__fabrico is not installed');
@@ -101,5 +116,9 @@ export function collectCaptureFacts(): CaptureFacts {
       antialias: ctx === null ? null : (ctx.getContextAttributes()?.antialias ?? null),
       samples: ctx === null ? null : (ctx.getParameter(ctx.SAMPLES) as number),
     },
+    cables: hook.cablePolylines().map((line) => line.map((p) => ({ x: p.x, y: p.y }))),
+    itemDots: hook.itemDots().map((p) => ({ x: p.x, y: p.y })),
+    labelWords: Array.from(document.querySelectorAll('[data-testid="label-words"]')).map(rectOf),
+    alertRings: hook.alertRingCentres().map((p) => ({ x: p.x, y: p.y })),
   };
 }

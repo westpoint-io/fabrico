@@ -1,6 +1,8 @@
 import { CELL, nubAnchor } from '../../shared/geometry';
 import { CHASSIS_INSET_U, U_TO_PX } from '../../src/render/layers/machineChassis';
 import { NUB_ELECTRICAL_HALF, NUB_FAULT_RING_R, NUB_R, NUB_STROKE } from '../../src/protocol/ports';
+import { CABLE_WIDTH } from '../../src/render/cableGeometry';
+import { DOT_SIZE } from '../../src/render/layers/items';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import type { DecodedImage } from './canvasDots';
 import type { CaptureFacts, CaptureNode, CaptureRect } from './captureFacts';
@@ -26,8 +28,11 @@ import type { CaptureCell } from './captureMatrix';
 //
 // WHAT IT REFUSES TO GUESS. A line is skipped, and counted, when anything other than one stroke on
 // one floor is on it: the line runs off the capture or crosses a mask, the floor differs at its two
-// ends, no stroke stands out from the floor, the stroke runs into the end of the line, a pixel of
-// another colour touches it, or other ink sits on the line beside it. A side left with no line
+// ends, no stroke stands out from the floor, the line's ends are lighter than its stroke (every
+// chassis ink is lighter than the board floor, so ink at both ends would otherwise read the dark
+// gap between them as the stroke), a pixel of another colour touches the stroke, or other ink sits
+// on the line beside it. A shape that touches the stroke and reaches past the end of the line
+// shows up as ink at that end, so the floor check refuses it. A side left with no line
 // reports `measured: false` with the reasons, and the grade counts that side as an offender. It
 // never reads as a width, so a missing outline can't compare equal to anything.
 
@@ -66,6 +71,11 @@ function sub(a: Rgb, b: Rgb): Rgb {
 
 function dot(a: Rgb, b: Rgb): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/** Rec. 601 luma, enough to say which of two colours is lighter. */
+function lightness(c: Rgb): number {
+  return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
 }
 
 function dist(a: Rgb, b: Rgb): number {
@@ -108,13 +118,13 @@ export function readSampleLine(pixels: readonly Rgb[]): LineReading {
   for (let k = 2; k < n - 1; k++) if (dist(pixels[k], floorOut) > dist(pixels[peak], floorOut)) peak = k;
   const ink = pixels[peak];
   if (dist(ink, floorOut) < MIN_CONTRAST) return { ok: false, reason: 'no stroke stands out from the floor' };
+  if (lightness(ink) <= lightness(floorOut)) return { ok: false, reason: "the line's ends are lighter than its stroke" };
   const floorFor = (k: number): Rgb => (k <= peak ? floorOut : floorIn);
   const cov = pixels.map((p, k) => coverageOf(p, floorFor(k), ink));
   let start = peak;
   while (start - 1 >= 0 && cov[start - 1] >= FRINGE_MIN) start--;
   let end = peak;
   while (end + 1 <= n - 1 && cov[end + 1] >= FRINGE_MIN) end++;
-  if (start === 0 || end === n - 1) return { ok: false, reason: 'the stroke runs into the end of the line' };
   for (let k = start; k <= end; k++) {
     const f = floorFor(k);
     const blend: Rgb = [
@@ -270,9 +280,57 @@ export function cssRectMask(facts: CaptureFacts, r: CaptureRect, what: string): 
   return { x0: r.left * facts.dpr, y0: r.top * facts.dpr, x1: (r.left + r.width) * facts.dpr, y1: (r.top + r.height) * facts.dpr, what };
 }
 
-/** The masks every capture carries: the chrome panels over the board. */
+/** How far past a drawn shape a mask reaches, in device px, so its edge pixels are covered too. */
+export const MASK_CLEARANCE_PX = 1;
+
+/**
+ * The radius an alert ring is masked to, in world px. The overlay draws the ring at radius 8 with
+ * a 2 px stroke and doesn't export either number, so the mask takes half a cell, which holds the
+ * ring with room to spare.
+ */
+export const ALERT_RING_MASK_R = CELL / 2;
+
+/** A world-px box as a device-px mask, `clearance` device px wider on every side. */
+function worldBoxMask(facts: CaptureFacts, x0: number, y0: number, x1: number, y1: number, what: string, clearance: number): MaskRect {
+  const a = worldToDevice(facts, x0, y0);
+  const b = worldToDevice(facts, x1, y1);
+  return { x0: Math.min(a.x, b.x) - clearance, y0: Math.min(a.y, b.y) - clearance, x1: Math.max(a.x, b.x) + clearance, y1: Math.max(a.y, b.y) + clearance, what };
+}
+
+/**
+ * Every mask a capture carries, in device px: the chrome panels and the label words over the
+ * board; each label node's footprint (a label has a box, not a chassis); each cable segment, as
+ * wide as its stroke; each item dot's box; and each alert ring. A sample line that crosses any of
+ * them is skipped.
+ */
 export function captureMasks(facts: CaptureFacts): MaskRect[] {
-  return facts.panels.map((p) => cssRectMask(facts, p, 'a chrome panel'));
+  const out: MaskRect[] = [];
+  for (const p of facts.panels) out.push(cssRectMask(facts, p, 'a chrome panel'));
+  for (const w of facts.labelWords) out.push(cssRectMask(facts, w, 'label words'));
+  for (const n of facts.nodes) {
+    if (!n.isLabel || n.cells.length === 0) continue;
+    const xs = n.cells.map(([x]) => x);
+    const ys = n.cells.map(([, y]) => y);
+    out.push(worldBoxMask(facts, Math.min(...xs) * CELL, Math.min(...ys) * CELL, (Math.max(...xs) + 1) * CELL, (Math.max(...ys) + 1) * CELL, 'a label', 0));
+  }
+  // A cable is drawn `CABLE_WIDTH` world px wide, and never thinner than one screen px.
+  const halfCable = Math.max(CABLE_WIDTH / 2, 0.5 / facts.camera.scale);
+  for (const line of facts.cables) {
+    for (let i = 0; i + 1 < line.length; i++) {
+      const p = line[i];
+      const q = line[i + 1];
+      out.push(
+        worldBoxMask(facts, Math.min(p.x, q.x) - halfCable, Math.min(p.y, q.y) - halfCable, Math.max(p.x, q.x) + halfCable, Math.max(p.y, q.y) + halfCable, 'a cable', MASK_CLEARANCE_PX),
+      );
+    }
+  }
+  for (const d of facts.itemDots) {
+    out.push(worldBoxMask(facts, d.x - DOT_SIZE / 2, d.y - DOT_SIZE / 2, d.x + DOT_SIZE / 2, d.y + DOT_SIZE / 2, 'an item dot', MASK_CLEARANCE_PX));
+  }
+  for (const r of facts.alertRings) {
+    out.push(worldBoxMask(facts, r.x - ALERT_RING_MASK_R, r.y - ALERT_RING_MASK_R, r.x + ALERT_RING_MASK_R, r.y + ALERT_RING_MASK_R, 'an alert ring', MASK_CLEARANCE_PX));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
