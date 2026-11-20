@@ -1,6 +1,7 @@
 import { Application, Container, ParticleContainer, UPDATE_PRIORITY } from 'pixi.js';
 import { createCamera, type Camera } from './camera';
 import { createDprFollower } from './dprFollow';
+import { antialiasForBoot } from './testAntialias';
 import { createGridLayer } from './layers/grid';
 import { createMachineLayer, type MachineLayer } from './layers/machines';
 import { createBeltLayer, type BeltLayer } from './layers/belts';
@@ -245,16 +246,16 @@ export async function bootPixi(container: HTMLElement, opts: BootOptions): Promi
     // The canvas background reads the darkest ramp step (index 0) of the ONE locked
     // skin, so the void behind the floor belongs to the same data-driven world.
     background: LOCKED_SKIN.palette.ramp[0],
-    // antialias OFF (SKIN-05, final step). Safe only now that plans 25-02..25-05
-    // deleted every vector Graphics plot (machine/belt/item/overlay bodies are all
-    // synth sprites baked at native CELL with nearest-neighbor sampling): with no
-    // vector edges left to smooth, AA would only blur the pixel-exact sprites. The
-    // whole scene renders crisp at CELL=32 integer scale. (roundPixels stays
-    // project-default unset/false: MOTION-07 (Phase 26) RESOLVED the snapping
-    // trilemma by quantizing ONLY item-dot positions to device pixels in the item
+    // Antialiasing ships OFF. `antialiasForBoot` answers false in every built bundle; in
+    // the Vite dev server a URL flag turns it on, so the capture set can photograph the
+    // board with antialiasing on as well as off (a grey fringe beside a stroke only shows
+    // with it on). WebGL fixes antialiasing when it creates the context, so the value has
+    // to be known here, before `app.init` builds it; nothing can change it afterwards.
+    // (roundPixels stays project-default unset/false: MOTION-07 (Phase 26) RESOLVED the
+    // snapping trilemma by quantizing ONLY item-dot positions to device pixels in the item
     // layer - a global roundPixels flip would coarsely snap the whole scene and kill
     // the smooth analytic item glide, so it is deliberately NOT enabled.)
-    antialias: false,
+    antialias: antialiasForBoot(location.search),
     autoDensity: true,
     resolution: window.devicePixelRatio || 1,
   });
