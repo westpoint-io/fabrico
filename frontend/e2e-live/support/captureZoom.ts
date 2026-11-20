@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { CELL } from '../../shared/geometry';
 import { MAX_ZOOM, MIN_ZOOM } from '../../src/render/camera';
+import type { CaptureFacts } from './captureFacts';
 import { cameraOf, readScene, resetZoomToActualSize, waitForCameraSettle, type CameraSnapshot } from './oracle';
 
 // captureZoom.ts - exact zooms and pans for the board capture set, through the app's own wheel
@@ -126,4 +127,123 @@ export async function panBy(page: Page, dx: number, dy: number): Promise<CameraS
   await page.evaluate(panWheelInPage, { dx, dy });
   await waitForCameraSettle(page);
   return cameraOf(page);
+}
+
+// ---------------------------------------------------------------------------
+// Tiles: covering a board that overflows the viewport
+// ---------------------------------------------------------------------------
+
+/** One tile: how far the board moves on screen from the zoom's camera, in CSS px. */
+export interface TileOffset {
+  dx: number;
+  dy: number;
+}
+
+/**
+ * Room kept around the board and around each machine, in CSS px, past the chassis band: enough
+ * for the sample margin the measurer reads past a band at any zoom and ratio here.
+ */
+const TILE_MARGIN_CSS = 12;
+
+/** The canvas area chrome leaves free, in canvas-relative CSS px. */
+export interface FreeArea {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * The canvas area left once every chrome panel is cut off along one canvas edge: for each panel,
+ * largest first, the cut (everything left of its right edge, above its bottom, right of its left
+ * or below its top) that keeps the most area. So the toolbar takes the top, the palette the left,
+ * and a corner cluster whichever cut costs less. Canvas-relative CSS px. A machine wholly inside
+ * this area is clear of every panel.
+ */
+export function freeCanvasArea(facts: CaptureFacts, viewport: { width: number; height: number }): FreeArea {
+  const w = Math.min(facts.clientRect.width, viewport.width);
+  const h = Math.min(facts.clientRect.height, viewport.height);
+  let area: FreeArea = { x0: 0, y0: 0, x1: w, y1: h };
+  const size = (a: FreeArea) => Math.max(0, a.x1 - a.x0) * Math.max(0, a.y1 - a.y0);
+  const panels = facts.panels
+    .map((p) => ({ l: p.left - facts.clientRect.left, t: p.top - facts.clientRect.top, r: p.left - facts.clientRect.left + p.width, b: p.top - facts.clientRect.top + p.height }))
+    .filter((p) => p.r > p.l && p.b > p.t)
+    .sort((a, b) => (b.r - b.l) * (b.b - b.t) - (a.r - a.l) * (a.b - a.t));
+  for (const p of panels) {
+    if (p.r <= area.x0 || p.b <= area.y0 || p.l >= area.x1 || p.t >= area.y1) continue;
+    const cuts: FreeArea[] = [
+      { ...area, x0: Math.max(area.x0, p.r) },
+      { ...area, y0: Math.max(area.y0, p.b) },
+      { ...area, x1: Math.min(area.x1, p.l) },
+      { ...area, y1: Math.min(area.y1, p.t) },
+    ];
+    area = cuts.reduce((best, c) => (size(c) > size(best) ? c : best));
+  }
+  return area;
+}
+
+/** Positions along one axis that cover [lo, hi] with windows of `size`, stepping by `size - overlap`. */
+function axisStarts(lo: number, hi: number, size: number, overlap: number): number[] {
+  if (hi - lo <= size) return [lo];
+  const step = size - overlap;
+  if (step <= 0) throw new Error(`tilePlan: the free canvas (${size} CSS px) is no wider than the largest machine plus margins (${overlap} CSS px)`);
+  const starts: number[] = [];
+  for (let s = lo; ; s += step) {
+    if (s + size >= hi) {
+      starts.push(hi - size);
+      break;
+    }
+    starts.push(s);
+  }
+  return starts;
+}
+
+/**
+ * The pans that cover the whole board at the current camera, as screen offsets of the board from
+ * where the zoom left it. The first is always `{ dx: 0, dy: 0 }`: tile 0 is the zoom's own camera.
+ * When the board (with a margin) fits in the canvas area chrome leaves free, that is the only
+ * tile. Otherwise a grid of tiles follows, each placing a window of the free area over the board,
+ * neighbours overlapping by the largest machine's on-screen size plus margins, so every machine
+ * lies wholly inside at least one tile.
+ */
+export function tilePlan(facts: CaptureFacts, viewport: { width: number; height: number }): TileOffset[] {
+  const cam = facts.camera;
+  const nodes = facts.nodes.filter((n) => n.cells.length > 0);
+  if (nodes.length === 0) return [{ dx: 0, dy: 0 }];
+  const box = (cells: readonly (readonly [number, number])[]) => {
+    const xs = cells.map(([x]) => x);
+    const ys = cells.map(([, y]) => y);
+    return { x0: Math.min(...xs) * CELL, y0: Math.min(...ys) * CELL, x1: (Math.max(...xs) + 1) * CELL, y1: (Math.max(...ys) + 1) * CELL };
+  };
+  const board = box(nodes.flatMap((n) => n.cells));
+  const sx0 = board.x0 * cam.scale + cam.x - TILE_MARGIN_CSS;
+  const sy0 = board.y0 * cam.scale + cam.y - TILE_MARGIN_CSS;
+  const sx1 = board.x1 * cam.scale + cam.x + TILE_MARGIN_CSS;
+  const sy1 = board.y1 * cam.scale + cam.y + TILE_MARGIN_CSS;
+  const free = freeCanvasArea(facts, viewport);
+  const fw = free.x1 - free.x0;
+  const fh = free.y1 - free.y0;
+  if (sx0 >= free.x0 && sy0 >= free.y0 && sx1 <= free.x1 && sy1 <= free.y1) return [{ dx: 0, dy: 0 }];
+  let maxW = 0;
+  let maxH = 0;
+  for (const n of nodes) {
+    const b = box(n.cells);
+    maxW = Math.max(maxW, (b.x1 - b.x0) * cam.scale);
+    maxH = Math.max(maxH, (b.y1 - b.y0) * cam.scale);
+  }
+  const where = () =>
+    `free area ${JSON.stringify(free)} from canvas ${JSON.stringify(facts.clientRect)} and panels ${JSON.stringify(facts.panels)}`;
+  let xs: number[];
+  let ys: number[];
+  try {
+    xs = axisStarts(sx0, sx1, fw, maxW + 2 * TILE_MARGIN_CSS);
+    ys = axisStarts(sy0, sy1, fh, maxH + 2 * TILE_MARGIN_CSS);
+  } catch (e) {
+    throw new Error(`${(e as Error).message}; ${where()}`);
+  }
+  const out: TileOffset[] = [{ dx: 0, dy: 0 }];
+  for (const y of ys) {
+    for (const x of xs) out.push({ dx: Math.round(free.x0 - x), dy: Math.round(free.y0 - y) });
+  }
+  return out;
 }

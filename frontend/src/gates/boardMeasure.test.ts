@@ -20,7 +20,10 @@ import {
   coverageOf,
   gradeOutlineSides,
   measureCapture,
+  measureTile,
   outlineBandFor,
+  outlineClearOfChrome,
+  outlinesForCell,
   readSampleLine,
   type MachineOutline,
   type Rgb,
@@ -337,5 +340,67 @@ describe('masks built from the capture facts', () => {
     const ringed = measure(img, facts({ alertRings: [{ x: 64, y: 91 }, { x: 44, y: 91 }, { x: 84, y: 91 }] }))[0];
     expect(ringed.sides.bottom.measured).toBe(false);
     expect(ringed.sides.top.measured).toBe(true);
+  });
+});
+
+describe('tiles: each machine is graded in the first tile that holds its whole outline', () => {
+  const SECOND: CaptureNode = { ...NODE, id: 2, cells: [[0, 3]] };
+  const wholeImage = { width: SIZE, height: SIZE };
+
+  it('calls an outline clear only when its band and sample margin lie on the canvas and off every panel', () => {
+    expect(outlineClearOfChrome(facts(), NODE, wholeImage)).toBe(true);
+    // A toolbar over the top 34 px reaches the band's outer edge at 34.5 less the 2 px margin.
+    expect(outlineClearOfChrome(facts({ panels: [{ left: 0, top: 0, width: SIZE, height: 34 }] }), NODE, wholeImage)).toBe(false);
+    // Its clean twin: a toolbar that stops well short of the band.
+    expect(outlineClearOfChrome(facts({ panels: [{ left: 0, top: 0, width: SIZE, height: 20 }] }), NODE, wholeImage)).toBe(true);
+    // Panned so the machine's right side runs past the canvas edge.
+    expect(outlineClearOfChrome(facts({ camera: { x: 40, y: 0, scale: 1 } }), NODE, wholeImage)).toBe(false);
+    // A canvas narrower than the image: the machine is in the image but not on the canvas.
+    expect(outlineClearOfChrome(facts({ clientRect: { left: 0, top: 0, width: 90, height: SIZE } }), NODE, wholeImage)).toBe(false);
+  });
+
+  it('leaves a machine under a panel out of the tile, and keeps the clear one', () => {
+    const img = blank();
+    outline(img, SOLID3);
+    const f = facts({ nodes: [NODE, SECOND], panels: [{ left: 0, top: 96, width: 40, height: 32 }] });
+    expect(measureTile(img, f).map((m) => m.nodeId)).toEqual([1]);
+  });
+
+  it('takes each machine from the first tile that measured it and names a machine no tile held', () => {
+    const img = blank();
+    outline(img, SOLID3);
+    const [clean] = measure(img);
+    const thin = blank();
+    outline(thin, SOLID3, { right: [IDLE_INK, IDLE_INK] });
+    const [thinOne] = measure(thin);
+    const scene = [
+      { nodeId: 1, kind: 2 },
+      { nodeId: 2, kind: 2 },
+      { nodeId: 3, kind: 7 },
+    ];
+    const tiles = [
+      { scene, outlines: [{ ...clean, nodeId: 1 }] },
+      { scene, outlines: [{ ...thinOne, nodeId: 1 }, { ...clean, nodeId: 2 }] },
+    ];
+    const { outlines, neverClear } = outlinesForCell(tiles);
+    // Machine 1 comes from tile 0 (clean), not tile 1 (thin); machine 2 from tile 1.
+    expect(outlines.map((o) => o.nodeId)).toEqual([1, 2]);
+    expect(coresOf(outlines[0]).right).toBe(3);
+    expect(neverClear).toEqual([{ nodeId: 3, kind: 7 }]);
+    const g = gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear);
+    expect(g.offenders).toHaveLength(1);
+    expect(g.offenders[0]).toContain('machine 3 (kind 7): never clear of chrome');
+    // Swapping the tile order makes the thin outline the one graded.
+    const swapped = outlinesForCell([tiles[1], tiles[0]]);
+    expect(coresOf(swapped.outlines[0]).right).toBe(2);
+    expect(gradeOutlineSides(swapped.outlines, SHIPPED_AT_1, swapped.neverClear).offenders).toHaveLength(2);
+  });
+
+  it('grades a cell whose every machine was never clear as offenders, not as an empty pass', () => {
+    const { outlines, neverClear } = outlinesForCell([{ scene: [{ nodeId: 4, kind: 2 }], outlines: [] }]);
+    expect(outlines).toEqual([]);
+    expect(gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear).offenders).toEqual([
+      'machine 4 (kind 2): never clear of chrome (no tile held its whole outline on the canvas)',
+    ]);
   });
 });

@@ -60,6 +60,8 @@ type JsonObject = { [key: string]: Json };
 
 interface ManifestEntry {
   cell: { dpr: number; aa: string; zoom: string | number };
+  /** The zoom's token in test titles (`boot`, `fullscreen-boot`, or the scale), when the manifest records it. */
+  zoomId?: string;
   png: string;
   camera?: { x: number; y: number; scale: number };
   gl?: { antialias: boolean | null; samples: number | null };
@@ -169,14 +171,20 @@ function readReport(): { tests: ReportTest[]; startTime: string | null } {
   return { tests, startTime: stats !== null && typeof stats.startTime === 'string' ? stats.startTime : null };
 }
 
-/** The title token of a zoom, as the capture and grading tests write it: `boot`, or the scale. */
-function zoomToken(zoom: string | number): string {
-  return typeof zoom === 'number' ? String(zoom) : zoom;
+/**
+ * The title token of an entry's zoom, as the capture and grading tests write it: the manifest's
+ * own `zoomId` when it records one (a named zoom such as `fullscreen-boot` is a number in `cell`),
+ * else `boot` or the scale.
+ */
+function zoomToken(entry: ManifestEntry): string {
+  if (typeof entry.zoomId === 'string' && entry.zoomId !== '') return entry.zoomId;
+  return typeof entry.cell.zoom === 'number' ? String(entry.cell.zoom) : entry.cell.zoom;
 }
 
 /** The grading tests for one property and one cell, matched by their title `<property> dpr=<r> aa=<a> zoom=<z>`. */
-function gradingTests(tests: ReportTest[], property: string, cell: ManifestEntry['cell']): ReportTest[] {
-  const want = `${property} dpr=${cell.dpr} aa=${cell.aa} zoom=${zoomToken(cell.zoom)}`;
+function gradingTests(tests: ReportTest[], property: string, entry: ManifestEntry): ReportTest[] {
+  const cell = entry.cell;
+  const want = `${property} dpr=${cell.dpr} aa=${cell.aa} zoom=${zoomToken(entry)}`;
   return tests.filter((t) => path.basename(t.file) === GRADE_FILE && (t.title === want || t.title.startsWith(`${want} `)));
 }
 
@@ -494,13 +502,14 @@ function main(): void {
             return propertyTable(rows, group.length > 1 ? `${property}, tile ${i}` : property);
           })
           .join('');
-        return tables + verdictList(gradingTests(tests, property, cell), `No grading test for ${property} in this cell.`);
+        return tables + verdictList(gradingTests(tests, property, group[0]), `No grading test for ${property} in this cell.`);
       });
 
+      const scaleText = typeof cell.zoom === 'number' && zoomToken(group[0]) !== String(cell.zoom) ? ` (scale ${cell.zoom})` : '';
       const gl = group[0].gl;
       const glText = gl ? `, WebGL antialias ${String(gl.antialias)}, samples ${String(gl.samples)}` : '';
       blocks.push(
-        `<section class="cell"><h3>zoom ${esc(zoomToken(cell.zoom))}${esc(glText)}</h3><div class="cell-body">` +
+        `<section class="cell"><h3>zoom ${esc(zoomToken(group[0]))}${esc(scaleText)}${esc(glText)}</h3><div class="cell-body">` +
           `<div class="shots"><div class="tiles">${tiles.join('')}</div></div>` +
           `<div class="facts">${facts.join('') || '<p class="empty">No measurements in this capture.</p>'}</div>` +
           `</div></section>`,

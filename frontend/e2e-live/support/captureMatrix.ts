@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CELL } from '../../shared/geometry';
-import type { MachineOutline } from './boardMeasure';
+import type { MachineOutline, SceneMachine } from './boardMeasure';
 
 // captureMatrix.ts - what the board capture set boots, which zooms it captures at, and which
 // cells each graded property expects a subject in.
@@ -30,18 +30,62 @@ export interface CaptureCell extends CaptureBoot {
 /** The properties the grading project checks. Each one names what it measures on screen. */
 export type PropertyId = 'outline-sides';
 
-export const CAPTURE_BOOTS: readonly CaptureBoot[] = [{ dpr: 1, aa: 'shipped' }];
+/**
+ * The fractional pixel ratio the capture set boots at besides 1 and 2: the `devicePixelRatio` read
+ * from the shipped app in a full-screen 3840x2160 window on the maintainer's screen,
+ * 1.181793212890625. On an Xvfb display, `GDK_DPI_SCALE=1.1818` reproduces this ratio in the real
+ * app (WebKitGTK), which is how the real-app walk boots at it.
+ */
+export const FRACTIONAL_DPR = 1.181793212890625;
 
-export const CAPTURE_ZOOMS: readonly CaptureZoom[] = ['boot', 1];
+/**
+ * The zoom the shipped app's own fit lands on in that same full-screen 3840x2160 window at
+ * `FRACTIONAL_DPR`: 2.8853387774251424. The 1600x1000 viewport here fits at a much smaller zoom,
+ * so this is captured as an exact zoom of its own. It is the zoom the board opens at on that
+ * screen, so the outline rule treats it like `boot`.
+ */
+export const FULLSCREEN_BOOT_ZOOM = 2.8853387774251424;
 
-/** A file-name-safe id for a boot, for example `dpr1-aa-shipped` or `dpr1.18-aa-on`. */
+/** Two zooms this close are one capture: the later one is left out of `CAPTURE_ZOOMS`. */
+export const ZOOM_DEDUP = 0.01;
+
+/** The pixel ratios, without repeats, in ascending order. */
+const CAPTURE_DPRS: readonly number[] = [...new Set([1, FRACTIONAL_DPR, 2])].sort((a, b) => a - b);
+
+/** One boot per pixel ratio and antialiasing setting: ordered by ratio, `shipped` before `on`. */
+export const CAPTURE_BOOTS: readonly CaptureBoot[] = CAPTURE_DPRS.flatMap((dpr) => [
+  { dpr, aa: 'shipped' as const },
+  { dpr, aa: 'on' as const },
+]);
+
+/**
+ * Every zoom each boot captures, in this order. The full-screen boot zoom is left out when it lands
+ * within `ZOOM_DEDUP` of a zoom already listed (at 2.885 it doesn't: the nearest is 2).
+ */
+export const CAPTURE_ZOOMS: readonly CaptureZoom[] = (() => {
+  const zooms: CaptureZoom[] = ['boot', 0.25, 0.5, 0.75, 1, 2, 4];
+  const near = zooms.some((z) => typeof z === 'number' && Math.abs(z - FULLSCREEN_BOOT_ZOOM) < ZOOM_DEDUP);
+  return near ? zooms : [...zooms, FULLSCREEN_BOOT_ZOOM];
+})();
+
+/** True for a zoom the board opens at: the 1600x1000 fit (`boot`) and the full-screen fit. */
+export function isBootZoom(zoom: CaptureZoom): boolean {
+  return zoom === 'boot' || zoom === FULLSCREEN_BOOT_ZOOM;
+}
+
+/** A file-name-safe id for a boot, for example `dpr1-aa-shipped` or `dpr1.181793212890625-aa-on`. */
 export function bootId(boot: CaptureBoot): string {
   return `dpr${boot.dpr}-aa-${boot.aa}`;
 }
 
-/** A file-name-safe id for a zoom: `boot`, or the scale as written (`1`, `0.75`). */
+/**
+ * A file-name-safe id for a zoom, also its token in test titles: `boot`, `fullscreen-boot` for
+ * `FULLSCREEN_BOOT_ZOOM`, or the scale as written (`1`, `0.75`).
+ */
 export function zoomId(zoom: CaptureZoom): string {
-  return zoom === 'boot' ? 'boot' : String(zoom);
+  if (zoom === 'boot') return 'boot';
+  if (zoom === FULLSCREEN_BOOT_ZOOM) return 'fullscreen-boot';
+  return String(zoom);
 }
 
 /** The test title of one grading cell, for example `outline-sides dpr=1 aa=shipped zoom=1`. */
@@ -81,11 +125,21 @@ export function machinesDrawnAsVectors(zoom: CaptureZoom): boolean {
   return zoom === 'boot' || zoom * CELL >= LOD_MIN_MACHINE_PX;
 }
 
-/** One capture as the manifest records it: what was asked, what was read back, what was measured. */
+/**
+ * One capture as the manifest records it: what was asked, what was read back, what was measured.
+ * A zoom where the board overflows the viewport has one entry per tile, in tile order, all with the
+ * same `cell`.
+ */
 export interface CaptureEntry {
   cell: CaptureCell;
+  /** The zoom's token in test titles and on the page (`zoomId`). */
+  zoomId: string;
+  /** The tile's place in its zoom's tile order, from 0. */
+  tile: number;
   /** The PNG, relative to `CAPTURE_ROOT`. */
   png: string;
+  /** The camera scale the board's own fit landed on at this boot, read before any wheel. */
+  bootScale: number;
   /** The camera read back after the zoom settled, not the zoom that was asked for. */
   camera: { x: number; y: number; scale: number };
   dpr: number;
@@ -93,6 +147,12 @@ export interface CaptureEntry {
   client: { width: number; height: number };
   gl: { antialias: boolean | null; samples: number | null };
   tick: number;
+  /**
+   * Every machine in the scene (label nodes left out), in node-id order. A machine graded in this
+   * tile is in `measurements`; one that isn't on the canvas and clear of chrome here isn't.
+   */
+  scene: SceneMachine[];
+  /** Per property, the machines measured in this tile: those whose whole outline is clear here. */
   measurements: Record<PropertyId, MachineOutline[]>;
 }
 

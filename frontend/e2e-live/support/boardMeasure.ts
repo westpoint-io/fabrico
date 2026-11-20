@@ -6,7 +6,7 @@ import { DOT_SIZE } from '../../src/render/layers/items';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import type { DecodedImage } from './canvasDots';
 import type { CaptureFacts, CaptureNode, CaptureRect } from './captureFacts';
-import type { CaptureCell } from './captureMatrix';
+import { isBootZoom, zoomId, type CaptureCell } from './captureMatrix';
 
 // boardMeasure.ts - pure measuring and grading over a decoded board capture.
 //
@@ -425,6 +425,88 @@ export function measureOutlineSides(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Tiles: where each machine is graded
+// ---------------------------------------------------------------------------
+
+/** A machine in the scene, as a tile's manifest entry lists it. */
+export interface SceneMachine {
+  nodeId: number;
+  kind: number;
+}
+
+/** Every machine in the scene in node-id order. Label nodes have no chassis and are left out. */
+export function sceneMachines(facts: CaptureFacts): SceneMachine[] {
+  return facts.nodes
+    .filter((n) => !n.isLabel && n.cells.length > 0)
+    .sort((a, b) => a.id - b.id)
+    .map((n) => ({ nodeId: n.id, kind: n.kind }));
+}
+
+/**
+ * True when the whole outline of `node` can be read in this capture: its chassis band, widened by
+ * the sample margin every line reads past it, lies on the canvas, inside the image, and outside
+ * every chrome panel. A machine half off the canvas or partly under the toolbar is graded in a
+ * later tile where it is whole, or not at all.
+ */
+export function outlineClearOfChrome(facts: CaptureFacts, node: CaptureNode, imageSize: { width: number; height: number }): boolean {
+  const band = outlineBandFor(facts, node);
+  const margin = sampleMargin(facts);
+  const bound = (side: SideName) => band.sides.find((s) => s.side === side)?.outer ?? Number.NaN;
+  const box = { x0: bound('left') - margin, y0: bound('top') - margin, x1: bound('right') + margin, y1: bound('bottom') + margin };
+  if (![box.x0, box.y0, box.x1, box.y1].every(Number.isFinite)) return false;
+  const canvas = cssRectMask(facts, facts.clientRect, 'the canvas');
+  const x0 = Math.max(0, canvas.x0);
+  const y0 = Math.max(0, canvas.y0);
+  const x1 = Math.min(imageSize.width, canvas.x1);
+  const y1 = Math.min(imageSize.height, canvas.y1);
+  if (box.x0 < x0 || box.y0 < y0 || box.x1 > x1 || box.y1 > y1) return false;
+  return facts.panels.every((p) => {
+    const m = cssRectMask(facts, p, 'a chrome panel');
+    return box.x1 <= m.x0 || box.x0 >= m.x1 || box.y1 <= m.y0 || box.y0 >= m.y1;
+  });
+}
+
+/** One tile as the grade reads it: the scene it saw and the outlines it measured. */
+export interface TileOutlines {
+  scene: readonly SceneMachine[];
+  outlines: readonly MachineOutline[];
+}
+
+/**
+ * Pick, for each machine in the scene, the outline from the FIRST tile that measured it (a tile
+ * measures only the machines whose whole outline was clear there). A scene machine no tile
+ * measured is returned in `neverClear`. Both lists are in node-id order. The scene is the union of
+ * every tile's, so a machine one tile left out of its scene list still has to be graded.
+ */
+export function outlinesForCell(tiles: readonly TileOutlines[]): { outlines: MachineOutline[]; neverClear: SceneMachine[] } {
+  const scene = new Map<number, SceneMachine>();
+  for (const t of tiles) for (const m of t.scene) if (!scene.has(m.nodeId)) scene.set(m.nodeId, m);
+  const outlines: MachineOutline[] = [];
+  const neverClear: SceneMachine[] = [];
+  for (const id of [...scene.keys()].sort((a, b) => a - b)) {
+    let found: MachineOutline | undefined;
+    for (const t of tiles) {
+      found = t.outlines.find((o) => o.nodeId === id);
+      if (found !== undefined) break;
+    }
+    if (found !== undefined) outlines.push(found);
+    else neverClear.push(scene.get(id) as SceneMachine);
+  }
+  return { outlines, neverClear };
+}
+
+/**
+ * The outlines of the machines whose whole outline is clear in this capture, in node-id order.
+ * Machines that aren't clear are left out here and graded in another tile (`outlinesForCell`).
+ */
+export function measureTile(image: DecodedImage, facts: CaptureFacts): MachineOutline[] {
+  const clear = new Set(
+    facts.nodes.filter((n) => !n.isLabel && n.cells.length > 0 && outlineClearOfChrome(facts, n, image)).map((n) => n.id),
+  );
+  return measureCapture(image, facts).filter((m) => clear.has(m.nodeId));
+}
+
 /** Every machine's outline in one capture, in node-id order. Label nodes have no chassis and are left out. */
 export function measureCapture(image: DecodedImage, facts: CaptureFacts): MachineOutline[] {
   const masks = captureMasks(facts);
@@ -450,13 +532,15 @@ export interface Grade {
 /**
  * Grade the outline-sides property for one cell. With antialiasing as shipped, the four median
  * cores of each machine must be equal. With it on, the four effective widths must sit within
- * `AA_ON_TOLERANCE` of each other, and at zoom 1 and at boot zoom the fringe must also be 0
- * (STRK-01: a crisp outline at the zooms people work at). A side that wasn't measured is an
- * offender, and so is a capture with no machine in it.
+ * `AA_ON_TOLERANCE` of each other, and at zoom 1 and at the two boot zooms (the 1600x1000 fit and
+ * the full-screen fit) the fringe must also be 0 (STRK-01: a crisp outline at the zooms people
+ * work at). A side that wasn't measured is an offender, so is a scene machine no tile held whole
+ * (`neverClear`), and so is a capture with no machine in it.
  */
-export function gradeOutlineSides(results: readonly MachineOutline[], cell: CaptureCell): Grade {
+export function gradeOutlineSides(results: readonly MachineOutline[], cell: CaptureCell, neverClear: readonly SceneMachine[] = []): Grade {
   const offenders: string[] = [];
-  if (results.length === 0) offenders.push('no machine was measured in this capture');
+  if (results.length === 0 && neverClear.length === 0) offenders.push('no machine was measured in this capture');
+  for (const m of neverClear) offenders.push(`machine ${m.nodeId} (kind ${m.kind}): never clear of chrome (no tile held its whole outline on the canvas)`);
   for (const m of results) {
     const who = `machine ${m.nodeId} (kind ${m.kind})`;
     const measured: { side: SideName; core: number; fringe: number; effective: number }[] = [];
@@ -474,12 +558,12 @@ export function gradeOutlineSides(results: readonly MachineOutline[], cell: Capt
       const eff = measured.map((s) => s.effective);
       const spread = Math.max(...eff) - Math.min(...eff);
       if (spread > AA_ON_TOLERANCE + 1e-9) offenders.push(`${who}: effective widths spread ${round3(spread)} px, over ${AA_ON_TOLERANCE} (${list((s) => s.effective)})`);
-      if ((cell.zoom === 1 || cell.zoom === 'boot') && measured.some((s) => s.fringe !== 0)) {
+      if ((cell.zoom === 1 || isBootZoom(cell.zoom)) && measured.some((s) => s.fringe !== 0)) {
         offenders.push(`${who}: grey fringe at zoom ${cell.zoom} (${list((s) => s.fringe)})`);
       }
     }
   }
-  const head = `outline sides at dpr=${cell.dpr} aa=${cell.aa} zoom=${cell.zoom}: ${results.length} machines, ${offenders.length} offenders`;
+  const head = `outline sides at dpr=${cell.dpr} aa=${cell.aa} zoom=${zoomId(cell.zoom)}: ${results.length + neverClear.length} machines, ${offenders.length} offenders`;
   return { offenders, explain: offenders.length === 0 ? head : `${head}\n  ${offenders.join('\n  ')}` };
 }
 

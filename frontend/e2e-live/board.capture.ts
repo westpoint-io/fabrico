@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { PNG } from 'playwright-core/lib/utilsBundle';
 import { pauseAndSettle, resumeIfPaused } from './support/beltBoard';
-import { measureCapture } from './support/boardMeasure';
+import { measureTile, sceneMachines } from './support/boardMeasure';
 import { collectCaptureFacts } from './support/captureFacts';
 import {
   CAPTURE_BOOTS,
@@ -15,7 +15,7 @@ import {
   type CaptureEntry,
   type CaptureManifest,
 } from './support/captureMatrix';
-import { ZOOM_TOLERANCE, zoomTo } from './support/captureZoom';
+import { ZOOM_TOLERANCE, panBy, tilePlan, zoomTo, type TileOffset } from './support/captureZoom';
 import {
   cameraOf,
   captureClip,
@@ -29,18 +29,22 @@ import {
 // board.capture.ts - captures the demo board on the real host, one test per boot (pixel ratio and
 // antialiasing setting), and measures each capture.
 //
-// Each test opens its own browser context at the boot's pixel ratio, brings the shared host back
+// Each test opens its own browser context at the boot's pixel ratio (an `on` boot adds the dev-only
+// antialiasing flag from `src/render/testAntialias.ts` to the URL), brings the shared host back
 // to the demo board, reloads so the board's own fit runs, pauses through the toolbar and pins the
 // render clock so nothing moves between the model read and the capture. Then for each zoom it
-// sets the camera through the shipped controls (`captureZoom.ts`), checks render health, takes one
-// viewport capture, reads the facts the capture is measured against, and measures it. It writes
-// the PNGs and `manifest.json` under `test-results/capture/<boot id>/`, which the grading project
-// (`board-grade.capture.ts`) reads.
+// sets the camera through the shipped controls (`captureZoom.ts`). Where the board overflows the
+// viewport it pans to further tiles (`tilePlan`), tile 0 being the zoom's own camera. At each tile
+// it checks render health, takes one viewport capture, reads the facts the capture is measured
+// against, and measures the machines whose whole outline is clear there. It writes the PNGs
+// (`z-<zoom>-t<tile>.png`) and `manifest.json` under `test-results/capture/<boot id>/`, entries
+// in zoom order then tile order, which the grading project (`board-grade.capture.ts`) reads.
 //
 // No capture is compared with a stored image. Every check is a measured property, graded in the
 // grading project. This test fails only on broken plumbing: a page error, a render loop that
-// stopped, a zoom that didn't land, a live antialiasing state that disagrees with the boot, or a
-// capture with no machine in it.
+// stopped, a zoom that didn't land, a pan that didn't land, a live antialiasing state (the WebGL
+// context's `antialias` attribute and its SAMPLES) that disagrees with the boot, or a capture
+// with no machine in it.
 
 /** The viewport every boot captures, in CSS px. */
 const VIEWPORT = { width: 1600, height: 1000 } as const;
@@ -79,46 +83,75 @@ for (const boot of CAPTURE_BOOTS) {
         hook.pinClock(n);
       }, pausedAt);
 
+      const bootScale = (await cameraOf(page)).scale;
       const entries: CaptureEntry[] = [];
       for (const zoom of CAPTURE_ZOOMS) {
-        const label = `${id} zoom=${zoomId(zoom)}`;
-        const camera = zoom === 'boot' ? await cameraOf(page) : await zoomTo(page, zoom);
+        const zid = zoomId(zoom);
+        const zoomCamera = zoom === 'boot' ? await cameraOf(page) : await zoomTo(page, zoom);
         if (zoom !== 'boot') {
-          expect(Math.abs(camera.scale - zoom), `${label}: the camera landed on the zoom asked for`).toBeLessThanOrEqual(ZOOM_TOLERANCE);
+          expect(Math.abs(zoomCamera.scale - zoom), `${id} zoom=${zid}: the camera landed on the zoom asked for`).toBeLessThanOrEqual(ZOOM_TOLERANCE);
         }
-        // The held-board health check waits for the ticker to finish two frames, so by the time
-        // it passes the board has been drawn at the new camera.
-        errors.assertNone(label);
-        await expectRenderLoopAlive(page, label, { boardHeld: true });
+        // The tile plan is made from tile 0's facts: where the board and the chrome sit at the
+        // zoom's own camera.
+        let plan: TileOffset[] = [{ dx: 0, dy: 0 }];
+        let at: TileOffset = { dx: 0, dy: 0 };
+        for (let tile = 0; tile < plan.length; tile++) {
+          const label = `${id} zoom=${zid} tile=${tile}`;
+          let camera = zoomCamera;
+          if (tile > 0) {
+            const want = plan[tile];
+            // A pan wheel moves the board by minus its delta (`camera.ts` onWheel, pan branch).
+            camera = await panBy(page, -(want.dx - at.dx), -(want.dy - at.dy));
+            at = want;
+            expect(camera.scale, `${label}: a pan keeps the zoom's scale`).toBe(zoomCamera.scale);
+            const off = Math.max(Math.abs(camera.x - (zoomCamera.x + want.dx)), Math.abs(camera.y - (zoomCamera.y + want.dy)));
+            expect(off, `${label}: the pan landed the board where the tile plan put it (CSS px off)`).toBeLessThanOrEqual(1e-6);
+          }
+          // The held-board health check waits for the ticker to finish two frames, so by the time
+          // it passes the board has been drawn at the new camera.
+          errors.assertNone(label);
+          await expectRenderLoopAlive(page, label, { boardHeld: true });
 
-        const png = `${id}/z-${zoomId(zoom)}.png`;
-        const buf = await captureClip(page, { x: 0, y: 0, ...VIEWPORT }, join(CAPTURE_ROOT, png));
-        const facts = await page.evaluate(collectCaptureFacts);
+          const png = `${id}/z-${zid}-t${tile}.png`;
+          const buf = await captureClip(page, { x: 0, y: 0, ...VIEWPORT }, join(CAPTURE_ROOT, png));
+          const facts = await page.evaluate(collectCaptureFacts);
 
-        expect(facts.camera, `${label}: the camera didn't move between the zoom and the capture`).toEqual(camera);
-        expect(facts.dpr, `${label}: the page reads the boot's pixel ratio`).toBe(boot.dpr);
-        expect(facts.gl.antialias, `${label}: the live WebGL context's antialiasing matches the boot`).toBe(boot.aa === 'on');
-        expect(facts.tick, `${label}: the board is still held on the tick it paused on`).toBe(pausedAt);
+          expect(facts.camera, `${label}: the camera didn't move between the pan and the capture`).toEqual(camera);
+          expect(facts.dpr, `${label}: the page reads the boot's pixel ratio`).toBe(boot.dpr);
+          expect(facts.gl, `${label}: the live WebGL context's antialiasing matches the boot`).toEqual(
+            boot.aa === 'on' ? { antialias: true, samples: expect.any(Number) } : { antialias: false, samples: 0 },
+          );
+          if (boot.aa === 'on') expect(facts.gl.samples, `${label}: an antialiased context has samples`).toBeGreaterThan(0);
+          expect(facts.tick, `${label}: the board is still held on the tick it paused on`).toBe(pausedAt);
 
-        const image = PNG.sync.read(buf);
-        expect([image.width, image.height], `${label}: the capture is the viewport in device px`).toEqual([
-          Math.round(VIEWPORT.width * boot.dpr),
-          Math.round(VIEWPORT.height * boot.dpr),
-        ]);
-        const outlines = measureCapture(image, facts);
-        expect(outlines.length, `${label}: the capture has machines to measure`).toBeGreaterThan(0);
+          const image = PNG.sync.read(buf);
+          expect([image.width, image.height], `${label}: the capture is the viewport in device px`).toEqual([
+            Math.round(VIEWPORT.width * boot.dpr),
+            Math.round(VIEWPORT.height * boot.dpr),
+          ]);
+          if (tile === 0) plan = tilePlan(facts, VIEWPORT);
+          const scene = sceneMachines(facts);
+          expect(scene.length, `${label}: the scene has machines`).toBeGreaterThan(0);
+          const outlines = measureTile(image, facts);
+          if (plan.length === 1) expect(outlines.length, `${label}: the capture has machines clear of chrome to measure`).toBeGreaterThan(0);
 
-        entries.push({
-          cell: { ...boot, zoom },
-          png,
-          camera: facts.camera,
-          dpr: facts.dpr,
-          backing: facts.backing,
-          client: facts.client,
-          gl: facts.gl,
-          tick: facts.tick,
-          measurements: { 'outline-sides': outlines },
-        });
+          entries.push({
+            cell: { ...boot, zoom },
+            zoomId: zid,
+            tile,
+            png,
+            bootScale,
+            camera: facts.camera,
+            dpr: facts.dpr,
+            backing: facts.backing,
+            client: facts.client,
+            gl: facts.gl,
+            tick: facts.tick,
+            scene,
+            measurements: { 'outline-sides': outlines },
+          });
+        }
+        console.log(`CAPTURE_TILES ${id} zoom=${zid} tiles=${plan.length} scale=${zoomCamera.scale}`);
       }
       const manifest: CaptureManifest = { boot, entries };
       writeFileSync(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
