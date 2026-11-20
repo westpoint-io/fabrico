@@ -28,8 +28,9 @@ import { PNG } from 'playwright-core/lib/utilsBundle';
 // would undo the switch. No browser event reports a CDP ratio switch, which is why the
 // renderer compares the ratio once per frame (`src/render/dprFollow.ts`).
 //
-// GATE NOTES. Chromium only (SwiftShader). `npx tsc --noEmit` doesn't typecheck e2e specs,
-// so this Playwright run is the only gate for this file.
+// GATE NOTES. Chromium only (SwiftShader). The WebKitGTK side has no automated harness here;
+// the follower itself is the same code in both engines, and `src/render/dprFollow.test.ts` pins
+// its compare-and-resize rule.
 
 const RATIOS = [2, 1.181793212890625, 1] as const;
 

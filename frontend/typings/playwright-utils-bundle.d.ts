@@ -13,10 +13,22 @@
 // `data` is a `Buffer` because `06-fault-red-probe.spec.ts:495` passes it to a
 // `(data: Buffer)` parameter. Widen it when a spec needs more, never to make an error go
 // away.
+//
+// `e2e/dpr-follow.spec.ts` also ENCODES: on a failed byte comparison it writes the two
+// regions it compared as PNGs beside the test's output, so a reader can see what differed.
+// That needs the constructor (an empty image of a given size, filled through `data`) and
+// `sync.write`, which pngjs ships with exactly these shapes.
 declare module 'playwright-core/lib/utilsBundle' {
+  interface DecodedPng {
+    width: number;
+    height: number;
+    data: Buffer;
+  }
   export const PNG: {
+    new (options: { width: number; height: number }): DecodedPng;
     sync: {
-      read(buffer: Buffer): { width: number; height: number; data: Buffer };
+      read(buffer: Buffer): DecodedPng;
+      write(png: DecodedPng): Buffer;
     };
   };
 }
