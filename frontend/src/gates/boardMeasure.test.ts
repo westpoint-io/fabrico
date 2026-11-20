@@ -32,6 +32,7 @@ import {
 import type { DecodedImage } from '../../e2e-live/support/canvasDots';
 import type { CaptureFacts, CaptureNode } from '../../e2e-live/support/captureFacts';
 import type { CaptureCell } from '../../e2e-live/support/captureMatrix';
+import { checkDeclared, runGradeCell, type DeclaredDefect } from '../../e2e-live/support/captureDefects';
 
 const FLOOR = 0x1b1f27;
 const IDLE_INK = chassisInk(state_tag.IDLE, LOCKED_SKIN);
@@ -194,8 +195,9 @@ describe('outline sides, antialiasing as shipped', () => {
     const [m] = measure(img);
     expect(coresOf(m)).toEqual({ top: 3, right: 2, bottom: 3, left: 3 });
     const g = gradeOutlineSides([m], SHIPPED_AT_1);
-    expect(g.offenders).toHaveLength(1);
-    expect(g.offenders[0]).toContain('right 2');
+    expect(g.offenders.map((o) => o.key)).toEqual(['1:right']);
+    expect(g.offenders[0]).toMatchObject({ unmeasured: false });
+    expect(g.offenders[0].text).toContain('right 2');
   });
 
   it('finds the ink per line, so a working, faulted or backed-up machine measures the same as an idle one', () => {
@@ -224,8 +226,8 @@ describe('outline sides, antialiasing on', () => {
     const [m] = results;
     expect(coresOf(m)).toEqual({ top: 2, right: 2, bottom: 2, left: 2 });
     const atOne = gradeOutlineSides(results, AA_ON_AT_1);
-    expect(atOne.offenders).toHaveLength(1);
-    expect(atOne.offenders[0]).toContain('grey fringe');
+    expect(atOne.offenders.map((o) => o.key)).toEqual(['1:top', '1:right', '1:bottom', '1:left']);
+    expect(atOne.offenders.every((o) => !o.unmeasured && o.text.includes('grey fringe'))).toBe(true);
     expect(gradeOutlineSides(results, AA_ON_AT_2).offenders).toEqual([]);
   });
 
@@ -239,8 +241,8 @@ describe('outline sides, antialiasing on', () => {
     expect(AA_ON_TOLERANCE).toBe(0.25);
     expect(gradeOutlineSides([withEffective({ top: 3, right: 3, bottom: 3, left: 3.25 })], AA_ON_AT_2).offenders).toEqual([]);
     const over = gradeOutlineSides([withEffective({ top: 3, right: 3, bottom: 3, left: 3.26 })], AA_ON_AT_2);
-    expect(over.offenders).toHaveLength(1);
-    expect(over.offenders[0]).toContain('spread 0.26');
+    expect(over.offenders.map((o) => o.key)).toEqual(['1:left']);
+    expect(over.offenders[0].text).toContain('spread 0.26');
   });
 });
 
@@ -282,8 +284,8 @@ describe('what the measurer refuses to read', () => {
     expect(m.sides.right.measured).toBe(false);
     expect(m.sides.left.measured).toBe(true);
     const g = gradeOutlineSides([m], SHIPPED_AT_1);
-    expect(g.offenders).toHaveLength(1);
-    expect(g.offenders[0]).toMatch(/right: not measured .*a chrome panel/);
+    expect(g.offenders.map((o) => [o.key, o.unmeasured])).toEqual([['1:right', true]]);
+    expect(g.offenders[0].text).toMatch(/right: not measured .*a chrome panel/);
     // The clean twin: the same capture with no panel grades clean.
     expect(gradeOutlineSides(measure(img), SHIPPED_AT_1).offenders).toEqual([]);
   });
@@ -293,7 +295,7 @@ describe('what the measurer refuses to read', () => {
     expect(Object.values(m.sides).map((s) => s.measured)).toEqual([false, false, false, false]);
     const g = gradeOutlineSides([m], SHIPPED_AT_1);
     expect(g.offenders).toHaveLength(4);
-    expect(g.offenders.every((o) => o.includes('not measured'))).toBe(true);
+    expect(g.offenders.every((o) => o.unmeasured && o.text.includes('not measured'))).toBe(true);
     // An outline drawn somewhere else is no better: still nothing at the expected place.
     const moved = blank();
     outline(moved, SOLID3, {}, 5, 30);
@@ -301,7 +303,9 @@ describe('what the measurer refuses to read', () => {
   });
 
   it('grades a capture with no machine in it as an offender', () => {
-    expect(gradeOutlineSides([], SHIPPED_AT_1).offenders).toEqual(['no machine was measured in this capture']);
+    expect(gradeOutlineSides([], SHIPPED_AT_1).offenders).toEqual([
+      { key: 'capture:no-machine', unmeasured: true, text: 'no machine was measured in this capture' },
+    ]);
   });
 });
 
@@ -388,19 +392,151 @@ describe('tiles: each machine is graded in the first tile that holds its whole o
     expect(coresOf(outlines[0]).right).toBe(3);
     expect(neverClear).toEqual([{ nodeId: 3, kind: 7 }]);
     const g = gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear);
-    expect(g.offenders).toHaveLength(1);
-    expect(g.offenders[0]).toContain('machine 3 (kind 7): never clear of chrome');
+    expect(g.offenders.map((o) => [o.key, o.unmeasured])).toEqual([['3:never-clear', true]]);
+    expect(g.offenders[0].text).toContain('machine 3 (kind 7): never clear of chrome');
     // Swapping the tile order makes the thin outline the one graded.
     const swapped = outlinesForCell([tiles[1], tiles[0]]);
     expect(coresOf(swapped.outlines[0]).right).toBe(2);
-    expect(gradeOutlineSides(swapped.outlines, SHIPPED_AT_1, swapped.neverClear).offenders).toHaveLength(2);
+    expect(gradeOutlineSides(swapped.outlines, SHIPPED_AT_1, swapped.neverClear).offenders.map((o) => o.key)).toEqual(['1:right', '3:never-clear']);
   });
 
   it('grades a cell whose every machine was never clear as offenders, not as an empty pass', () => {
     const { outlines, neverClear } = outlinesForCell([{ scene: [{ nodeId: 4, kind: 2 }], outlines: [] }]);
     expect(outlines).toEqual([]);
-    expect(gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear).offenders).toEqual([
+    expect(gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear).offenders.map((o) => o.text)).toEqual([
       'machine 4 (kind 2): never clear of chrome (no tile held its whole outline on the canvas)',
     ]);
+  });
+});
+
+describe('outline offenders: the side that differs, keyed by machine and side', () => {
+  /** One machine whose sides read these cores (null: not measured), with no fringe. */
+  function withCores(nodeId: number, cores: Record<SideName, number | null>): MachineOutline {
+    const side = (core: number | null) =>
+      core === null ? { measured: false as const, reason: 'all 5 sample lines skipped: 5 x the line crosses a label' } : { measured: true as const, core, fringe: 0, effective: core, lines: 5, skipped: 0 };
+    return { nodeId, kind: 7, sides: { top: side(cores.top), right: side(cores.right), bottom: side(cores.bottom), left: side(cores.left) } };
+  }
+
+  it('names the side that differs from the other three, not the machine', () => {
+    const g = gradeOutlineSides([withCores(3, { top: 4, right: 3, bottom: 4, left: 4 })], SHIPPED_AT_1);
+    expect(g.offenders.map((o) => o.key)).toEqual(['3:right']);
+  });
+
+  it('names the thinner pair when two sides read one width and two another', () => {
+    const g = gradeOutlineSides([withCores(6, { top: 8, right: 7, bottom: 8, left: 7 })], SHIPPED_AT_1);
+    expect(g.offenders.map((o) => o.key)).toEqual(['6:right', '6:left']);
+  });
+
+  it('keys a side that was not measured as unmeasured', () => {
+    const g = gradeOutlineSides([withCores(4, { top: 3, right: null, bottom: 3, left: 3 })], SHIPPED_AT_1);
+    expect(g.offenders).toEqual([expect.objectContaining({ key: '4:right', unmeasured: true })]);
+  });
+});
+
+describe('runGradeCell', () => {
+  const CELL_BOOT: CaptureCell = { dpr: 1, aa: 'shipped', zoom: 'boot' };
+  const ROW: DeclaredDefect = {
+    property: 'outline-sides',
+    dpr: 1,
+    aa: 'shipped',
+    zoom: 'boot',
+    fixes: 'STRK-01',
+    offenders: ['3:right'],
+    why: 'machine 3 right reads core 3 against 4 on its other sides',
+  };
+  const side = (core: number | null) =>
+    core === null ? { measured: false as const, reason: 'all 5 sample lines skipped: 5 x the line crosses a label' } : { measured: true as const, core, fringe: 0, effective: core, lines: 5, skipped: 0 };
+  const machine = (nodeId: number, top: number | null, right: number | null, bottom: number | null, left: number | null): MachineOutline => ({
+    nodeId,
+    kind: 7,
+    sides: { top: side(top), right: side(right), bottom: side(bottom), left: side(left) },
+  });
+  const EVEN3 = machine(3, 4, 4, 4, 4);
+  const THIN3 = machine(3, 4, 3, 4, 4);
+  const EVEN5 = machine(5, 4, 4, 4, 4);
+  const THIN5 = machine(5, 4, 4, 4, 3);
+
+  /** A grade function over fixed outlines, the shape board-grade.capture.ts hands in. */
+  const gradeOf = (outlines: MachineOutline[], neverClear: { nodeId: number; kind: number }[] = []) => (cell: CaptureCell) =>
+    gradeOutlineSides(outlines, cell, neverClear);
+
+  /** Run one cell and answer whether it threw (and with what) and whether the mark was reached. */
+  function run(row: DeclaredDefect | undefined, grade: (cell: CaptureCell) => ReturnType<typeof gradeOutlineSides>) {
+    let marked = false;
+    let error: Error | null = null;
+    try {
+      runGradeCell(CELL_BOOT, row, grade, () => {
+        marked = true;
+      });
+    } catch (e) {
+      error = e as Error;
+    }
+    return { marked, error };
+  }
+
+  it('declared cell, the manifest entry is missing: throws and never reaches the expected-failure mark', () => {
+    const r = run(ROW, () => {
+      throw new Error('the manifest for boot dpr1-aa-shipped has no capture at zoom boot, which this cell expects');
+    });
+    expect(r.error?.message).toContain('has no capture at zoom boot');
+    expect(r.marked).toBe(false);
+  });
+
+  it('declared cell, the declared offender reads not measured: throws and never reaches the mark', () => {
+    const r = run(ROW, gradeOf([machine(3, 4, null, 4, 4), EVEN5]));
+    expect(r.error?.message).toMatch(/3:right.*not measured/);
+    expect(r.marked).toBe(false);
+  });
+
+  it('declared cell, a machine never clear of chrome: throws and never reaches the mark', () => {
+    const r = run(ROW, gradeOf([THIN3, EVEN5], [{ nodeId: 7, kind: 2 }]));
+    expect(r.error?.message).toContain('7:never-clear');
+    expect(r.marked).toBe(false);
+  });
+
+  it('declared cell, the declared offender now passes and another machine fails: throws and never reaches the mark', () => {
+    const r = run(ROW, gradeOf([EVEN3, THIN5]));
+    expect(r.error?.message).toContain('3:right');
+    expect(r.error?.message).toContain('5:left');
+    expect(r.marked).toBe(false);
+  });
+
+  it('declared cell, the declared offenders plus one extra: throws and never reaches the mark', () => {
+    const r = run(ROW, gradeOf([THIN3, THIN5]));
+    expect(r.error?.message).toContain('5:left');
+    expect(r.marked).toBe(false);
+  });
+
+  it('declared cell, exactly the declared offenders: reaches the mark, then throws the grade', () => {
+    const r = run(ROW, gradeOf([THIN3, EVEN5]));
+    expect(r.marked).toBe(true);
+    expect(r.error?.message).toContain('machine 3 (kind 7) right');
+  });
+
+  it('declared cell, no offenders (the defect was fixed): reaches the mark and does not throw, so test.fail() reports it', () => {
+    const r = run(ROW, gradeOf([EVEN3, EVEN5]));
+    expect(r.marked).toBe(true);
+    expect(r.error).toBeNull();
+  });
+
+  it('cell without a row, one offender: throws and never reaches the mark', () => {
+    const r = run(undefined, gradeOf([THIN3, EVEN5]));
+    expect(r.error?.message).toContain('machine 3 (kind 7) right');
+    expect(r.marked).toBe(false);
+  });
+
+  it('cell without a row, no offenders: no throw, never reaches the mark', () => {
+    const r = run(undefined, gradeOf([EVEN3, EVEN5]));
+    expect(r.error).toBeNull();
+    expect(r.marked).toBe(false);
+  });
+
+  it('checkDeclared lists each unmeasured offender, each declared key missing and each key not declared', () => {
+    const g = gradeOutlineSides([machine(3, 4, 4, 4, 4), machine(5, 4, null, 4, 3)], CELL_BOOT);
+    const reasons = checkDeclared(ROW, g);
+    expect(reasons).toHaveLength(3);
+    expect(reasons.filter((r) => r.includes('not measured'))).toHaveLength(1);
+    expect(reasons.some((r) => r.includes('3:right') && r.includes('declared'))).toBe(true);
+    expect(checkDeclared(ROW, gradeOutlineSides([THIN3], CELL_BOOT))).toEqual([]);
   });
 });
