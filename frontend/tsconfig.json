@@ -68,6 +68,7 @@
     "playwright.mock.reuse.config.ts",
     "playwright.player.config.ts",
     "playwright.walk.config.ts",
+    "playwright.capture.config.ts",
     "playwright.embed.config.ts",
     "playwright.offline.config.ts",
     "playwright.docs.config.ts",

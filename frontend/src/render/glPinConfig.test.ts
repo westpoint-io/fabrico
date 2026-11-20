@@ -50,6 +50,7 @@ const CONFIG_FILES = [
   'playwright.live.config.ts',
   'playwright.live.reuse.config.ts',
   'playwright.walk.config.ts',
+  'playwright.capture.config.ts',
   'playwright.embed.config.ts',
   'playwright.player.config.ts',
   'playwright.offline.config.ts',
@@ -164,8 +165,8 @@ describe('the no-WebGL project is the one allowed extra', () => {
 });
 
 describe('VEC-05 GL pin: all Playwright configs name the same GL backend', () => {
-  it('checks exactly 9 configs (a shrinking list cannot pass vacuously)', () => {
-    expect(CONFIG_FILES).toHaveLength(9);
+  it('checks exactly 10 configs (a shrinking list cannot pass vacuously)', () => {
+    expect(CONFIG_FILES).toHaveLength(10);
   });
 
   for (const name of CONFIG_FILES) {
