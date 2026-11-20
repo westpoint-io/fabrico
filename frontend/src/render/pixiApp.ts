@@ -1,5 +1,6 @@
-import { Application, Container, ParticleContainer } from 'pixi.js';
+import { Application, Container, ParticleContainer, UPDATE_PRIORITY } from 'pixi.js';
 import { createCamera, type Camera } from './camera';
+import { createDprFollower } from './dprFollow';
 import { createGridLayer } from './layers/grid';
 import { createMachineLayer, type MachineLayer } from './layers/machines';
 import { createBeltLayer, type BeltLayer } from './layers/belts';
@@ -258,6 +259,26 @@ export async function bootPixi(container: HTMLElement, opts: BootOptions): Promi
     resolution: window.devicePixelRatio || 1,
   });
 
+  // Follow a pixel-ratio change without a reload (the window moved to another monitor, the
+  // desktop's scaling changed). `resolution` above is read once, and no event reports a
+  // ratio change everywhere, so the follower compares the ratio with the renderer's
+  // resolution once per frame and calls `app.renderer.resize` on a difference. HIGH runs it
+  // before the render, which Pixi adds at LOW, so the frame that sees the change draws at
+  // the new ratio. `renderer.resize` emits the `resize` event the grid redraw listens to and
+  // never touches the camera container; the belt, item and wire layers read
+  // `app.renderer.resolution` fresh on every draw. The CSS size is read the way Pixi's
+  // ResizePlugin reads it, so a later window resize keeps the new resolution.
+  const resizeTo = opts.resizeTo;
+  const followDpr = createDprFollower(
+    () => window.devicePixelRatio,
+    app.renderer,
+    () =>
+      resizeTo === window
+        ? { width: window.innerWidth, height: window.innerHeight }
+        : { width: (resizeTo as HTMLElement).clientWidth, height: (resizeTo as HTMLElement).clientHeight },
+  );
+  app.ticker.add(followDpr, undefined, UPDATE_PRIORITY.HIGH);
+
   const sceneState = opts.scene ?? createSceneState();
   const getScene = (): SceneState => sceneState;
 
@@ -421,6 +442,7 @@ export async function bootPixi(container: HTMLElement, opts: BootOptions): Promi
       loop.setTreadAppearanceOverride(pxPerTick),
     setRenderPace: (speed: number): void => loop.setRenderPace(speed),
     stop: (): void => {
+      app.ticker.remove(followDpr);
       loop.stop();
       // Cancel any pending grid re-tile so it never fires on a renderer torn down by
       // the StrictMode double-boot (mirror the pollRaf cleanup discipline in App.tsx).
