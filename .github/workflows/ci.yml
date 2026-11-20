@@ -1984,6 +1984,102 @@ jobs:
         working-directory: frontend
         run: bash ../scripts/check-walk-report.sh test-results/walk-report.json
 
+  # THE BOARD CAPTURE SET. `npm run e2e:capture` boots the real host and the Vite app with the demo
+  # board, captures the board at each pixel ratio, antialiasing setting and zoom it lists, measures
+  # each machine's outline sides from the pixels, and grades the measurements in a second project
+  # that reads only what the first one wrote. No capture is compared with a stored image.
+  #
+  # WHY ITS OWN JOB. The live suite's job already runs close to its limit, so the capture set gets a
+  # runner and a time limit of its own. It reads `frontend/` and `crates/` and never a markdown file
+  # at the repository root, so it takes the same docs-only gate as `e2e-walk`.
+  #
+  # THE LIMIT. 45 minutes for the first run: the capture config's 30 minute `globalTimeout`, so an
+  # overrun still writes a report, plus 15 for the build. Both are first estimates. The first
+  # recorded CI run replaces them with the walk's rule: the slowest recorded job minutes doubled,
+  # rounded up to the next five, plus 15 here.
+  #
+  # ITS VERDICT IS THE REPORT, READ AFTER THE SUITE. Playwright exits 0 on a skipped test and on a
+  # test marked `test.fail()` that failed, so the run's exit code alone can lose a test. After the
+  # suite, `scripts/check-capture-report.sh` reads the JSON report: every test ran, each one passed
+  # or is an expected failure in the grading file with exactly one STRK requirement tag, and there
+  # are at least as many as the checker's floor. Its bite proof runs first, so the checker is seen
+  # to bite before it is trusted with the report. Both run on `!cancelled()`, so a red suite still
+  # gets its report read and its page written. `ci_wiring_parity.rs` pins the three run lines.
+  #
+  # THE PAGE. `node scripts/capture-report.ts` writes test-results/capture/index.html, each capture
+  # beside its measured numbers and verdicts, and the job uploads that folder as `board-captures` on
+  # every run that isn't cancelled. A red run also uploads test-results/ with its traces.
+  e2e-capture:
+    name: board capture set (real headless host)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: rustup show
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Before any Playwright step, so the webServer timeout never covers compilation.
+      - name: Build dev_render_server
+        run: cargo build -p fabrico-host --example dev_render_server
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the board capture set
+        working-directory: frontend
+        run: npm run e2e:capture
+
+      # The checker must be seen to bite before it is trusted with the report.
+      - name: Capture report checker bites
+        if: ${{ !cancelled() }}
+        run: bash scripts/prove-capture-report-bites.sh
+
+      - name: Every capture test ran and passed or is declared
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-capture-report.sh frontend/test-results/capture-report.json
+
+      - name: Write the capture page
+        if: ${{ !cancelled() }}
+        working-directory: frontend
+        run: node scripts/capture-report.ts
+
+      - name: Keep the captures and their page
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: board-captures
+          path: frontend/test-results/capture/
+          if-no-files-found: error
+          retention-days: 14
+
+      # A failing run's traces go nowhere otherwise, and a red that only CI shows needs them.
+      - name: Keep the traces of a red capture run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-test-results
+          path: frontend/test-results/
+          retention-days: 14
+
   # Frontend unit gate (Phase 56, plan 56-02, decision D-26) - the frontend's own
   # vitest suite and its typecheck, neither of which any CI job ran until now.
   #

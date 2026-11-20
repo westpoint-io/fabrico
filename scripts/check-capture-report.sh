@@ -164,7 +164,7 @@ classify_expected_failure() {
     if [ "${#strk[@]}" -eq 0 ]; then
         undeclared="an expected failure with no STRK requirement tag"
     elif [ "${#strk[@]}" -gt 1 ]; then
-        undeclared="an expected failure with ${#strk[@]} STRK tags (${strk[*]}), not exactly one"
+        undeclared="an expected failure with ${#strk[@]} STRK tags ($(IFS=" "; echo "${strk[*]}")), not exactly one"
     else
         case "$DECLARABLE_TAGS" in
             *" ${strk[0]} "*) declared_tag="${strk[0]}" ;;

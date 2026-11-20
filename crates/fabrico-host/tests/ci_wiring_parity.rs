@@ -507,7 +507,9 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// `scripts/` reads there except the always-on residue gate. The `unit` job's
 /// `frontend/src/gates/oneBoardAllFive.source.test.ts` reads a markdown fixture under
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
-const HEAVY_JOBS: [&str; 11] = [
+/// `e2e-capture` (the board capture set) reads `frontend/` and `crates/` and never a markdown file
+/// at the repository root, so it skips on a docs-only change like `e2e-walk`.
+const HEAVY_JOBS: [&str; 12] = [
     "determinism",
     "headless-build",
     "wasm-player",
@@ -518,6 +520,7 @@ const HEAVY_JOBS: [&str; 11] = [
     "e2e-live-verdict",
     "e2e-walk",
     "e2e-walk-verdict",
+    "e2e-capture",
     "unit",
 ];
 
@@ -3262,6 +3265,274 @@ fn the_walk_gate_check_names_each_way_of_switching_it_off() {
     assert!(
         missed.is_empty(),
         "a planted break in the walk gate went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
+/// The board capture set's job.
+const CAPTURE_JOB: &str = "e2e-capture";
+/// The capture set, as the whole of its `run:` line.
+const CAPTURE_SUITE_RUN: &str = "run: npm run e2e:capture";
+/// The capture report check's bite proof, as the whole of its `run:` line.
+const CAPTURE_BITES_RUN: &str = "run: bash scripts/prove-capture-report-bites.sh";
+/// The capture report check, as the whole of its `run:` line.
+const CAPTURE_CHECKER_RUN: &str =
+    "run: bash scripts/check-capture-report.sh frontend/test-results/capture-report.json";
+/// The one condition the proof and the check may carry: run after a red suite too, so its report is
+/// still read. Any other condition could skip them while the job stays green.
+const CAPTURE_AFTER_SUITE_IF: &str = "if: ${{ !cancelled() }}";
+
+/// Everything wrong with how `yml` and `package_json` wire the board capture set's verdict. Empty
+/// means right.
+fn capture_gate_wrong(yml: &str, package_json: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+
+    // Each one exactly once in the file, in the capture job, as the whole of its line. A whole-line
+    // match is what refuses `|| true`, `; true` and a pipe, each of which turns a red step green.
+    for (expected, needle) in [
+        (CAPTURE_SUITE_RUN, "npm run e2e:capture"),
+        (CAPTURE_BITES_RUN, "scripts/prove-capture-report-bites.sh"),
+        (CAPTURE_CHECKER_RUN, "scripts/check-capture-report.sh"),
+    ] {
+        let found: Vec<(&str, &str)> = blocks
+            .iter()
+            .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
+            .filter(|(_, line)| line.starts_with("run:") && line.contains(needle))
+            .collect();
+        let want = vec![(CAPTURE_JOB, expected)];
+        if found != want {
+            wrong.push(format!(
+                "the `run:` lines invoking `{needle}` are {found:?}, expected exactly {want:?}. \
+                 With anything else on that line, or the step moved or gone, the capture set can \
+                 go green without its verdict."
+            ));
+        }
+    }
+
+    match blocks.iter().find(|(id, _)| *id == CAPTURE_JOB) {
+        None => wrong.push(format!("there is no job `{CAPTURE_JOB}` under `jobs:`.")),
+        Some((_, job)) => {
+            // The suite, then the proof, then the check: the checker is seen to bite before it
+            // reads the report, and the report exists before it is read.
+            let runs: Vec<&str> = job
+                .iter()
+                .map(|line| step_key(line))
+                .filter(|line| line.starts_with("run:"))
+                .collect();
+            let at = |expected: &str| runs.iter().position(|line| *line == expected);
+            if let (Some(s), Some(b), Some(c)) = (
+                at(CAPTURE_SUITE_RUN),
+                at(CAPTURE_BITES_RUN),
+                at(CAPTURE_CHECKER_RUN),
+            ) && !(s < b && b < c)
+            {
+                wrong.push(format!(
+                    "the capture set, the bite proof and the report check are `run:` lines {s}, \
+                     {b} and {c} of job `{CAPTURE_JOB}`. The bite proof must come after the suite \
+                     and before the check."
+                ));
+            }
+
+            // The proof and the check may carry only the after-the-suite condition.
+            for needle in [
+                "scripts/prove-capture-report-bites.sh",
+                "scripts/check-capture-report.sh",
+            ] {
+                for line in step_of(job, needle)
+                    .iter()
+                    .map(|line| step_key(line))
+                    .filter(|line| line.starts_with("if:") && *line != CAPTURE_AFTER_SUITE_IF)
+                {
+                    wrong.push(format!(
+                        "the step that runs `{needle}` in job `{CAPTURE_JOB}` carries `{line}`. \
+                         Its only allowed condition is `{CAPTURE_AFTER_SUITE_IF}`; any other can \
+                         skip it while the job stays green."
+                    ));
+                }
+            }
+        }
+    }
+
+    // No `continue-on-error` anywhere in the job, and no condition on the suite step.
+    wrong.extend(step_guards_wrong(
+        yml,
+        CAPTURE_JOB,
+        &["npm run e2e:capture"],
+    ));
+
+    // The npm script deletes the old report first, so a failed build leaves nothing to read, ends in
+    // the unfiltered capture set, and can't swallow an exit code on the way.
+    let script = package_json
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("\"e2e:capture\": \""))
+        .and_then(|rest| rest.trim_end_matches(',').strip_suffix('"'));
+    match script {
+        None => wrong.push("frontend/package.json has no `e2e:capture` script.".to_string()),
+        Some(script) => {
+            if !script.starts_with("rm -f test-results/capture-report.json && ")
+                || !script.ends_with("&& playwright test --config=playwright.capture.config.ts")
+                || script.contains("||")
+                || script.contains(';')
+            {
+                wrong.push(format!(
+                    "the `e2e:capture` script is `{script}`. It must delete the old report first, \
+                     end in the unfiltered `playwright test --config=playwright.capture.config.ts`, \
+                     and hold no `||` or `;`, or the report check can read a stale or partial run."
+                ));
+            }
+        }
+    }
+    wrong
+}
+
+/// The board capture set's verdict is its report, read by a checker that is seen to bite first, and
+/// nothing can switch either off.
+///
+/// # Why
+///
+/// Playwright exits 0 on a skipped test and on a `test.fail()` that failed, so `ci.yml` runs
+/// `scripts/check-capture-report.sh` on the JSON report after the suite, with its bite proof before
+/// it. A comment can't fail, and `|| true` on a run line, a reordered proof or a step condition would
+/// each leave the job green without that verdict, so those facts are pinned here. The job's `needs:`
+/// line and docs-only gate are pinned by `job_classes_wrong`.
+#[test]
+fn the_capture_gate_verdict_cannot_be_switched_off() {
+    let wrong = capture_gate_wrong(CI_YML, FRONTEND_PACKAGE_JSON);
+    assert!(
+        wrong.is_empty(),
+        "{} fact(s) about the capture set's verdict are wrong:\n\n{}\n\n\
+         Update the WORKFLOW to match this test. Do NOT re-point this test at whatever the \
+         workflow currently says: these assertions are what keep the capture gate on.",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+}
+
+/// `capture_gate_wrong` can fail: each of these breaks is planted in a copy of the real files, and
+/// the check has to name it.
+#[test]
+fn the_capture_gate_check_names_each_way_of_switching_it_off() {
+    const BITES_STEP: &str = "      - name: Capture report checker bites\n";
+    const CHECKER_STEP: &str = "      - name: Every capture test ran and passed or is declared\n";
+    const CAPTURE_HEADER: &str = "    name: board capture set (real headless host)\n";
+    let suite_line = format!("        {CAPTURE_SUITE_RUN}\n");
+    let bites_line = format!("        {CAPTURE_BITES_RUN}\n");
+    let checker_line = format!("        {CAPTURE_CHECKER_RUN}\n");
+    let after_suite = format!("        {CAPTURE_AFTER_SUITE_IF}\n");
+    let bites_step = format!("{BITES_STEP}{after_suite}{bites_line}");
+    let checker_step = format!("{CHECKER_STEP}{after_suite}{checker_line}");
+    assert_eq!(
+        CI_YML.matches(&bites_step).count(),
+        1,
+        "the bite proof step reads as planted"
+    );
+    assert_eq!(
+        CI_YML.matches(&checker_step).count(),
+        1,
+        "the check step reads as planted"
+    );
+
+    let plants: Vec<(&str, String, String)> = vec![
+        (
+            "the suite's exit code swallowed",
+            CI_YML.replace(
+                &suite_line,
+                &suite_line.replace("e2e:capture", "e2e:capture || true"),
+            ),
+            "npm run e2e:capture".to_string(),
+        ),
+        (
+            "the bite proof's exit code swallowed",
+            CI_YML.replace(&bites_line, &bites_line.replace(".sh", ".sh || true")),
+            "scripts/prove-capture-report-bites.sh".to_string(),
+        ),
+        (
+            "the report check's exit code swallowed",
+            CI_YML.replace(
+                &checker_line,
+                &checker_line.replace(".json", ".json || true"),
+            ),
+            "scripts/check-capture-report.sh".to_string(),
+        ),
+        (
+            "the report check deleted",
+            without_step(CI_YML, CHECKER_STEP),
+            "scripts/check-capture-report.sh".to_string(),
+        ),
+        (
+            "the bite proof and the report check swapped",
+            CI_YML.replace(
+                &format!("{bites_step}\n{checker_step}"),
+                &format!("{checker_step}\n{bites_step}"),
+            ),
+            "The bite proof must come after the suite and before the check".to_string(),
+        ),
+        (
+            "a condition on the report check",
+            CI_YML.replace(
+                &checker_step,
+                &checker_step.replace("!cancelled()", "false"),
+            ),
+            format!("in job `{CAPTURE_JOB}` carries `if: ${{{{ false }}}}`"),
+        ),
+        (
+            "continue-on-error on the capture job",
+            CI_YML.replace(
+                CAPTURE_HEADER,
+                &format!("{CAPTURE_HEADER}    continue-on-error: true\n"),
+            ),
+            format!("job `{CAPTURE_JOB}` carries `continue-on-error: true`"),
+        ),
+    ];
+    assert_eq!(
+        plants.len(),
+        7,
+        "seven ways of switching the capture verdict off in ci.yml"
+    );
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, must_name) in &plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = capture_gate_wrong(yml, FRONTEND_PACKAGE_JSON).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!(
+                "{what}: expected `{must_name}` named, got: {named:?}"
+            ));
+        }
+    }
+
+    for (what, from, to) in [
+        (
+            "the script's exit code swallowed",
+            "capture.config.ts\"",
+            "capture.config.ts || true\"",
+        ),
+        (
+            "a filtered capture set",
+            "capture.config.ts\"",
+            "capture.config.ts --project=capture\"",
+        ),
+        (
+            "the old report kept",
+            "rm -f test-results/capture-report.json && ",
+            "",
+        ),
+    ] {
+        let package_json = FRONTEND_PACKAGE_JSON.replace(from, to);
+        assert_ne!(
+            package_json, FRONTEND_PACKAGE_JSON,
+            "{what}: the plant landed"
+        );
+        let named = capture_gate_wrong(CI_YML, &package_json).join("\n");
+        if !named.contains("the `e2e:capture` script is") {
+            missed.push(format!("{what}: expected the script named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the capture gate went unnamed:\n{}",
         missed.join("\n")
     );
 }
