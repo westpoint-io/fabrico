@@ -100,6 +100,11 @@ async function bootBoard(page: Page): Promise<string[]> {
   const h = await mockRenderSocket(page);
   await page.goto('/');
   await waitForChrome(page);
+  // Let the chrome's web fonts finish loading before the packet. The boot fit runs once,
+  // on the first packet, and reads the palette's width as it is then. A page whose fonts
+  // land after that fit keeps a camera a few CSS px off a page whose fonts landed first:
+  // under a load of about 99 a fresh page read x -733 against -737.796875 (107 deferred items).
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await h.connected;
   // Pause BEFORE the packet: the watchdog only arms once a packet has arrived on a playing
   // board, so a board paused first never starts the stall timer (pausing after the packet
@@ -232,6 +237,12 @@ test.describe('the board canvas follows a pixel-ratio change without a reload', 
     page,
     browser,
   }) => {
+    // Two boots and two full ratio-2 CDP captures, each decoded in Node. Measured: 6.3 s
+    // alone on this machine, 25.8 to 27.4 s inside a full local mock run, and pinned to one
+    // core with two workers (the slow-runner recipe for CI) 37.2 s beside a light test and
+    // 37.9 to 58.9 s beside a second copy of itself. The 30 s default timed it out on every
+    // one-core run. The limit is the slowest, 58.9 s, doubled and rounded up to 5 s.
+    test.setTimeout(120_000);
     const errors = await bootBoard(page);
     const cam0 = await cameraOf(page);
     const cdp = await page.context().newCDPSession(page);
