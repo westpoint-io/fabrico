@@ -55,7 +55,7 @@ import {
   runGradeCell,
   type DeclaredDefect,
 } from '../../e2e-live/support/captureDefects';
-import { gradingCells } from '../../e2e-live/support/captureMatrix';
+import { PROPERTY_IDS, gradingCells, type PropertyId } from '../../e2e-live/support/captureMatrix';
 
 const FLOOR = 0x1b1f27;
 const IDLE_INK = chassisInk(state_tag.IDLE, LOCKED_SKIN);
@@ -588,14 +588,34 @@ describe('the declared rows', () => {
     expect(() => assertDeclaredRowsMatchCells([ROW, { ...ROW, offenders: ['5:left'] }])).toThrow(/2 rows declare/);
   });
 
-  it('holds rows the collection check accepts, each with measured side keys, no repeats and numbers in its reason', () => {
+  it('holds rows the collection check accepts, each with its property\'s offender keys and tag, no repeats and numbers in its reason', () => {
     expect(() => assertDeclaredRowsMatchCells()).not.toThrow();
     expect(DECLARED_DEFECTS.length).toBeGreaterThan(0);
-    expect(DECLARED_DEFECTS.length).toBeLessThanOrEqual(gradingCells('outline-sides').length);
+    for (const property of PROPERTY_IDS) {
+      expect(DECLARED_DEFECTS.filter((r) => r.property === property).length, property).toBeLessThanOrEqual(gradingCells(property).length);
+    }
+    const keyShape: Record<PropertyId, RegExp> = {
+      'outline-sides': /^\d+:(top|right|bottom|left)$/,
+      'glyph-strokes': /^\d+:leg-\d+$/,
+      'fault-ring': /^\d+:fault-\d+$/,
+      'belt-dash': /^\d+:tile-\d+$/,
+      'rail-vs-outline': /^\d+:rail$/,
+      'cap-in-cell': /^\d+:collar-\d+$/,
+    };
+    const tagOf: Record<PropertyId, DeclaredDefect['fixes']> = {
+      'outline-sides': 'STRK-01',
+      'glyph-strokes': 'STRK-01',
+      'fault-ring': 'STRK-02',
+      'belt-dash': 'STRK-02',
+      'rail-vs-outline': 'STRK-03',
+      'cap-in-cell': 'STRK-03',
+    };
     for (const row of DECLARED_DEFECTS) {
       expect(row.offenders.length, row.why).toBeGreaterThan(0);
       expect(new Set(row.offenders).size, row.why).toBe(row.offenders.length);
-      for (const k of row.offenders) expect(k, row.why).toMatch(/^\d+:(top|right|bottom|left)$/);
+      for (const k of row.offenders) expect(k, row.why).toMatch(keyShape[row.property]);
+      expect(row.offenders, row.why).not.toContain('no-subjects');
+      expect(row.fixes, row.why).toBe(tagOf[row.property]);
       expect(row.why).toMatch(/\d/);
     }
   });
