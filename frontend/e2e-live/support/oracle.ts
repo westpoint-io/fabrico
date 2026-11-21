@@ -1136,6 +1136,15 @@ export async function waitForChromeAndTick(page: Page): Promise<void> {
   }).toBeGreaterThan(0);
 }
 
+/** Per-worker boot counter for the `fabrico-boot` key (see waitForAppReady). */
+let bootSeq = 0;
+
+/** 'body', or the hook kind ('beforeEach', 'beforeAll', 'afterEach', 'afterAll') from a step's title path. */
+function bootScope(titlePath: readonly string[]): string {
+  const hooks = titlePath.filter((t) => t.endsWith(' hook'));
+  return hooks.length > 0 ? hooks[hooks.length - 1].slice(0, -' hook'.length) : 'body';
+}
+
 /**
  * The standard readiness gate every non-onboarding spec uses: wait for the live
  * chrome + a ticking WS (above), THEN suppress the ONB-01 first-run welcome card
@@ -1149,18 +1158,60 @@ export async function waitForChromeAndTick(page: Page): Promise<void> {
  * no overlay painted during the test body), behaving exactly like a returning
  * user. The onboarding spec itself uses `waitForChromeAndTick` directly so it can
  * assert the genuine first-run card before this suppression.
+ *
+ * WHY THE BOOT STEP AND THE ANNOTATIONS (phase 111, D-01, TIME-01, VERD-02). The work runs
+ * inside `test.step('boot')` so a failure in a body boot is named `boot` in the failure
+ * header and in the JSON report. That alone does not measure every boot: the JSON reporter
+ * keeps a step only when every parent is a step, and a hook runs inside a hook step, so a
+ * boot in `beforeEach` or `beforeAll` vanishes from `live-report.json` and from the header.
+ * Annotations survive from every location, so each boot pushes one `fabrico-boot`
+ * annotation, `<workerIndex>:<seq> <bootMs> <navMs> <scope>`, which
+ * `scripts/measure-live-boot.sh` reads. The scope matters because `beforeAll` and
+ * `afterAll` time sits in no test's duration, while body, `beforeEach` and `afterEach` time
+ * does. Annotations pushed in `beforeAll` are copied onto every later test of the suite, so
+ * the key exists to count such a boot once; a worker restarted after a failure gets a new
+ * index, so the pair stays unique inside one run. A boot that fails pushes
+ * `fabrico-failed-step` reading `boot <scope>` before rethrowing, so a failure in a hook can
+ * still be named. navMs is the document's own navigation-to-load time, counted once per
+ * document through the `__fabricoBootNavCounted` window property.
  */
 export async function waitForAppReady(page: Page): Promise<void> {
-  await waitForChromeAndTick(page);
-  const welcome = page.getByRole('heading', { name: 'Welcome to Fabrico' });
-  if ((await welcome.count()) > 0) {
-    await page.evaluate(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
-    await page.reload();
-    await waitForChromeAndTick(page);
+  const info = test.info();
+  const key = `${info.workerIndex}:${++bootSeq}`;
+  let scope = 'body';
+  let navMs = 0;
+  const t0 = Date.now();
+  try {
+    await test.step('boot', async (step) => {
+      scope = bootScope(step.titlePath);
+      navMs = await page.evaluate(() => {
+        const w = window as unknown as Record<string, unknown>;
+        if (w['__fabricoBootNavCounted']) return 0;
+        w['__fabricoBootNavCounted'] = true;
+        const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+        return nav ? Math.round(nav.loadEventEnd) : 0;
+      });
+      await waitForChromeAndTick(page);
+      const welcome = page.getByRole('heading', { name: 'Welcome to Fabrico' });
+      if ((await welcome.count()) > 0) {
+        await page.evaluate(() => localStorage.setItem('fab.onboarding.seen.v1', '1'));
+        await page.reload();
+        await waitForChromeAndTick(page);
+      }
+      // The wider request/response-wire demo boots with a longer fit animation; settle it
+      // before any camera read so coordinate transforms + the NAV-02 readout are stable.
+      await waitForCameraSettle(page);
+      // A welcome-card reload made a new document; mark it so a later boot on it adds no navigation.
+      await page.evaluate(() => {
+        (window as unknown as Record<string, unknown>)['__fabricoBootNavCounted'] = true;
+      });
+    });
+  } catch (e) {
+    info.annotations.push({ type: 'fabrico-failed-step', description: `boot ${scope}` });
+    throw e;
   }
-  // The wider request/response-wire demo boots with a longer fit animation; settle it
-  // before any camera read so coordinate transforms + the NAV-02 readout are stable.
-  await waitForCameraSettle(page);
+  const bootMs = Date.now() - t0;
+  info.annotations.push({ type: 'fabrico-boot', description: `${key} ${bootMs} ${navMs} ${scope}` });
 }
 
 /**
