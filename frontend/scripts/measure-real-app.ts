@@ -28,11 +28,18 @@
 //
 // Usage, from frontend/:
 //   node scripts/measure-real-app.ts --port <inspector port> --display <:N> --origin <x,y> \
-//     --zooms <list> --out <dir> [--reload]
+//     --zooms <list> --out <dir> [--reload] [--camera-from <manifest.json>]
 //
 //   --origin  the webview's top-left corner in the root window, in device px
 //   --zooms   comma-separated: `boot`, `fullscreen-boot`, numbers, or `all` for the capture set's zooms
 //   --reload  reload the page first, so the board's own fit runs at the window's current size
+//   --camera-from <manifest.json>
+//             after each numbered zoom lands, pan so tile 0's camera equals that capture-set
+//             manifest's tile 0 camera at the same zoom, and take the manifest's tiles in place
+//             of this page's own tile plan. Where the two engines' fits or chrome sizes differ,
+//             the numbered zooms and the tiles otherwise sit at different pans, and a hard edge
+//             then lands on a different sub-pixel phase; matching the cameras leaves only the
+//             engine's own drawing as a difference. The boot zoom is always the app's own fit.
 //
 // Writes `<out>/z-<zoom>-t<tile>.png` (the root window), `<out>/z-<zoom>-t<tile>.facts.json` and
 // `<out>/results.json`: one entry per zoom with the camera, ratio, backing and client size, the live
@@ -63,7 +70,7 @@ function flag(name: string): string | undefined {
 }
 function usage(why: string): never {
   console.error(`measure-real-app: ${why}`);
-  console.error('usage: node scripts/measure-real-app.ts --port <n> --display <:N> --origin <x,y> --zooms <list> --out <dir> [--reload]');
+  console.error('usage: node scripts/measure-real-app.ts --port <n> --display <:N> --origin <x,y> --zooms <list> --out <dir> [--reload] [--camera-from <manifest.json>]');
   process.exit(2);
 }
 
@@ -73,6 +80,7 @@ const originArg = (flag('origin') ?? '').split(',').map(Number);
 const zoomsArg = flag('zooms') ?? '';
 const outDir = resolve(flag('out') ?? '');
 const reload = argv.includes('--reload');
+const cameraFrom = flag('camera-from');
 if (!Number.isInteger(port) || port <= 0) usage('--port must be a positive integer');
 if (!/^:\d+$/.test(display)) usage('--display must look like :N');
 if (originArg.length !== 2 || !originArg.every((n) => Number.isInteger(n) && n >= 0)) usage('--origin must be two whole numbers, x,y');
@@ -282,6 +290,9 @@ async function main(): Promise<void> {
             return n;
           });
 
+    const matchCameras: CaptureMatrix.CaptureManifest | null =
+      cameraFrom === undefined ? null : (JSON.parse(readFileSync(resolve(cameraFrom), 'utf8')) as CaptureMatrix.CaptureManifest);
+
     page = await connectInspector();
     if (reload) {
       await page.evaluate('(location.reload(), true)');
@@ -331,6 +342,15 @@ async function main(): Promise<void> {
           cam = await settled(() => p.evaluate<Camera>(CAMERA), sameCamera, `zoom=${zid}: the wheel`);
         }
         if (Math.abs(cam.scale - zoom) > cz.ZOOM_TOLERANCE) throw new Error(`zoom=${zid}: the camera reads ${cam.scale} after a reset and two wheels`);
+        const want = matchCameras?.entries.find((e) => e.cell.zoom === zoom && e.tile === 0)?.camera;
+        if (matchCameras !== null && want === undefined) throw new Error(`zoom=${zid}: --camera-from has no tile 0 at this zoom`);
+        if (want !== undefined) {
+          // A pan wheel moves the board by minus its delta (the pan branch of the wheel handler).
+          await p.evaluate(call(cz.panWheelInPage, { dx: -(want.x - cam.x), dy: -(want.y - cam.y) }));
+          cam = await settled(() => p.evaluate<Camera>(CAMERA), sameCamera, `zoom=${zid}: the matching pan`);
+          const off = Math.max(Math.abs(cam.x - want.x), Math.abs(cam.y - want.y));
+          if (off > PAN_TOLERANCE) throw new Error(`zoom=${zid}: the matching pan landed ${off} CSS px off the manifest's camera`);
+        }
         zoomCamera = cam;
       }
 
@@ -359,7 +379,11 @@ async function main(): Promise<void> {
         const image = crop(root, cropW, cropH);
         if (tile === 0) {
           first = facts;
-          plan = cz.tilePlan(facts, viewport);
+          const tiles = matchCameras?.entries.filter((e) => e.cell.zoom === zoom).sort((a, b) => a.tile - b.tile);
+          plan =
+            tiles === undefined || zoom === 'boot'
+              ? cz.tilePlan(facts, viewport)
+              : tiles.map((e) => ({ dx: e.camera.x - tiles[0].camera.x, dy: e.camera.y - tiles[0].camera.y }));
         }
         records.push({ tile, png, camera: facts.camera, ...bm.measureTileProperties(image, facts) });
       }
@@ -382,6 +406,7 @@ async function main(): Promise<void> {
         zoomId: zid,
         bootScale: bootCamera.scale,
         camera: zoomCamera,
+        cameraMatched: matchCameras !== null && zoom !== 'boot',
         dpr: first.dpr,
         backing: first.backing,
         client: first.client,
