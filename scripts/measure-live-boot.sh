@@ -91,27 +91,32 @@ command -v jq >/dev/null 2>&1 || unmeasured "jq not found on the PATH"
 #   T <duration ms> <boot annotations on the test> <name>   one per test
 #   B <key> <bootMs> <navMs> <scope>                        one per unique boot
 #   M <description>                                         one per malformed description
-# A key seen with two different descriptions is reported as M.
+# A test's boots are the fabrico-boot annotations on the test entry and on its last result (the
+# reporter writes a copy in both places). Every copy, earlier results included, is checked for
+# format, so a broken copy in either place is M. A key seen with two different descriptions is M.
 report_rows() {
     jq -r '
       def clean: tostring | gsub("[\t\r\n]"; " ");
+      def boot_descs: map(select(.type? == "fabrico-boot") | (.description // "" | tostring));
       def walk_tests(chain):
         ( (.specs // [])[] as $s
           | ($s.tests // [])[] as $t
           | (($t.results // []) | last) as $r
-          | ((($r // {}) | .annotations) // $t.annotations // [])
-              | map(select(.type == "fabrico-boot") | (.description // "" | tostring)) as $boots
+          | (($t.annotations // []) + ((($r // {}) | .annotations) // []) | boot_descs | unique) as $boots
+          | (($t.annotations // []) + ([($t.results // [])[] | (.annotations // [])[]]) | boot_descs) as $seen
           | { dur: ((($r // {}) | .duration) // 0),
               boots: $boots,
+              seen: $seen,
               name: (($s.file | clean) + ":" + ($s.line | clean) + " > "
                      + ((chain + [$s.title]) | map(clean) | join(" > "))) } ),
         ( (.suites // [])[] as $su | $su | walk_tests(chain + [$su.title]) );
       [ .suites[] | walk_tests([]) ] as $tests
       | ( $tests[] | "T\t\(.dur)\t\(.boots | length)\t\(.name)" ),
+        ( [ $tests[].seen[] ] | unique
+          | map(select(test("^[0-9]+:[0-9]+ [0-9]+ [0-9]+ (body|beforeEach|beforeAll|afterEach|afterAll)$") | not))[]
+          | "M\t\(clean)" ),
         ( [ $tests[].boots[] ] | unique as $descs
-          | ( $descs[] | select(test("^[0-9]+:[0-9]+ [0-9]+ [0-9]+ (body|beforeEach|beforeAll|afterEach|afterAll)$") | not)
-              | "M\t\(clean)" ),
-            ( [ $descs[] | select(test("^[0-9]+:[0-9]+ [0-9]+ [0-9]+ (body|beforeEach|beforeAll|afterEach|afterAll)$"))
+          | ( [ $descs[] | select(test("^[0-9]+:[0-9]+ [0-9]+ [0-9]+ (body|beforeEach|beforeAll|afterEach|afterAll)$"))
                 | split(" ") ]
               | group_by(.[0])[]
               | if length > 1 then "M\tkey \(.[0][0]) has \(length) different descriptions"
