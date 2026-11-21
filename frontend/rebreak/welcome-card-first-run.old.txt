@@ -1,0 +1,37 @@
+
+Running 1 test using 1 worker
+
+  ✘  1 [live] › e2e-live/12-welcome-card.spec.ts:19:3 › ONB-01 first-run welcome card (real app, localStorage-gated) › shows once on first run naming the demo, then stays dismissed across a reload (5.6s)
+
+
+  1) [live] › e2e-live/12-welcome-card.spec.ts:19:3 › ONB-01 first-run welcome card (real app, localStorage-gated) › shows once on first run naming the demo, then stays dismissed across a reload 
+
+    Error: the first-run welcome card is visible on a cold context
+
+    expect(locator).toBeVisible() failed
+
+    Locator: getByRole('heading', { name: 'Welcome to Fabrico' })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - the first-run welcome card is visible on a cold context with timeout 5000ms
+      - waiting for getByRole('heading', { name: 'Welcome to Fabrico' })
+
+
+      25 |     // First run (fresh context, no flag): the card is visible and names the demo.
+      26 |     const heading = page.getByRole('heading', { name: 'Welcome to Fabrico' });
+    > 27 |     await expect(heading, 'the first-run welcome card is visible on a cold context').toBeVisible();
+         |                                                                                      ^
+      28 |     await expect(
+      29 |       page.getByText('demo factory', { exact: false }),
+      30 |       'the welcome card names the current scene as a demo',
+        at <worktree>/frontend/e2e-live/12-welcome-card.spec.ts:27:86
+
+    Error Context: test-results/12-welcome-card-ONB-01-fir-bac99-s-dismissed-across-a-reload-live/error-context.md
+
+  1 failed
+    [live] › e2e-live/12-welcome-card.spec.ts:19:3 › ONB-01 first-run welcome card (real app, localStorage-gated) › shows once on first run naming the demo, then stays dismissed across a reload 
+REBREAK control=passed tests=1
+REBREAK verdict=RED run=old suite=live commit=3e64668b53d177a425dfb662e56cd9202589fafe patch_sha256=a47905904c893e513a8a270c03d52402678ff957b199d585f9579877ca459e24 tests=1 failed=1 target=e2e-live/12-welcome-card.spec.ts

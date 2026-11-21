@@ -1,0 +1,37 @@
+
+Running 1 test using 1 worker
+
+  ✘  1 [chromium] › e2e/lessons.spec.ts:1521:3 › the welcome card opens the list › the welcome card opens the list (5.6s)
+
+
+  1) [chromium] › e2e/lessons.spec.ts:1521:3 › the welcome card opens the list › the welcome card opens the list 
+
+    Error: the first-run card shows
+
+    expect(locator).toBeVisible() failed
+
+    Locator: getByRole('heading', { name: 'Welcome to Fabrico' })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - the first-run card shows with timeout 5000ms
+      - waiting for getByRole('heading', { name: 'Welcome to Fabrico' })
+
+
+      1529 |
+      1530 |     const heading = page.getByRole('heading', { name: 'Welcome to Fabrico' });
+    > 1531 |     await expect(heading, 'the first-run card shows').toBeVisible();
+           |                                                       ^
+      1532 |     const buttons = page.locator('aside[aria-labelledby="fab-welcome-heading"]').getByRole('button');
+      1533 |     await expect(buttons).toHaveText(['Show the gestures', 'Start a lesson', 'Start building']);
+      1534 |     // Three labels fit on one line each at the narrowest supported window.
+        at <worktree>/frontend/e2e/lessons.spec.ts:1531:55
+
+    Error Context: test-results/lessons-the-welcome-card-o-1f670-welcome-card-opens-the-list-chromium/error-context.md
+
+  1 failed
+    [chromium] › e2e/lessons.spec.ts:1521:3 › the welcome card opens the list › the welcome card opens the list 
+REBREAK control=passed tests=1
+REBREAK verdict=RED run=new suite=mock commit=3e64668b53d177a425dfb662e56cd9202589fafe patch_sha256=a47905904c893e513a8a270c03d52402678ff957b199d585f9579877ca459e24 tests=1 failed=1 target=mock: [chromium] › lessons.spec.ts › the welcome card opens the list › the welcome card opens the list
