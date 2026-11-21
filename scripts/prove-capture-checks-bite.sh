@@ -17,10 +17,33 @@
 # applies each break below in turn, captures again, puts the file back from its kept bytes,
 # and compares the two runs:
 #
-#   break               file (in the private worktree)   must turn red
-#   outline-thin-side   layers/machines.ts: the Sink at   outline-sides dpr=1 aa=shipped zoom=1,
-#                       cell (14,4), node 4, draws its    and its error names machine 4
-#                       right side 2 px wide, not 3
+#   break               file (in the private worktree)          must turn red (dpr=1 aa=shipped)
+#   outline-thin-side   layers/machines.ts: the Sink at cell     outline-sides zoom=1, naming
+#                       (14,4), node 4, draws its right side     machine 4's right side
+#                       2 px wide instead of 3
+#   glyph-thin-leg      assets/factory.svg: the Factory glyph's  glyph-strokes zoom=1, naming
+#                       top-left leg (leg-0) drawn 1 px wide     leg-0
+#                       instead of 2, in a path of its own
+#   ring-gap            layers/machines.ts: every fault port     fault-ring zoom=1, naming a gap
+#                       ring drawn as an arc with 30 degrees     in a ring
+#                       missing, centred on its outward normal
+#   dash-hole           synth/beltGeometry.ts: one world px cut  belt-dash zoom=1, naming a gap
+#                       out of the middle of every straight      in the dash
+#                       tile's dash 3 px or longer
+#   rail-wide           synth/beltGeometry.ts: every rail 3      rail-vs-outline zoom=1, naming a
+#                       device px wider than shipped (4 at       rail wider than the outline
+#                       zoom 1, against an outline of 3)
+#   cap-wide            layers/belts.ts: the Factory's output    cap-in-cell zoom=1, naming belt
+#                       cap (belt 19's Tail) drawn as an         19's Tail cap
+#                       ellipse 48 px along the machine's side,
+#                       about 35 px where the check scans, set
+#                       outward of the box so it stays off the
+#                       outline the outline check reads
+#
+# Every target is the zoom-1 cell of its property, and every one of them passes at HEAD. Each
+# break is as narrow as it can be made: the cap is one belt end, because a cap wider than a
+# cell at zoom 1 placed on its port would cover that machine's outline, and the outline check
+# would change its verdict too.
 #
 # Every test whose verdict changed must belong to the break's property (a declared cell of
 # that property may change too: its offenders then differ from its row). The two runs'
@@ -60,9 +83,10 @@
 # HOW TO RUN: `bash scripts/prove-capture-checks-bite.sh` from anywhere in the checkout. It
 # takes no arguments. The worktree and every run directory go under `$TMPDIR`; on a machine
 # where /tmp is held in memory, point it at disk (`TMPDIR=$HOME/.cache/fabrico-tmp`). It
-# makes one unmutated run and one run per break, each booting the host and Vite. MEASURED:
-# see the wall time printed on the PROVEN line; the worst case under the per-run limit is
-# 900 s per run, reached only if every run hangs.
+# makes one unmutated run and one run per break, seven in all, each booting the host and
+# Vite. MEASURED: 202 s wall time for the seven runs on a developer machine at a load average
+# under 5 (the PROVEN line prints each run's own figure); the worst case under the per-run
+# limit is 7 x 900 s, about 1 h 45 min, reached only if every run hangs.
 #
 # EXIT CODES:
 #   0  PROVEN: every break turned its cell red, changed no other property's verdict, and
@@ -383,7 +407,9 @@ echo "baseline: ${base_tests} tests clean for ${BOOT_GREP} (passed or declared),
 
 # --- The files the breaks touch, kept once -------------------------------------------
 L="frontend/src/render/layers"
-KEPT=("$L/machines.ts")
+A="frontend/src/render/assets"
+S="frontend/src/render/synth"
+KEPT=("$L/machines.ts" "$A/factory.svg" "$S/beltGeometry.ts" "$L/belts.ts")
 prover_keep_bytes "${KEPT[@]}"
 
 failures=()
@@ -441,6 +467,73 @@ prove outline-thin-side "$L/machines.ts" outline-sides "outline-sides ${BOOT_GRE
             entry.chassis.moveTo(bw - 4, 4).lineTo(4, 4).lineTo(4, bh - 4).lineTo(bw - 4, bh - 4).stroke({ width: 3, color: ink, alignment: 0.5 });
             entry.chassis.rect(bw - 5.5, 2.5, 2, bh - 5).fill(ink);
           }
+"
+
+# glyph-thin-leg: the left brace's first segment (H y=26, 44 to 32) moves into a path of its
+# own with the same data-part and stroke-width 1, so its leg number and name are unchanged
+# and the measurer, which reads the art from this file, reads it across a 1 px band. Both
+# machines that draw the Factory glyph (nodes 1 and 30) carry the thin leg.
+prove glyph-thin-leg "$A/factory.svg" glyph-strokes "glyph-strokes ${BOOT_GREP} zoom=1" \
+    "" "leg-0" "glyph leg-0: core 1" \
+    '  <path data-part="brace-left" d="M 44 26 H 32 V 44 H 24 V 52 H 32 V 70 H 44" fill="none" stroke="#b0bacb" stroke-width="2" />
+' \
+    '  <path data-part="brace-left" d="M 44 26 H 32" fill="none" stroke="#b0bacb" stroke-width="1" />
+  <path data-part="brace-left" d="M 32 26 V 44 H 24 V 52 H 32 V 70 H 44" fill="none" stroke="#b0bacb" stroke-width="2" />
+'
+
+# ring-gap: the fault annulus's ring is stroked as an arc that leaves out 30 degrees centred
+# on the port's outward normal, where the ring check's rays are not skipped (the rays that
+# point into the machine are).
+prove ring-gap "$L/machines.ts" fault-ring "fault-ring ${BOOT_GREP} zoom=1" \
+    "" "" "a gap in the ring on" \
+    "    g.circle(spec.x, spec.y, NUB_FAULT_RING_R).stroke({ width: NUB_STROKE, color });
+" \
+    "    const gapAt = Math.atan2(spec.ny, spec.nx);
+    const a0 = gapAt + Math.PI / 12;
+    const a1 = gapAt + 2 * Math.PI - Math.PI / 12;
+    g.moveTo(spec.x + Math.cos(a0) * NUB_FAULT_RING_R, spec.y + Math.sin(a0) * NUB_FAULT_RING_R)
+      .arc(spec.x, spec.y, NUB_FAULT_RING_R, a0, a1)
+      .stroke({ width: NUB_STROKE, color });
+"
+
+# dash-hole: each dash run on a straight tile that is 3 world px or longer is emitted as two
+# rects with one world px between them (at zoom 1 and ratio 1, one device px).
+prove dash-hole "$S/beltGeometry.ts" belt-dash "belt-dash ${BOOT_GREP} zoom=1" \
+    "" "" "in the dash, the longest" \
+    "    out.push(rect(from - HALF, -BAND, to - from, BELT_GEOM.band, 'tread'));
+" \
+    "    if (to - from >= 3) {
+      const cut = from + Math.floor((to - from) / 2);
+      out.push(rect(from - HALF, -BAND, cut - from, BELT_GEOM.band, 'tread'));
+      out.push(rect(cut + 1 - HALF, -BAND, to - cut - 1, BELT_GEOM.band, 'tread'));
+    } else {
+      out.push(rect(from - HALF, -BAND, to - from, BELT_GEOM.band, 'tread'));
+    }
+"
+
+# rail-wide: the rail band's device thickness gains 3 px at every zoom. Rails grow inward
+# from the lane edge, so the lane keeps its width and the dash band stays clear.
+prove rail-wide "$S/beltGeometry.ts" rail-vs-outline "rail-vs-outline ${BOOT_GREP} zoom=1" \
+    "" "" "wider than the outline's" \
+    "    t: Math.max(1, Math.round(BELT_GEOM.rail * q)),
+" \
+    "    t: Math.max(1, Math.round(BELT_GEOM.rail * q)) + 3,
+"
+
+# cap-wide: the cap on the Factory's output port (anchor (224.5, 112), belt 19's Tail) is an
+# ellipse 3 world px across and 24 along the side, centred 3 px outward of the anchor. Its
+# inner edge sits on the anchor, 3 px outside the outline's outer edge, so the outline
+# check's lines (which read 2 px past that edge) never reach it; the cap check scans along
+# the side 1 px outward of the anchor, where the ellipse is about 35 px long in a 32 px cell.
+prove cap-wide "$L/belts.ts" cap-in-cell "cap-in-cell ${BOOT_GREP} zoom=1" \
+    "" "" "belt 19 Tail cap:" \
+    "        g.circle(cx, cy, capR).fill(plugCapColor(anchor.role));
+" \
+    "        if (anchor.x === 224.5 && anchor.y === 112) {
+          g.ellipse(anchor.x + 3, anchor.y, 3, 24).fill(plugCapColor(anchor.role));
+        } else {
+          g.circle(cx, cy, capR).fill(plugCapColor(anchor.role));
+        }
 "
 
 # --- Every file is back to its kept bytes -----------------------------------------------
