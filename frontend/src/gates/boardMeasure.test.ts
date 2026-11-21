@@ -32,7 +32,14 @@ import {
 import type { DecodedImage } from '../../e2e-live/support/canvasDots';
 import type { CaptureFacts, CaptureNode } from '../../e2e-live/support/captureFacts';
 import type { CaptureCell } from '../../e2e-live/support/captureMatrix';
-import { checkDeclared, runGradeCell, type DeclaredDefect } from '../../e2e-live/support/captureDefects';
+import {
+  DECLARED_DEFECTS,
+  assertDeclaredRowsMatchCells,
+  checkDeclared,
+  runGradeCell,
+  type DeclaredDefect,
+} from '../../e2e-live/support/captureDefects';
+import { gradingCells } from '../../e2e-live/support/captureMatrix';
 
 const FLOOR = 0x1b1f27;
 const IDLE_INK = chassisInk(state_tag.IDLE, LOCKED_SKIN);
@@ -535,8 +542,43 @@ describe('runGradeCell', () => {
     const g = gradeOutlineSides([machine(3, 4, 4, 4, 4), machine(5, 4, null, 4, 3)], CELL_BOOT);
     const reasons = checkDeclared(ROW, g);
     expect(reasons).toHaveLength(3);
-    expect(reasons.filter((r) => r.includes('not measured'))).toHaveLength(1);
+    expect(reasons.filter((r) => r.startsWith('5:right was not measured'))).toHaveLength(1);
+    expect(reasons.filter((r) => r.startsWith("5:right fails but the row doesn't declare it"))).toHaveLength(1);
     expect(reasons.some((r) => r.includes('3:right') && r.includes('declared'))).toBe(true);
     expect(checkDeclared(ROW, gradeOutlineSides([THIN3], CELL_BOOT))).toEqual([]);
+  });
+});
+
+describe('the declared rows', () => {
+  const ROW: DeclaredDefect = {
+    property: 'outline-sides',
+    dpr: 1,
+    aa: 'shipped',
+    zoom: 'boot',
+    fixes: 'STRK-01',
+    offenders: ['3:right'],
+    why: 'machine 3 right reads core 3 against 4',
+  };
+
+  it('stops collection on a row that matches no grading cell, such as a zoom no requirement grades', () => {
+    expect(() => assertDeclaredRowsMatchCells([{ ...ROW, zoom: 0.5 }])).toThrow(/matches no grading cell/);
+    expect(() => assertDeclaredRowsMatchCells([{ ...ROW, dpr: 1.5 }])).toThrow(/matches no grading cell/);
+    expect(() => assertDeclaredRowsMatchCells([ROW])).not.toThrow();
+  });
+
+  it('stops collection on two rows that declare one cell', () => {
+    expect(() => assertDeclaredRowsMatchCells([ROW, { ...ROW, offenders: ['5:left'] }])).toThrow(/2 rows declare/);
+  });
+
+  it('holds rows the collection check accepts, each with measured side keys, no repeats and numbers in its reason', () => {
+    expect(() => assertDeclaredRowsMatchCells()).not.toThrow();
+    expect(DECLARED_DEFECTS.length).toBeGreaterThan(0);
+    expect(DECLARED_DEFECTS.length).toBeLessThanOrEqual(gradingCells('outline-sides').length);
+    for (const row of DECLARED_DEFECTS) {
+      expect(row.offenders.length, row.why).toBeGreaterThan(0);
+      expect(new Set(row.offenders).size, row.why).toBe(row.offenders.length);
+      for (const k of row.offenders) expect(k, row.why).toMatch(/^\d+:(top|right|bottom|left)$/);
+      expect(row.why).toMatch(/\d/);
+    }
   });
 });

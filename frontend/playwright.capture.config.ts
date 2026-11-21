@@ -21,9 +21,12 @@ export default defineConfig({
   testMatch: /\.capture\.ts$/,
   timeout: 90_000,
   // A ceiling on one run, so a wedged browser ends in a written report instead of a runner killed
-  // at the CI job's limit. 30 minutes is a first estimate. The first recorded CI run replaces it
-  // with the walk's rule: the slowest recorded job minutes doubled, rounded up to the next five.
-  globalTimeout: 30 * 60_000,
+  // at the CI job's limit. 20 minutes is a first-run value from a local measurement: the whole
+  // six-boot run took 292 s on a developer machine, CI runners have measured 2 to 4 times slower,
+  // and 292 s x 4 rounded up to the next five minutes is 20. The closing plan of this phase
+  // replaces it from the recorded CI run with the walk's rule: the slowest recorded job minutes
+  // doubled, rounded up to the next five.
+  globalTimeout: 20 * 60_000,
   // One mutable host process is shared by every test, so tests run one at a time.
   fullyParallel: false,
   workers: 1,

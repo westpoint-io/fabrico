@@ -162,12 +162,25 @@ export interface CaptureManifest {
   entries: CaptureEntry[];
 }
 
-/** Every cell where the property's subject is drawn, in boot order then zoom order. */
+/**
+ * True when a requirement promises the outline-sides property at this zoom. STRK-01 promises equal
+ * sides with no grey fringe "at zoom 1 and at boot zoom", and no requirement promises them anywhere
+ * else, so only those zooms are graded. The captures at the other zooms still carry their measured
+ * widths for the per-run page.
+ */
+export function outlineSidesPromisedAt(zoom: CaptureZoom): boolean {
+  return zoom === 1 || isBootZoom(zoom);
+}
+
+/**
+ * Every cell where the property's subject is drawn and a requirement promises the property, in
+ * boot order then zoom order.
+ */
 export function gradingCells(property: PropertyId): CaptureCell[] {
   const out: CaptureCell[] = [];
   for (const boot of CAPTURE_BOOTS) {
     for (const zoom of CAPTURE_ZOOMS) {
-      if (property === 'outline-sides' && !machinesDrawnAsVectors(zoom)) continue;
+      if (property === 'outline-sides' && (!machinesDrawnAsVectors(zoom) || !outlineSidesPromisedAt(zoom))) continue;
       out.push({ ...boot, zoom });
     }
   }

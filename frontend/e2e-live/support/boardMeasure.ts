@@ -524,47 +524,108 @@ export function measureCapture(image: DecodedImage, facts: CaptureFacts): Machin
 // Grading
 // ---------------------------------------------------------------------------
 
+/**
+ * One thing that broke the rule in a cell. `key` is stable across runs at one revision, so a
+ * declared row can list exactly the offenders it explains: `<node id>:<side>` for a side,
+ * `<node id>:never-clear` for a machine no tile held whole, `capture:no-machine` for a capture with
+ * no machine in it. `unmeasured` is true when nothing was read (a side not measured, a machine never
+ * clear of chrome, no machine at all) and false for a measured side that broke the rule.
+ */
+export interface Offender {
+  key: string;
+  unmeasured: boolean;
+  text: string;
+}
+
 export interface Grade {
-  offenders: string[];
+  offenders: Offender[];
   explain: string;
 }
 
 /**
+ * The sides of one machine whose value differs from the rest: the most common value is the
+ * reference (on a two-two split, the larger one), and every side that reads otherwise differs.
+ */
+function oddSides(values: readonly { side: SideName; v: number }[]): { side: SideName; v: number }[] {
+  const counts = new Map<number, number>();
+  for (const { v } of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const [ref] = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+  return values.filter(({ v }) => v !== ref);
+}
+
+/**
  * Grade the outline-sides property for one cell. With antialiasing as shipped, the four median
- * cores of each machine must be equal. With it on, the four effective widths must sit within
- * `AA_ON_TOLERANCE` of each other, and at zoom 1 and at the two boot zooms (the 1600x1000 fit and
- * the full-screen fit) the fringe must also be 0 (STRK-01: a crisp outline at the zooms people
- * work at). A side that wasn't measured is an offender, so is a scene machine no tile held whole
- * (`neverClear`), and so is a capture with no machine in it.
+ * cores of each machine must be equal; a side whose core differs from the others' is an offender.
+ * With it on, the four effective widths must sit within `AA_ON_TOLERANCE` of each other (a side
+ * more than half the tolerance from the median of the four is an offender), and at zoom 1 and at
+ * the two boot zooms (the 1600x1000 fit and the full-screen fit) the fringe must also be 0 (STRK-01:
+ * a crisp outline at the zooms people work at; each side with a fringe is an offender). A side that
+ * wasn't measured is an offender, so is a scene machine no tile held whole (`neverClear`), and so
+ * is a capture with no machine in it. Offenders come in node-id order, sides top, right, bottom,
+ * left, one per key.
  */
 export function gradeOutlineSides(results: readonly MachineOutline[], cell: CaptureCell, neverClear: readonly SceneMachine[] = []): Grade {
-  const offenders: string[] = [];
-  if (results.length === 0 && neverClear.length === 0) offenders.push('no machine was measured in this capture');
-  for (const m of neverClear) offenders.push(`machine ${m.nodeId} (kind ${m.kind}): never clear of chrome (no tile held its whole outline on the canvas)`);
-  for (const m of results) {
+  const byKey = new Map<string, Offender>();
+  const add = (key: string, unmeasured: boolean, text: string) => {
+    const had = byKey.get(key);
+    if (had === undefined) byKey.set(key, { key, unmeasured, text });
+    else byKey.set(key, { key, unmeasured: had.unmeasured || unmeasured, text: `${had.text}; ${text}` });
+  };
+  if (results.length === 0 && neverClear.length === 0) add('capture:no-machine', true, 'no machine was measured in this capture');
+  const machines = [
+    ...neverClear.map((m) => ({ nodeId: m.nodeId, never: m, outline: undefined as MachineOutline | undefined })),
+    ...results.map((m) => ({ nodeId: m.nodeId, never: undefined as SceneMachine | undefined, outline: m })),
+  ].sort((a, b) => a.nodeId - b.nodeId);
+  for (const entry of machines) {
+    if (entry.never !== undefined) {
+      const m = entry.never;
+      add(`${m.nodeId}:never-clear`, true, `machine ${m.nodeId} (kind ${m.kind}): never clear of chrome (no tile held its whole outline on the canvas)`);
+      continue;
+    }
+    const m = entry.outline as MachineOutline;
     const who = `machine ${m.nodeId} (kind ${m.kind})`;
     const measured: { side: SideName; core: number; fringe: number; effective: number }[] = [];
     for (const side of SIDES) {
       const s = m.sides[side];
-      if (!s.measured) offenders.push(`${who} ${side}: not measured (${s.reason})`);
+      if (!s.measured) add(`${m.nodeId}:${side}`, true, `${who} ${side}: not measured (${s.reason})`);
       else measured.push({ side, core: s.core, fringe: s.fringe, effective: s.effective });
     }
     if (measured.length < SIDES.length) continue;
     const list = (f: (s: (typeof measured)[number]) => number) => measured.map((s) => `${s.side} ${round3(f(s))}`).join(', ');
     if (cell.aa === 'shipped') {
-      const cores = measured.map((s) => s.core);
-      if (Math.max(...cores) !== Math.min(...cores)) offenders.push(`${who}: core widths differ (${list((s) => s.core)})`);
+      for (const { side, v } of oddSides(measured.map((s) => ({ side: s.side, v: s.core })))) {
+        add(`${m.nodeId}:${side}`, false, `${who} ${side}: core ${v} against the other sides (${list((s) => s.core)})`);
+      }
     } else {
       const eff = measured.map((s) => s.effective);
       const spread = Math.max(...eff) - Math.min(...eff);
-      if (spread > AA_ON_TOLERANCE + 1e-9) offenders.push(`${who}: effective widths spread ${round3(spread)} px, over ${AA_ON_TOLERANCE} (${list((s) => s.effective)})`);
-      if ((cell.zoom === 1 || isBootZoom(cell.zoom)) && measured.some((s) => s.fringe !== 0)) {
-        offenders.push(`${who}: grey fringe at zoom ${cell.zoom} (${list((s) => s.fringe)})`);
+      if (spread > AA_ON_TOLERANCE + 1e-9) {
+        const mid = median(eff);
+        for (const s of measured) {
+          if (Math.abs(s.effective - mid) > AA_ON_TOLERANCE / 2) {
+            add(`${m.nodeId}:${s.side}`, false, `${who} ${s.side}: effective widths spread ${round3(spread)} px, over ${AA_ON_TOLERANCE} (${list((x) => x.effective)})`);
+          }
+        }
+      }
+      if (cell.zoom === 1 || isBootZoom(cell.zoom)) {
+        for (const s of measured) {
+          if (s.fringe !== 0) add(`${m.nodeId}:${s.side}`, false, `${who} ${s.side}: grey fringe at zoom ${zoomId(cell.zoom)} (fringe ${list((x) => x.fringe)}; core ${list((x) => x.core)})`);
+        }
       }
     }
   }
+  // Insertion order is node-id order already; within a machine put the sides back in SIDES order.
+  const rank = (o: Offender) => {
+    const [id, part] = o.key.split(':');
+    return [id === 'capture' ? -1 : Number(id), (SIDES as readonly string[]).indexOf(part)];
+  };
+  const offenders = [...byKey.values()].sort((a, b) => {
+    const [ia, sa] = rank(a);
+    const [ib, sb] = rank(b);
+    return ia - ib || sa - sb;
+  });
   const head = `outline sides at dpr=${cell.dpr} aa=${cell.aa} zoom=${zoomId(cell.zoom)}: ${results.length + neverClear.length} machines, ${offenders.length} offenders`;
-  return { offenders, explain: offenders.length === 0 ? head : `${head}\n  ${offenders.join('\n  ')}` };
+  return { offenders, explain: offenders.length === 0 ? head : `${head}\n  ${offenders.map((o) => o.text).join('\n  ')}` };
 }
 
 function round3(x: number): number {

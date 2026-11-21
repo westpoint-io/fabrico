@@ -335,6 +335,14 @@ function rowCells(row: JsonObject, cols: Column[], odd: Set<string>): string {
   let html = '';
   for (const c of cols) {
     if (c.children.length === 0) {
+      // A group whose every row reads `measured: false` has no fields left to make columns of, so
+      // it arrives here as one column; it still reads "not measured" with its reason.
+      const leaf = at(row, c.path);
+      if (isObject(leaf) && leaf.measured === false) {
+        const reason = typeof leaf.reason === 'string' ? `: ${leaf.reason}` : '';
+        html += `<td class="unmeasured">not measured${esc(reason)}</td>`;
+        continue;
+      }
       const key = c.path.join('.');
       const cls = odd.has(key) ? ' odd' : READING_FIELDS.has(c.label) ? ' reading' : '';
       html += `<td class="num${cls}">${esc(formatValue(c.label, at(row, c.path)))}</td>`;
@@ -451,7 +459,7 @@ caption { text-align: left; font-weight: 600; padding: 0 0 6px; }
 th, td { border: 1px solid var(--line); padding: 3px 6px; white-space: nowrap; }
 th { background: #232834; font-weight: 600; } th.group { text-align: center; }
 td.num { text-align: right; } td.reading { color: var(--muted); } td.odd { background: var(--odd); color: #ffd9a0; font-weight: 600; }
-td.unmeasured { color: var(--muted); font-style: italic; text-align: center; }
+td.unmeasured { color: var(--muted); font-style: italic; text-align: center; white-space: normal; width: 16em; min-width: 12em; }
 .verdicts { list-style: none; padding: 0; margin: 4px 0 16px; }
 .verdict { margin: 0 0 8px; }
 .pill { display: inline-block; min-width: 64px; text-align: center; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: #0b0d10; background: var(--muted); }

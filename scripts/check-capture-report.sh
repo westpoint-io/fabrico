@@ -57,13 +57,15 @@
 
 set -u
 
-# The capture set held 3 tests when this floor was set: one capture test per boot (one boot) and one
-# outline-sides grading test per graded cell (boot zoom and zoom 1). It equals the count
+# The capture set held 24 tests when this floor was set: one capture test per boot (six boots: pixel
+# ratios 1, 1.181793212890625 and 2, each with antialiasing as shipped and on) and one outline-sides
+# grading test per graded cell (each boot at boot zoom, zoom 1 and the full-screen boot zoom, the
+# zooms STRK-01 names). It equals the count
 # `npx playwright test --config=playwright.capture.config.ts --list` prints. A report below it is a
 # partial run or a capture file that went missing. Raise it when tests are added;
 # scripts/prove-capture-report-bites.sh reads it from here. Lowering it is a decision to stop
 # capturing or grading something.
-MIN_TESTS=3
+MIN_TESTS=24
 
 # The one file whose expected failures may be declared, and the tags that may declare one.
 GRADE_FILE="board-grade.capture.ts"
