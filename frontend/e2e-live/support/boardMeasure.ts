@@ -1,12 +1,29 @@
-import { CELL, nubAnchor } from '../../shared/geometry';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { BELT_GEOM, CELL, INSET, NUB_PUSH, nubAnchor } from '../../shared/geometry';
 import { CHASSIS_INSET_U, U_TO_PX } from '../../src/render/layers/machineChassis';
-import { NUB_ELECTRICAL_HALF, NUB_FAULT_RING_R, NUB_R, NUB_STROKE } from '../../src/protocol/ports';
+import {
+  FAULT_PORT,
+  NUB_ELECTRICAL_HALF,
+  NUB_FAULT_CORE_R,
+  NUB_FAULT_RING_R,
+  NUB_R,
+  NUB_RING_R,
+  NUB_RING_STROKE,
+  NUB_STROKE,
+  PORT_ROLE,
+  beltEndCell,
+  beltSeamPoint,
+  dockPort,
+} from '../../src/protocol/ports';
+import type { BeltView, NodeView } from '../../src/protocol/decode';
 import { CABLE_WIDTH } from '../../src/render/cableGeometry';
-import { DOT_SIZE } from '../../src/render/layers/items';
+import { DOT_SIZE, itemDotGrow, snapToDevicePixel } from '../../src/render/layers/items';
+import { railBandAt, straightTickCommands } from '../../src/render/synth/beltGeometry';
 import { LOCKED_SKIN } from '../../src/render/synth/skins/locked';
 import type { DecodedImage } from './canvasDots';
-import type { CaptureFacts, CaptureNode, CaptureRect } from './captureFacts';
-import { isBootZoom, zoomId, type CaptureCell } from './captureMatrix';
+import type { CaptureBelt, CaptureFacts, CaptureNode, CapturePort, CaptureRect } from './captureFacts';
+import { isBootZoom, shippedConst, treadDrawnAsDash, zoomId, type CaptureCell, type PropertyId } from './captureMatrix';
 
 // boardMeasure.ts - pure measuring and grading over a decoded board capture.
 //
@@ -163,18 +180,22 @@ export function worldToDevice(facts: CaptureFacts, wx: number, wy: number): { x:
 export type SideName = 'top' | 'right' | 'bottom' | 'left';
 export const SIDES: readonly SideName[] = ['top', 'right', 'bottom', 'left'];
 
-/** One side of a chassis band, in device px. */
-export interface SideBand {
-  side: SideName;
-  /** The axis a sample line runs along: `x` for the left and right sides, `y` for the top and bottom. */
+/** One straight stroke to read across, in device px: an outline side or a glyph leg. */
+export interface StrokeBand {
+  /** The axis a sample line runs along: `x` for a vertical stroke, `y` for a horizontal one. */
   across: 'x' | 'y';
   /** The band's outer and inner edges on the `across` axis, in device px. */
   outer: number;
   inner: number;
-  /** Device pixel rows (left, right) or columns (top, bottom) a sample line may take, in order. */
+  /** Device pixel rows (vertical stroke) or columns (horizontal stroke) a sample line may take, in order. */
   lines: number[];
-  /** Why the side has no line, when `lines` is empty. */
+  /** Why the stroke has no line, when `lines` is empty. */
   noLines?: string;
+}
+
+/** One side of a chassis band, in device px. */
+export interface SideBand extends StrokeBand {
+  side: SideName;
 }
 
 export interface OutlineBand {
@@ -324,8 +345,10 @@ export function captureMasks(facts: CaptureFacts): MaskRect[] {
       );
     }
   }
+  // Below zoom 1 the item layer grows each dot in world px so it keeps its on-screen size.
+  const dot = (DOT_SIZE * itemDotGrow(facts.camera.scale)) / 2;
   for (const d of facts.itemDots) {
-    out.push(worldBoxMask(facts, d.x - DOT_SIZE / 2, d.y - DOT_SIZE / 2, d.x + DOT_SIZE / 2, d.y + DOT_SIZE / 2, 'an item dot', MASK_CLEARANCE_PX));
+    out.push(worldBoxMask(facts, d.x - dot, d.y - dot, d.x + dot, d.y + dot, 'an item dot', MASK_CLEARANCE_PX));
   }
   for (const r of facts.alertRings) {
     out.push(worldBoxMask(facts, r.x - ALERT_RING_MASK_R, r.y - ALERT_RING_MASK_R, r.x + ALERT_RING_MASK_R, r.y + ALERT_RING_MASK_R, 'an alert ring', MASK_CLEARANCE_PX));
@@ -370,59 +393,69 @@ export function measureOutlineSides(
   margin = 2,
 ): Record<SideName, SideResult> {
   const out = {} as Record<SideName, SideResult>;
-  for (const sb of band.sides) {
-    if (sb.lines.length === 0) {
-      out[sb.side] = { measured: false, reason: sb.noLines ?? 'no sample line' };
-      continue;
-    }
-    // Pixels whose centres lie inside the band, then `margin` more on each side.
-    const lo = Math.min(sb.outer, sb.inner);
-    const hi = Math.max(sb.outer, sb.inner);
-    const first = Math.ceil(lo - 0.5) - margin;
-    const last = Math.floor(hi - 0.5) + margin;
-    const outsideFirst = sb.outer < sb.inner;
-    const readings: { core: number; fringe: number; effective: number }[] = [];
-    const skips = new Map<string, number>();
-    const skip = (why: string) => skips.set(why, (skips.get(why) ?? 0) + 1);
-    for (const line of sb.lines) {
-      const xy = (k: number) => (sb.across === 'x' ? { x: k, y: line } : { x: line, y: k });
-      const a = xy(first);
-      const b = xy(last);
-      if (Math.min(a.x, a.y) < 0 || b.x >= image.width || b.y >= image.height) {
-        skip('the line runs off the capture');
-        continue;
-      }
-      const hit = masks.find((m) => Math.max(a.x, b.x) + 1 > m.x0 && Math.min(a.x, b.x) < m.x1 && Math.max(a.y, b.y) + 1 > m.y0 && Math.min(a.y, b.y) < m.y1);
-      if (hit !== undefined) {
-        skip(`the line crosses ${hit.what}`);
-        continue;
-      }
-      const pixels: Rgb[] = [];
-      for (let k = first; k <= last; k++) {
-        const p = xy(k);
-        pixels.push(pixelAt(image, p.x, p.y));
-      }
-      if (!outsideFirst) pixels.reverse();
-      const r = readSampleLine(pixels);
-      if (r.ok) readings.push(r);
-      else skip(r.reason);
-    }
-    const skipped = sb.lines.length - readings.length;
-    if (readings.length === 0) {
-      const why = [...skips].map(([w, c]) => `${c} x ${w}`).join('; ');
-      out[sb.side] = { measured: false, reason: `all ${sb.lines.length} sample lines skipped: ${why}` };
-      continue;
-    }
-    out[sb.side] = {
-      measured: true,
-      core: median(readings.map((r) => r.core)),
-      fringe: median(readings.map((r) => r.fringe)),
-      effective: median(readings.map((r) => r.effective)),
-      lines: readings.length,
-      skipped,
-    };
-  }
+  for (const sb of band.sides) out[sb.side] = measureBand(image, sb, masks, margin);
   return out;
+}
+
+/**
+ * Read one straight stroke: each sample line runs across the band from its outer edge to its inner
+ * edge, `margin` device px past each, and the stroke reports the median core, fringe and effective
+ * width of the lines that read. A stroke with no readable line is `measured: false` with the reasons.
+ */
+export function measureBand(image: DecodedImage, sb: StrokeBand, masks: readonly MaskRect[], margin = 2): SideResult {
+  if (sb.lines.length === 0) return { measured: false, reason: sb.noLines ?? 'no sample line' };
+  // Pixels whose centres lie inside the band, then `margin` more on each side.
+  const lo = Math.min(sb.outer, sb.inner);
+  const hi = Math.max(sb.outer, sb.inner);
+  const first = Math.ceil(lo - 0.5) - margin;
+  const last = Math.floor(hi - 0.5) + margin;
+  const outsideFirst = sb.outer < sb.inner;
+  const readings: { core: number; fringe: number; effective: number }[] = [];
+  const skips = new Map<string, number>();
+  const skip = (why: string) => skips.set(why, (skips.get(why) ?? 0) + 1);
+  for (const line of sb.lines) {
+    const xy = (k: number) => (sb.across === 'x' ? { x: k, y: line } : { x: line, y: k });
+    const a = xy(first);
+    const b = xy(last);
+    if (Math.min(a.x, a.y) < 0 || b.x >= image.width || b.y >= image.height) {
+      skip('the line runs off the capture');
+      continue;
+    }
+    const hit = maskHit(masks, Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y));
+    if (hit !== undefined) {
+      skip(`the line crosses ${hit.what}`);
+      continue;
+    }
+    const pixels: Rgb[] = [];
+    for (let k = first; k <= last; k++) {
+      const p = xy(k);
+      pixels.push(pixelAt(image, p.x, p.y));
+    }
+    if (!outsideFirst) pixels.reverse();
+    const r = readSampleLine(pixels);
+    if (r.ok) readings.push(r);
+    else skip(r.reason);
+  }
+  const skipped = sb.lines.length - readings.length;
+  if (readings.length === 0) return { measured: false, reason: `all ${sb.lines.length} sample lines skipped: ${skipText(skips)}` };
+  return {
+    measured: true,
+    core: median(readings.map((r) => r.core)),
+    fringe: median(readings.map((r) => r.fringe)),
+    effective: median(readings.map((r) => r.effective)),
+    lines: readings.length,
+    skipped,
+  };
+}
+
+/** The first mask that the pixel box `[x0, x1] x [y0, y1]` (inclusive pixel indices) touches. */
+function maskHit(masks: readonly MaskRect[], x0: number, y0: number, x1: number, y1: number): MaskRect | undefined {
+  return masks.find((m) => x1 + 1 > m.x0 && x0 < m.x1 && y1 + 1 > m.y0 && y0 < m.y1);
+}
+
+/** `3 x reason; 1 x other reason`, for a skip count map. */
+function skipText(skips: ReadonlyMap<string, number>): string {
+  return [...skips].map(([w, c]) => `${c} x ${w}`).join('; ');
 }
 
 // ---------------------------------------------------------------------------
@@ -630,4 +663,144 @@ export function gradeOutlineSides(results: readonly MachineOutline[], cell: Capt
 
 function round3(x: number): number {
   return Math.round(x * 1000) / 1000;
+}
+
+// ===========================================================================
+// Glyph legs, fault rings, belt dash, rail against outline, cap against cell (plan 107-07)
+// ===========================================================================
+
+/** One H or V segment of a glyph path, in the art's author units. `leg` counts every segment in file order. */
+export interface GlyphSegment {
+  leg: number;
+  part: string;
+  orient: 'H' | 'V';
+  /** The fixed coordinate: y for an H segment, x for a V segment. */
+  at: number;
+  /** The segment's ends on the other axis, in drawing order. */
+  from: number;
+  to: number;
+  strokeWidth: number;
+}
+
+export interface GlyphArt {
+  viewBox: { x: number; y: number; w: number; h: number };
+  segments: GlyphSegment[];
+}
+
+/** One leg of one Factory glyph as measured: which leg, where in the art, and its width. */
+export interface GlyphLegRow {
+  nodeId: number;
+  leg: string;
+  segment: string;
+  width: SideResult;
+}
+
+export type RingResult =
+  | { measured: true; rays: number; skipped: number; gaps: number; holeClosed: number; minCore: number; minEffective: number }
+  | { measured: false; reason: string };
+
+/** One bare fault port ring as measured, keyed by its machine and port index. */
+export interface FaultRingRow {
+  nodeId: number;
+  port: number;
+  ring: RingResult;
+}
+
+export type DashResult =
+  | { measured: true; gaps: number; longestGapPx: number; readPx: number; core: number; effective: number }
+  | { measured: false; reason: string };
+
+/** One straight belt tile's dash (or low-zoom tick) as measured. */
+export interface BeltDashRow {
+  beltId: number;
+  tile: number;
+  cell: string;
+  mode: 'dash' | 'tick';
+  stroke: DashResult;
+}
+
+export type OutlineWidth = { measured: true; core: number; effective: number; sides: number } | { measured: false; reason: string };
+
+/** One belt's rail width beside the median machine outline width in the same capture. */
+export interface RailRow {
+  beltId: number;
+  rail: SideResult;
+  outline: OutlineWidth;
+  ratio: string;
+}
+
+export type CapResult = { measured: true; widthPx: number; offsetPx: number } | { measured: false; reason: string };
+
+/** One belt end mark (a plug cap on a machine port, or a junction collar) against one cell. */
+export interface CapRow {
+  beltId: number;
+  n: number;
+  end: 'Head' | 'Tail';
+  mark: 'cap' | 'collar';
+  cellPx: number;
+  cap: CapResult;
+}
+
+/** Every property's rows for one tile. */
+export interface TileMeasurements {
+  'outline-sides': MachineOutline[];
+  'glyph-strokes': GlyphLegRow[];
+  'fault-ring': FaultRingRow[];
+  'belt-dash': BeltDashRow[];
+  'rail-vs-outline': RailRow[];
+  'cap-in-cell': CapRow[];
+}
+
+/** One tile as the grade reads it: its scene, each property's subjects, and what it measured. */
+export interface TileRecord {
+  scene: SceneMachine[];
+  subjects: Record<PropertyId, string[]>;
+  measurements: TileMeasurements;
+}
+
+export function factoryGlyph(): GlyphArt {
+  return { viewBox: { x: 0, y: 0, w: 96, h: 96 }, segments: [] };
+}
+export function measureGlyphStrokes(_image: DecodedImage, _facts: CaptureFacts, _node: CaptureNode): GlyphLegRow[] {
+  return [];
+}
+export function gradeGlyphStrokes(_rows: readonly GlyphLegRow[], _cell: CaptureCell): Grade {
+  return { offenders: [], explain: '' };
+}
+export function measureFaultRing(_image: DecodedImage, _facts: CaptureFacts, node: CaptureNode, port: CapturePort): FaultRingRow {
+  return { nodeId: node.id, port: port.index, ring: { measured: true, rays: 0, skipped: 0, gaps: 0, holeClosed: 0, minCore: 1, minEffective: 1 } };
+}
+export function gradeFaultRing(_rows: readonly FaultRingRow[], _cell: CaptureCell): Grade {
+  return { offenders: [], explain: '' };
+}
+export function measureBeltDash(_image: DecodedImage, _facts: CaptureFacts, _belt: CaptureBelt): BeltDashRow[] {
+  return [];
+}
+export function gradeBeltDash(_rows: readonly BeltDashRow[], _cell: CaptureCell): Grade {
+  return { offenders: [], explain: '' };
+}
+export function outlineWidthOf(_outlines: readonly MachineOutline[]): OutlineWidth {
+  return { measured: false, reason: 'stub' };
+}
+export function measureRailWidth(_image: DecodedImage, _facts: CaptureFacts, belt: CaptureBelt, outline: OutlineWidth): RailRow {
+  return { beltId: belt.id, rail: { measured: false, reason: 'stub' }, outline, ratio: '' };
+}
+export function gradeRailVsOutline(_rows: readonly RailRow[], _cell: CaptureCell): Grade {
+  return { offenders: [], explain: '' };
+}
+export function measureCapWidth(_image: DecodedImage, _facts: CaptureFacts, _belt: CaptureBelt): CapRow[] {
+  return [];
+}
+export function gradeCapInCell(_rows: readonly CapRow[], _cell: CaptureCell): Grade {
+  return { offenders: [], explain: '' };
+}
+export function measureTileProperties(image: DecodedImage, facts: CaptureFacts): TileRecord {
+  return {
+    scene: sceneMachines(facts),
+    subjects: { 'outline-sides': [], 'glyph-strokes': [], 'fault-ring': [], 'belt-dash': [], 'rail-vs-outline': [], 'cap-in-cell': [] },
+    measurements: { 'outline-sides': measureTile(image, facts), 'glyph-strokes': [], 'fault-ring': [], 'belt-dash': [], 'rail-vs-outline': [], 'cap-in-cell': [] },
+  };
+}
+export function gradeCell(_property: PropertyId, _cell: CaptureCell, _tiles: readonly TileRecord[]): Grade {
+  return { offenders: [], explain: '' };
 }

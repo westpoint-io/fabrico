@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CELL } from '../../shared/geometry';
-import type { MachineOutline, SceneMachine } from './boardMeasure';
+import type { SceneMachine, TileMeasurements } from './boardMeasure';
 
 // captureMatrix.ts - what the board capture set boots, which zooms it captures at, and which
 // cells each graded property expects a subject in.
@@ -27,8 +27,21 @@ export interface CaptureCell extends CaptureBoot {
   zoom: CaptureZoom;
 }
 
-/** The properties the grading project checks. Each one names what it measures on screen. */
-export type PropertyId = 'outline-sides';
+/**
+ * The properties the grading project checks. Each one names what it measures on screen:
+ *
+ * - `outline-sides`: the four sides of a machine outline read the same width (STRK-01).
+ * - `glyph-strokes`: the legs of the Factory glyph read the same width (STRK-01).
+ * - `fault-ring`: each bare fault port ring is continuous, keeps its hole and is at least one
+ *   device pixel wide (STRK-02).
+ * - `belt-dash`: each straight belt tile's dash, or its low-zoom tick, has no gap (STRK-02).
+ * - `rail-vs-outline`: a belt rail is no wider than a machine outline in the same capture (STRK-03).
+ * - `cap-in-cell`: a belt end cap is no wider than one cell (STRK-03).
+ */
+export type PropertyId = 'outline-sides' | 'glyph-strokes' | 'fault-ring' | 'belt-dash' | 'rail-vs-outline' | 'cap-in-cell';
+
+/** Every property, in the order the grading project generates its tests. */
+export const PROPERTY_IDS: readonly PropertyId[] = ['outline-sides', 'glyph-strokes', 'fault-ring', 'belt-dash', 'rail-vs-outline', 'cap-in-cell'];
 
 /**
  * The fractional pixel ratio the capture set boots at besides 1 and 2: the `devicePixelRatio` read
@@ -102,19 +115,35 @@ export function captureDir(boot: CaptureBoot): string {
 }
 
 /**
- * The renderer's machine detail cut, read out of `machines.ts` as source: below
- * `scale x CELL < LOD_MIN_MACHINE_PX` a machine draws as a solid block with no outline.
- *
- * Read as text, not imported, because `machines.ts` pulls in the SVG assets through Vite's
- * `?raw` imports, which the Playwright runner can't load. Reading the shipped line keeps the
- * number single-sourced: a file with no such line throws by name rather than defaulting.
+ * A number the renderer declares as `const NAME = <n>;` (or `export const`), read out of the
+ * shipped source as text. Read, not imported, because the render layers pull in the SVG assets
+ * through Vite's `?raw` imports, which the Playwright runner can't load, and some of these numbers
+ * aren't exported. Reading the shipped line keeps each number single-sourced: a file with no such
+ * line throws by name rather than defaulting.
  */
-export const LOD_MIN_MACHINE_PX: number = (() => {
-  const src = readFileSync(fileURLToPath(new URL('../../src/render/layers/machines.ts', import.meta.url)), 'utf8');
-  const m = /^export const LOD_MIN_MACHINE_PX = (\d+(?:\.\d+)?);$/m.exec(src);
-  if (m === null) throw new Error('captureMatrix: no `export const LOD_MIN_MACHINE_PX = <n>;` line in src/render/layers/machines.ts');
+export function shippedConst(file: string, name: string): number {
+  const src = readFileSync(fileURLToPath(new URL(`../../src/render/${file}`, import.meta.url)), 'utf8');
+  const m = new RegExp(`^(?:export )?const ${name} = (\\d+(?:\\.\\d+)?);`, 'm').exec(src);
+  if (m === null) throw new Error(`captureMatrix: no \`const ${name} = <n>;\` line in src/render/${file}`);
   return Number(m[1]);
-})();
+}
+
+/**
+ * The renderer's machine detail cut (`machines.ts`): below `scale x CELL < LOD_MIN_MACHINE_PX` a
+ * machine draws as a solid block with no outline, glyph or port nubs.
+ */
+export const LOD_MIN_MACHINE_PX: number = shippedConst('layers/machines.ts', 'LOD_MIN_MACHINE_PX');
+
+/**
+ * The belt layer's tread detail cut (`belts.ts`): at `scale x CELL >= LOD_MIN_TREAD_PX` a straight
+ * tile draws the marching 10-on, 6-off dash, and below it one static tick on the tile centre.
+ */
+export const LOD_MIN_TREAD_PX: number = shippedConst('layers/belts.ts', 'LOD_MIN_TREAD_PX');
+
+/** True when straight belt tiles draw the full dash at this camera scale (else the low-zoom tick). */
+export function treadDrawnAsDash(scale: number): boolean {
+  return scale * CELL >= LOD_MIN_TREAD_PX;
+}
 
 /**
  * True when machines draw as vectors (an outline and a glyph) at this zoom. A boot zoom is the
@@ -152,8 +181,15 @@ export interface CaptureEntry {
    * tile is in `measurements`; one that isn't on the canvas and clear of chrome here isn't.
    */
   scene: SceneMachine[];
-  /** Per property, the machines measured in this tile: those whose whole outline is clear here. */
-  measurements: Record<PropertyId, MachineOutline[]>;
+  /**
+   * Per property, every subject the scene holds for it, whether or not this tile could read it:
+   * machine ids (`outline-sides`), Factory glyph node ids, `<node>:fault-<port>`,
+   * `<belt>:tile-<n>`, `<belt>:rail`, `<belt>:collar-<n>`. The grade takes the union over a cell's
+   * tiles, so a subject no tile measured is an offender, and a cell with no subject at all fails.
+   */
+  subjects: Record<PropertyId, string[]>;
+  /** Per property, the rows measured in this tile: only subjects whose whole sampling area is clear here. */
+  measurements: TileMeasurements;
 }
 
 /** `<captureDir>/manifest.json`: every capture one boot took. */
@@ -173,6 +209,30 @@ export function outlineSidesPromisedAt(zoom: CaptureZoom): boolean {
 }
 
 /**
+ * The zooms where a requirement promises the property, and where its subject is drawn:
+ *
+ * - `outline-sides` and `glyph-strokes`: zoom 1 and the two boot zooms (STRK-01 says "at zoom 1 and
+ *   at boot zoom"; the other vector zooms keep their measured widths on the page).
+ * - `fault-ring` and `rail-vs-outline`: every zoom where machines draw as vectors (STRK-02 promises
+ *   no stroke under a device pixel at any zoom; a rail is compared with an outline, which only
+ *   exists there).
+ * - `belt-dash` and `cap-in-cell`: every zoom (belts draw at every zoom).
+ */
+export function propertyGradedAt(property: PropertyId, zoom: CaptureZoom): boolean {
+  switch (property) {
+    case 'outline-sides':
+    case 'glyph-strokes':
+      return machinesDrawnAsVectors(zoom) && outlineSidesPromisedAt(zoom);
+    case 'fault-ring':
+    case 'rail-vs-outline':
+      return machinesDrawnAsVectors(zoom);
+    case 'belt-dash':
+    case 'cap-in-cell':
+      return true;
+  }
+}
+
+/**
  * Every cell where the property's subject is drawn and a requirement promises the property, in
  * boot order then zoom order.
  */
@@ -180,7 +240,7 @@ export function gradingCells(property: PropertyId): CaptureCell[] {
   const out: CaptureCell[] = [];
   for (const boot of CAPTURE_BOOTS) {
     for (const zoom of CAPTURE_ZOOMS) {
-      if (property === 'outline-sides' && (!machinesDrawnAsVectors(zoom) || !outlineSidesPromisedAt(zoom))) continue;
+      if (!propertyGradedAt(property, zoom)) continue;
       out.push({ ...boot, zoom });
     }
   }

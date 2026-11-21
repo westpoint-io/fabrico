@@ -8,6 +8,10 @@
 // Besides where the machines are, it reads what can sit on top of a machine's outline, so the
 // measurer can keep those pixels out of a width: cables (drawn above machines), item dots, label
 // words (a DOM overlay) and the alert rings around faulted machines.
+//
+// For the glyph, port and belt properties it also reads where each machine's glyph is drawn and
+// which art it is (`glyphSubjectOn`, `glyphBoxOn`, read off the live Pixi objects), each port's
+// catalog index, and each belt's drawn tiles, docks and plotted junction collars.
 
 export interface CaptureRect {
   left: number;
@@ -17,6 +21,8 @@ export interface CaptureRect {
 }
 
 export interface CapturePort {
+  /** The port's catalog index (identity-stable across Rotate). */
+  index: number;
   cell_x: number;
   cell_y: number;
   /** The cell edge the port faces: N=0, E=1, S=2, W=3. */
@@ -34,6 +40,30 @@ export interface CaptureNode {
   ports: CapturePort[];
   /** A label node: its words sit in a DOM overlay and it has no chassis outline. */
   isLabel: boolean;
+  /**
+   * The glyph as drawn, or null when the machine draws none here (below the detail cut, or a label):
+   * `subject` is the art (`'factory'` for the Factory and every kind that draws its art), `box` the
+   * glyph Graphics' position and drawn size and the footprint size, all in px in the body's
+   * unrotated frame (`window.__fabrico.glyphBoxOn`).
+   */
+  glyph: { subject: string; box: { x: number; y: number; w: number; h: number; footW: number; footH: number } } | null;
+}
+
+/** One drawn belt tile: its cell and its straight (`axis` X=0, Y=1) or corner kind. */
+export interface CaptureBeltTile {
+  cell_x: number;
+  cell_y: number;
+  kind: { Straight: { axis: number } } | { Corner: { from: number; to: number } };
+}
+
+export interface CaptureBelt {
+  id: number;
+  /** The tiles as drawn, tail first (`scene().belts[i].tiles`). */
+  tiles: CaptureBeltTile[];
+  /** Per-end docks, Head before Tail: the docked node or belt handle and the port index. */
+  docks: { end: 'Head' | 'Tail'; node: number; port: number }[];
+  /** `window.__fabrico.beltCollarCentresOn(id)`: each stroked circle on the belt's end marks, in world px. */
+  collars: { x: number; y: number }[];
 }
 
 export interface CaptureFacts {
@@ -61,6 +91,8 @@ export interface CaptureFacts {
   labelWords: CaptureRect[];
   /** `window.__fabrico.alertRingCentres()`: the alert rings around faulted machines, in world px. */
   alertRings: { x: number; y: number }[];
+  /** Every belt in the scene, in id order. */
+  belts: CaptureBelt[];
 }
 
 /** Read every fact a capture is measured against. Read-only; see the file header. */
@@ -74,13 +106,21 @@ export function collectCaptureFacts(): CaptureFacts {
         kind: number;
         state: number;
         cells: [number, number][];
-        ports: { cell_x: number; cell_y: number; side: number; role: number }[];
+        ports: { index: number; cell_x: number; cell_y: number; side: number; role: number }[];
         label: unknown;
+      }[];
+      belts: {
+        id: number;
+        tiles: { cell_x: number; cell_y: number; kind: CaptureBeltTile['kind'] }[];
+        docks: { end: 'Head' | 'Tail'; node: number; port: number }[];
       }[];
     };
     cablePolylines(): { x: number; y: number }[][];
     itemDots(): { x: number; y: number }[];
     alertRingCentres(): { x: number; y: number }[];
+    glyphSubjectOn(id: number): string | null;
+    glyphBoxOn(id: number): { x: number; y: number; w: number; h: number; footW: number; footH: number } | null;
+    beltCollarCentresOn(id: number): { x: number; y: number }[];
   };
   const hook = (window as unknown as { __fabrico?: Hook }).__fabrico;
   if (hook === undefined) throw new Error('collectCaptureFacts: window.__fabrico is not installed');
@@ -103,14 +143,19 @@ export function collectCaptureFacts(): CaptureFacts {
     clientRect: rectOf(canvas),
     camera: hook.camera(),
     tick: scene.tick,
-    nodes: scene.nodes.map((n) => ({
-      id: n.id,
-      kind: n.kind,
-      state: n.state,
-      cells: n.cells.map(([x, y]) => [x, y] as [number, number]),
-      ports: n.ports.map((p) => ({ cell_x: p.cell_x, cell_y: p.cell_y, side: p.side, role: p.role })),
-      isLabel: n.label !== null,
-    })),
+    nodes: scene.nodes.map((n) => {
+      const subject = hook.glyphSubjectOn(n.id);
+      const box = hook.glyphBoxOn(n.id);
+      return {
+        id: n.id,
+        kind: n.kind,
+        state: n.state,
+        cells: n.cells.map(([x, y]) => [x, y] as [number, number]),
+        ports: n.ports.map((p) => ({ index: p.index, cell_x: p.cell_x, cell_y: p.cell_y, side: p.side, role: p.role })),
+        isLabel: n.label !== null,
+        glyph: subject === null || box === null ? null : { subject, box: { x: box.x, y: box.y, w: box.w, h: box.h, footW: box.footW, footH: box.footH } },
+      };
+    }),
     panels: Array.from(document.querySelectorAll('.fab-panel')).map(rectOf),
     gl: {
       antialias: ctx === null ? null : (ctx.getContextAttributes()?.antialias ?? null),
@@ -120,5 +165,15 @@ export function collectCaptureFacts(): CaptureFacts {
     itemDots: hook.itemDots().map((p) => ({ x: p.x, y: p.y })),
     labelWords: Array.from(document.querySelectorAll('[data-testid="label-words"]')).map(rectOf),
     alertRings: hook.alertRingCentres().map((p) => ({ x: p.x, y: p.y })),
+    belts: scene.belts.map((b) => ({
+      id: b.id,
+      tiles: b.tiles.map((t) => ({
+        cell_x: t.cell_x,
+        cell_y: t.cell_y,
+        kind: 'Straight' in t.kind ? { Straight: { axis: t.kind.Straight.axis } } : { Corner: { from: t.kind.Corner.from, to: t.kind.Corner.to } },
+      })),
+      docks: b.docks.map((d) => ({ end: d.end, node: d.node, port: d.port })),
+      collars: hook.beltCollarCentresOn(b.id).map((p) => ({ x: p.x, y: p.y })),
+    })),
   };
 }

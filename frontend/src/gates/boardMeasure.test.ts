@@ -18,19 +18,35 @@ import {
   NUB_ALONG_REACH_PX,
   captureMasks,
   coverageOf,
+  factoryGlyph,
+  gradeBeltDash,
+  gradeCapInCell,
+  gradeCell,
+  gradeFaultRing,
+  gradeGlyphStrokes,
   gradeOutlineSides,
+  gradeRailVsOutline,
+  measureBeltDash,
+  measureCapWidth,
   measureCapture,
+  measureFaultRing,
+  measureGlyphStrokes,
+  measureRailWidth,
   measureTile,
+  measureTileProperties,
   outlineBandFor,
   outlineClearOfChrome,
+  outlineWidthOf,
   outlinesForCell,
   readSampleLine,
+  type GlyphSegment,
   type MachineOutline,
   type Rgb,
   type SideName,
+  type TileRecord,
 } from '../../e2e-live/support/boardMeasure';
 import type { DecodedImage } from '../../e2e-live/support/canvasDots';
-import type { CaptureFacts, CaptureNode } from '../../e2e-live/support/captureFacts';
+import type { CaptureBelt, CaptureFacts, CaptureNode } from '../../e2e-live/support/captureFacts';
 import type { CaptureCell } from '../../e2e-live/support/captureMatrix';
 import {
   DECLARED_DEFECTS,
@@ -48,8 +64,8 @@ const SIZE = 128;
 const rgb = (c: number): Rgb => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
 const grey = (v: number): number => (v << 16) | (v << 8) | v;
 
-function blank(): DecodedImage {
-  const data = new Uint8Array(SIZE * SIZE * 4);
+function blank(width = SIZE, height = width): DecodedImage {
+  const data = new Uint8Array(width * height * 4);
   const [r, g, b] = rgb(FLOOR);
   for (let i = 0; i < data.length; i += 4) {
     data[i] = r;
@@ -57,7 +73,7 @@ function blank(): DecodedImage {
     data[i + 2] = b;
     data[i + 3] = 255;
   }
-  return { width: SIZE, height: SIZE, data };
+  return { width, height, data };
 }
 
 function paint(img: DecodedImage, x: number, y: number, colour: number): void {
@@ -87,6 +103,7 @@ const NODE: CaptureNode = {
   ],
   ports: [],
   isLabel: false,
+  glyph: null,
 };
 
 function facts(over: Partial<CaptureFacts> = {}): CaptureFacts {
@@ -104,6 +121,7 @@ function facts(over: Partial<CaptureFacts> = {}): CaptureFacts {
     itemDots: [],
     labelWords: [],
     alertRings: [],
+    belts: [],
     ...over,
   };
 }
@@ -274,7 +292,7 @@ describe('what the measurer refuses to read', () => {
 
   it("keeps sample lines off a port nub's reach along its side, and leaves the side lines elsewhere", () => {
     // A port on cell (2,1)'s east edge: its nub sits on the right side at world y 48.
-    const withPort: CaptureNode = { ...NODE, ports: [{ cell_x: 2, cell_y: 1, side: 1, role: 0 }] };
+    const withPort: CaptureNode = { ...NODE, ports: [{ index: 0, cell_x: 2, cell_y: 1, side: 1, role: 0 }] };
     const right = outlineBandFor(facts({ nodes: [withPort] }), withPort).sides.find((s) => s.side === 'right');
     const bare = outlineBandFor(facts(), NODE).sides.find((s) => s.side === 'right');
     if (right === undefined || bare === undefined) throw new Error('no right side');
@@ -332,7 +350,7 @@ describe('masks built from the capture facts', () => {
   });
 
   it('masks item dots, label words, label nodes and alert rings', () => {
-    const label: CaptureNode = { id: 9, kind: 11, state: 0, cells: [[3, 0]], ports: [], isLabel: true };
+    const label: CaptureNode = { id: 9, kind: 11, state: 0, cells: [[3, 0]], ports: [], isLabel: true, glyph: null };
     const f = facts({
       nodes: [NODE, label],
       itemDots: [{ x: 10, y: 10 }],
@@ -580,5 +598,489 @@ describe('the declared rows', () => {
       for (const k of row.offenders) expect(k, row.why).toMatch(/^\d+:(top|right|bottom|left)$/);
       expect(row.why).toMatch(/\d/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Glyph legs, fault rings, belt dash, rail against outline and cap against cell (plan 107-07)
+// ---------------------------------------------------------------------------
+
+const GLYPH_INK = LOCKED_SKIN.palette.ramp[4];
+const NUB_INK = LOCKED_SKIN.palette.ramp[3];
+const TREAD_INK = LOCKED_SKIN.palette.ramp[4];
+const BOOT_SHIPPED: CaptureCell = { dpr: 1, aa: 'shipped', zoom: 'boot' };
+const BOOT_ON: CaptureCell = { dpr: 1, aa: 'on', zoom: 'boot' };
+const AT_HALF: CaptureCell = { dpr: 1, aa: 'shipped', zoom: 0.5 };
+const AT_QUARTER: CaptureCell = { dpr: 1, aa: 'shipped', zoom: 0.25 };
+
+/** The colour `t` of the way from the floor to `ink`. */
+function blend(ink: number, t: number): number {
+  const [fr, fg, fb] = rgb(FLOOR);
+  const [ir, ig, ib] = rgb(ink);
+  const mix = (f: number, i: number) => Math.round(f + (i - f) * t);
+  return (mix(fr, ir) << 16) | (mix(fg, ig) << 8) | mix(fb, ib);
+}
+
+// --- the Factory glyph -------------------------------------------------------------------------
+
+/** A 3x3 Factory on cells (0,0) to (2,2), its glyph box the whole 96 px footprint. Scale 1.5: a 2u leg is 3 px. */
+const GLYPH_SCALE = 1.5;
+const GLYPH_NODE: CaptureNode = {
+  id: 1,
+  kind: 2,
+  state: state_tag.IDLE,
+  cells: [0, 1, 2].flatMap((y) => [0, 1, 2].map((x) => [x, y] as [number, number])),
+  ports: [],
+  isLabel: false,
+  glyph: { subject: 'factory', box: { x: 0, y: 0, w: 96, h: 96, footW: 96, footH: 96 } },
+};
+const GLYPH_SIZE = 160;
+
+function glyphFacts(over: Partial<CaptureFacts> = {}): CaptureFacts {
+  return facts({
+    backing: { width: GLYPH_SIZE, height: GLYPH_SIZE },
+    client: { width: GLYPH_SIZE, height: GLYPH_SIZE },
+    clientRect: { left: 0, top: 0, width: GLYPH_SIZE, height: GLYPH_SIZE },
+    camera: { x: 0, y: 0, scale: GLYPH_SCALE },
+    nodes: [GLYPH_NODE],
+    ...over,
+  });
+}
+
+/** Paint one leg `profile` across (pixel values from its low edge), as long as the segment plus the stroke. */
+function paintLeg(img: DecodedImage, seg: GlyphSegment, profile: number[]): void {
+  const k = GLYPH_SCALE;
+  const start = Math.round(seg.at * k - profile.length / 2);
+  const lo = Math.floor(Math.min(seg.from, seg.to) * k - profile.length / 2);
+  const hi = Math.ceil(Math.max(seg.from, seg.to) * k + profile.length / 2) - 1;
+  for (let along = lo; along <= hi; along++) {
+    profile.forEach((c, i) => (seg.orient === 'V' ? paint(img, start + i, along, c) : paint(img, along, start + i, c)));
+  }
+}
+
+/** The whole glyph, every leg `profile` unless `override` swaps one leg's. */
+function glyph(img: DecodedImage, profile: number[], override: Record<number, number[]> = {}): void {
+  for (const seg of factoryGlyph().segments) paintLeg(img, seg, override[seg.leg] ?? profile);
+}
+
+const LEG3 = [GLYPH_INK, GLYPH_INK, GLYPH_INK];
+
+describe('glyph strokes: the Factory glyph legs', () => {
+  it('reads the legs from factory.svg itself: 14 H and V segments of the two braces', () => {
+    const { segments } = factoryGlyph();
+    expect(segments).toHaveLength(14);
+    expect(segments[0]).toMatchObject({ leg: 0, part: 'brace-left', orient: 'H', at: 26, from: 44, to: 32 });
+    expect(segments[1]).toMatchObject({ leg: 1, part: 'brace-left', orient: 'V', at: 32, from: 26, to: 44 });
+  });
+
+  it('reads every leg at 3 px as a core of 3, and the grade passes', () => {
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3);
+    const rows = measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE);
+    expect(rows).toHaveLength(14);
+    for (const r of rows) expect(r.width, r.segment).toMatchObject({ measured: true, core: 3, fringe: 0 });
+    expect(gradeGlyphStrokes(rows, BOOT_SHIPPED).offenders).toEqual([]);
+  });
+
+  it('fails one leg at 2 px beside legs at 3 px, naming the leg', () => {
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3, { 1: [GLYPH_INK, GLYPH_INK] });
+    const g = gradeGlyphStrokes(measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE), BOOT_SHIPPED);
+    expect(g.offenders).toEqual([expect.objectContaining({ key: '1:leg-1', unmeasured: false })]);
+  });
+
+  it('with antialiasing on, passes equal effective widths away from the zooms people work at, and fails the fringe at boot zoom', () => {
+    const img = blank(GLYPH_SIZE);
+    const half = blend(GLYPH_INK, 0.5);
+    glyph(img, [half, GLYPH_INK, GLYPH_INK, half]);
+    const rows = measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE);
+    for (const r of rows) expect(r.width, r.segment).toMatchObject({ measured: true, core: 2, fringe: 2 });
+    expect(gradeGlyphStrokes(rows, AA_ON_AT_2).offenders).toEqual([]);
+    const atBoot = gradeGlyphStrokes(rows, BOOT_ON);
+    expect(atBoot.offenders).toHaveLength(14);
+    expect(atBoot.explain).toMatch(/fringe/);
+  });
+
+  it('fails effective widths spread by more than the tolerance with antialiasing on', () => {
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3, { 4: [GLYPH_INK, GLYPH_INK, blend(GLYPH_INK, 0.5)] });
+    const g = gradeGlyphStrokes(measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE), AA_ON_AT_2);
+    expect(g.offenders.map((o) => o.key)).toEqual(['1:leg-4']);
+  });
+
+  it('reads a glyph under a chrome panel as not measured on every leg, and the grade lists each one', () => {
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3);
+    const f = glyphFacts({ panels: [{ left: 0, top: 0, width: GLYPH_SIZE, height: GLYPH_SIZE }] });
+    const rows = measureGlyphStrokes(img, f, GLYPH_NODE);
+    for (const r of rows) expect(r.width.measured).toBe(false);
+    const g = gradeGlyphStrokes(rows, BOOT_SHIPPED);
+    expect(g.offenders).toHaveLength(14);
+    expect(g.offenders.every((o) => o.unmeasured)).toBe(true);
+  });
+
+  it('refuses to map a glyph whose drawn footprint disagrees with the scene footprint, such as a rotated body', () => {
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3);
+    const odd: CaptureNode = { ...GLYPH_NODE, glyph: { subject: 'factory', box: { x: 0, y: 0, w: 96, h: 96, footW: 96, footH: 64 } } };
+    const rows = measureGlyphStrokes(img, glyphFacts({ nodes: [odd] }), odd);
+    expect(rows.every((r) => !r.width.measured)).toBe(true);
+  });
+});
+
+// --- the fault ring ----------------------------------------------------------------------------
+
+/**
+ * A 1x1 machine on cell (0,0) with a fault port on its south side. Camera scale 2 and a pan put the
+ * nub anchor (16, 32.5) at device (64, 40): core radius 4, ring from 8.75 to 11.25 px.
+ */
+const RING_NODE: CaptureNode = {
+  id: 4,
+  kind: 7,
+  state: state_tag.IDLE,
+  cells: [[0, 0]],
+  ports: [{ index: 2, cell_x: 0, cell_y: 0, side: 2, role: 2 }],
+  isLabel: false,
+  glyph: null,
+};
+const RING_CENTRE = { x: 64, y: 40 };
+
+function ringFacts(over: Partial<CaptureFacts> = {}): CaptureFacts {
+  return facts({ camera: { x: 32, y: -25, scale: 2 }, nodes: [RING_NODE], ...over });
+}
+
+/** Paint the fault nub: a core disc and a ring, `ringInk(angle)` choosing each ring pixel's colour (null: leave the floor). */
+function ring(img: DecodedImage, opts: { holeFilled?: boolean; ringInk?: (deg: number) => number | null } = {}): void {
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const dx = x + 0.5 - RING_CENTRE.x;
+      const dy = y + 0.5 - RING_CENTRE.y;
+      const d = Math.hypot(dx, dy);
+      // Degrees from the outward normal (south, +y), either way round.
+      const deg = Math.abs((Math.atan2(dx, dy) * 180) / Math.PI);
+      if (d <= 4 || (opts.holeFilled === true && d <= 11.25)) paint(img, x, y, NUB_INK);
+      else if (d >= 8.75 && d <= 11.25) {
+        const c = opts.ringInk ? opts.ringInk(deg) : NUB_INK;
+        if (c !== null) paint(img, x, y, c);
+      }
+    }
+  }
+}
+
+const PORT = RING_NODE.ports[0];
+
+describe('fault ring: continuous, keeps its hole, at least one device pixel wide', () => {
+  it('reads a clean ring as no gap, an open hole and a core of at least 1 on every ray, and the grade passes', () => {
+    const img = blank();
+    ring(img);
+    const row = measureFaultRing(img, ringFacts(), RING_NODE, PORT);
+    expect(row.ring).toMatchObject({ measured: true, gaps: 0, holeClosed: 0 });
+    if (!row.ring.measured) throw new Error('not measured');
+    expect(row.ring.rays).toBeGreaterThanOrEqual(16);
+    expect(row.ring.minCore).toBeGreaterThanOrEqual(1);
+    expect(gradeFaultRing([row], AT_HALF).offenders).toEqual([]);
+  });
+
+  it('fails a ring with a 30 degree arc missing, on its gaps', () => {
+    const img = blank();
+    ring(img, { ringInk: (deg) => (deg <= 15 ? null : NUB_INK) });
+    const row = measureFaultRing(img, ringFacts(), RING_NODE, PORT);
+    expect(row.ring).toMatchObject({ measured: true });
+    if (!row.ring.measured) throw new Error('not measured');
+    expect(row.ring.gaps).toBeGreaterThanOrEqual(2);
+    const g = gradeFaultRing([row], AT_HALF);
+    expect(g.offenders).toEqual([expect.objectContaining({ key: '4:fault-2', unmeasured: false })]);
+    expect(g.explain).toMatch(/gap/);
+  });
+
+  it('fails a ring whose hole is filled with ink, on the hole', () => {
+    const img = blank();
+    ring(img, { holeFilled: true });
+    const row = measureFaultRing(img, ringFacts(), RING_NODE, PORT);
+    expect(row.ring).toMatchObject({ measured: true, gaps: 0 });
+    if (!row.ring.measured) throw new Error('not measured');
+    expect(row.ring.holeClosed).toBe(row.ring.rays);
+    const g = gradeFaultRing([row], AT_HALF);
+    expect(g.offenders.map((o) => o.key)).toEqual(['4:fault-2']);
+    expect(g.explain).toMatch(/hole/);
+  });
+
+  it('fails a ring whose radial core is 0 at some angle with antialiasing as shipped, on the one-pixel floor', () => {
+    const img = blank();
+    ring(img, { ringInk: (deg) => (deg >= 20 && deg <= 50 ? blend(NUB_INK, 0.5) : NUB_INK) });
+    const row = measureFaultRing(img, ringFacts(), RING_NODE, PORT);
+    expect(row.ring).toMatchObject({ measured: true, gaps: 0, holeClosed: 0, minCore: 0 });
+    const g = gradeFaultRing([row], AT_HALF);
+    expect(g.offenders.map((o) => o.key)).toEqual(['4:fault-2']);
+    expect(g.explain).toMatch(/core/);
+  });
+
+  it('reads a ring under a chrome panel as not measured, and the grade counts it as an unmeasured offender', () => {
+    const img = blank();
+    ring(img);
+    const row = measureFaultRing(img, ringFacts({ panels: [{ left: 40, top: 20, width: 50, height: 50 }] }), RING_NODE, PORT);
+    expect(row.ring.measured).toBe(false);
+    expect(gradeFaultRing([row], AT_HALF).offenders).toEqual([expect.objectContaining({ key: '4:fault-2', unmeasured: true })]);
+  });
+});
+
+// --- the belt dash, the rail and the cap -------------------------------------------------------
+
+const straight = (cell_x: number, cell_y: number, axis = 0): CaptureBelt['tiles'][number] => ({ cell_x, cell_y, kind: { Straight: { axis } } });
+
+/** A three-tile horizontal belt on cells (1,1) to (3,1). */
+const DASH_BELT: CaptureBelt = { id: 7, tiles: [straight(1, 1), straight(2, 1), straight(3, 1)], docks: [], collars: [] };
+
+/** At scale 1: rails on rows 38 and 57, the 2 px dash on rows 47 and 48, 10 on and 6 off from x 32. */
+function dashBelt(img: DecodedImage, opts: { holeAt?: number } = {}): void {
+  for (let x = 32; x < 128; x++) {
+    paint(img, x, 38, TREAD_INK);
+    paint(img, x, 57, TREAD_INK);
+    if ((x - 32) % 16 < 10 && x !== opts.holeAt) {
+      paint(img, x, 47, TREAD_INK);
+      paint(img, x, 48, TREAD_INK);
+    }
+  }
+}
+
+/** At scale 0.5 the tile centres sit at device x 24, 40, 56 on row 24: rails on rows 19 and 28, an 8 px tick on row 24. */
+function tickBelt(img: DecodedImage, opts: { missing?: number } = {}): void {
+  for (let x = 16; x < 64; x++) {
+    paint(img, x, 19, TREAD_INK);
+    paint(img, x, 28, TREAD_INK);
+  }
+  [24, 40, 56].forEach((c, i) => {
+    if (i !== opts.missing) for (let x = c - 4; x < c + 4; x++) paint(img, x, 24, TREAD_INK);
+  });
+}
+
+const HALF_FACTS = (over: Partial<CaptureFacts> = {}) => facts({ camera: { x: 0, y: 0, scale: 0.5 }, nodes: [], belts: [DASH_BELT], ...over });
+
+describe('belt dash: no gap in a straight tile dash or its low-zoom tick', () => {
+  it('reads a run of 10-on, 6-off dashes as no gap in any tile, and the grade passes', () => {
+    const img = blank();
+    dashBelt(img);
+    const rows = measureBeltDash(img, facts({ nodes: [], belts: [DASH_BELT] }), DASH_BELT);
+    expect(rows.map((r) => r.tile)).toEqual([0, 1, 2]);
+    for (const r of rows) expect(r.stroke, `tile ${r.tile}`).toMatchObject({ measured: true, gaps: 0 });
+    expect(rows[0].mode).toBe('dash');
+    expect(gradeBeltDash(rows, SHIPPED_AT_1).offenders).toEqual([]);
+  });
+
+  it('fails the same run with a one-pixel hole inside one dash, naming the tile', () => {
+    const img = blank();
+    dashBelt(img, { holeAt: 52 });
+    const rows = measureBeltDash(img, facts({ nodes: [], belts: [DASH_BELT] }), DASH_BELT);
+    expect(rows[0].stroke).toMatchObject({ measured: true, gaps: 1, longestGapPx: 1 });
+    expect(gradeBeltDash(rows, SHIPPED_AT_1).offenders).toEqual([expect.objectContaining({ key: '7:tile-0', unmeasured: false })]);
+  });
+
+  it('below the switch zoom, passes a present 1 px tick and fails a tile whose tick is missing', () => {
+    const clean = blank();
+    tickBelt(clean);
+    const rows = measureBeltDash(clean, HALF_FACTS(), DASH_BELT);
+    expect(rows[0].mode).toBe('tick');
+    for (const r of rows) expect(r.stroke, `tile ${r.tile}`).toMatchObject({ measured: true, gaps: 0, core: 1 });
+    expect(gradeBeltDash(rows, AT_HALF).offenders).toEqual([]);
+
+    const img = blank();
+    tickBelt(img, { missing: 1 });
+    const g = gradeBeltDash(measureBeltDash(img, HALF_FACTS(), DASH_BELT), AT_HALF);
+    expect(g.offenders.map((o) => o.key)).toEqual(['7:tile-1']);
+  });
+
+  it('reads a tile fully under a cable as not measured, and the grade counts it as unmeasured', () => {
+    const img = blank();
+    dashBelt(img);
+    const f = facts({ nodes: [], belts: [DASH_BELT], cables: [[{ x: 30, y: 48 }, { x: 130, y: 48 }]] });
+    const rows = measureBeltDash(img, f, DASH_BELT);
+    for (const r of rows) expect(r.stroke.measured).toBe(false);
+    expect(gradeBeltDash(rows, SHIPPED_AT_1).offenders.every((o) => o.unmeasured)).toBe(true);
+  });
+});
+
+/** NODE's 3 px outline plus a two-tile belt on cells (1,3) and (2,3): rails on rows 102 and 121. */
+const RAIL_BELT: CaptureBelt = { id: 8, tiles: [straight(1, 3), straight(2, 3)], docks: [], collars: [] };
+
+function railBelt(img: DecodedImage, width: number): void {
+  for (let x = 32; x < 96; x++) {
+    for (let i = 0; i < width; i++) {
+      paint(img, x, 102 + i, TREAD_INK);
+      paint(img, x, 121 - i, TREAD_INK);
+    }
+  }
+}
+
+describe('rail against outline: a belt rail no wider than a machine outline', () => {
+  const railFacts = (over: Partial<CaptureFacts> = {}) => facts({ belts: [RAIL_BELT], ...over });
+
+  it('reads a 1 px rail beside a 3 px outline, reports the ratio 1:3, and the grade passes', () => {
+    const img = blank();
+    outline(img, SOLID3);
+    railBelt(img, 1);
+    const f = railFacts();
+    const row = measureRailWidth(img, f, RAIL_BELT, outlineWidthOf(measureCapture(img, f)));
+    expect(row.rail).toMatchObject({ measured: true, core: 1 });
+    expect(row.outline).toMatchObject({ measured: true, core: 3 });
+    expect(row.ratio).toBe('1:3');
+    expect(gradeRailVsOutline([row], SHIPPED_AT_1).offenders).toEqual([]);
+  });
+
+  it('fails a 4 px rail beside a 3 px outline', () => {
+    const img = blank();
+    outline(img, SOLID3);
+    railBelt(img, 4);
+    const f = railFacts();
+    const row = measureRailWidth(img, f, RAIL_BELT, outlineWidthOf(measureCapture(img, f)));
+    expect(row.rail).toMatchObject({ measured: true, core: 4 });
+    expect(gradeRailVsOutline([row], SHIPPED_AT_1).offenders).toEqual([expect.objectContaining({ key: '8:rail', unmeasured: false })]);
+  });
+
+  it('reads a rail fully under cables as not measured, and the grade counts it as unmeasured', () => {
+    const img = blank();
+    outline(img, SOLID3);
+    railBelt(img, 1);
+    const f = railFacts({ cables: [[{ x: 30, y: 102 }, { x: 100, y: 102 }], [{ x: 30, y: 121 }, { x: 100, y: 121 }]] });
+    const row = measureRailWidth(img, f, RAIL_BELT, outlineWidthOf(measureCapture(img, f)));
+    expect(row.rail.measured).toBe(false);
+    expect(gradeRailVsOutline([row], SHIPPED_AT_1).offenders).toEqual([expect.objectContaining({ key: '8:rail', unmeasured: true })]);
+  });
+});
+
+/**
+ * A 1x1 machine on cell (2,2) with an Out on its east side, and a belt whose Tail plugs into it. At
+ * scale 0.25 a cell is 8 px and the cap sits at device (24, 20).
+ */
+const CAP_NODE: CaptureNode = {
+  id: 1,
+  kind: 0,
+  state: state_tag.IDLE,
+  cells: [[2, 2]],
+  ports: [{ index: 0, cell_x: 2, cell_y: 2, side: 1, role: 1 }],
+  isLabel: false,
+  glyph: null,
+};
+const CAP_BELT: CaptureBelt = { id: 7, tiles: [straight(3, 2), straight(4, 2)], docks: [{ end: 'Tail', node: 1, port: 0 }], collars: [] };
+const capFacts = (over: Partial<CaptureFacts> = {}) => facts({ camera: { x: 0, y: 0, scale: 0.25 }, nodes: [CAP_NODE], belts: [CAP_BELT], ...over });
+
+function capDisc(img: DecodedImage, diameter: number): void {
+  for (let y = 0; y < 48; y++) {
+    for (let x = 0; x < 48; x++) if (Math.hypot(x + 0.5 - 24, y + 0.5 - 20) <= diameter / 2) paint(img, x, y, LOCKED_SKIN.palette.ramp[4]);
+  }
+}
+
+describe('cap in cell: a belt end cap no wider than one cell', () => {
+  it('passes an 8 px cap in an 8 px cell', () => {
+    const img = blank();
+    capDisc(img, 8);
+    const rows = measureCapWidth(img, capFacts(), CAP_BELT);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ beltId: 7, n: 1, end: 'Tail', mark: 'cap', cellPx: 8 });
+    expect(rows[0].cap).toMatchObject({ measured: true, widthPx: 8 });
+    expect(gradeCapInCell(rows, AT_QUARTER).offenders).toEqual([]);
+  });
+
+  it('fails a 12 px cap in an 8 px cell', () => {
+    const img = blank();
+    capDisc(img, 12);
+    const rows = measureCapWidth(img, capFacts(), CAP_BELT);
+    expect(rows[0].cap).toMatchObject({ measured: true, widthPx: 12 });
+    expect(gradeCapInCell(rows, AT_QUARTER).offenders).toEqual([expect.objectContaining({ key: '7:collar-1', unmeasured: false })]);
+  });
+
+  it('reads a cap under an item dot as not measured, and the grade counts it as unmeasured', () => {
+    const img = blank();
+    capDisc(img, 12);
+    const rows = measureCapWidth(img, capFacts({ itemDots: [{ x: 96, y: 80 }] }), CAP_BELT);
+    expect(rows[0].cap.measured).toBe(false);
+    expect(gradeCapInCell(rows, AT_QUARTER).offenders).toEqual([expect.objectContaining({ key: '7:collar-1', unmeasured: true })]);
+  });
+});
+
+// --- every grading cell fails when it finds nothing to grade -----------------------------------
+
+describe('a cell with no subject for its property fails', () => {
+  const noSubject = (property: Parameters<typeof gradeCell>[0], cell: CaptureCell, tile: TileRecord) => {
+    const g = gradeCell(property, cell, [tile]);
+    expect(g.offenders).toEqual([expect.objectContaining({ key: 'no-subjects', unmeasured: true })]);
+  };
+  const passes = (property: Parameters<typeof gradeCell>[0], cell: CaptureCell, tile: TileRecord) => {
+    expect(gradeCell(property, cell, [tile]).offenders).toEqual([]);
+  };
+
+  it('no subjects, outline-sides: a cell with no machine fails, and one clean machine passes', () => {
+    noSubject('outline-sides', SHIPPED_AT_1, measureTileProperties(blank(), facts({ nodes: [] })));
+    const img = blank();
+    outline(img, SOLID3);
+    passes('outline-sides', SHIPPED_AT_1, measureTileProperties(img, facts()));
+  });
+
+  it('no subjects, glyph-strokes: a cell with no Factory glyph fails, and one clean glyph passes', () => {
+    noSubject('glyph-strokes', BOOT_SHIPPED, measureTileProperties(blank(), facts()));
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3);
+    passes('glyph-strokes', BOOT_SHIPPED, measureTileProperties(img, glyphFacts()));
+  });
+
+  it('no subjects, fault-ring: a cell with no fault port fails, and one clean ring passes', () => {
+    noSubject('fault-ring', AT_HALF, measureTileProperties(blank(), facts()));
+    const img = blank();
+    ring(img);
+    passes('fault-ring', AT_HALF, measureTileProperties(img, ringFacts()));
+  });
+
+  it('no subjects, belt-dash: a cell with no straight tile fails, and one clean straight tile passes', () => {
+    noSubject('belt-dash', SHIPPED_AT_1, measureTileProperties(blank(), facts({ nodes: [] })));
+    const one: CaptureBelt = { ...DASH_BELT, tiles: [straight(1, 1)] };
+    const img = blank();
+    dashBelt(img);
+    passes('belt-dash', SHIPPED_AT_1, measureTileProperties(img, facts({ nodes: [], belts: [one] })));
+  });
+
+  it('no subjects, rail-vs-outline: a cell with a rail and no outline to compare it with fails, and a clean pair passes', () => {
+    const rails = blank();
+    railBelt(rails, 1);
+    noSubject('rail-vs-outline', SHIPPED_AT_1, measureTileProperties(rails, facts({ nodes: [], belts: [RAIL_BELT] })));
+    noSubject('rail-vs-outline', SHIPPED_AT_1, measureTileProperties(blank(), facts()));
+    const img = blank();
+    outline(img, SOLID3);
+    railBelt(img, 1);
+    passes('rail-vs-outline', SHIPPED_AT_1, measureTileProperties(img, facts({ belts: [RAIL_BELT] })));
+  });
+
+  it('no subjects, cap-in-cell: a cell with no belt end cap or collar fails, and one clean cap passes', () => {
+    noSubject('cap-in-cell', AT_QUARTER, measureTileProperties(blank(), capFacts({ belts: [{ ...CAP_BELT, docks: [] }] })));
+    const img = blank();
+    capDisc(img, 8);
+    passes('cap-in-cell', AT_QUARTER, measureTileProperties(img, capFacts()));
+  });
+
+  it('declared cell: no subjects, glyph-strokes: throws and never reaches the expected-failure mark', () => {
+    const row: DeclaredDefect = {
+      property: 'glyph-strokes',
+      dpr: 1,
+      aa: 'shipped',
+      zoom: 'boot',
+      fixes: 'STRK-01',
+      offenders: ['1:leg-1'],
+      why: 'machine 1 leg-1 reads core 2 against 3',
+    };
+    const empty = measureTileProperties(blank(), facts());
+    let marked = false;
+    expect(() =>
+      runGradeCell(BOOT_SHIPPED, row, (cell) => gradeCell('glyph-strokes', cell, [empty]), () => {
+        marked = true;
+      }),
+    ).toThrow(/no-subjects was not measured/);
+    expect(marked).toBe(false);
+  });
+
+  it('a subject the scene holds that no tile measured is an unmeasured offender, never a pass', () => {
+    const img = blank(GLYPH_SIZE);
+    glyph(img, LEG3);
+    const tile = measureTileProperties(img, glyphFacts({ panels: [{ left: 0, top: 0, width: 20, height: 20 }] }));
+    expect(tile.subjects['glyph-strokes']).toEqual(['1']);
+    expect(tile.measurements['glyph-strokes']).toEqual([]);
+    expect(gradeCell('glyph-strokes', BOOT_SHIPPED, [tile]).offenders).toEqual([expect.objectContaining({ key: '1:never-clear', unmeasured: true })]);
   });
 });
