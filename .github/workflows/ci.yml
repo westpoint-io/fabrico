@@ -2004,12 +2004,12 @@ jobs:
   # runner and a time limit of its own. It reads `frontend/` and `crates/` and never a markdown file
   # at the repository root, so it takes the same docs-only gate as `e2e-walk`.
   #
-  # THE LIMIT. 35 minutes: the capture config's 20 minute `globalTimeout`, so an overrun still
-  # writes a report, plus 15 for the build. Both are first-run values from a local measurement (the
-  # six-boot run took 292 s on a developer machine; CI runners have measured 2 to 4 times slower,
-  # so 292 s x 4, rounded up to the next five minutes, is 20). The closing plan of this phase
-  # replaces them from the recorded CI run with the walk's rule: the slowest recorded job minutes
-  # doubled, rounded up to the next five, plus 15 here.
+  # THE LIMIT. CI run 44867588480 on 3e64668 ran the 222-test capture set in 18.5 job minutes
+  # (Playwright's own 16.2). Doubled that is 37.0, rounded up to the next five minutes the way the
+  # walk's 58.4 became 60, which gives the 40 minute `globalTimeout` in the capture config, so an
+  # overrun writes a report before the runner is killed. This job's limit is those 40 plus 15 for
+  # the build. That recorded run replaces the first-run values from a local measurement (20 and 35
+  # minutes, from a 292 s run on a developer machine times 4 for a slow runner).
   #
   # ITS VERDICT IS THE REPORT, READ AFTER THE SUITE. Playwright exits 0 on a skipped test and on a
   # test marked `test.fail()` that failed, so the run's exit code alone can lose a test. After the
@@ -2027,7 +2027,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - name: Checkout
         uses: actions/checkout@v4
