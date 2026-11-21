@@ -1084,3 +1084,61 @@ describe('a cell with no subject for its property fails', () => {
     expect(gradeCell('glyph-strokes', BOOT_SHIPPED, [tile]).offenders).toEqual([expect.objectContaining({ key: '1:never-clear', unmeasured: true })]);
   });
 });
+
+// --- measuring bugs the first live runs found (plan 107-07, Task 1 step 8) -----------------------
+
+describe('measuring bugs found on the live board', () => {
+  it('reads an antialiased 1.25 px ring as at least 1 px wide on every ray, diagonals included', () => {
+    // Area coverage from 8x8 subsamples per pixel, the way MSAA blends a thin stroke. Scale 1:
+    // core radius 2, ring 4.375 to 5.625 px, centred on device (64, 40) by a pan.
+    const img = blank();
+    const cx = 64;
+    const cy = 40;
+    for (let y = 30; y < 50; y++) {
+      for (let x = 54; x < 74; x++) {
+        let inside = 0;
+        for (let sy = 0; sy < 8; sy++) {
+          for (let sx = 0; sx < 8; sx++) {
+            const d = Math.hypot(x + (sx + 0.5) / 8 - cx, y + (sy + 0.5) / 8 - cy);
+            if (d <= 2 || (d >= 4.375 && d <= 5.625)) inside++;
+          }
+        }
+        if (inside > 0) paint(img, x, y, blend(NUB_INK, inside / 64));
+      }
+    }
+    const row = measureFaultRing(img, ringFacts({ camera: { x: 48, y: 7.5, scale: 1 } }), RING_NODE, PORT);
+    expect(row.ring).toMatchObject({ measured: true, gaps: 0, holeClosed: 0 });
+    if (!row.ring.measured) throw new Error('not measured');
+    expect(row.ring.minEffective).toBeGreaterThanOrEqual(1);
+    expect(gradeFaultRing([row], { dpr: 1, aa: 'on', zoom: 1 }).offenders).toEqual([]);
+  });
+
+  it('reads caps merged into one blob along a machine side as wider than the cell, not as unmeasured', () => {
+    // Three 12 px Out caps one cell (8 px) apart down the east side: one light column with no floor on the scan.
+    const img = blank();
+    for (const cyDev of [12, 20, 28]) {
+      for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) if (Math.hypot(x + 0.5 - 24, y + 0.5 - cyDev) <= 6) paint(img, x, y, LOCKED_SKIN.palette.ramp[4]);
+    }
+    const rows = measureCapWidth(img, capFacts(), CAP_BELT);
+    expect(rows[0].cap.measured).toBe(true);
+    if (!rows[0].cap.measured) throw new Error('not measured');
+    expect(rows[0].cap.widthPx).toBeGreaterThan(8);
+    expect(gradeCapInCell(rows, AT_QUARTER).offenders).toEqual([expect.objectContaining({ key: '7:collar-1', unmeasured: false })]);
+  });
+
+  it('reads the rails of a two-tile belt plugged at both ends, between the plug stems', () => {
+    // Belt 8 on cells (1,3) and (2,3), Tail plugged into an Out east of cell (0,3) and Head into an In west of cell (3,3).
+    const img = blank();
+    outline(img, SOLID3);
+    railBelt(img, 1);
+    const stem = LOCKED_SKIN.palette.ramp[1];
+    fillRect(img, 32, 108, 95, 115, stem);
+    const src: CaptureNode = { id: 2, kind: 0, state: state_tag.IDLE, cells: [[0, 3]], ports: [{ index: 0, cell_x: 0, cell_y: 3, side: 1, role: 1 }], isLabel: false, glyph: null };
+    const dst: CaptureNode = { id: 3, kind: 7, state: state_tag.IDLE, cells: [[3, 3]], ports: [{ index: 0, cell_x: 3, cell_y: 3, side: 3, role: 0 }], isLabel: false, glyph: null };
+    const plugged: CaptureBelt = { ...RAIL_BELT, docks: [{ end: 'Head', node: 3, port: 0 }, { end: 'Tail', node: 2, port: 0 }] };
+    const f = facts({ nodes: [NODE, src, dst], belts: [plugged] });
+    const row = measureRailWidth(img, f, plugged, outlineWidthOf(measureCapture(img, facts())));
+    // Three lines per rail per tile, all clear of the stems that run between the rails.
+    expect(row.rail).toMatchObject({ measured: true, core: 1, lines: 12, skipped: 0 });
+  });
+});

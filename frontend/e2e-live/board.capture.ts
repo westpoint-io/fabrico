@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { PNG } from 'playwright-core/lib/utilsBundle';
 import { pauseAndSettle, resumeIfPaused } from './support/beltBoard';
-import { measureTile, sceneMachines } from './support/boardMeasure';
+import { measureTileProperties } from './support/boardMeasure';
 import { collectCaptureFacts } from './support/captureFacts';
 import {
   CAPTURE_BOOTS,
@@ -36,8 +36,9 @@ import {
 // sets the camera through the shipped controls (`captureZoom.ts`). Where the board overflows the
 // viewport it pans to further tiles (`tilePlan`), tile 0 being the zoom's own camera. At each tile
 // it checks render health, takes one viewport capture, reads the facts the capture is measured
-// against, and measures the machines whose whole outline is clear there. It writes the PNGs
-// (`z-<zoom>-t<tile>.png`) and `manifest.json` under `test-results/capture/<boot id>/`, entries
+// against, and measures every graded property (`measureTileProperties`) for the subjects whose
+// whole sampling area is clear there. It writes the PNGs
+// (`z-<zoom>-t<tile>.png`), each capture's facts (`z-<zoom>-t<tile>.facts.json`) and `manifest.json` under `test-results/capture/<boot id>/`, entries
 // in zoom order then tile order, which the grading project (`board-grade.capture.ts`) reads.
 //
 // No capture is compared with a stored image. Every check is a measured property, graded in the
@@ -130,10 +131,11 @@ for (const boot of CAPTURE_BOOTS) {
             Math.round(VIEWPORT.height * boot.dpr),
           ]);
           if (tile === 0) plan = tilePlan(facts, VIEWPORT);
-          const scene = sceneMachines(facts);
-          expect(scene.length, `${label}: the scene has machines`).toBeGreaterThan(0);
-          const outlines = measureTile(image, facts);
-          if (plan.length === 1) expect(outlines.length, `${label}: the capture has machines clear of chrome to measure`).toBeGreaterThan(0);
+          // The facts beside the PNG, so a capture can be measured again without the app.
+          writeFileSync(join(CAPTURE_ROOT, png.replace(/\.png$/, '.facts.json')), `${JSON.stringify(facts)}\n`);
+          const measured = measureTileProperties(image, facts);
+          expect(measured.scene.length, `${label}: the scene has machines`).toBeGreaterThan(0);
+          if (plan.length === 1) expect(measured.measurements['outline-sides'].length, `${label}: the capture has machines clear of chrome to measure`).toBeGreaterThan(0);
 
           entries.push({
             cell: { ...boot, zoom },
@@ -147,8 +149,9 @@ for (const boot of CAPTURE_BOOTS) {
             client: facts.client,
             gl: facts.gl,
             tick: facts.tick,
-            scene,
-            measurements: { 'outline-sides': outlines },
+            scene: measured.scene,
+            subjects: measured.subjects,
+            measurements: measured.measurements,
           });
         }
         console.log(`CAPTURE_TILES ${id} zoom=${zid} tiles=${plan.length} scale=${zoomCamera.scale}`);
