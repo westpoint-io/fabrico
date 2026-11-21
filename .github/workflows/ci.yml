@@ -1612,6 +1612,17 @@ jobs:
         working-directory: frontend
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
+      # The leg's JSON report holds each test's duration. It is uploaded red or green, so the
+      # mock verdict can read every leg, and a leg with no report fails here.
+      - name: Keep this shard's mock report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-report-${{ matrix.shard }}
+          path: frontend/test-results/mock-report.json
+          if-no-files-found: error
+          retention-days: 14
+
       # A failing leg's traces go nowhere otherwise, and a red that only CI shows needs them.
       - name: Keep the traces of a red mock shard
         if: failure()

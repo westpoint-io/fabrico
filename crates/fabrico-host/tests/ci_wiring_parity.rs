@@ -3663,6 +3663,11 @@ const MOCK_JOB: &str = "e2e";
 const MOCK_SHARDS: usize = 4;
 /// The mock config's retry count, whole: a test that fails once fails its leg.
 const MOCK_RETRIES: &str = "retries: 0,";
+/// The artifact each mock leg uploads its JSON report as, by its `name:` line.
+const MOCK_REPORT_ARTIFACT: &str = "name: mock-report-${{ matrix.shard }}";
+/// Where the leg's JSON report is, by the upload step's `path:` line. It is the `outputFile` of
+/// the json reporter in `frontend/playwright.config.ts`, from the repository root.
+const MOCK_REPORT_PATH: &str = "path: frontend/test-results/mock-report.json";
 
 /// The mock suite's run line, whole, built from `MOCK_SHARDS`.
 fn mock_run_line() -> String {
@@ -3719,6 +3724,51 @@ fn mock_gate_wrong(yml: &str) -> Vec<String> {
     wrong
 }
 
+/// Everything wrong with how `yml` uploads each mock leg's JSON report. Empty means right.
+///
+/// In job `MOCK_JOB` the artifact line, the path line and `if-no-files-found: error` each appear
+/// once, all in one step that uses `actions/upload-artifact@v4` under `if: ${{ !cancelled() }}`.
+/// The guard uploads a red leg's report too, and the missing-file rule turns a leg that wrote no
+/// report red, so the reports that reach the verdict cover every leg that ran.
+fn mock_report_upload_wrong(yml: &str) -> Vec<String> {
+    let blocks = job_blocks_in(yml);
+    let Some((_, job)) = blocks.iter().find(|(id, _)| *id == MOCK_JOB) else {
+        return vec![format!("there is no job `{MOCK_JOB}` under `jobs:`.")];
+    };
+    let mut wrong: Vec<String> = Vec::new();
+    for key in [MOCK_REPORT_PATH, "if-no-files-found: error"] {
+        let n = job.iter().filter(|l| step_key(l) == key).count();
+        if n != 1 {
+            wrong.push(format!(
+                "job `{MOCK_JOB}` carries `{key}` {n} time(s), expected 1. Each leg uploads one \
+                 report, from the file the json reporter writes, and fails when it is missing."
+            ));
+        }
+    }
+    match one_step_with(job, MOCK_REPORT_ARTIFACT, MOCK_JOB) {
+        Err(message) => wrong.push(format!(
+            "{message} Without it the leg's per-test durations never leave the runner."
+        )),
+        Ok((_, step)) => {
+            for key in [
+                "uses: actions/upload-artifact@v4",
+                "if: ${{ !cancelled() }}",
+                MOCK_REPORT_PATH,
+                "if-no-files-found: error",
+            ] {
+                if !step.iter().any(|l| step_key(l) == key) {
+                    wrong.push(format!(
+                        "the step carrying `{MOCK_REPORT_ARTIFACT}` in job `{MOCK_JOB}` has no \
+                         `{key}` line. Without it a red leg's report is never uploaded, or a leg \
+                         with no report stays green."
+                    ));
+                }
+            }
+        }
+    }
+    wrong
+}
+
 /// Everything wrong with the mock config's retry count. Empty means right.
 fn mock_retries_wrong(config: &str) -> Vec<String> {
     let retries: Vec<&str> = config
@@ -3746,9 +3796,14 @@ fn mock_retries_wrong(config: &str) -> Vec<String> {
 /// `shard: [1, 2, 3]` or `/5`, part of the 606 tests runs nowhere and every leg is green. And
 /// `retries: 0` in `playwright.config.ts` is what makes a test that fails once fail its leg. Each
 /// of these is one edit away, so they're pinned here, where `cargo test` runs them.
+///
+/// Each leg also uploads its JSON report as `mock-report-<i>`, red or green, and the upload fails
+/// when the report is missing. The report holds each test's duration for the mock verdict; it
+/// grades nothing, and the exit code stays the suite's verdict.
 #[test]
 fn the_mock_suite_runs_every_test_once_with_no_retry() {
     let mut wrong = mock_gate_wrong(CI_YML);
+    wrong.extend(mock_report_upload_wrong(CI_YML));
     wrong.extend(mock_retries_wrong(MOCK_CONFIG));
     assert!(
         wrong.is_empty(),
@@ -3759,8 +3814,8 @@ fn the_mock_suite_runs_every_test_once_with_no_retry() {
     );
 }
 
-/// `mock_gate_wrong` and `mock_retries_wrong` can fail: each break below is planted in a copy of
-/// the real files, and the check has to name it.
+/// `mock_gate_wrong`, `mock_report_upload_wrong` and `mock_retries_wrong` can fail: each break
+/// below is planted in a copy of the real files, and the check has to name it.
 #[test]
 fn the_mock_gate_check_names_each_way_of_losing_tests() {
     const MOCK_HEADER: &str = "    name: frontend e2e (Playwright + axe)\n";
@@ -3806,6 +3861,44 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
             format!("in job `{MOCK_JOB}` carries `if: false`"),
         ),
     ];
+    // (what, the planted workflow, what the report-upload check must name)
+    let report_plants: Vec<(&str, String, String)> = vec![
+        (
+            "the report artifact renamed to mock-report",
+            CI_YML.replace(
+                &format!("          {MOCK_REPORT_ARTIFACT}\n"),
+                "          name: mock-report\n",
+            ),
+            format!("`{MOCK_REPORT_ARTIFACT}` appears 0 time(s) in job `{MOCK_JOB}`"),
+        ),
+        (
+            "the report path cut to the results folder",
+            CI_YML.replace(
+                &format!("          {MOCK_REPORT_PATH}\n"),
+                "          path: frontend/test-results/\n",
+            ),
+            format!("job `{MOCK_JOB}` carries `{MOCK_REPORT_PATH}` 0 time(s)"),
+        ),
+        (
+            "the missing-file rule removed",
+            CI_YML.replace(
+                &format!("          {MOCK_REPORT_PATH}\n          if-no-files-found: error\n"),
+                &format!("          {MOCK_REPORT_PATH}\n"),
+            ),
+            format!("job `{MOCK_JOB}` carries `if-no-files-found: error` 0 time(s)"),
+        ),
+        (
+            "the upload guard changed to failure()",
+            CI_YML.replace(
+                "      - name: Keep this shard's mock report\n        if: ${{ !cancelled() }}\n",
+                "      - name: Keep this shard's mock report\n        if: failure()\n",
+            ),
+            format!(
+                "the step carrying `{MOCK_REPORT_ARTIFACT}` in job `{MOCK_JOB}` has no \
+                 `if: ${{{{ !cancelled() }}}}` line"
+            ),
+        ),
+    ];
     // (what, the planted config)
     let config_plants: Vec<(&str, String)> = vec![
         (
@@ -3832,11 +3925,19 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
         10,
         "ten ways of losing mock tests or hiding a failure"
     );
+    assert_eq!(report_plants.len(), 4, "four ways of losing a mock leg's report");
 
     let mut missed: Vec<String> = Vec::new();
     for (what, yml, must_name) in &yml_plants {
         assert_ne!(yml, CI_YML, "{what}: the plant landed");
         let named = mock_gate_wrong(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    for (what, yml, must_name) in &report_plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = mock_report_upload_wrong(yml).join("\n");
         if !named.contains(must_name.as_str()) {
             missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
         }
