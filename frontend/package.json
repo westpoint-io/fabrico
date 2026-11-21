@@ -10,7 +10,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "rm -f test-results/mock-report.json && playwright test",
     "e2e:live": "rm -f test-results/live-report.json && cargo build -p fabrico-host --example dev_render_server && playwright test --config=playwright.live.config.ts",
     "e2e:walk": "rm -f test-results/walk-report.json && cargo build -p fabrico-host --example dev_render_server --example replay_hash && playwright test --config=playwright.walk.config.ts",
     "e2e:capture": "rm -f test-results/capture-report.json && cargo build -p fabrico-host --example dev_render_server && playwright test --config=playwright.capture.config.ts",

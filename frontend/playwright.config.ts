@@ -24,7 +24,10 @@ export default defineConfig({
   // starts. Each CI shard boots its own Vite, and without this the first test on every shard
   // paid for the compile. See e2e/support/warmVite.ts.
   globalSetup: './e2e/support/warmVite.ts',
-  reporter: 'list',
+  // The JSON report holds each test's duration. CI uploads it from every leg as
+  // mock-report-<i>, and the mock verdict reads it. `npm run test:e2e` deletes it
+  // first, so a run that never starts can't leave an old report behind.
+  reporter: [['list'], ['json', { outputFile: 'test-results/mock-report.json' }]],
   use: {
     baseURL: 'http://127.0.0.1:5173',
     // VEC-05: pin the GL backend explicitly rather than trusting the headless
