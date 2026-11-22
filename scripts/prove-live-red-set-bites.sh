@@ -57,6 +57,27 @@
 #   M9  shard 2 with 3 of the fatal spec's 4 tests      -> exit 2
 #   M10 --merge 4 with three paths                      -> exit 2
 #   M11 four valid shards and no CUT                    -> exit 0, cut_failed=0 verdict=OK
+#   L1  a shard that matches its --list                 -> exit 0, LIVE LIST missing=0 (phase 111, D-03)
+#   L2  a listed test missing from the shard's report   -> exit 1, named `not in the report`
+#   L3  a report test that is not on the list           -> exit 2
+#   L4  a shard list read in merge mode                 -> exit 2
+#   L5  the whole list read with --shard                -> exit 2
+#   L6  --shard without --list                          -> exit 2
+#   L7  --merge without --list                          -> exit 2
+#   L8  a list file that is not JSON                    -> exit 2
+#   L9  a list with zero tests                          -> exit 2
+#   L10 a merge whose union matches the whole list      -> exit 0, LIVE LIST missing=0
+#   L11 a merge where one listed test is in no report   -> exit 1, named `not in the report`
+#   L12 single-report mode with a list it does not match -> exit 1, named `not in the report`
+#   P1  a failure inside a step at depth 1              -> exit 1, `step: boot` (VERD-02)
+#   P2  a failure inside a step at depth 2              -> exit 1, `step: outer > inner`
+#   P3  no step, a fabrico-failed-step annotation       -> exit 1, `step: boot beforeEach (in a hook)`
+#   P4  no step and no annotation                       -> exit 1, `no test.step (error at <file>:<line>)`
+#   P5  a nested step title holding a tab and a ›       -> exit 1, the tab printed as a space, › kept
+#
+# Every --shard and --merge case passes a --list, because the checker requires one in those
+# modes: the list is the case's own report(s) with results removed and `config.shard` set to
+# match (make_list), so the S and M cases keep testing only their own rule.
 #
 # Every K case except K1 runs with `--min-tests 1`, so the floor cannot be what turns it
 # red; K1 also passes `--min-tests 4`, the fixture's exact count. Every exit-1 case must
@@ -332,6 +353,27 @@ make_shard() {
     }
 }
 
+# make_list OUT SHARD REPORT...: the list Playwright's `--list --reporter=json` would print for
+# these reports: every suite once (the terminal spec repeats across shard reports, so suites are
+# kept once per file), every test with no results, `config.shard` SHARD ("i/n" or "none").
+make_list() {
+    local out="$1" sh="$2" shj=null
+    shift 2
+    if [ "$sh" != none ]; then
+        shj="{\"current\":${sh%/*},\"total\":${sh#*/}}"
+    fi
+    jq -s --argjson sh "$shj" '
+      ((.[0] | .config.shard = $sh | .errors = []
+          | .stats = { startTime: "2026-10-12T06:59:00.000Z", duration: 1, expected: 0, skipped: 0,
+                       unexpected: 0, flaky: 0 })
+        + { suites: ([ .[].suites[] ] | unique_by(.file)) })
+      | (.. | objects | select(has("tests") and (.tests | type) == "array") | .tests[])
+          |= (.results = [] | .status = "skipped")' "$@" > "$out" || {
+        echo "prove-live-red-set-bites: could not build list $out; COULD NOT PROVE" >&2
+        exit 2
+    }
+}
+
 # S1 to S6: one shard read with --shard. The shard floor at n=4 is 290 / 8 = 36 tests outside
 # the fatal spec.
 #   S1 a valid shard: the base's 4 tests, 40 filler, the fatal spec last -> exit 0
@@ -342,17 +384,21 @@ make_shard() {
 #   S6 the base's 4 tests and 30 filler, 34 in all                         -> exit 2, under 36
 S1="$TMP/s1.json"
 make_shard "$S1" 2 4 40 4 1 "s2-"
-run_case "S1 a valid shard with the fatal spec last" 0 "verdict=OK" --shard 2/4 "$S1"
+S1L="$TMP/s1-list.json"
+make_list "$S1L" 2/4 "$S1"
+run_case "S1 a valid shard with the fatal spec last" 0 "verdict=OK" --shard 2/4 --list "$S1L" "$S1"
 jq --arg tf "$TERMINAL" '(.suites[] | select(.file == $tf) | .specs[0].tests[0].results[0].startTime) = "2026-10-12T07:00:01.000Z"' \
     "$S1" > "$TMP/s2.json"
-run_case "S2 a shard whose fatal spec started early" 2 "must run last" --shard 2/4 "$TMP/s2.json"
+run_case "S2 a shard whose fatal spec started early" 2 "must run last" --shard 2/4 --list "$S1L" "$TMP/s2.json"
 make_shard "$TMP/s3.json" 3 4 40 4 1 "s3-"
-run_case "S3 a shard 3/4 report read as 2/4" 2 "config.shard 3/4, but --shard asked for 2/4" --shard 2/4 "$TMP/s3.json"
-run_case "S4 --shard with --min-tests" 2 "cannot be combined" --shard 2/4 --min-tests 1 "$S1"
+run_case "S3 a shard 3/4 report read as 2/4" 2 "config.shard 3/4, but --shard asked for 2/4" --shard 2/4 --list "$S1L" "$TMP/s3.json"
+run_case "S4 --shard with --min-tests" 2 "cannot be combined" --shard 2/4 --min-tests 1 --list "$S1L" "$S1"
 make_shard "$TMP/s5.json" 2 4 40 0 1 "s2-"
-run_case "S5 a shard without the fatal spec" 2 "$TERMINAL" --shard 2/4 "$TMP/s5.json"
+make_list "$TMP/s5-list.json" 2/4 "$TMP/s5.json"
+run_case "S5 a shard without the fatal spec" 2 "$TERMINAL" --shard 2/4 --list "$TMP/s5-list.json" "$TMP/s5.json"
 make_shard "$TMP/s6.json" 2 4 30 4 1 "s2-"
-run_case "S6 a shard below its floor" 2 "below the shard floor of 36" --shard 2/4 "$TMP/s6.json"
+make_list "$TMP/s6-list.json" 2/4 "$TMP/s6.json"
+run_case "S6 a shard below its floor" 2 "below the shard floor of 36" --shard 2/4 --list "$TMP/s6-list.json" "$TMP/s6.json"
 
 # M1 to M11: four shards read with --merge 4. The valid set V1 to V4: 73 tests outside the fatal
 # spec in each shard (shard 3 holds the base's 4 tests, the failed CUT among them, and 69
@@ -373,40 +419,107 @@ make_shard "$V1" 1 4 73 4 0 "v1-"
 make_shard "$V2" 2 4 73 4 0 "v2-"
 make_shard "$V3" 3 4 69 4 1 "v3-"
 make_shard "$V4" 4 4 73 4 0 "v4-"
+VL="$TMP/v-list.json"
+make_list "$VL" none "$V1" "$V2" "$V3" "$V4"
 run_case "M1 four valid shards, the CUT failed in shard 3" 0 \
     "LIVE RED SET total=296 passed=295 failed=1 skipped=0 did_not_run=0 flaky=0 cut_failed=1 verdict=OK" \
-    --merge 4 "$V1" "$V2" "$V3" "$V4"
+    --merge 4 --list "$VL" "$V1" "$V2" "$V3" "$V4"
 run_case "M2 shard 3's report is missing" 2 "m2-shard-3-never-uploaded.json" \
-    --merge 4 "$V1" "$V2" "$TMP/m2-shard-3-never-uploaded.json" "$V4"
+    --merge 4 --list "$VL" "$V1" "$V2" "$TMP/m2-shard-3-never-uploaded.json" "$V4"
 run_case "M3 shard 2's report at position 3" 2 "shard 3: check-live-red-set: report '$V2' carries config.shard 2/4, but --shard asked for 3/4" \
-    --merge 4 "$V1" "$V2" "$V2" "$V4"
+    --merge 4 --list "$VL" "$V1" "$V2" "$V2" "$V4"
 for k in 1 2 4; do make_shard "$TMP/m4-$k.json" "$k" 4 60 4 0 "m4-$k-"; done
 make_shard "$TMP/m4-3.json" 3 4 56 4 1 "m4-3-"
+make_list "$TMP/m4-list.json" none "$TMP/m4-1.json" "$TMP/m4-2.json" "$TMP/m4-3.json" "$TMP/m4-4.json"
 run_case "M4 four shards below the summed floor" 2 "244 in all, below the floor of 290" \
-    --merge 4 "$TMP/m4-1.json" "$TMP/m4-2.json" "$TMP/m4-3.json" "$TMP/m4-4.json"
+    --merge 4 --list "$TMP/m4-list.json" "$TMP/m4-1.json" "$TMP/m4-2.json" "$TMP/m4-3.json" "$TMP/m4-4.json"
 make_shard "$TMP/m5-4.json" 4 4 73 0 0 "v4-"
 run_case "M5 shard 4 without the fatal spec" 2 "shard 4: check-live-red-set: the report holds no test from $TERMINAL" \
-    --merge 4 "$V1" "$V2" "$V3" "$TMP/m5-4.json"
+    --merge 4 --list "$VL" "$V1" "$V2" "$V3" "$TMP/m5-4.json"
 M6_TITLE='shard two filler that failed'
 jq --arg t "$M6_TITLE" '(.suites[] | select(.file == "v2-filler.spec.ts") | .specs[5]) |=
     (.title = $t | .ok = false | .tests[0].status = "unexpected" | .tests[0].results[0].status = "failed")' \
     "$V2" > "$TMP/m6-2.json"
-run_case "M6 a failed test in shard 2" 1 "$M6_TITLE" --merge 4 "$V1" "$TMP/m6-2.json" "$V3" "$V4"
+run_case "M6 a failed test in shard 2" 1 "$M6_TITLE" --merge 4 --list "$VL" "$V1" "$TMP/m6-2.json" "$V3" "$V4"
 jq '.errors = [ { message: "Timed out waiting 5400s for the test suite to run" } ]' "$V4" > "$TMP/m7-4.json"
 run_case "M7 shard 4 hit the global timeout" 2 "shard 4:   top-level error: Timed out waiting 5400s for the test suite to run" \
-    --merge 4 "$V1" "$V2" "$V3" "$TMP/m7-4.json"
+    --merge 4 --list "$VL" "$V1" "$V2" "$V3" "$TMP/m7-4.json"
 jq '(.suites[] | select(.file == "v2-filler.spec.ts") | .specs[0].id) = "v1-0"' "$V2" > "$TMP/m8-2.json"
-run_case "M8 one test id in two shards" 2 "(shards 1 and 2)" --merge 4 "$V1" "$TMP/m8-2.json" "$V3" "$V4"
+run_case "M8 one test id in two shards" 2 "(shards 1 and 2)" --merge 4 --list "$VL" "$V1" "$TMP/m8-2.json" "$V3" "$V4"
 make_shard "$TMP/m9-2.json" 2 4 73 3 0 "v2-"
 run_case "M9 shard 2 ran 3 of the fatal spec's 4 tests" 2 "terminal=4,3,4,4" \
-    --merge 4 "$V1" "$TMP/m9-2.json" "$V3" "$V4"
-run_case "M10 --merge 4 with three paths" 2 "needs 4 report paths" --merge 4 "$V1" "$V2" "$V3"
+    --merge 4 --list "$VL" "$V1" "$TMP/m9-2.json" "$V3" "$V4"
+run_case "M10 --merge 4 with three paths" 2 "needs 4 report paths" --merge 4 --list "$VL" "$V1" "$V2" "$V3"
 make_shard "$TMP/m11-3.json" 3 4 73 4 0 "v3-"
+make_list "$TMP/m11-list.json" none "$V1" "$V2" "$TMP/m11-3.json" "$V4"
 run_case "M11 four valid shards and no CUT" 0 \
     "LIVE RED SET total=296 passed=296 failed=0 skipped=0 did_not_run=0 flaky=0 cut_failed=0 verdict=OK" \
-    --merge 4 "$V1" "$V2" "$TMP/m11-3.json" "$V4"
+    --merge 4 --list "$TMP/m11-list.json" "$V1" "$V2" "$TMP/m11-3.json" "$V4"
 
-DECLARED_TOTAL=40
+# L1 to L12: the exact list (phase 111, D-03, VERD-01).
+run_case "L1 a shard that matches its list" 0 "LIVE LIST ids=48 reported=48 missing=0" \
+    --shard 2/4 --list "$S1L" "$S1"
+jq --arg t "$LEG2" 'del(.. | objects | select(has("specs")) | .specs[] | select(.title == $t))' "$S1" > "$TMP/l2.json"
+run_case "L2 a listed test missing from the report" 1 \
+    "RED [not in the report] $SPEC:120 > one board, all five > $LEG2" \
+    --shard 2/4 --list "$S1L" "$TMP/l2.json"
+jq --arg t "$LEG2" 'del(.. | objects | select(has("specs")) | .specs[] | select(.title == $t))' "$S1L" > "$TMP/l3-list.json"
+run_case "L3 a report test that is not on the list" 2 "not on the list" \
+    --shard 2/4 --list "$TMP/l3-list.json" "$S1"
+run_case "L4 a shard list read in merge mode" 2 "carries config.shard 2/4, but this mode needs the whole list" \
+    --merge 4 --list "$S1L" "$V1" "$V2" "$V3" "$V4"
+run_case "L5 the whole list read with --shard" 2 "carries config.shard none, but --shard asked for 2/4" \
+    --shard 2/4 --list "$VL" "$S1"
+run_case "L6 --shard without --list" 2 "--shard needs --list" --shard 2/4 "$S1"
+run_case "L7 --merge without --list" 2 "--merge needs --list" --merge 4 "$V1" "$V2" "$V3" "$V4"
+printf 'Listing tests:\n  [live] > 01-default-scene.spec.ts\n' > "$TMP/l8-list.json"
+run_case "L8 a list file that is not JSON" 2 "is not a JSON object" --shard 2/4 --list "$TMP/l8-list.json" "$S1"
+jq '.suites = []' "$S1L" > "$TMP/l9-list.json"
+run_case "L9 a list with zero tests" 2 "holds zero tests" --shard 2/4 --list "$TMP/l9-list.json" "$S1"
+run_case "L10 a merge whose union matches the whole list" 0 "LIVE LIST ids=296 reported=296 missing=0" \
+    --merge 4 --list "$VL" "$V1" "$V2" "$V3" "$V4"
+jq '(.suites[] | select(.file == "v2-filler.spec.ts") | .specs) |= del(.[5])' "$V2" > "$TMP/l11-2.json"
+run_case "L11 a merge where one listed test is in no report" 1 \
+    "RED [not in the report] v2-filler.spec.ts:6 > t5" \
+    --merge 4 --list "$VL" "$V1" "$TMP/l11-2.json" "$V3" "$V4"
+make_list "$TMP/l12-list.json" none "$FULL"
+jq '(.suites[] | select(.file == "filler.spec.ts") | .specs) |= del(.[3])' "$FULL" > "$TMP/l12.json"
+run_case "L12 single-report mode with a list it does not match" 1 \
+    "RED [not in the report] filler.spec.ts:4 > t3" \
+    --list "$TMP/l12-list.json" "$TMP/l12.json"
+
+# P1 to P5: the step a failed test died in (VERD-02). Leg 2 fails; its last result carries
+# STEPS, the test carries ANNOTATIONS, and the result's error location is LOC (or null).
+# fail_with OUT STEPS ANNOTATIONS LOC
+fail_with() {
+    jq --arg t "$LEG2" --argjson steps "$2" --argjson ann "$3" --argjson loc "$4" '
+      (.. | objects | select(has("specs")) | .specs[] | select(.title == $t)) |=
+        (.ok = false | .tests[0] |=
+          (.status = "unexpected" | .annotations = $ann
+           | .results = [ { workerIndex: 0, parallelIndex: 0, status: "failed", duration: 900,
+                            errors: [ { message: "Error: planted" } ], stdout: [], stderr: [], retry: 0,
+                            startTime: "2026-10-12T07:00:00.000Z", annotations: $ann, attachments: [],
+                            steps: $steps }
+                          + (if $loc == null then {} else { errorLocation: $loc, error: { message: "Error: planted", location: $loc } } end) ]))' \
+        "$BASE" > "$1" || {
+        echo "prove-live-red-set-bites: could not build step fixture $1; COULD NOT PROVE" >&2
+        exit 2
+    }
+}
+ERR='{"message":"Error: planted"}'
+LOC='{"file":"/home/runner/work/fabrico/fabrico/frontend/e2e-live/77-one-board-all-five.live.spec.ts","line":131,"column":7}'
+fail_with "$TMP/p1.json" "[{\"title\":\"boot\",\"duration\":10,\"error\":$ERR,\"steps\":[]}]" '[]' "$LOC"
+run_case "P1 a failure inside a step at depth 1" 1 "$LEG2  step: boot" --min-tests 1 "$TMP/p1.json"
+fail_with "$TMP/p2.json" "[{\"title\":\"boot\",\"duration\":10,\"steps\":[]},{\"title\":\"outer\",\"duration\":10,\"error\":$ERR,\"steps\":[{\"title\":\"before\",\"duration\":1,\"steps\":[]},{\"title\":\"inner\",\"duration\":1,\"error\":$ERR,\"steps\":[]}]}]" '[]' "$LOC"
+run_case "P2 a failure inside a step at depth 2" 1 "$LEG2  step: outer > inner" --min-tests 1 "$TMP/p2.json"
+fail_with "$TMP/p3.json" '[]' '[{"type":"fabrico-boot","description":"0:3 900 400 beforeEach"},{"type":"fabrico-failed-step","description":"boot beforeEach"}]' "$LOC"
+run_case "P3 no step, a fabrico-failed-step annotation" 1 "$LEG2  step: boot beforeEach (in a hook)" --min-tests 1 "$TMP/p3.json"
+fail_with "$TMP/p4.json" '[]' '[]' "$LOC"
+run_case "P4 no step and no annotation" 1 "$LEG2  no test.step (error at 77-one-board-all-five.live.spec.ts:131)" --min-tests 1 "$TMP/p4.json"
+fail_with "$TMP/p5.json" "[{\"title\":\"outer\",\"duration\":10,\"error\":$ERR,\"steps\":[{\"title\":\"wait\\tfor \\u203a the belt\",\"duration\":1,\"error\":$ERR,\"steps\":[]}]}]" '[]' "$LOC"
+run_case "P5 a step title with a tab and a ›" 1 "$LEG2  step: outer > wait for › the belt" --min-tests 1 "$TMP/p5.json"
+
+DECLARED_TOTAL=57
 if [ "$executed" -ne "$DECLARED_TOTAL" ]; then
     failures+=("ran $executed cases, declared $DECLARED_TOTAL")
 fi

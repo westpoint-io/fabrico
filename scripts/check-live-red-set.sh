@@ -64,6 +64,44 @@
 #        - a --shard report whose `config.shard` is missing or is not i/n
 #        - --merge <n> with n under 2, with a path count other than n, given twice, or
 #          together with --shard or --min-tests; and every merge rule below
+#        - --shard or --merge without --list, or --list given twice or with an empty path
+#        - the list is missing, empty or not JSON, has no `suites` array, carries top-level
+#          `errors`, holds zero tests, or holds one key twice
+#        - the list's `config.shard` is not i/n with --shard, or not null with --merge or in
+#          single-report mode; in single-report mode with a list, a report whose
+#          `config.shard` is not null
+#        - a report test that is not on the list (the report and the list come from
+#          different trees or commands)
+#
+# THE EXACT LIST (`--list <list.json>`, phase 111, D-03, VERD-01). The floor alone lets tests
+# vanish: 341 tests were listed at 3e64668 against MIN_TESTS=290, so about 50 could go missing
+# with the verdict still OK. So the report is also compared, test by test, with the suite's own
+# `npx playwright test --config=playwright.live.config.ts --list --reporter=json`, made with the
+# same --shard as the run (or without one for --merge and a whole run). A test's key on both
+# sides is `<spec.id> @ <projectName>`. Then:
+#   - a listed test with no row in the report (or in any report of a merge) is exit 1, printed
+#     as `RED [not in the report] <file>:<line> > <describes> > <title>`, named from the list,
+#     and counted into did_not_run (total counts the report's tests only);
+#   - a report test that isn't on the list is exit 2;
+#   - the list must be the right kind: `config.shard` i/n with --shard, null with --merge and in
+#     single-report mode, where the report must be unsharded too.
+# --list is REQUIRED with --shard and --merge, the two modes CI runs. It is optional in
+# single-report mode, so a local full pass (the visuals session's closing line) and a partial
+# run with --min-tests keep working without one, and compared whenever it is given. MIN_TESTS,
+# the shard floor, the CUT rule, the terminal rules and every status rule stay as the second
+# guard behind the list: a list made with --grep or one spec matches its own report exactly.
+# When a list is given, the line before the summary reads:
+#   LIVE LIST ids=<listed tests> reported=<listed tests with a row> missing=<listed tests without>
+#
+# THE STEP A FAILED TEST DIED IN (VERD-02). Every `RED [failed: ...]` line ends with
+# `  step: <chain>`: the innermost failed `test.step` of the last result, followed from the top
+# through the one child that carries an error, titles joined with ` > ` (tabs and newlines as
+# spaces, every other character kept). Playwright keeps no step that ran inside a hook, so a
+# boot that failed in a `beforeEach` leaves none; waitForAppReady (e2e-live/support/oracle.ts)
+# then pushes a `fabrico-failed-step` annotation reading `boot <scope>`, printed as
+# `step: boot <scope> (in a hook)` (`(from the boot annotation)` when the scope is body). With
+# neither, the line reads `no test.step (error at <file>:<line>)` from the last result's error
+# location, or `no test.step`.
 #
 # A STALE REPORT. This script cannot tell a report from this run from one an earlier run
 # left behind. `npm run e2e:live` therefore deletes test-results/live-report.json before it
@@ -97,9 +135,12 @@
 #   LIVE SHARDS n=<n> live=<sum> terminal=<count per shard>
 #
 # USAGE:
-#   check-live-red-set.sh [--min-tests <n>] <report.json>
-#   check-live-red-set.sh --shard <i>/<n> <report.json>
-#   check-live-red-set.sh --merge <n> <report-1.json> ... <report-n.json>
+#   check-live-red-set.sh [--min-tests <n>] [--list <whole-list.json>] <report.json>
+#   check-live-red-set.sh --shard <i>/<n> --list <shard-list.json> <report.json>
+#   check-live-red-set.sh --merge <n> --list <whole-list.json> <report-1.json> ... <report-n.json>
+#
+# scripts/prove-live-red-set-bites.sh runs this over hand-made reports and lists and shows each
+# rule red.
 
 set -u
 
@@ -149,9 +190,19 @@ shard=""
 shard_i=0
 shard_n=0
 merge_n=""
+list=""
+list_given=0
 paths=()
 while [ $# -gt 0 ]; do
     case "$1" in
+        --list)
+            [ $# -ge 2 ] || unmeasured "--list needs a path"
+            [ "$list_given" = 0 ] || unmeasured "--list given twice ('$list', '$2')"
+            list="$2"
+            list_given=1
+            [ -n "$list" ] || unmeasured "--list names an empty path"
+            shift 2
+            ;;
         --min-tests)
             [ $# -ge 2 ] || unmeasured "--min-tests needs a number"
             case "$2" in
@@ -211,6 +262,15 @@ if [ -n "$shard" ] && [ "$min_given" = 1 ]; then
     unmeasured "--shard and --min-tests cannot be combined: a shard has its own floor and keeps the terminal checks"
 fi
 
+# THE LIST IS REQUIRED IN THE TWO MODES CI RUNS. Without it a shard or a merge could lose tests
+# down to the floor and still read OK.
+if [ -n "$shard" ] && [ "$list_given" = 0 ]; then
+    unmeasured "--shard needs --list <shard-list.json>, the exact list made with the same --shard as the run"
+fi
+if [ -n "$merge_n" ] && [ "$list_given" = 0 ]; then
+    unmeasured "--merge needs --list <whole-list.json>, the exact list made without --shard"
+fi
+
 if [ -n "$merge_n" ]; then
     [ -z "$shard" ] || unmeasured "--merge and --shard cannot be combined: the merge grades shard i/n itself"
     [ "$min_given" = 0 ] || unmeasured "--merge and --min-tests cannot be combined: the merge floor is MIN_TESTS"
@@ -218,7 +278,7 @@ if [ -n "$merge_n" ]; then
         || unmeasured "--merge $merge_n needs $merge_n report paths, one per shard in shard order, got ${#paths[@]}"
     report=""
 else
-    [ "${#paths[@]}" -gt 0 ] || unmeasured "no report path given (usage: check-live-red-set.sh [--min-tests <n> | --shard <i>/<n>] <report.json>, or --merge <n> <report-1.json> ... <report-n.json>)"
+    [ "${#paths[@]}" -gt 0 ] || unmeasured "no report path given (usage: check-live-red-set.sh [--min-tests <n>] [--list <list.json>] <report.json>, --shard <i>/<n> --list <list.json> <report.json>, or --merge <n> --list <list.json> <report-1.json> ... <report-n.json>)"
     [ "${#paths[@]}" -eq 1 ] || unmeasured "more than one report given ('${paths[0]}', '${paths[1]}')"
     report="${paths[0]}"
 fi
@@ -229,11 +289,29 @@ terminal_json="$(printf '%s\n' "${TERMINAL_FILES[@]}" | jq -R . | jq -s -c .)" \
     || unmeasured "could not hand TERMINAL_FILES to jq"
 
 # report_rows REPORT: one tab-separated row per test: category, is-CUT, is-terminal (its file is
-# in TERMINAL_FILES), identity (spec id and project name), name, last result status. Every mode
-# classifies through this one function.
+# in TERMINAL_FILES), identity (spec id and project name), name, last result status, and the step
+# text for a failed test (`-` for any other). Every mode classifies through this one function, and
+# list_rows reads a list through it too, so a key means the same on both sides.
 report_rows() {
     jq -r --arg cut "$CUT_PATTERN" --argjson tf "$terminal_json" '
       def clean: tostring | gsub("[\t\r\n]"; " ");
+      # The innermost failed test.step: from the top, follow the one child that has an error.
+      def fpath: (map(select(.error))) as $e
+        | if ($e | length) == 1 then [$e[0].title] + (($e[0].steps // []) | fpath) else [] end;
+      def shortfile: clean | if test("/e2e-live/") then sub("^.*/e2e-live/"; "") else (split("/") | last) end;
+      def steptext($t; $r):
+        ((($r.steps // []) | fpath) | map(clean)) as $p
+        | if ($p | length) > 0 then "step: " + ($p | join(" > "))
+          else
+            ( [ (($r.annotations // []) + ($t.annotations // []))[]
+                | select(.type == "fabrico-failed-step") | (.description // "" | clean) ] | first ) as $a
+            | ( $r.errorLocation // $r.error.location // ((($r.errors // [])[0]) // {}).location ) as $loc
+            | if $a != null and $a != "" then
+                "step: " + $a + (if ($a | test(" body$")) then " (from the boot annotation)" else " (in a hook)" end)
+              elif $loc != null and $loc.file != null then
+                "no test.step (error at " + ($loc.file | shortfile) + ":" + ($loc.line | clean) + ")"
+              else "no test.step" end
+          end;
       def walk_tests(chain):
         ( (.specs // [])[] as $s
           | ($s.tests // [])[] as $t
@@ -251,11 +329,92 @@ report_rows() {
                 + " @ " + (($t.projectName // "") | clean) ),
               ( ($s.file | clean) + ":" + ($s.line | clean) + " > "
                 + ((chain + [$s.title]) | map(clean) | join(" > ")) ),
-              ( ($rs | last | .status) // "none" | clean ) ]
+              ( ($rs | last | .status) // "none" | clean ),
+              ( if ($rs | length) > 0 and $t.status == "unexpected" then steptext($t; ($rs | last)) else "-" end ) ]
           | join("\t") ),
         ( (.suites // [])[] as $su | $su | walk_tests(chain + [$su.title]) );
       .suites[] | walk_tests([])
     ' "$1" 2>/dev/null
+}
+
+# list_rows LIST: one tab-separated row per listed test: key (spec id and project name) and name,
+# read through report_rows so the key is built by the same code as a report's.
+list_rows() {
+    local r
+    r="$(report_rows "$1")" || return 1
+    awk -F'\t' 'NF { print $4 "\t" $5 }' <<< "$r"
+}
+
+# check_json WHAT PATH: refuse a file that is missing, empty, not a JSON object, without `suites`,
+# or with top-level errors.
+check_json() {
+    local what="$1" f="$2" errs
+    [ -e "$f" ] || unmeasured "$what '$f' does not exist"
+    [ -s "$f" ] || unmeasured "$what '$f' is empty"
+    jq -e 'type == "object"' "$f" >/dev/null 2>&1 || unmeasured "$what '$f' is not a JSON object"
+    jq -e '(.suites | type) == "array"' "$f" >/dev/null 2>&1 || unmeasured "$what '$f' has no suites array"
+    errs="$(jq -r '(.errors // []) | length' "$f" 2>/dev/null)" || unmeasured "cannot read the errors of $what '$f'"
+    if [ "$errs" != "0" ]; then
+        jq -r '.errors[] | "  top-level error: " + ((.message // tostring) | split("\n")[0])' "$f" >&2
+        unmeasured "$what '$f' carries $errs top-level error(s)"
+    fi
+}
+
+# shard_of PATH: the file's config.shard as "i/n", or "none".
+shard_of() {
+    jq -r 'if (.config.shard | type) == "object"
+           then "\(.config.shard.current)/\(.config.shard.total)" else "none" end' "$1" 2>/dev/null
+}
+
+# load_list WANT: check the --list file, which must carry config.shard WANT ("i/n" or "none"),
+# and set list_keys (key TAB name per listed test) and list_count.
+list_keys=""
+list_count=0
+load_list() {
+    local want="$1" got dup
+    check_json "list" "$list"
+    got="$(shard_of "$list")" || unmeasured "cannot read the list's config.shard"
+    if [ "$got" != "$want" ]; then
+        if [ "$want" = none ]; then
+            unmeasured "list '$list' carries config.shard $got, but this mode needs the whole list (made without --shard)"
+        else
+            unmeasured "list '$list' carries config.shard $got, but --shard asked for $want: make the list with the same --shard as the run"
+        fi
+    fi
+    list_keys="$(list_rows "$list")" || unmeasured "jq could not walk the list's suites"
+    list_count="$(grep -c . <<< "$list_keys")"
+    [ "$list_count" -gt 0 ] || unmeasured "list '$list' holds zero tests"
+    dup="$(awk -F'\t' 'NF { if (seen[$1]++ == 1) print $2 }' <<< "$list_keys")"
+    if [ -n "$dup" ]; then
+        while IFS= read -r d; do echo "check-live-red-set: listed twice: $d" >&2; done <<< "$dup"
+        unmeasured "list '$list' holds a key twice"
+    fi
+}
+
+# list_compare KEYS: KEYS holds every reported key, one per line. A report key off the list is
+# exit 2; each listed key not in KEYS prints `RED [not in the report] <name>` and counts as an
+# offender and as did_not_run. Then the LIVE LIST line.
+list_missing=0
+list_compare() {
+    local extra missing_names reported
+    extra="$(awk -F'\t' 'NR == FNR { if (NF) listed[$1] = 1; next } NF && !($1 in listed) { print $1 }' \
+        <(printf '%s\n' "$list_keys") <(printf '%s\n' "$1") | sort -u)"
+    if [ -n "$extra" ]; then
+        while IFS= read -r e; do echo "NOT ON THE LIST $e"; done <<< "$extra"
+        unmeasured "$(grep -c . <<< "$extra") reported test(s) are not on the list: the report and the list come from different trees or commands"
+    fi
+    missing_names="$(awk -F'\t' 'NR == FNR { if (NF) seen[$1] = 1; next } NF && !($1 in seen) { print $2 }' \
+        <(printf '%s\n' "$1") <(printf '%s\n' "$list_keys"))"
+    if [ -n "$missing_names" ]; then
+        while IFS= read -r m; do
+            echo "RED [not in the report] $m"
+            list_missing=$((list_missing + 1))
+        done <<< "$missing_names"
+    fi
+    offenders=$((offenders + list_missing))
+    did_not_run=$((did_not_run + list_missing))
+    reported=$((list_count - list_missing))
+    echo "LIVE LIST ids=$list_count reported=$reported missing=$list_missing"
 }
 
 live_count=0
@@ -263,8 +422,8 @@ terminal_count=0
 
 # tally ROWS: count every row into the totals above and print each offender.
 tally() {
-    local cat is_cut is_term name last label
-    while IFS=$'\t' read -r cat is_cut is_term _ name last; do
+    local cat is_cut is_term name last step label
+    while IFS=$'\t' read -r cat is_cut is_term _ name last step; do
         [ -n "$cat" ] || continue
         total=$((total + 1))
         if [ "$is_term" = 1 ]; then
@@ -286,7 +445,7 @@ tally() {
                     cut_failed=$((cut_failed + 1))
                     echo "CUT failed as declared: $name"
                 else
-                    echo "RED [failed: $last] $name"
+                    echo "RED [failed: $last] $name  $step"
                     offenders=$((offenders + 1))
                 fi
                 ;;
@@ -339,6 +498,13 @@ tally() {
 #     name), so a repeated shard cannot pad the floor;
 #   - the tests outside TERMINAL_FILES summed over the shards, plus one shard's terminal
 #     tests, reach MIN_TESTS.
+#   - with every shard graded, the union of the reports' keys is compared with the whole --list
+#     (the terminal tests repeat in every shard report, which is expected): a listed test in no
+#     report is exit 1, named, and a report test off the list is exit 2.
+# The inner `--shard` call needs a list too, and the merge has only the whole one, so it hands
+# each shard a list written from that shard's own report under `mktemp -d` (results stripped).
+# That inner compare can't find anything missing by construction; the union compare above is the
+# one that can, and its LIVE LIST line is the only one the merge prints.
 # The cross-shard rules and the summed counts read the shards that could be graded (exit 0
 # or 1); one that could not is already exit 2. Exit precedence: any shard exit 2 or any broken cross-shard rule is
 # 2, otherwise any shard exit 1 is 1, otherwise 0. The CUT count is not fixed: a run with no
@@ -350,6 +516,11 @@ tally() {
 # (its worst result across the shards).
 if [ -n "$merge_n" ]; then
     self="${BASH_SOURCE[0]}"
+    load_list none
+    merge_tmp="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/check-live-red-set.XXXXXX")" \
+        || unmeasured "mktemp failed for the merge's shard lists"
+    trap 'rm -rf -- "$merge_tmp"' EXIT
+    all_keys=""
     any_red=0
     any_unmeasured=0
     broken=()
@@ -362,9 +533,13 @@ if [ -n "$merge_n" ]; then
     i=0
     for p in "${paths[@]}"; do
         i=$((i + 1))
-        out="$(bash "$self" --shard "$i/$merge_n" "$p" 2>&1)"
+        # This shard's own list, from its own report; a report jq can't read leaves no file, and
+        # the inner call then refuses the report before it reads the list.
+        jq '.errors = [] | (.. | objects | select(has("tests") and (.tests | type) == "array") | .tests[]) |= (.results = [])' \
+            "$p" > "$merge_tmp/list-$i.json" 2>/dev/null || rm -f -- "$merge_tmp/list-$i.json"
+        out="$(bash "$self" --shard "$i/$merge_n" --list "$merge_tmp/list-$i.json" "$p" 2>&1)"
         rc=$?
-        printf '%s\n' "$out" | sed "s/^/shard $i: /"
+        printf '%s\n' "$out" | grep -v '^LIVE LIST ' | sed "s/^/shard $i: /"
         case "$rc" in
             0) ;;
             1) any_red=1 ;;
@@ -376,6 +551,7 @@ if [ -n "$merge_n" ]; then
             broken+=("shard $i graded, but its report could not be read again")
             continue
         }
+        all_keys="$all_keys$(awk -F'\t' 'NF { print $4 }' <<< "$rows")"$'\n'
         shard_live="$(awk -F'\t' '$3 == 0' <<< "$rows")"
         shard_term="$(awk -F'\t' '$3 == 1' <<< "$rows")"
         n_term="$(awk -F'\t' '$3 == 1 { n++ } END { print n + 0 }' <<< "$rows")"
@@ -414,6 +590,13 @@ if [ -n "$merge_n" ]; then
     } END { for (j = 1; j <= n; j++) print row[order[j]] }' <<< "$term_rows")"
     tally "$live_rows$term_once" > /dev/null
 
+    # THE UNION COMPARE, only when every shard was graded: with one shard exit 2 its tests would
+    # all read as missing, and the verdict is already UNMEASURED.
+    if [ "$any_unmeasured" = 0 ] && [ "${#broken[@]}" -eq 0 ]; then
+        list_compare "$all_keys"
+        [ "$list_missing" -eq 0 ] || any_red=1
+    fi
+
     echo "LIVE SHARDS n=$merge_n live=$live_count terminal=$term_list"
     if [ "$any_unmeasured" = 0 ] && [ "${#broken[@]}" -eq 0 ]; then
         floor_count=$((live_count + ${first_term:-0}))
@@ -429,7 +612,7 @@ if [ -n "$merge_n" ]; then
         unmeasured "the merge over $merge_n shards could not be made"
     fi
     if [ "$any_red" = 1 ]; then
-        echo "check-live-red-set: RED, a shard has offender(s) beyond the declared CUTs (its lines above)"
+        echo "check-live-red-set: RED, a shard has offender(s) beyond the declared CUTs, or a listed test is in no report (the lines above)"
         summary RED
         exit 1
     fi
@@ -464,10 +647,26 @@ if [ -n "$shard" ]; then
         || unmeasured "report '$report' carries config.shard $got, but --shard asked for $shard"
 fi
 
+# THE LIST, when given (always with --shard): the right kind, and in single-report mode the
+# report must be a whole run too.
+if [ "$list_given" = 1 ]; then
+    if [ -n "$shard" ]; then
+        load_list "$shard"
+    else
+        got="$(shard_of "$report")" || unmeasured "cannot read the report's config.shard"
+        [ "$got" = none ] \
+            || unmeasured "report '$report' carries config.shard $got, but single-report mode with --list reads a whole run (grade a shard with --shard)"
+        load_list none
+    fi
+fi
+
 rows="$(report_rows "$report")" || unmeasured "jq could not walk the report's suites"
 tally "$rows"
 
 [ "$total" -gt 0 ] || unmeasured "the report holds zero tests"
+if [ "$list_given" = 1 ]; then
+    list_compare "$(awk -F'\t' 'NF { print $4 }' <<< "$rows")"
+fi
 if [ -n "$shard" ]; then
     # THE SHARD FLOOR: MIN_TESTS / (2 * n), over the tests outside TERMINAL_FILES, because every
     # shard carries its own copy of the terminal spec and those copies must not pad the count.
