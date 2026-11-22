@@ -9,9 +9,12 @@ import { collectCaptureFacts } from './support/captureFacts';
 import {
   CAPTURE_BOOTS,
   CAPTURE_ROOT,
+  CAPTURE_WAIT_OVERSHOOT_MS,
   CAPTURE_ZOOMS,
   bootId,
+  captureBootCeilingMs,
   captureDir,
+  captureLimitProblems,
   zoomId,
   type CaptureEntry,
   type CaptureManifest,
@@ -50,6 +53,16 @@ import {
 // after zoom 4. Each boot logs `CAPTURE_BOOT ... uncoveredMs=` and each zoom `CAPTURE_TILES ...
 // uncoveredMsMax=`, the numbers the two shares are derived from, so a CI log is enough to check them.
 //
+// THE CEILING. Those budgets are sized for a far slower runner than any seen, so on their own they
+// let a boot's limit grow to about 27 minutes, and a wedged browser late in a boot burned all of it.
+// So the limit is also held under the boot's ceiling (`CAPTURE_BOOT_CEILING_MS`: its slowest
+// measured wall time, doubled), less `CAPTURE_WAIT_OVERSHOOT_MS` for the one wait that may be
+// running when the limit is next held. `hold` does that after every step that can add a budget, and
+// fails when one stretch of waits added more than the overshoot, so the ceiling can't be crossed by
+// more than the test allows for. The ceilings and the rest of the run fit inside the config's
+// `globalTimeout` (`captureLimitProblems`, checked below when this file loads), so a wedged boot hits
+// its own limit, which names it, before the global one, which doesn't.
+//
 // No capture is compared with a stored image. Every check is a measured property, graded in the
 // grading project. This test fails only on broken plumbing: a page error, a render loop that
 // stopped, a zoom that didn't land, a pan that didn't land, a canvas backing store that isn't its
@@ -86,12 +99,39 @@ const TILE_WORK = 'the zoom or pan and its settle, the facts read, decode, measu
  */
 const BOOT_WORK_BUDGET_MS = 180_000;
 
+// The ceilings must fit the global limit before any boot runs.
+const LIMIT_PROBLEMS = captureLimitProblems();
+if (LIMIT_PROBLEMS.length > 0) throw new Error(`board.capture.ts: the capture time limits don't add up: ${LIMIT_PROBLEMS.join('; ')}`);
+
 for (const boot of CAPTURE_BOOTS) {
   test(`capture dpr=${boot.dpr} aa=${boot.aa}`, async ({ browser }, testInfo) => {
     const id = bootId(boot);
-    addWorkBudget(BOOT_WORK_BUDGET_MS, `${id}: open, load the demo, reload and pause`);
-    const bootStart = Date.now();
-    const limitAtBootStart = testInfo.timeout;
+    const ceilingMs = captureBootCeilingMs(boot);
+    const heldCap = ceilingMs - CAPTURE_WAIT_OVERSHOOT_MS;
+    testInfo.annotations.push({ type: 'capture-ceiling', description: `${id}: the limit is held at or under ${heldCap} ms, the boot's ${ceilingMs} ms ceiling less ${CAPTURE_WAIT_OVERSHOOT_MS} ms for one wait` });
+    // `heldAt` is the limit as the last hold left it, so `testInfo.timeout - heldAt` is what the waits
+    // since then added. `waitsGranted` sums those, unclamped, for the logs' uncovered-time figures.
+    let heldAt = testInfo.timeout;
+    let waitsGranted = 0;
+    let waitStretchMaxMs = 0;
+    const hold = (where: string) => {
+      const grown = testInfo.timeout - heldAt;
+      waitsGranted += grown;
+      waitStretchMaxMs = Math.max(waitStretchMaxMs, grown);
+      expect(grown, `${where}: the waits since the last hold added ${grown} ms to the limit, more than the ${CAPTURE_WAIT_OVERSHOOT_MS} ms the ceiling keeps for them`).toBeLessThanOrEqual(CAPTURE_WAIT_OVERSHOOT_MS);
+      if (testInfo.timeout > heldCap) testInfo.setTimeout(heldCap);
+      heldAt = testInfo.timeout;
+    };
+    /** Add a measured work share, then hold the limit under the ceiling. */
+    const share = (ms: number, reason: string) => {
+      addWorkBudget(ms, reason);
+      heldAt += ms;
+      hold(reason);
+    };
+    share(BOOT_WORK_BUDGET_MS, `${id}: open, load the demo, reload and pause`);
+    const testStart = Date.now();
+    const bootStart = testStart;
+    const grantedAtBootStart = waitsGranted;
     const dir = captureDir(boot);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
@@ -107,16 +147,20 @@ for (const boot of CAPTURE_BOOTS) {
     try {
       await page.goto(boot.aa === 'on' ? '/?fab-test-antialias' : '/');
       await waitForAppReady(page);
+      hold(`${id} boot: the first page load`);
       // The host is shared, so whatever ran before may have left another board. Load the demo,
       // then reload: the board's fit runs only at boot, and LoadDemo keeps the old camera.
       await resetToDemo(page);
+      hold(`${id} boot: the demo load`);
       await page.reload();
       await waitForAppReady(page);
       await waitForCameraSettle(page);
+      hold(`${id} boot: the reload`);
 
       await resumeIfPaused(page);
       const pausedAt = await pauseAndSettle(page, id);
       paused = true;
+      hold(`${id} boot: the pause`);
       await page.evaluate((n) => {
         const hook = (window as unknown as { __fabrico?: { pinClock(n: number | null): void } }).__fabrico;
         if (hook === undefined) throw new Error('window.__fabrico is not installed');
@@ -127,7 +171,7 @@ for (const boot of CAPTURE_BOOTS) {
       const bootMs = Date.now() - bootStart;
       // As for a tile: the boot's time beyond the budgets its waits added is what BOOT_WORK_BUDGET_MS covers.
       console.log(
-        `CAPTURE_BOOT ${id} bootMs=${bootMs} uncoveredMs=${bootMs - (testInfo.timeout - limitAtBootStart)} bootBudgetMs=${BOOT_WORK_BUDGET_MS}`,
+        `CAPTURE_BOOT ${id} bootMs=${bootMs} uncoveredMs=${bootMs - (waitsGranted - grantedAtBootStart)} bootBudgetMs=${BOOT_WORK_BUDGET_MS} ceilingMs=${ceilingMs}`,
       );
       const entries: CaptureEntry[] = [];
       for (const zoom of CAPTURE_ZOOMS) {
@@ -137,11 +181,12 @@ for (const boot of CAPTURE_BOOTS) {
         let workMsMax = 0;
         let uncoveredMsMax = 0;
         // Tile 0's share is given before the zoom gesture, each later tile's before its pan.
-        addWorkBudget(TILE_WORK_BUDGET_MS, `${id} zoom=${zid} tile=0: ${TILE_WORK}`);
+        share(TILE_WORK_BUDGET_MS, `${id} zoom=${zid} tile=0: ${TILE_WORK}`);
         let tileStart = Date.now();
-        let limitAtTileStart = testInfo.timeout;
+        let grantedAtTileStart = waitsGranted;
         const zoomGestureStart = tileStart;
         const zoomCamera = zoom === 'boot' ? await cameraOf(page) : await zoomTo(page, zoom);
+        hold(`${id} zoom=${zid}: the zoom gesture`);
         gestureMsMax = Date.now() - zoomGestureStart;
         if (zoom !== 'boot') {
           expect(Math.abs(zoomCamera.scale - zoom), `${id} zoom=${zid}: the camera landed on the zoom asked for`).toBeLessThanOrEqual(ZOOM_TOLERANCE);
@@ -155,12 +200,13 @@ for (const boot of CAPTURE_BOOTS) {
           let camera = zoomCamera;
           if (tile > 0) {
             const want = plan[tile];
-            addWorkBudget(TILE_WORK_BUDGET_MS, `${label}: ${TILE_WORK}`);
+            share(TILE_WORK_BUDGET_MS, `${label}: ${TILE_WORK}`);
             const panStart = Date.now();
             tileStart = panStart;
-            limitAtTileStart = testInfo.timeout;
+            grantedAtTileStart = waitsGranted;
             // A pan wheel moves the board by minus its delta (`camera.ts` onWheel, pan branch).
             camera = await panBy(page, -(want.dx - at.dx), -(want.dy - at.dy));
+            hold(`${label}: the pan`);
             gestureMsMax = Math.max(gestureMsMax, Date.now() - panStart);
             at = want;
             expect(camera.scale, `${label}: a pan keeps the zoom's scale`).toBe(zoomCamera.scale);
@@ -171,9 +217,11 @@ for (const boot of CAPTURE_BOOTS) {
           // it passes the board has been drawn at the new camera.
           errors.assertNone(label);
           await expectRenderLoopAlive(page, label, { boardHeld: true });
+          hold(`${label}: the render health check`);
 
           const png = `${id}/z-${zid}-t${tile}.png`;
           const buf = await captureClip(page, { x: 0, y: 0, ...VIEWPORT }, join(CAPTURE_ROOT, png));
+          hold(`${label}: the capture`);
           const workStart = Date.now();
           const facts = await page.evaluate(collectCaptureFacts);
 
@@ -222,7 +270,8 @@ for (const boot of CAPTURE_BOOTS) {
           const tileEnd = Date.now();
           workMsMax = Math.max(workMsMax, tileEnd - workStart);
           // What the tile spent beyond the budgets its waits added: the share TILE_WORK_BUDGET_MS covers.
-          uncoveredMsMax = Math.max(uncoveredMsMax, tileEnd - tileStart - (testInfo.timeout - limitAtTileStart));
+          hold(`${label}: the facts read and the measure`);
+          uncoveredMsMax = Math.max(uncoveredMsMax, tileEnd - tileStart - (waitsGranted - grantedAtTileStart));
         }
         // `uncoveredMsMax` is what TILE_WORK_BUDGET_MS is derived from: read it off a CI run.
         console.log(
@@ -232,6 +281,8 @@ for (const boot of CAPTURE_BOOTS) {
       const manifest: CaptureManifest = { boot, entries };
       writeFileSync(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
       errors.assertNone(`${id} after the last capture`);
+      // What the ceiling is checked against on a CI log: the boot's wall time and the largest stretch of waits.
+      console.log(`CAPTURE_LIMIT ${id} elapsedMs=${Date.now() - testStart} ceilingMs=${ceilingMs} waitStretchMaxMs=${waitStretchMaxMs} overshootMs=${CAPTURE_WAIT_OVERSHOOT_MS}`);
     } finally {
       // The host is shared by every boot and every later suite: free the render clock and play.
       await page

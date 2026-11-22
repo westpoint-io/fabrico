@@ -86,6 +86,98 @@ export function isBootZoom(zoom: CaptureZoom): boolean {
   return zoom === 'boot' || zoom === FULLSCREEN_BOOT_ZOOM;
 }
 
+// ---------------------------------------------------------------------------
+// Time limits (review 107 WR-05)
+// ---------------------------------------------------------------------------
+//
+// A capture test's limit grows with its own work: the config's 90 s, every wait's budget, and the
+// boot and per-tile shares `board.capture.ts` adds. Those budgets are sized for a runner several
+// times slower than any seen, so a boot's limit reached about 27 minutes, six times a normal boot,
+// and the six boots' limits summed to about 160 minutes against the 65-minute `globalTimeout`. A
+// browser wedged late in a boot burned that slack, and a wedge in boot 3 or later hit the global
+// limit first, which ends the run with a top-level error that names no test. So each test is also
+// held under a CEILING of its own: the slowest wall time measured for that boot, doubled (the walk's
+// rule), and the ceilings plus the share kept for the rest of the run fit inside `globalTimeout`
+// (`captureLimitProblems`, checked when the capture file loads and in `boardMeasure.test.ts`).
+
+/**
+ * The capture config's `globalTimeout`: the ceiling on one whole run (the config says why 65). The
+ * config keeps its own literal; `boardMeasure.test.ts` checks the two agree.
+ */
+export const CAPTURE_GLOBAL_TIMEOUT_MS = 65 * 60_000;
+
+/**
+ * The share of `CAPTURE_GLOBAL_TIMEOUT_MS` kept for everything that isn't a capture test: the 216
+ * grading tests (7.5 s on CI run 44867588480, about 14 s on the slower runner of run 45022991094,
+ * doubled to 28 s) and Playwright's own start and the servers it waits for, rounded up to 2 minutes.
+ */
+export const CAPTURE_OTHER_SHARE_MS = 2 * 60_000;
+
+/**
+ * The most one stretch of waits between two of the capture test's holds may add to its limit. The
+ * largest single wait in a tile is the capture itself, `frameBudgetMs(CAPTURE_FRAMES)` = 11,943 ms
+ * at the floor rate; rounded up to 12 s. The test holds its limit at `ceiling - this`, so a wait in
+ * progress can lift it to the ceiling and no further, and it asserts at every hold that no stretch
+ * of waits added more than this.
+ */
+export const CAPTURE_WAIT_OVERSHOOT_MS = 12_000;
+
+/**
+ * Each capture test's ceiling in ms, by boot id: the slowest wall time measured for that boot,
+ * doubled. The slowest runs on record are CI run 45022991094 on 1df4880 (a runner 1.6 to 1.9 times
+ * slower than usual: 2.4, 2.9, 3.2 and 3.8 min for the ratio-1 and ratio-1.1818 boots, 7.4 min for
+ * ratio 2 as shipped, and 8.7 min for ratio 2 with antialiasing on before its old limit stopped it,
+ * with its last zoom, about 138 s on that runner, still to go, so about 11.0 min) and plan 107-10's
+ * local run on one core under a 75% CPU quota (8.0 min for ratio 2 as shipped, 10.0 with
+ * antialiasing on). The slowest of the two, doubled: 4.8, 5.8, 6.4, 7.6, 16.0 and 22.0 minutes, 62.6
+ * in all. A normal CI run takes 2.0 to 6.7 minutes per boot (run 45046568896), a local one 0.4 to
+ * 1.3.
+ */
+export const CAPTURE_BOOT_CEILING_MS: Readonly<Record<string, number>> = {
+  'dpr1-aa-shipped': 288_000,
+  'dpr1-aa-on': 348_000,
+  'dpr1.181793212890625-aa-shipped': 384_000,
+  'dpr1.181793212890625-aa-on': 456_000,
+  'dpr2-aa-shipped': 960_000,
+  'dpr2-aa-on': 1_320_000,
+};
+
+/** The ceiling for one boot's capture test. Throws for a boot with none, so a new boot can't run unlimited. */
+export function captureBootCeilingMs(boot: CaptureBoot, ceilings: Readonly<Record<string, number>> = CAPTURE_BOOT_CEILING_MS): number {
+  const ms = ceilings[bootId(boot)];
+  if (ms === undefined) throw new Error(`captureMatrix: boot ${bootId(boot)} has no entry in CAPTURE_BOOT_CEILING_MS`);
+  return ms;
+}
+
+/**
+ * What is wrong with the capture tests' ceilings, or an empty list: a boot with no ceiling, a
+ * ceiling for no boot, a ceiling that leaves no room past the wait overshoot, and ceilings that,
+ * with `otherMs` for the rest of the run, sum to more than `globalMs`. With any of these a wedged
+ * boot could reach the global limit before its own, and the report would name no test.
+ */
+export function captureLimitProblems(
+  ceilings: Readonly<Record<string, number>> = CAPTURE_BOOT_CEILING_MS,
+  boots: readonly CaptureBoot[] = CAPTURE_BOOTS,
+  globalMs: number = CAPTURE_GLOBAL_TIMEOUT_MS,
+  otherMs: number = CAPTURE_OTHER_SHARE_MS,
+): string[] {
+  const problems: string[] = [];
+  const ids = boots.map(bootId);
+  for (const id of ids) if (ceilings[id] === undefined) problems.push(`boot ${id} has no ceiling`);
+  for (const id of Object.keys(ceilings)) if (!ids.includes(id)) problems.push(`the ceiling for ${id} belongs to no boot`);
+  for (const id of ids) {
+    const ms = ceilings[id];
+    if (ms !== undefined && ms <= CAPTURE_WAIT_OVERSHOOT_MS) problems.push(`boot ${id}'s ceiling of ${ms} ms leaves nothing past the ${CAPTURE_WAIT_OVERSHOOT_MS} ms wait overshoot`);
+  }
+  const sum = ids.reduce((acc, id) => acc + (ceilings[id] ?? 0), 0);
+  if (sum + otherMs > globalMs) {
+    problems.push(
+      `the capture tests' ceilings sum to ${sum / 60_000} min, which with ${otherMs / 60_000} min for the rest of the run is over the ${globalMs / 60_000} min globalTimeout`,
+    );
+  }
+  return problems;
+}
+
 /** A file-name-safe id for a boot, for example `dpr1-aa-shipped` or `dpr1.181793212890625-aa-on`. */
 export function bootId(boot: CaptureBoot): string {
   return `dpr${boot.dpr}-aa-${boot.aa}`;

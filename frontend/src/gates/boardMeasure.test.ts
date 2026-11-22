@@ -6,6 +6,8 @@
 // that can't fail: a reader that returned 3 for every side, or skipped every line, would pass the
 // clean twins and fail the defect cases here.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CELL } from '../../shared/geometry';
 import { state_tag } from '../protocol/kinds';
@@ -57,7 +59,17 @@ import {
   runGradeCell,
   type DeclaredDefect,
 } from '../../e2e-live/support/captureDefects';
-import { PROPERTY_IDS, gradingCells, type PropertyId } from '../../e2e-live/support/captureMatrix';
+import {
+  CAPTURE_BOOT_CEILING_MS,
+  CAPTURE_BOOTS,
+  CAPTURE_GLOBAL_TIMEOUT_MS,
+  PROPERTY_IDS,
+  bootId,
+  captureBootCeilingMs,
+  captureLimitProblems,
+  gradingCells,
+  type PropertyId,
+} from '../../e2e-live/support/captureMatrix';
 
 const FLOOR = 0x1b1f27;
 const IDLE_INK = chassisInk(state_tag.IDLE, LOCKED_SKIN);
@@ -1226,5 +1238,35 @@ describe('the grey-fringe rule and the live antialiasing state', () => {
       const g = gradeCell('outline-sides', SHIPPED_AT_1, tiles);
       expect(g.offenders).toEqual([expect.objectContaining({ key: 'antialias-unknown', unmeasured: true })]);
     }
+  });
+});
+
+// --- each capture test's ceiling, and the ceilings against the global limit (review WR-05) -------
+
+describe('the capture tests time limits', () => {
+  it('gives every boot a ceiling, and the ceilings with the rest of the run fit the 65 min global limit', () => {
+    expect(CAPTURE_GLOBAL_TIMEOUT_MS).toBe(65 * 60_000);
+    expect(captureLimitProblems()).toEqual([]);
+    for (const boot of CAPTURE_BOOTS) expect(captureBootCeilingMs(boot)).toBeGreaterThan(0);
+  });
+
+  it('checks the ceilings against the globalTimeout the capture config really sets', () => {
+    // The config keeps its own literal, so this reads it rather than having the config import it.
+    const config = readFileSync(fileURLToPath(new URL('../../playwright.capture.config.ts', import.meta.url)), 'utf8');
+    const m = /^\s*globalTimeout: (\d+) \* 60_000,$/m.exec(config);
+    expect(m, 'playwright.capture.config.ts sets globalTimeout as <minutes> * 60_000').not.toBeNull();
+    expect(Number(m?.[1]) * 60_000).toBe(CAPTURE_GLOBAL_TIMEOUT_MS);
+  });
+
+  it('names ceilings that sum past the global limit, a boot with no ceiling and a ceiling for no boot', () => {
+    const ratio2On = bootId({ dpr: 2, aa: 'on' });
+    const over = captureLimitProblems({ ...CAPTURE_BOOT_CEILING_MS, [ratio2On]: CAPTURE_BOOT_CEILING_MS[ratio2On] + 3 * 60_000 });
+    expect(over).toEqual([expect.stringContaining('over the 65 min globalTimeout')]);
+    const missing = Object.fromEntries(Object.entries(CAPTURE_BOOT_CEILING_MS).filter(([id]) => id !== ratio2On));
+    expect(captureLimitProblems(missing)).toEqual([`boot ${ratio2On} has no ceiling`]);
+    expect(() => captureBootCeilingMs({ dpr: 2, aa: 'on' }, missing)).toThrow(/has no entry/);
+    expect(captureLimitProblems({ ...CAPTURE_BOOT_CEILING_MS, 'dpr3-aa-on': 60_000 })).toEqual(
+      expect.arrayContaining(['the ceiling for dpr3-aa-on belongs to no boot']),
+    );
   });
 });
