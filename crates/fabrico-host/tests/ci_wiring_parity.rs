@@ -3869,10 +3869,41 @@ const MOCK_REPORT_ARTIFACT: &str = "name: mock-report-${{ matrix.shard }}";
 /// the json reporter in `frontend/playwright.config.ts`, from the repository root.
 const MOCK_REPORT_PATH: &str = "path: frontend/test-results/mock-report.json";
 
+/// The mock suite's verdict against its exact list.
+const MOCK_CHECKER: &str = "scripts/check-mock-report.sh";
+/// Where each mock job writes its exact list, through the runner's own variable. Outside
+/// `test-results/`, because the suite deletes that folder when it starts.
+const MOCK_LIST_FILE: &str = "\"$RUNNER_TEMP/mock-list.json\"";
+
 /// The mock suite's run line, whole, built from `MOCK_SHARDS`.
 fn mock_run_line() -> String {
     let shard = "${{ matrix.shard }}";
     format!("run: npm run test:e2e -- --shard={shard}/{MOCK_SHARDS}")
+}
+
+/// The pinned run lines of the mock gate, whole, built from `MOCK_SHARDS`.
+struct MockRunLines {
+    /// This leg's exact test list, in `MOCK_JOB`, before the suite, from the same config and shard.
+    list: String,
+    /// This leg's shard of the suite. Its exit code is still the verdict for a red test.
+    suite: String,
+    /// This leg's report against its list, the run line straight after the suite.
+    checker: String,
+}
+
+fn mock_run_lines() -> MockRunLines {
+    let n = MOCK_SHARDS;
+    let shard = "${{ matrix.shard }}";
+    MockRunLines {
+        list: format!(
+            "run: npx playwright test {LIVE_LIST_FLAGS} --shard={shard}/{n} > {MOCK_LIST_FILE}"
+        ),
+        suite: mock_run_line(),
+        checker: format!(
+            "run: bash ../{MOCK_CHECKER} --shard {shard}/{n} --list {MOCK_LIST_FILE} \
+             test-results/mock-report.json"
+        ),
+    }
 }
 
 /// Everything wrong with how `yml` runs the mock suite's shards. Empty means right.
@@ -3891,14 +3922,76 @@ fn mock_gate_wrong(yml: &str) -> Vec<String> {
     if found != [(MOCK_JOB, run_line.as_str())] {
         wrong.push(format!(
             "the `run:` lines invoking `test:e2e` are {found:?}, expected exactly \
-             [(\"{MOCK_JOB}\", \"{run_line}\")]. The mock job has no report checker, so its exit \
-             code and this line are the whole verdict."
+             [(\"{MOCK_JOB}\", \"{run_line}\")]. The suite's exit code is the verdict for a red \
+             test, and this line is what makes the legs cover the suite."
         ));
+    }
+
+    // The list and the checker once each in the workflow, in their own job, as the whole of their
+    // line. A whole-line match is what refuses `|| true`, another shard or a dropped `--list`.
+    let lines = mock_run_lines();
+    let pinned: [(&str, &str, &str); 2] = [
+        ("the exact list", &lines.list, MOCK_JOB),
+        ("the shard checker", &lines.checker, MOCK_JOB),
+    ];
+    for (what, line, job) in pinned {
+        let homes: Vec<&str> = blocks
+            .iter()
+            .flat_map(|(id, lines)| {
+                lines
+                    .iter()
+                    .filter(move |l| step_key(l) == line)
+                    .map(move |_| *id)
+            })
+            .collect();
+        if homes != [job] {
+            wrong.push(format!(
+                "{what}'s run line `{line}` is in job(s) {homes:?}, expected exactly once, in \
+                 [\"{job}\"]. Without it, or with it anywhere else, a mock test that never ran \
+                 can leave every leg green."
+            ));
+        }
+    }
+
+    // Every run line that names the mock checker or writes the mock list is a pinned one.
+    for (id, job) in &blocks {
+        for line in job
+            .iter()
+            .map(|l| step_key(l))
+            .filter(|l| l.starts_with("run:"))
+        {
+            let names_mock = line.contains(MOCK_CHECKER) || line.contains("mock-list.json");
+            if names_mock && !pinned.iter().any(|(_, p, _)| *p == line) {
+                wrong.push(format!(
+                    "job `{id}` runs `{line}`, which is none of the pinned mock run lines. A list \
+                     from another shard, a checker without its list or a swallowed exit code would \
+                     let a leg with a test missing pass."
+                ));
+            }
+        }
     }
 
     match blocks.iter().find(|(id, _)| *id == MOCK_JOB) {
         None => wrong.push(format!("there is no job `{MOCK_JOB}` under `jobs:`.")),
         Some((_, job)) => {
+            // The list before the suite, and the checker the run line straight after it.
+            let runs: Vec<&str> = job
+                .iter()
+                .map(|l| step_key(l))
+                .filter(|l| l.starts_with("run:"))
+                .collect();
+            let at = |expected: &str| runs.iter().position(|l| *l == expected);
+            if let (Some(l), Some(s), Some(c)) = (at(&lines.list), at(&lines.suite), at(&lines.checker))
+                && !(l < s && s + 1 == c)
+            {
+                wrong.push(format!(
+                    "the exact list, the suite and the shard checker are `run:` lines {l}, {s} and \
+                     {c} of job `{MOCK_JOB}`. The list must be made before the suite, and the \
+                     checker must be the run: line straight after it, so it reads the report this \
+                     leg's suite just wrote."
+                ));
+            }
+
             // One leg per shard, and a red leg cancels none of the others.
             let shard_list = format!(
                 "shard: [{}]",
@@ -3920,7 +4013,11 @@ fn mock_gate_wrong(yml: &str) -> Vec<String> {
         }
     }
 
-    wrong.extend(step_guards_wrong(yml, MOCK_JOB, &["npm run test:e2e"]));
+    wrong.extend(step_guards_wrong(
+        yml,
+        MOCK_JOB,
+        &["npm run test:e2e", lines.list.as_str(), lines.checker.as_str()],
+    ));
     wrong
 }
 
@@ -3991,15 +4088,17 @@ fn mock_retries_wrong(config: &str) -> Vec<String> {
 ///
 /// # Why
 ///
-/// The mock job has no report checker and no test floor, so its exit code is its whole verdict.
-/// The shard list and the `/4` in its run line are all that make the 4 legs cover the suite: with
-/// `shard: [1, 2, 3]` or `/5`, part of the 606 tests runs nowhere and every leg is green. And
-/// `retries: 0` in `playwright.config.ts` is what makes a test that fails once fail its leg. Each
-/// of these is one edit away, so they're pinned here, where `cargo test` runs them.
+/// The suite's exit code is the verdict for a red test. The shard list and the `/4` in its run
+/// lines are what make the 4 legs cover the suite: with `shard: [1, 2, 3]` or `/5`, part of the
+/// suite runs nowhere and every leg is green. And `retries: 0` in `playwright.config.ts` is what
+/// makes a test that fails once fail its leg. Each of these is one edit away, so they're pinned
+/// here, where `cargo test` runs them.
 ///
-/// Each leg also uploads its JSON report as `mock-report-<i>`, red or green, and the upload fails
-/// when the report is missing. The report holds each test's duration for the mock verdict; it
-/// grades nothing, and the exit code stays the suite's verdict.
+/// Playwright exits 0 on a skipped test or a deleted spec, so each leg also writes its shard's
+/// exact list before the suite, and the run line straight after the suite checks the leg's report
+/// against it with `check-mock-report.sh --shard i/4 --list`. Both lines are pinned whole, in that
+/// order, with no condition on either step. Each leg uploads its JSON report as `mock-report-<i>`,
+/// red or green, and the upload fails when the report is missing.
 #[test]
 fn the_mock_suite_runs_every_test_once_with_no_retry() {
     let mut wrong = mock_gate_wrong(CI_YML);
@@ -4021,10 +4120,58 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
     const MOCK_HEADER: &str = "    name: frontend e2e (Playwright + axe)\n";
     const MOCK_STEP: &str = "      - name: Run e2e (Playwright + axe)\n";
     const MATRIX: &str = "      fail-fast: false\n      matrix:\n        shard: [1, 2, 3, 4]\n";
+    const LIST_STEP: &str = "      - name: This shard's exact test list\n";
+    const CHECKER_STEP: &str = "      - name: This shard ran exactly its listed tests, all passed\n";
     let run_line = format!("        {}\n", mock_run_line());
+    let lines = mock_run_lines();
+    let list_line = format!("        {}\n", lines.list);
+    let checker_line = format!("        {}\n", lines.checker);
+    let checker_step = format!("{CHECKER_STEP}        working-directory: frontend\n{checker_line}");
+    assert_eq!(CI_YML.matches(&checker_step).count(), 1, "the mock checker step is one block");
+    assert_eq!(CI_YML.matches(LIST_STEP).count(), 2, "the live and mock legs each name a list step");
+    let mock_list_step = format!("{LIST_STEP}        working-directory: frontend\n{list_line}");
+    assert_eq!(CI_YML.matches(&mock_list_step).count(), 1, "the mock list step is one block");
+    let list_on_five = lines.list.replace("/4 >", "/5 >");
+    let checker_no_list = lines.checker.replace(&format!(" --list {MOCK_LIST_FILE}"), "");
+    let checker_swallowed = format!("{} || true", lines.checker);
 
     // (what, the planted workflow, what the check must name)
     let yml_plants: Vec<(&str, String, String)> = vec![
+        (
+            "the leg's list step removed",
+            CI_YML.replace(&mock_list_step, ""),
+            format!("the exact list's run line `{}` is in job(s) []", lines.list),
+        ),
+        (
+            "the leg's list made for shard `/5`",
+            CI_YML.replace(&list_line, &format!("        {list_on_five}\n")),
+            format!("job `{MOCK_JOB}` runs `{list_on_five}`, which is none of the pinned"),
+        ),
+        (
+            "the shard checker without `--list`",
+            CI_YML.replace(&checker_line, &format!("        {checker_no_list}\n")),
+            format!("job `{MOCK_JOB}` runs `{checker_no_list}`, which is none of the pinned"),
+        ),
+        (
+            "the shard checker given `|| true`",
+            CI_YML.replace(&checker_line, &format!("        {checker_swallowed}\n")),
+            format!("job `{MOCK_JOB}` runs `{checker_swallowed}`, which is none of the pinned"),
+        ),
+        (
+            "`if: always()` on the shard checker step",
+            CI_YML.replace(CHECKER_STEP, &format!("{CHECKER_STEP}        if: always()\n")),
+            format!(
+                "the step that runs `{}` in job `{MOCK_JOB}` carries `if: always()`",
+                lines.checker
+            ),
+        ),
+        (
+            "the shard checker moved before the suite",
+            CI_YML
+                .replace(&checker_step, "")
+                .replace(MOCK_STEP, &format!("{checker_step}\n{MOCK_STEP}")),
+            "the checker must be the run: line straight after it".to_string(),
+        ),
         (
             "the matrix cut to three shards",
             CI_YML.replace(MATRIX, &MATRIX.replace("[1, 2, 3, 4]", "[1, 2, 3]")),
@@ -4122,8 +4269,8 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
     ];
     assert_eq!(
         yml_plants.len() + config_plants.len(),
-        10,
-        "ten ways of losing mock tests or hiding a failure"
+        16,
+        "sixteen ways of losing mock tests or hiding a failure"
     );
     assert_eq!(report_plants.len(), 4, "four ways of losing a mock leg's report");
 

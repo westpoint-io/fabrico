@@ -1562,13 +1562,19 @@ jobs:
   # own Vite through the config's webServer. The check names become
   # `frontend e2e (Playwright + axe) (1)` to `(4)`.
   #
-  # NO VERDICT JOB. This suite has no report checker and no test floor, so each leg's exit
-  # code is its verdict, as the single job's was. `fail-fast: false` keeps the other legs
-  # running after one goes red, and any red or cancelled leg turns the run red. GitHub runs
-  # every leg the matrix names, so a leg can't drop out unseen at run time. What the legs cover is
-  # set by `shard: [1, 2, 3, 4]` and the `/4` in the run line, and an edit to either could leave
-  # part of the suite unrun with every leg green, so `ci_wiring_parity.rs` pins both, along with
-  # `fail-fast: false`, no condition on the suite step, and `retries: 0` in playwright.config.ts.
+  # TWO VERDICTS PER LEG. The suite's exit code is still the verdict for a red test: a failed
+  # test fails the run step and the leg. Playwright exits 0 on a skipped test, a `test.fail()`
+  # that failed or a deleted spec, so the exit code alone can't see a test that never ran. Before
+  # the suite each leg writes its shard's exact test list (`playwright test --list
+  # --reporter=json --shard=<i>/4`, same config, same commit), and the run line straight after the
+  # suite is `scripts/check-mock-report.sh --shard <i>/4 --list <list>`. It compares the leg's
+  # report with that list, so a listed test that was skipped, missing or never ran is red and
+  # named. `fail-fast: false` keeps the other legs running after one goes red, and any red or
+  # cancelled leg turns the run red. What the legs cover is set by `shard: [1, 2, 3, 4]` and the
+  # `/4` in the run lines, and an edit to either could leave part of the suite unrun with every
+  # leg green, so `ci_wiring_parity.rs` pins both, along with `fail-fast: false`, the list and
+  # checker lines and their order, no condition on the suite or checker step, and `retries: 0` in
+  # playwright.config.ts. The `e2e-verdict` job below grades all four reports together.
   #
   # NO RETRY. `playwright.config.ts` sets `retries: 0`, so a test that fails once fails its
   # leg instead of passing as flaky, and `trace: 'retain-on-failure'` keeps the trace of
@@ -1606,11 +1612,25 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # The exact list of tests this leg should run, from the same config and shard as the suite,
+      # made in this job from this commit. It goes to $RUNNER_TEMP, outside test-results/, which
+      # the suite deletes when it starts. List mode opens no browser.
+      - name: This shard's exact test list
+        working-directory: frontend
+        run: npx playwright test --list --reporter=json --shard=${{ matrix.shard }}/4 > "$RUNNER_TEMP/mock-list.json"
+
       # Boots `npm run dev` via playwright.config.ts webServer, then runs this leg's
       # quarter of the command-emission + a11y specs.
       - name: Run e2e (Playwright + axe)
         working-directory: frontend
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+
+      # This leg's report against its list: a listed test that was skipped, missing or never ran is
+      # red here even when the suite exited 0. No condition: when the suite went red the leg is red
+      # already, and the verdict job still reads the uploaded report.
+      - name: This shard ran exactly its listed tests, all passed
+        working-directory: frontend
+        run: bash ../scripts/check-mock-report.sh --shard ${{ matrix.shard }}/4 --list "$RUNNER_TEMP/mock-list.json" test-results/mock-report.json
 
       # The leg's JSON report holds each test's duration. It is uploaded red or green, so the
       # mock verdict can read every leg, and a leg with no report fails here.
