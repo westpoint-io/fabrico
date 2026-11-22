@@ -571,8 +571,7 @@ describe('GATE 4: no ring carrier is a scroll container', () => {
     // CSS walker above cannot see, so it joins this scan and declares no overflow
     // property at all. 13 -> 12 at plan 68-07, which DELETED the 62-07 panel with the
     // rest of the development pace switch (BELT-05 / D-68-12). The deleted path is named
-    // in `68-07-SUMMARY.md` and deliberately not here: this file is inside the scan set
-    // of `scripts/check-dev-pace-switch-absent.sh`. 12 -> 13 at plan 73-04
+    // in `68-07-SUMMARY.md` and deliberately not here. 12 -> 13 at plan 73-04
     // (`LoadRefusedCard.tsx`), for the SAME reason 64-06 moved it: the card reuses the
     // registered class rather than hand-rolling a ring, so it joins this scan. 13 -> 14 at
     // plan 90-07 on 2026-10-24 (`SimStoppedCard.tsx`, the card a fatal sim error shows), the

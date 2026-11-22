@@ -819,8 +819,8 @@ the 32 candidate drafts under `candidates/`.
 - the art-direction record (`57-ART-LOCK.md`) - the filled lock, and the
   only source this bible's sections 1, 2, 3, 5 and 7 draw from.
 - `docs/style-bible.md` (this document).
-- `scripts/check-neutrality.sh` - which scans this document and the lock, and which stays green
-  by rewording copy, never by shortening its token list.
+- the neutrality token lists in `frontend/e2e/art-board.spec.ts` and `frontend/e2e/mark-sheet.spec.ts`,
+  which stay green by rewording copy, never by shortening the list.
 
 ### 8b. The Phase 24 style board (`?styleBoard=1`)
 

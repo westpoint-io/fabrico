@@ -9,7 +9,7 @@
 # IMPORTANT: this gate is CLIPPY-load-bearing, NOT compiler-enforced. A plain
 # `cargo build` / `cargo test` (without clippy) does NOT catch any of these — only
 # `#![forbid(unsafe_code)]` is enforced by the compiler. CI MUST run the clippy
-# command above (and scripts/determinism-gate-negative-test.sh proves it bites).
+# command above.
 #
 # `allow-invalid = true` on the `rand::*` entries: `rand` is not a direct
 # dependency (only `rand_core` / `rand_chacha` are), so those paths do not resolve

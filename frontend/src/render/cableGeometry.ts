@@ -126,8 +126,7 @@ export function nubEndAt(cellX: number, cellY: number, side: number): ResolvedNu
  * did: the router is `crates/fabrico-command/src/wire_route.rs`, mirrored by
  * `protocol/wireRoute.ts`, and `fabrico-command` was never in the byte-freeze, whose
  * FROZEN_PATHS were exactly `fabrico-core`, `fabrico-protocol` and `fabrico-scenario`.
- * The router has lived in `fabrico-command` since before the first release. Arm 2 of
- * `scripts/check-drawwire-truth.sh` (plan 75-04) keeps the old claim from coming back.
+ * The router has lived in `fabrico-command` since before the first release.
  *
  * WHAT THE ROUTER NOW GUARANTEES (plans 75-01 to 75-03). Plan 72-16's union-box
  * perimeter RING serves pairs whose four admissibility booleans are all false; plan

@@ -27,9 +27,6 @@
 #      which `bootPixi` reads to size the canvas. A scan set that doesn't contain it can't
 #      be the renderer's code, so a zero count there proves nothing; exit 2.
 #   3. Exit 2 means "could not assert" and is never a pass.
-# `scripts/prove-test-aa-switch-absent-non-vacuous.sh` builds the app with the guard removed
-# and checks that this script then exits 1 and names the file, and that all three
-# could-not-assert cases exit 2.
 #
 # EXIT CODES
 #   0  the flag's name occurs 0 times in every directory, and each directory could be checked

@@ -1248,9 +1248,8 @@ export async function waitForAppReady(page: Page): Promise<void> {
  * means that spec, not this module. The helper has TWO origins, and both keep their own
  * copies untouched: `24-one-board-all-six.spec.ts`, whose body this is, and
  * `16-router-presets.spec.ts`, which carries the same shape. They are left as they are
- * because spec 24 is the v8.0 done-test pinned by
- * `src/gates/liveWalkDeclarationOrder.source.test.ts` (77 D-01), and an edit to either
- * would move a shipped walk for no gain. Its one timed 400 ms read is a SAMPLE of the
+ * because spec 24 is the v8.0 done-test (77 D-01), and an edit to either would move a
+ * shipped walk for no gain. Its one timed 400 ms read is a SAMPLE of the
  * tick rate, never a settle.
  *
  * WHAT IT CANNOT DO (77-01, measured against `sim_loop.rs`). It presses only when the

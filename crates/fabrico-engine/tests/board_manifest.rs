@@ -6,8 +6,8 @@
 //! asserts, so one run names every problem.
 //!
 //! The generator at the bottom is `#[ignore]`d, so a test failure never rewrites the manifest. A
-//! hash that moves is either a decision, made by running the generator by hand and declaring the
-//! new digest in `docs/DECLARED-MOVES.txt`, or a change to revert.
+//! hash that moves is either a decision, made by running the generator by hand and saying why in
+//! the commit, or a change to revert.
 //!
 //! The comparison takes the walked results and the manifest text as plain values, so the tests of
 //! the check itself can feed it bad inputs without touching a file.

@@ -41,9 +41,8 @@ edits-first per tick). `meta.toml` is for humans and the regen script only.
   current, so a stale block under that instruction is worse than either state alone. Corrected
   in one pass by Phase 60, which took the snapshot version from 8 to 9; Phase 62 takes it from
   9 to 10, byte-forced by `Belt.ticks_per_slot`. `EDIT_SCHEMA_VERSION` moved in neither phase;
-  only this transcription of it did. The rot is now machine-gated:
-  `fabrico-host/tests/golden_readme_currency.rs` reddens if this line stops naming the live
-  values, which is why the number above is edited in the SAME commit as the constant.)
+  only this transcription of it did. Edit the number above in the SAME commit as the
+  constant, so this line keeps naming the live values.)
   Phase 63 (`63-11`) takes `EDIT_SCHEMA_VERSION` 6 to 7 and moves NOTHING else. It is the
   first bump in this block that is not byte-forced: no `EditRecord` field changed in
   milestone v8.0, so a pre-v8.0 edit log would decode perfectly well. That is exactly why

@@ -6,8 +6,6 @@
 # The size is `gzip -9 -n`, because -n leaves the file name and timestamp out, so the same module
 # measures the same on every run. A size exactly at the budget passes, and one byte over fails.
 #
-# scripts/prove-player-size-bites.sh watches this gate fail on each CI run.
-#
 # OUTPUT, exactly one line on stdout, when a size was measured:
 #   PLAYER_SIZE raw=<bytes> gzip=<bytes> budget=<bytes>
 #

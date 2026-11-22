@@ -178,9 +178,8 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  * Router rules editor body). 44 -> 45 in plan 68-02 (`BeltConfigBody.tsx`, the Belt pace
  * segmented control). 45 -> 44 in plan 68-07, which DELETED the development pace panel
  * added at 62-07 along with the rest of the development pace switch (BELT-05 / D-68-12;
- * the deleted path is named in `68-07-SUMMARY.md`, and deliberately not named here -
- * `scripts/check-dev-pace-switch-absent.sh` asserts that name appears zero times
- * anywhere in the tree, and this file is inside its scan set). A `.test.ts` sibling is
+ * the deleted path is named in `68-07-SUMMARY.md`, and deliberately not named here). A
+ * `.test.ts` sibling is
  * NOT counted - the walk excludes specs by design, see the note above.
  *
  * 44 -> 45 in plan 72-10 (`RouteConfigBody.tsx`, the Route's Path field and the
@@ -193,10 +192,7 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  * unmoved, so it could not have caught a 68-07 that shipped the addition and forgot the
  * deletion** - both walkers would have sat green at 45. That is `68-UI-SPEC.md` 6.1's
  * arithmetic-accident warning, and the two history lines above are the only thing that
- * makes the offsetting pair visible to a reader. The check that actually catches the
- * omission is `scripts/check-dev-pace-switch-absent.sh`, which is why its non-vacuity
- * prover is load-bearing for this file and not only for the host half of the removal.
- * Holding the constant at 44 through the gap would ALSO have left this walker RED for
+ * makes the offsetting pair visible to a reader. Holding the constant at 44 through the gap would ALSO have left this walker RED for
  * three waves and made every intermediate plan's frontend gate unsatisfiable, so the
  * honest number is stated at each wave rather than netted out invisibly.
  *

@@ -90,9 +90,8 @@ const FAILURE_RULE_PX = 4;
  * SUBSTRING so `preferred` and `defaulted` are caught too.
  *
  * Mirrored as literals from `e2e/art-board.spec.ts:2226-2240` rather than imported, for the
- * same reason that file states: the two halves of the gate are meant to be independently
- * readable, and a drift between this list, that one and `scripts/check-neutrality.sh` IS a
- * finding.
+ * same reason that file states: each copy of the list is meant to be readable on its own, and a
+ * drift between this list and that one IS a finding.
  *
  * THE RESOLUTION OF A RED SCAN IS ALWAYS A REWORDING OF THE SHEET COPY AND NEVER A SHORTENING
  * OF THIS LIST. That is the documented failure mode, and on this sheet it matters more than

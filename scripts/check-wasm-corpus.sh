@@ -4,8 +4,8 @@
 # each tick with a native report from this same revision. Build first with scripts/build-wasm.sh.
 #
 # It regenerates the native report on each run, so a stale report can't agree with a stale module.
-# Pass --native-report to compare against a report you name instead. That flag exists so
-# scripts/prove-wasm-corpus-bites.sh can compare against a tampered one.
+# Pass --native-report to compare against a report you name instead, for example a tampered one
+# to watch the comparison fail.
 #
 # Usage: bash scripts/check-wasm-corpus.sh [--native-report <existing file>]
 #

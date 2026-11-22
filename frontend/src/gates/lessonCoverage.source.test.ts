@@ -10,8 +10,8 @@
 //
 // It also scans all the `*.walk.ts` files and the runner they share for a test taken out of the run,
 // and fails when one of the files the walk is known to need has gone. Playwright exits 0 on a skipped
-// test, so this catches it on every `npm test`, and `scripts/check-walk-report.sh` catches what a
-// source scan can't, such as a skip reached through an alias, in the walk's CI job.
+// test, so this catches it on every `npm test`. A skip reached through an alias is one shape a
+// source scan can't see.
 //
 // It imports the lesson data and the table, and reads the walk files and the index as text. The walk
 // files import Playwright, and a vitest gate can't load that.

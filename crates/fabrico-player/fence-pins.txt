@@ -6,9 +6,8 @@
 # desktop build uses 16, so the same shape fits more values into the same limit. The native lines
 # repeat the pins in crates/fabrico-core/tests/factory_memory_pin.rs.
 #
-# This file is covered by docs/DECLARED-MOVES.txt. Moving a count needs a declared line in the
-# same commit, with a comment saying why the count moved. Don't move one only to turn a red check
-# green.
+# Moving a count needs a commit message saying why the count moved. Don't move one only to turn a
+# red check green.
 #
 # Format: <target> <shape> <count>, and one `gas <count>` line. The gas line is only where the
 # search starts. The gas rule compares the two targets with each other, and the native count is

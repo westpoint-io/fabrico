@@ -140,9 +140,7 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  * (`BeltConfigBody.tsx`, the Belt pace segmented control). 45 -> 44 in plan 68-07, which
  * DELETED the development pace panel added at 62-07 along with the rest of the
  * development pace switch (BELT-05 / D-68-12). The deleted path is named in
- * `68-07-SUMMARY.md` and deliberately NOT named here: this file sits inside the scan set
- * of `scripts/check-dev-pace-switch-absent.sh`, which asserts that name appears zero
- * times anywhere in the tree. A `.test.ts` sibling is excluded by the walk, so one file
+ * `68-07-SUMMARY.md` and deliberately NOT named here. A `.test.ts` sibling is excluded by the walk, so one file
  * means one bump.
  *
  * THIS NUMBER IS TRUE AT EVERY WAVE, and that is why it moved twice inside this one
@@ -150,10 +148,7 @@ function chromeSourceFiles(dir = CHROME_DIR, prefix = ''): string[] {
  * `68-UI-SPEC.md` 6.1 names: across phase 68 the count is net unmoved, so **a 68-07 that
  * shipped 68-02's addition and forgot 68-07's deletion would have left this walker and
  * `bitMatrixIdiom.test.ts` both GREEN at 45.** Neither walker can catch that omission;
- * the two history lines are what make the offsetting pair visible to a reader, and
- * `scripts/check-dev-pace-switch-absent.sh` is the check that actually catches it, which
- * is why that gate's non-vacuity prover is load-bearing for the user-interface half of
- * the removal too. Leaving the constant at 44 across the gap would ALSO have left both
+ * the two history lines are what make the offsetting pair visible to a reader. Leaving the constant at 44 across the gap would ALSO have left both
  * walkers RED for three waves and made the frontend gate in plans 68-04, 68-05 and 68-06
  * unsatisfiable - so two real history entries, not one invisible offset that nets out.
  *

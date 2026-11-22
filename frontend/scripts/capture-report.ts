@@ -8,8 +8,8 @@
 // the page to see what the board looked like and what was measured on it, without re-running
 // anything.
 //
-// THE PAGE IS FOR PEOPLE, NOT THE VERDICT. `scripts/check-capture-report.sh` decides whether the run
-// passed. This page shows each grading verdict as the report gives it, and lists any test it could
+// THE PAGE IS FOR PEOPLE, NOT THE VERDICT. The capture run's exit code decides whether it passed.
+// This page shows each grading verdict as the report gives it, and lists any test it could
 // not place beside a capture in a section of its own, so nothing in the report is left off the page.
 //
 // LAYOUT. One section per boot (a pixel ratio and an antialiasing setting), ordered by ratio and

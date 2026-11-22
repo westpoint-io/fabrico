@@ -116,13 +116,7 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 // declaration is silently un-run whenever anything above it goes red, while the suite
 // still reports the same failure count.
 //
-// `src/gates/liveWalkDeclarationOrder.source.test.ts` holds that rule durably: it
-// reads this file as text on every `npm test` and reddens on a reorder, on a deleted
-// leg, on an appended declaration, on any skip / fixme / fail / only at either scope,
-// on `mode: serial` being dropped, and on any unconditional throw reappearing in this
-// file. If you came here to append a test, that gate is what will stop you, and the
-// answer is to declare it above the last leg and to update the gate's expected order
-// deliberately rather than to widen the gate.
+// If you came here to append a test, declare it above the last leg.
 //
 // ===========================================================================
 // SHARED-HOST NOTE.

@@ -62,7 +62,6 @@ permissions:
 # replaces a pending one. Under a burst of master pushes that would drop the verdict for
 # a master commit. A group unique per non-PR run takes master out of the mechanism
 # entirely; the cancel rule is ALSO gated on pull_request as a second guard.
-# `ci_wiring_parity.rs` asserts both lines exactly.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -470,8 +469,6 @@ jobs:
       # it runs even after the shipped-default suite went red: without it, the implicit
       # `success()` skipped it, and an all-features-only break stayed hidden until the
       # shipped red was fixed. The job is red either way.
-      # `crates/fabrico-host/tests/ci_wiring_parity.rs` pins both run lines, their
-      # PROPTEST_CASES, these two conditions and the matrix that makes the legs.
       - name: Certification suite - SHIPPED default features (PROPTEST_CASES=1024)
         if: matrix.leg == 'main'
         env:
@@ -551,8 +548,7 @@ jobs:
   #
   # WHY IT IS ITS OWN JOB. No other job compiles for wasm. A change that breaks the wasm build, makes
   # the player's packets or hashes differ from a native run, or grows the module past its size budget
-  # would leave every other job green. `ci_wiring_parity.rs` matches each check's run line whole, so
-  # dropping a step fails that test.
+  # would leave every other job green.
   #
   # THE COMPILER. `rustup target add` runs after `rustup show`, so the wasm standard library lands on
   # the toolchain rust-toolchain.toml pins. apt installs clang and llvm because QuickJS's C code needs
@@ -882,7 +878,7 @@ jobs:
   # short-lived OIDC token (the id-token scope) and the pages scope, so no job here holds a
   # token that can push to the repository, and Pages runs no Jekyll pass that would drop Astro's
   # `_astro` folder. This job runs one first-party action and no package code, so it is the only job
-  # that holds either scope; `ci_wiring_parity.rs` refuses them anywhere else.
+  # that holds either scope.
   #
   # BEFORE THE FIRST DEPLOY, Pages must be switched on for the repository with GitHub Actions as its
   # source (Settings, Pages, Source). With Pages off this job fails and the site isn't published.

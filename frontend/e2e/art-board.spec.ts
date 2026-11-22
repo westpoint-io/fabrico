@@ -2183,8 +2183,7 @@ test('art board: the lane strip carries zero controls', async ({ browser }) => {
  *
  * D-14 makes "the board advocates nothing" machine-checkable AS PROSE, and D-17
  * widens the token list because a neutrality gate that can be walked around with a
- * synonym is not a gate. This block is one of the gate's two halves; the other is
- * `scripts/check-neutrality.sh`, over the two markdown artifacts.
+ * synonym is not a gate. This block and `e2e/mark-sheet.spec.ts` carry the token list.
  *
  * WHY `innerText` AND NOT `textContent`. `textContent` includes text inside
  * `display:none` nodes. N10 forbids those anyway - the board's only hidden element is
@@ -2218,10 +2217,9 @@ test('art board: the lane strip carries zero controls', async ({ browser }) => {
  * D-14's five, widened by D-17's eight. Thirteen, lower-case, matched by SUBSTRING so
  * `preferred` and `defaulted` are caught.
  *
- * Mirrored as literals rather than imported from the shell gate, deliberately: this
- * spec is not typechecked (see the file header) and the two halves of the gate are
- * meant to be independently readable. A drift between this list and
- * `scripts/check-neutrality.sh`'s IS a finding.
+ * Written as literals rather than imported, deliberately: this spec is not typechecked
+ * (see the file header) and each copy of the list is meant to be readable on its own. A
+ * drift between this list and `e2e/mark-sheet.spec.ts`'s IS a finding.
  */
 const BANNED_TOKENS: readonly string[] = [
   'recommend',

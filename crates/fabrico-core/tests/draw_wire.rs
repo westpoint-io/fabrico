@@ -49,11 +49,9 @@
 //! Run target: `cargo test -p fabrico-core --test draw_wire`
 //! (`PROPTEST_CASES=1024` in CI).
 //!
-//! # This file could only be created here
-//! `golden_readme_currency.rs` records that checks 2 and 3 of
-//! the core-freeze gate between them bar ANY new file under
-//! `crates/fabrico-core`, and that no phase under the freeze can put one there. Phase
-//! 63 is the only phase in v8.0 not under the freeze.
+//! # Why this file was created in phase 63
+//! The core-freeze gate of the time barred ANY new file under `crates/fabrico-core`.
+//! Phase 63 was the only phase in v8.0 not under the freeze.
 
 mod common;
 

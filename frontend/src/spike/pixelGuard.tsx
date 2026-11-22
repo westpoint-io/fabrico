@@ -142,8 +142,7 @@
 //       peak, found by search and published on the readout with both ring alphas read back
 //       off the drawn rings. Thirteen element-scoped baselines, one per slot, through clip
 //       divs over the canvas (`e2e/machine-kinds-pixel.spec.ts`), so a broken kind reddens
-//       its own PNG; `scripts/prove-machine-kinds-baselines-bite.sh` breaks each kind's art
-//       in a private worktree and shows exactly its own PNGs redden.
+//       its own PNG.
 //
 // NO SURFACE IS A BAKE ANY MORE (plan 61-07 re-pointed the last one). Every drawing on
 // this fixture is a live Pixi canvas, and every colour comes from LOCKED_SKIN through

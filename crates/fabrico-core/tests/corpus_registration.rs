@@ -26,11 +26,10 @@
 //! see it is `scripts/measure-golden-corpus.sh`, whose `GOLDEN_FILES` walk requires all
 //! five files to be present.
 //!
-//! # This test is NOT the proof
+//! # Seeing it fail
 //! At every commit where the corpus is correct, the disk set and the registry set are
-//! equal and this file is green on arrival. A guard that has never been observed red
-//! proves nothing. `scripts/prove-corpus-registration-bites.sh` is the proof: it PLANTS an
-//! unregistered fixture directory, requires this target to go red NAMING it, and reverts.
+//! equal and this file is green. To see it fail, add an empty fixture directory under
+//! `tests/golden/` that the registry doesn't name and run this target: it goes red naming it.
 
 use std::path::{Path, PathBuf};
 

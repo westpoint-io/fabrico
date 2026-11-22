@@ -8,8 +8,7 @@
 //! file and to `disallowed_methods` ONLY:
 //!   - the cross-platform RUNNER (`cert_cross_platform.rs`) uses
 //!     `include_bytes!`/`include_str!` and touches no fs, so it needs no allow;
-//!   - the negative-test (`scripts/determinism-gate-negative-test.sh`) plants an
-//!     `f64` + `HashMap`, which trip `disallowed_TYPES`, NOT methods — so the gate
+//!   - an `f64` or a `HashMap` trips `disallowed_TYPES`, NOT methods — so the gate
 //!     still bites everywhere else and this allow cannot mask a determinism-killer.
 //!
 //! Every generator is `#[ignore]`d: `cargo test` never runs it, so the corpus is

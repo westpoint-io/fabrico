@@ -129,8 +129,7 @@ async function openFixture(
  * four seconds at a time, but the ring it paints in that window has to be as crisp at
  * DPR 1.25 as any panel that never leaves. 16 -> 15 at plan 68-07, which DELETED the
  * 62-07 panel with the rest of the development pace switch (BELT-05 / D-68-12). The
- * deleted path is named in `68-07-SUMMARY.md` and deliberately not here: this file is
- * inside the scan set of `scripts/check-dev-pace-switch-absent.sh`. 15 -> 16 at plan
+ * deleted path is named in `68-07-SUMMARY.md` and deliberately not here. 15 -> 16 at plan
  * 73-04: `LoadRefusedCard.tsx` is an ELEVENTH inline `.fab-panel` (UNDO-09, the card that
  * says why a `.fab` file will not open), carrying the SAME ring-inclusive padding
  * expression `RefusalMessage.tsx` does rather than declaring a new one. Unlike the

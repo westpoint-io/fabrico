@@ -5,7 +5,6 @@
 #
 # Comment lines and blank lines are ignored, and exactly one line holds the number.
 #
-# Moving the number is a declared change: this file sits in a crate that
-# scripts/check-core-declared.sh covers, so an edit needs a line in docs/DECLARED-MOVES.txt with a
-# stated reason. Don't raise it just to turn a red check green.
+# Moving the number needs a commit message with a stated reason. Don't raise it just to turn a red
+# check green.
 578000

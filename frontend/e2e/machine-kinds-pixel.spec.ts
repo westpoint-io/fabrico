@@ -39,11 +39,10 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 // which belong to the DPR spec and are regenerated only with it. Every regenerated PNG is opened and read before it is
 // committed.
 //
-// THAT EACH BASELINE CAN FAIL is proved by `scripts/prove-machine-kinds-baselines-bite.sh`,
-// which breaks each kind's art in a private worktree (one `<path>` per SVG, the Handler's
-// subject, the label fill, the ring, the fault outline, the fault nub, the working notch)
-// and asserts exactly the PNGs that art reaches redden, with their pixel counts, while
-// every other one stays green.
+// THAT EACH BASELINE CAN FAIL was checked when the baselines were made, by breaking each kind's
+// art (one `<path>` per SVG, the Handler's subject, the label fill, the ring, the fault outline,
+// the fault nub, the working notch) and seeing exactly the PNGs that art reaches redden, while
+// every other one stayed green.
 //
 // TOLERANCE: `maxDiffPixels: 0` under the configs' pinned `threshold: 0`, the same EXACT
 // options as `pixel-guard.spec.ts`, for the same three reasons (antialias off, resolution
