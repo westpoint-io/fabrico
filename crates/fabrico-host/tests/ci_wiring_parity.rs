@@ -2122,14 +2122,25 @@ const LIVE_REPORT_PATH: &str = "path: frontend/test-results/live-report.json";
 /// The verdict job takes every leg's artifact by this pattern, into this folder.
 const LIVE_REPORT_PATTERN: &str = "pattern: live-report-*";
 const LIVE_REPORTS_DIR: &str = "path: live-reports";
+/// The live suite's config, as the list lines name it.
+const LIVE_CONFIG: &str = "playwright.live.config.ts";
+/// The flags that turn a Playwright run into a JSON test list. A run line holding them and
+/// `LIVE_CONFIG` must be one of the pinned list lines.
+const LIVE_LIST_FLAGS: &str = "--list --reporter=json";
+/// Where each job writes its exact list, through the runner's own variable. Outside
+/// `test-results/`, because the suite deletes that folder when it starts.
+const LIVE_LIST_FILE: &str = "\"$RUNNER_TEMP/live-list.json\"";
 
-/// The four pinned run lines of the live gate, whole, built from `LIVE_SHARDS`.
+/// The pinned run lines of the live gate, whole, built from `LIVE_SHARDS`.
 struct LiveRunLines {
-    /// The bite proof, in `LIVE_JOB`, before the suite.
+    /// The bite proof, in `LIVE_JOB`, before the list.
     bites: String,
+    /// This leg's exact test list, in `LIVE_JOB`, after the proof and before the suite, from the
+    /// same config and shard as the suite.
+    list: String,
     /// This leg's shard of the suite, its exit code swallowed because the CUT makes it 1.
     suite: String,
-    /// This leg's verdict, the run line straight after the suite.
+    /// This leg's verdict against its list, the run line straight after the suite.
     checker: String,
     /// The merged verdict in `LIVE_VERDICT_JOB`, over every shard's report in shard order.
     merge: String,
@@ -2144,12 +2155,17 @@ fn live_run_lines() -> LiveRunLines {
         .join(" ");
     LiveRunLines {
         bites: format!("run: bash {LIVE_RED_SET_BITES}"),
+        list: format!(
+            "run: npx playwright test --config={LIVE_CONFIG} {LIVE_LIST_FLAGS} --shard={shard}/{n} \
+             > {LIVE_LIST_FILE}"
+        ),
         suite: format!(
             "run: {LIVE_SUITE} -- --shard={shard}/{n} || echo \"live shard exited $?; the red-set \
              check below decides\""
         ),
         checker: format!(
-            "run: bash ../{LIVE_RED_SET_CHECKER} --shard {shard}/{n} test-results/live-report.json"
+            "run: bash ../{LIVE_RED_SET_CHECKER} --shard {shard}/{n} --list {LIVE_LIST_FILE} \
+             test-results/live-report.json"
         ),
         merge: format!("run: bash {LIVE_RED_SET_CHECKER} --merge {n} {reports}"),
     }
@@ -2166,8 +2182,9 @@ fn live_gate_wrong(yml: &str) -> Vec<String> {
             .find(|(id, _)| *id == job)
             .map(|(_, lines)| lines.clone())
     };
-    let pinned: [(&str, &str, &str); 4] = [
+    let pinned: [(&str, &str, &str); 5] = [
         ("the bite proof", &lines.bites, LIVE_JOB),
+        ("the exact list", &lines.list, LIVE_JOB),
         ("the suite", &lines.suite, LIVE_JOB),
         ("the shard checker", &lines.checker, LIVE_JOB),
         ("the merge", &lines.merge, LIVE_VERDICT_JOB),
@@ -2194,7 +2211,7 @@ fn live_gate_wrong(yml: &str) -> Vec<String> {
         }
     }
 
-    // Every run line that names the suite, the checker or its proof is one of the four.
+    // Every run line that names the suite, the checker, its proof or a live list is a pinned one.
     for (id, job) in &blocks {
         for line in job
             .iter()
@@ -2203,12 +2220,13 @@ fn live_gate_wrong(yml: &str) -> Vec<String> {
         {
             let names_live = [LIVE_SUITE, LIVE_RED_SET_CHECKER, LIVE_RED_SET_BITES]
                 .iter()
-                .any(|needle| line.contains(needle));
+                .any(|needle| line.contains(needle))
+                || (line.contains(LIVE_LIST_FLAGS) && line.contains(LIVE_CONFIG));
             if names_live && !pinned.iter().any(|(_, p, _)| *p == line) {
                 wrong.push(format!(
-                    "job `{id}` runs `{line}`, which is none of the four pinned live run lines. A \
-                     second suite run, a checker with another argument or a swallowed exit code \
-                     would let a red shard pass."
+                    "job `{id}` runs `{line}`, which is none of the pinned live run lines. A \
+                     second suite run, a list from another shard or folder, a checker with another \
+                     argument or a swallowed exit code would let a red shard pass."
                 ));
             }
         }
@@ -2230,13 +2248,23 @@ fn live_gate_wrong(yml: &str) -> Vec<String> {
     match job_lines(LIVE_JOB) {
         None => wrong.push(format!("there is no job `{LIVE_JOB}` under `jobs:`.")),
         Some(job) => {
-            // The proof before the suite, and the shard checker the run line straight after it.
+            // The proof, then the list, before the suite, and the shard checker the run line
+            // straight after it.
             let runs: Vec<&str> = job
                 .iter()
                 .map(|l| step_key(l))
                 .filter(|l| l.starts_with("run:"))
                 .collect();
             let at = |expected: &str| runs.iter().position(|l| *l == expected);
+            if let (Some(b), Some(l), Some(s)) = (at(&lines.bites), at(&lines.list), at(&lines.suite))
+                && !(b < l && l < s)
+            {
+                wrong.push(format!(
+                    "the bite proof, the exact list and the suite are `run:` lines {b}, {l} and \
+                     {s} of job `{LIVE_JOB}`. The list must be made after the proof and before \
+                     the suite, so it records what this leg was asked to run before anything ran."
+                ));
+            }
             if let (Some(b), Some(s), Some(c)) =
                 (at(&lines.bites), at(&lines.suite), at(&lines.checker))
                 && !(b < s && s + 1 == c)
@@ -2379,10 +2407,12 @@ fn live_gate_wrong(yml: &str) -> Vec<String> {
 ///
 /// The suite runs as `LIVE_SHARDS` shards on separate runners, one leg of `LIVE_JOB` each, because
 /// one worker against one host made it the slowest job in the workflow. So its verdict has two
-/// halves. Each leg grades its own shard with `--shard i/n` on the run line straight after the
-/// suite, and uploads its raw report. `LIVE_VERDICT_JOB` needs every leg, takes the reports and
-/// grades them together with `--merge n`. This rule used to allow exactly one checker line, in one
-/// job; it now pins all four run lines whole, the order inside the leg, the matrix, the upload and
+/// halves. Each leg makes its shard's exact test list before the suite, grades its own shard with
+/// `--shard i/n --list` on the run line straight after the suite, and uploads its raw report.
+/// `LIVE_VERDICT_JOB` needs every leg, takes the reports and grades them together with
+/// `--merge n`. The list is made in the same job from the same commit as the run it grades, so a
+/// list can't come from another revision. This rule used to allow exactly one checker line, in one
+/// job; it now pins every live run line whole, the order inside the leg, the matrix, the upload and
 /// download between the two jobs, and the guards on both. The verdict job's `needs:` line and its
 /// docs-only gate are pinned by `job_classes_wrong`.
 ///
@@ -2410,6 +2440,7 @@ fn the_live_gate_verdict_is_the_red_set_check() {
 #[test]
 fn the_live_gate_check_names_each_way_of_switching_it_off() {
     const CHECKER_STEP: &str = "      - name: This shard's red set is exactly its declared CUTs\n";
+    const LIST_STEP: &str = "      - name: This shard's exact test list\n";
     const MERGE_STEP: &str =
         "      - name: The live red set over all shards is exactly the declared CUTs\n";
     const UPLOAD_STEP: &str = "      - name: Keep this shard's report for the verdict job\n";
@@ -2418,6 +2449,12 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
     let lines = live_run_lines();
     let checker_line = format!("        {}\n", lines.checker);
     let merge_line = format!("        {}\n", lines.merge);
+    let list_line = format!("        {}\n", lines.list);
+    let list_step = format!("{LIST_STEP}        working-directory: frontend\n{list_line}");
+    assert!(CI_YML.contains(&list_step), "the list step is in the workflow as one block");
+    let list_on_three = lines.list.replace("/4 >", "/3 >");
+    let list_in_results = lines.list.replace(LIVE_LIST_FILE, "test-results/live-list.json");
+    let checker_no_list = lines.checker.replace(&format!(" --list {LIVE_LIST_FILE}"), "");
     let last_report = format!(" live-reports/live-report-{LIVE_SHARDS}/live-report.json");
 
     // (what, the planted copy, which check reads it, what it must name)
@@ -2433,7 +2470,7 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
             "the shard checker given `|| true`",
             CI_YML.replace(&checker_line, &checker_line.replace(".json\n", ".json || true\n")),
             live_gate_wrong,
-            "is none of the four pinned live run lines".to_string(),
+            "is none of the pinned live run lines".to_string(),
         ),
         (
             "a step between the suite and the shard checker",
@@ -2454,10 +2491,42 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
             format!("the merge's run line `{}` is in job(s) []", lines.merge),
         ),
         (
+            "the leg's list step deleted",
+            without_step(CI_YML, LIST_STEP),
+            live_gate_wrong,
+            format!("the exact list's run line `{}` is in job(s) []", lines.list),
+        ),
+        (
+            "the leg's list made for shard `/3`",
+            CI_YML.replace(&list_line, &format!("        {list_on_three}\n")),
+            live_gate_wrong,
+            format!("job `{LIVE_JOB}` runs `{list_on_three}`, which is none of the pinned"),
+        ),
+        (
+            "the leg's list written into test-results/",
+            CI_YML.replace(&list_line, &format!("        {list_in_results}\n")),
+            live_gate_wrong,
+            format!("job `{LIVE_JOB}` runs `{list_in_results}`, which is none of the pinned"),
+        ),
+        (
+            "the shard checker without `--list`",
+            CI_YML.replace(&checker_line, &format!("        {checker_no_list}\n")),
+            live_gate_wrong,
+            format!("job `{LIVE_JOB}` runs `{checker_no_list}`, which is none of the pinned"),
+        ),
+        (
+            "the leg's list step moved after the suite",
+            CI_YML
+                .replace(&list_step, "")
+                .replace(&checker_line, &format!("{checker_line}\n{list_step}")),
+            live_gate_wrong,
+            "The list must be made after the proof and before the suite".to_string(),
+        ),
+        (
             "the merge given three paths",
             CI_YML.replace(&merge_line, &merge_line.replace(&last_report, "")),
             live_gate_wrong,
-            "is none of the four pinned live run lines".to_string(),
+            "is none of the pinned live run lines".to_string(),
         ),
         (
             "continue-on-error on the verdict job",
@@ -2505,7 +2574,7 @@ fn the_live_gate_check_names_each_way_of_switching_it_off() {
             format!("heavy job `{LIVE_VERDICT_JOB}` is missing `{LIVE_VERDICT_NEEDS}`"),
         ),
     ];
-    assert_eq!(plants.len(), 12, "twelve ways of switching the live verdict off");
+    assert_eq!(plants.len(), 17, "seventeen ways of switching the live verdict off");
 
     let mut missed: Vec<String> = Vec::new();
     for (what, yml, check, must_name) in &plants {

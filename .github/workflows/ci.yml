@@ -1666,10 +1666,14 @@ jobs:
   # adds the terminal spec (`90-sim-fatal.terminal.spec.ts`, the teardown that ends the host)
   # back into every shard, so every leg ends its own host last, and its 4 tests run 4 times.
   #
-  # ONE VERDICT IN TWO HALVES. In each leg, the run: line straight after the suite is
-  # `check-live-red-set.sh --shard <i>/4`. It refuses a report from another shard, keeps the
-  # checks that the terminal spec ran and ran last, and applies a floor of its own to the
-  # shard. The leg then uploads its raw report as `live-report-<i>` unless the run was
+  # ONE VERDICT IN TWO HALVES. Before its suite, each leg writes the shard's exact test list
+  # (`playwright test --list --reporter=json --shard=<i>/4`, same config, same commit). The
+  # run: line straight after the suite is `check-live-red-set.sh --shard <i>/4 --list <list>`.
+  # It compares the shard's results with that list, so a listed test with no result is red and
+  # a result that isn't on the list means the verdict could not be made. It also refuses a
+  # report from another shard, keeps the checks that the terminal spec ran and ran last, and
+  # applies a floor of its own to the shard. A failed test's red line names the test.step it
+  # failed in. The leg then uploads its raw report as `live-report-<i>` unless the run was
   # cancelled, and the upload fails if there is no report. The `e2e-live-verdict` job below
   # needs every leg. It takes the four reports and runs the checker's `--merge 4` mode over
   # them in shard order: each shard must grade OK on its own, no test outside the terminal spec
@@ -1685,7 +1689,7 @@ jobs:
   # time comparison inside one machine.
   #
   # The bite proof runs in every leg before the suite. `ci_wiring_parity.rs`
-  # (`the_live_gate_verdict_is_the_red_set_check`) pins the four run lines, their jobs and
+  # (`the_live_gate_verdict_is_the_red_set_check`) pins every live run line, its job and its
   # order, the matrix, the report upload and download, and that neither job carries
   # `continue-on-error` and no verdict step carries a condition.
   #
@@ -1766,6 +1770,14 @@ jobs:
       - name: Live red-set checker bites
         run: bash scripts/prove-live-red-set-bites.sh
 
+      # The exact list of tests this leg should run, from the same config and shard as the suite,
+      # made in this job from this commit. The checker compares the report with it, so a test
+      # that drops out of the run is named rather than missed. It goes to $RUNNER_TEMP because
+      # the suite deletes test-results/ when it starts. List mode opens no browser.
+      - name: This shard's exact test list
+        working-directory: frontend
+        run: npx playwright test --config=playwright.live.config.ts --list --reporter=json --shard=${{ matrix.shard }}/4 > "$RUNNER_TEMP/live-list.json"
+
       # The developer command with this leg's shard (the inner cargo build is a warm-cache
       # no-op). Its exit code is not the verdict: the CUT makes it 1 on whichever shard holds it.
       - name: Run this live shard (the JSON report is the input; the next step is the verdict)
@@ -1774,7 +1786,7 @@ jobs:
 
       - name: This shard's red set is exactly its declared CUTs
         working-directory: frontend
-        run: bash ../scripts/check-live-red-set.sh --shard ${{ matrix.shard }}/4 test-results/live-report.json
+        run: bash ../scripts/check-live-red-set.sh --shard ${{ matrix.shard }}/4 --list "$RUNNER_TEMP/live-list.json" test-results/live-report.json
 
       # The docs tour's pictures (site/src/assets/tour/), taken again from the real app once per
       # run, on shard 1 only. The script starts its own host and Vite now that the suite has freed
