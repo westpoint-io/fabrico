@@ -43,11 +43,17 @@
 #                       3 px outline and gains a half-opaque     grey fringe on machine 4's right
 #                       1 px column just outside its right       side (its cores stay equal, so
 #                       side                                     only the fringe rule can see it)
+#   backing-stretched   pixiApp.ts: the pixel-ratio follower     the capture test itself, naming
+#                       reads half the page's ratio, so the      the canvas backing store
+#                       board draws at 0.5 and the browser
+#                       stretches it to the viewport
 #
 # Every grading target is the zoom-1 cell of its property, and every one of them passes at HEAD.
 # `outline-fringe` proves the "no grey fringe" half of STRK-01 is graded with antialiasing as
 # shipped (review 107 CR-01): before that fix the shipped rule compared cores only, and this break
-# leaves the cores equal. Each
+# leaves the cores equal. `backing-stretched` is a plumbing break (review 107 WR-01): the capture
+# test must stop at the first tile, naming the backing store, and the grading tests of the boot
+# then fail for want of a manifest, which is the only other verdict it may change. Each
 # break is as narrow as it can be made: the cap is one belt end, because a cap wider than a
 # cell at zoom 1 placed on its port would cover that machine's outline, and the outline check
 # would change its verdict too.
@@ -90,10 +96,11 @@
 # HOW TO RUN: `bash scripts/prove-capture-checks-bite.sh` from anywhere in the checkout. It
 # takes no arguments. The worktree and every run directory go under `$TMPDIR`; on a machine
 # where /tmp is held in memory, point it at disk (`TMPDIR=$HOME/.cache/fabrico-tmp`). It
-# makes one unmutated run and one run per break, eight in all, each booting the host and
+# makes one unmutated run and one run per break, nine in all, each booting the host and
 # Vite. MEASURED: 202 s wall time for seven runs on a developer machine at a load average
-# under 5 (the PROVEN line prints each run's own figure); the worst case under the per-run
-# limit is 8 x 900 s, 2 h, reached only if every run hangs.
+# under 5, and 374 s for the nine runs on 2026-11-22 while a full capture run shared the machine
+# (the PROVEN line prints each run's own figure); the worst case under the per-run
+# limit is 9 x 900 s, about 2 h 15 min, reached only if every run hangs.
 #
 # EXIT CODES:
 #   0  PROVEN: every break turned its cell red, changed no other property's verdict, and
@@ -317,6 +324,32 @@ if (mode === "baseline") {
     process.exit(0);
 }
 const brk = tests(breakDir);
+if (mode === "plumbing") {
+    // A break in the capture test's own checks: the capture test fails, naming the check, and
+    // every other test that changed is a grading test that found no manifest to read.
+    let changedP = 0;
+    for (const [title, b] of base) {
+        const a = brk.get(title);
+        if (a === undefined) { problems.push(`${title}: missing from the break's run`); continue; }
+        if (a.status === b.status && a.outcome === b.outcome) continue;
+        changedP++;
+        if (title !== target && !a.error.includes("no manifest for boot")) problems.push(`${title} changed for another reason: ${b.status}/${b.outcome} -> ${a.status}/${a.outcome}, ${a.error.split("\n")[0]}`);
+    }
+    for (const title of brk.keys()) if (!base.has(title)) problems.push(`${title}: only in the break's run`);
+    const tb0 = base.get(target), ta0 = brk.get(target);
+    console.log(`CHANGED ${changedP}`);
+    console.log(`TARGET ${tb0 ? tb0.status : "missing"} ${ta0 ? ta0.status : "missing"}`);
+    if (!tb0 || tb0.status !== "passed") problems.push(`${target} did not pass in the unmutated run`);
+    if (!ta0 || ta0.status !== "failed") problems.push(`${target} did not fail with the break (${ta0 ? ta0.status : "missing"})`);
+    const err0 = ta0 ? ta0.error : "";
+    const named0 = err0.includes(needle);
+    console.log(`NAMED ${named0 ? "yes" : "no"}`);
+    if (!named0) problems.push(`${target}'s error does not name ${JSON.stringify(needle)}`);
+    console.log(`ERROR ${(err0.split("\n").find((l) => l.trim() !== "") || "").trim()}`);
+    console.log(`OFFENDER ${(err0.split("\n").find((l) => l.includes(needle)) || "").trim()}`);
+    for (const p of problems) console.log(`PROBLEM ${p}`);
+    process.exit(0);
+}
 let changed = 0;
 for (const [title, b] of base) {
     const a = brk.get(title);
@@ -416,7 +449,8 @@ echo "baseline: ${base_tests} tests clean for ${BOOT_GREP} (passed or declared),
 L="frontend/src/render/layers"
 A="frontend/src/render/assets"
 S="frontend/src/render/synth"
-KEPT=("$L/machines.ts" "$A/factory.svg" "$S/beltGeometry.ts" "$L/belts.ts")
+R="frontend/src/render"
+KEPT=("$L/machines.ts" "$A/factory.svg" "$S/beltGeometry.ts" "$L/belts.ts" "$R/pixiApp.ts")
 prover_keep_bytes "${KEPT[@]}"
 
 failures=()
@@ -455,6 +489,41 @@ prove() {
     echo "  error: ${err}"
     sed -n 's/^OFFENDER /  offender: /p' <<<"$rep"
     sed -n 's/^PLANTED /  moved inside the break: /p' <<<"$rep"
+}
+
+# prove_plumbing <break> <file> <target title> <text the error must contain> <old text> <new text>:
+# a break in what the capture test itself checks. The capture test must fail and name the check;
+# the grading tests may change only because the failed capture wrote no manifest.
+prove_plumbing() {
+    local name="$1" file="$2" target="$3" needle="$4" from="$5" to="$6"
+    local rep changed problems err
+    if ! replace_once "$file" "$from" "$to"; then
+        echo "FAIL: the break '${name}' could not be applied to ${file}." >&2
+        exit 2
+    fi
+    if prover_same_as_kept "$file"; then
+        echo "FAIL: the break '${name}' changed no byte of ${file}." >&2
+        exit 2
+    fi
+    run_capture "$name"
+    prover_put_back "$file"
+    if ! rep="$(node -e "$ANALYSE" plumbing "${RUNS}/baseline" "${RUNS}/${name}" "" "$target" "" "" "$needle")"; then
+        echo "FAIL: the reports of '${name}' could not be read." >&2
+        exit 2
+    fi
+    changed="$(sed -n 's/^CHANGED //p' <<<"$rep")"
+    err="$(sed -n 's/^ERROR //p' <<<"$rep")"
+    problems="$(sed -n 's/^PROBLEM //p' <<<"$rep")"
+    if [ -n "$problems" ]; then
+        failures+=("${name}: $(tr '\n' ';' <<<"$problems")")
+        echo "MUT ${name} verdict=NOT-AS-PINNED test=\"${target}\" changed=${changed:-?} rev=${REV} overlay=${OVERLAY}"
+        sed 's/^/  problem: /' <<<"$problems"
+    else
+        mut_lines+=("MUT ${name} verdict=RED test=\"${target}\" changed=${changed} rev=${REV} overlay=${OVERLAY}")
+        echo "MUT ${name} verdict=RED test=\"${target}\" changed=${changed} rev=${REV} overlay=${OVERLAY}"
+    fi
+    echo "  error: ${err}"
+    sed -n 's/^OFFENDER /  offender: /p' <<<"$rep"
 }
 
 # outline-thin-side: the Sink at cell (14,4), node 4, keeps its left, top and bottom bands
@@ -557,6 +626,17 @@ prove outline-fringe "$L/machines.ts" outline-sides "outline-sides ${BOOT_GREP} 
             const ink = skin.palette.ramp[skin.palette.ramp.length - 1];
             entry.chassis.rect(node.w * CELL - 2.5, 2.5, 1, node.h * CELL - 5).fill({ color: ink, alpha: 0.5 });
           }
+"
+
+# backing-stretched: the follower that keeps the renderer's resolution equal to the page's ratio
+# reads half the ratio, so on its first frame it resizes the renderer to 0.5. The canvas keeps its
+# CSS size and the browser stretches an 800x500 backing store over the 1600x1000 viewport. The
+# screenshot is still 1600x1000, so only the backing-store check can see it.
+prove_plumbing backing-stretched "$R/pixiApp.ts" "capture ${BOOT_GREP}" \
+    "the canvas backing store is its client size times the boot's ratio" \
+    "    () => window.devicePixelRatio,
+" \
+    "    () => window.devicePixelRatio / 2,
 "
 
 # --- Every file is back to its kept bytes -----------------------------------------------

@@ -52,9 +52,10 @@ import {
 //
 // No capture is compared with a stored image. Every check is a measured property, graded in the
 // grading project. This test fails only on broken plumbing: a page error, a render loop that
-// stopped, a zoom that didn't land, a pan that didn't land, a live antialiasing state (the WebGL
-// context's `antialias` attribute and its SAMPLES) that disagrees with the boot, or a capture
-// with no machine in it.
+// stopped, a zoom that didn't land, a pan that didn't land, a canvas backing store that isn't its
+// client size times the boot's ratio (a board the browser stretches), a live antialiasing state
+// (the WebGL context's `antialias` attribute and its SAMPLES) that disagrees with the boot, or a
+// capture with no machine in it.
 
 /** The viewport every boot captures, in CSS px. */
 const VIEWPORT = { width: 1600, height: 1000 } as const;
@@ -178,6 +179,12 @@ for (const boot of CAPTURE_BOOTS) {
 
           expect(facts.camera, `${label}: the camera didn't move between the pan and the capture`).toEqual(camera);
           expect(facts.dpr, `${label}: the page reads the boot's pixel ratio`).toBe(boot.dpr);
+          // A board drawn at a lower ratio and stretched by the browser still screenshots at the
+          // viewport's device size, so the size check below can't see it. The backing store can.
+          expect(
+            [facts.backing.width, facts.backing.height],
+            `${label}: the canvas backing store is its client size times the boot's ratio, so the browser doesn't stretch the board`,
+          ).toEqual([Math.round(facts.client.width * boot.dpr), Math.round(facts.client.height * boot.dpr)]);
           expect(facts.gl, `${label}: the live WebGL context's antialiasing matches the boot`).toEqual(
             boot.aa === 'on' ? { antialias: true, samples: expect.any(Number) } : { antialias: false, samples: 0 },
           );
