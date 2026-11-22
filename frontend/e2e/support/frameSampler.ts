@@ -132,10 +132,10 @@ export function tickBudgetMs(ticks: number): number {
 }
 
 /** Add `ms` to the running test's limit (none when the limit is off) and annotate why. */
-function extendTestLimit(ms: number, description: string): void {
+function extendTestLimit(ms: number, description: string, type = 'frame-budget'): void {
   const info = test.info();
   if (info.timeout > 0) info.setTimeout(info.timeout + ms);
-  info.annotations.push({ type: 'frame-budget', description });
+  info.annotations.push({ type, description });
 }
 
 /**
@@ -157,6 +157,17 @@ export function addFrameBudget(frames: number, reason: string): number {
  */
 export function addWaitBudget(ms: number, reason: string): number {
   extendTestLimit(ms, `${reason}: a derived ${ms} ms wait`);
+  return ms;
+}
+
+/**
+ * Raise the running test's limit by `ms` for work that is not a wait on the page: Node-side work
+ * such as decoding a capture and measuring it, whose cost scales with the machine, not with
+ * frames. `ms` comes from a measured run (the caller names it), never from frames. Annotated
+ * `work-budget`, so a test that still times out reports what it was given. Returns `ms`.
+ */
+export function addWorkBudget(ms: number, reason: string): number {
+  extendTestLimit(ms, `${reason}: ${ms} ms of measured work`, 'work-budget');
   return ms;
 }
 

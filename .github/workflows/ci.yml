@@ -2132,12 +2132,15 @@ jobs:
   # runner and a time limit of its own. It reads `frontend/` and `crates/` and never a markdown file
   # at the repository root, so it takes the same docs-only gate as `e2e-walk`.
   #
-  # THE LIMIT. CI run 44867588480 on 3e64668 ran the 222-test capture set in 18.5 job minutes
-  # (Playwright's own 16.2). Doubled that is 37.0, rounded up to the next five minutes the way the
-  # walk's 58.4 became 60, which gives the 40 minute `globalTimeout` in the capture config, so an
-  # overrun writes a report before the runner is killed. This job's limit is those 40 plus 15 for
-  # the build. That recorded run replaces the first-run values from a local measurement (20 and 35
-  # minutes, from a 292 s run on a developer machine times 4 for a slow runner).
+  # THE LIMIT. The slowest recorded run is CI run 45022991094 on 1df4880, on a runner 1.6 to 1.9
+  # times slower than run 44867588480's (18.5 job minutes). Its capture test for ratio 2 with
+  # antialiasing on hit its own per-test limit and the job ended at 29.8 minutes; the part that
+  # never ran, timed on the same runner, comes to about 2.6 more, so 32.4 job minutes in all (the
+  # arithmetic is in the capture config). Doubled that is 64.8, rounded up to the next five
+  # minutes the way the walk's 58.4 became 60, which gives the 65 minute `globalTimeout` in the
+  # capture config, so an overrun writes a report before the runner is killed. This job's limit is
+  # those 65 plus 15 for the build. They replace 40 and 55 from run 44867588480, which that slower runner showed were too
+  # close: 40 minutes was 1.2 times its run.
   #
   # ITS VERDICT IS THE REPORT, READ AFTER THE SUITE. Playwright exits 0 on a skipped test and on a
   # test marked `test.fail()` that failed, so the run's exit code alone can lose a test. After the
@@ -2155,7 +2158,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 80
     steps:
       - name: Checkout
         uses: actions/checkout@v4

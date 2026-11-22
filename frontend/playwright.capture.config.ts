@@ -21,12 +21,17 @@ export default defineConfig({
   testMatch: /\.capture\.ts$/,
   timeout: 90_000,
   // A ceiling on one run, so a wedged browser ends in a written report instead of a runner killed
-  // at the CI job's limit. CI run 44867588480 on 3e64668 ran the 222-test capture set in 18.5 job
-  // minutes (Playwright's own 16.2). Doubled that is 37.0, rounded up to the next five minutes the
-  // way the walk's 58.4 became 60, which gives 40. The CI job's limit is 55: these 40 plus 15 for
-  // the build. That recorded run replaces the first-run 20 minutes from a local measurement (292 s
-  // on a developer machine, times 4 for a slow runner).
-  globalTimeout: 40 * 60_000,
+  // at the CI job's limit. The slowest recorded run is CI run 45022991094 on 1df4880: its runner was
+  // 1.6 to 1.9 times slower than run 44867588480's (18.5 job minutes). The capture test for ratio 2
+  // with antialiasing on hit its per-test limit after zoom 4, and the job ended at 29.8 minutes,
+  // the steps after the suite included. The part that never ran, timed on the same runner, is about
+  // 2.6 minutes: the last zoom (7 tiles, 107 s for the ratio-2 shipped boot times 1.29, aa-on's
+  // slowdown at zoom 2, so 138 s) and the 216 grading tests (7.5 s on the earlier run times 1.9, so
+  // 14 s). That makes 32.4 job minutes. Doubled that is 64.8, rounded up to the next five minutes
+  // the way the walk's 58.4 became 60, which gives 65. The CI job's limit is 80: these 65 plus 15
+  // for the build. The 40 minutes this replaces were 1.2 times that run, under ci.yml's 1.5 to 2
+  // rule.
+  globalTimeout: 65 * 60_000,
   // One mutable host process is shared by every test, so tests run one at a time.
   fullyParallel: false,
   workers: 1,
