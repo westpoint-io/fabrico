@@ -20,6 +20,9 @@ export default defineConfig({
   // configs. The old CI retry let a test that failed once pass as flaky, and no
   // gate read the flaky line, so retries is 0 on CI and locally.
   retries: 0,
+  // A test that fails and then passes on a retry fails the run. With retries at 0 this only
+  // matters if someone raises retries later.
+  failOnFlakyTests: true,
   // Load the app once before any test, so Vite has compiled it before the first test's budget
   // starts. Each CI shard boots its own Vite, and without this the first test on every shard
   // paid for the compile. See e2e/support/warmVite.ts.

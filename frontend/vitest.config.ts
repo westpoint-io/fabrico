@@ -15,5 +15,13 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // `vitest run --coverage` (npm run test:coverage, and CI's unit job) writes a v8 coverage
+    // report to coverage/. It is a report only: no threshold fails the run.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'html', 'json-summary'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/gates/**'],
+    },
   },
 });

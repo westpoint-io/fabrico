@@ -36,6 +36,9 @@ export default defineConfig({
   // LOCKED flake policy: a flaky gate is a broken gate. retries stays 0
   // unconditionally - the mock config's CI retry must never apply here.
   retries: 0,
+  // A test that fails and then passes on a retry fails the run. With retries at 0 this only
+  // matters if someone raises retries later.
+  failOnFlakyTests: true,
   // The JSON report is the per-test report CI keeps as an artifact (per-test timings). The
   // run's exit code is the verdict.
   reporter: [['list'], ['json', { outputFile: 'test-results/live-report.json' }]],

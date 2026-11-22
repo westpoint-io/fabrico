@@ -37,6 +37,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
+  // A test that fails and then passes on a retry fails the run. With retries at 0 this only
+  // matters if someone raises retries later.
+  failOnFlakyTests: true,
   reporter: REPORTERS,
   use: {
     baseURL: 'http://127.0.0.1:5173',

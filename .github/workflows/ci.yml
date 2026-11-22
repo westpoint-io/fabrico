@@ -74,6 +74,26 @@ jobs:
   # that job. The live suite also has its own `globalTimeout` (playwright.live.config.ts),
   # under its job's limit, so an overrun writes a report before the runner is killed.
   # ===================================================================================
+  # WORKFLOW LINT. actionlint checks every file under .github/workflows: YAML shape, job and step
+  # keys, `needs:` targets, expression syntax and types, and action inputs. It also runs the
+  # runner's shellcheck over each `run:` block. The binary is a pinned release download, checked
+  # against its sha256 before it runs, so a changed tarball fails the job instead of running.
+  workflow-lint:
+    name: workflow lint (actionlint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint the workflows with a checksum-pinned actionlint
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
+  # ===================================================================================
   # GOLDEN-CORPUS AUTHORING DRIFT (added 2026-08-19, milestone v8.0 Phase 63 plan 63-13).
   #
   # THIS JOB IS THE DELIBERATE CLOSURE OF PHASE 63's RESEARCH FINDING 2: until it, the
@@ -1404,7 +1424,9 @@ jobs:
   unit:
     name: frontend unit (vitest + tsc)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Was 15. vitest with v8 coverage took 2.03 times as long as without it locally (45.3 s
+    # against 22.3 s), so the limit went up by that ratio, 15 x 2.03 rounded up to 31.
+    timeout-minutes: 31
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1422,7 +1444,18 @@ jobs:
 
       - name: Unit tests (vitest)
         working-directory: frontend
-        run: npx vitest run
+        run: npx vitest run --coverage
+
+      # The v8 coverage report the run above writes (frontend/coverage/). It is a report only, with
+      # no threshold. A red run may not write it, hence the warning instead of an error.
+      - name: Keep the unit coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: frontend/coverage/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Typecheck (tsc --noEmit)
         working-directory: frontend

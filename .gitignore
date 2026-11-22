@@ -37,7 +37,8 @@ crates/fabrico-app/gen/
 # the committed golden corpus; only the *.snap.new pending review files are noise.
 frontend/test-results/
 frontend/playwright-report/
-# A lesson walk shard's blob report, which CI merges in its walk verdict job.
+frontend/coverage/
+# A Playwright blob report, if a local run writes one.
 frontend/blob-report/
 crates/fabrico-scenario/**/*.snap.new
 
