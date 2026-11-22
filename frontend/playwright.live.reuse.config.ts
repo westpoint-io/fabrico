@@ -16,7 +16,7 @@ export default defineConfig({
   // A ceiling on the whole run (review 84 WR-06), so a wedged browser ends in a written report
   // instead of a runner killed at the CI job's limit: Playwright stops, marks what is left not
   // run, and writes the JSON report with a top-level "Timed out waiting ... for the test suite
-  // to run" error, which scripts/check-live-red-set.sh refuses by name (exit 2, never a pass).
+  // to run" error, and the run exits non-zero.
   // The slowest whole pass measured was 1.3 h (78 min, the GPU proxy; a full CI
   // run took 1.2 h), and the CI job's own limit is 120 min with about ten of build
   // before the suite starts, so 100.
@@ -25,8 +25,8 @@ export default defineConfig({
   workers: 1,
   forbidOnly: false,
   retries: 0,
-  // MIRROR playwright.live.config.ts: the JSON report is what
-  // scripts/check-live-red-set.sh reads for the live verdict (plan 84-02, GATE-07).
+  // MIRROR playwright.live.config.ts: the JSON report is the per-test report kept for
+  // per-test timings.
   reporter: [['line'], ['json', { outputFile: 'test-results/live-report.json' }]],
   use: {
     baseURL: 'http://127.0.0.1:5173',
@@ -75,9 +75,7 @@ export default defineConfig({
   // `--no-deps`, which would fire the fault switch on that host and leave every later run against
   // it red. So here the `live-terminal` project, and the `live` project's teardown edge to it,
   // exist only when the caller asks for them with FABRICO_LIVE_TERMINAL=1 (the full-pass recipe and
-  // a run of the fatal spec alone set it). `scripts/check-live-red-set.sh` refuses a full pass that
-  // holds no test from the fatal spec, so a full pass run without the flag cannot read OK.
-  // `liveProjects.source.test.ts` keeps the two configs' projects the same.
+  // a run of the fatal spec alone set it). Keep the two configs' projects the same.
   projects: [
     {
       name: 'live',

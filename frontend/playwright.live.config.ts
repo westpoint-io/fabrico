@@ -19,7 +19,7 @@ export default defineConfig({
   // A ceiling on the whole run (review 84 WR-06), so a wedged browser ends in a written report
   // instead of a runner killed at the CI job's limit: Playwright stops, marks what is left not
   // run, and writes the JSON report with a top-level "Timed out waiting ... for the test suite
-  // to run" error, which scripts/check-live-red-set.sh refuses by name (exit 2, never a pass).
+  // to run" error, and the run exits non-zero.
   // CI runs the suite as four shards, one runner each, so this ceiling covers one shard. The
   // slowest of the four shards took 14.75 min in a local run on 2026-11-07 (885 s for shard 3/4,
   // which holds the 77 file). CI runs a test up to 2.9 times slower than this machine, and twice
@@ -36,9 +36,8 @@ export default defineConfig({
   // LOCKED flake policy: a flaky gate is a broken gate. retries stays 0
   // unconditionally - the mock config's CI retry must never apply here.
   retries: 0,
-  // The JSON report is the live gate's input: scripts/check-live-red-set.sh reads
-  // test-results/live-report.json and passes only when the failed set is exactly the
-  // declared CUTs (plan 84-02, GATE-07), because the CUT makes this run exit 1 forever.
+  // The JSON report is the per-test report CI keeps as an artifact (per-test timings). The
+  // run's exit code is the verdict.
   reporter: [['list'], ['json', { outputFile: 'test-results/live-report.json' }]],
   use: {
     baseURL: 'http://127.0.0.1:5173',
@@ -96,13 +95,10 @@ export default defineConfig({
   // so it must run after every other live spec, in a project of its own. Terminal specs are
   // named `*.terminal.spec.ts` (review IN-C-01), so a second one lands here by its name, not by
   // an exact file regex. `live` names the project as its `teardown`, which runs it LAST and also
-  // when a `live` test failed (the declared CUT always does); `dependencies` would be the wrong
-  // keyword, because a project whose dependency failed is skipped, and the checker reads a
-  // skipped test as did-not-run (red). A file-filtered run of a `live` spec also runs the
+  // when a `live` test failed; `dependencies` would be the wrong keyword, because a project
+  // whose dependency failed is skipped. A file-filtered run of a `live` spec also runs the
   // teardown, so a touched-spec run passes `--no-deps`; a run of the fatal spec alone passes
-  // `--project live-terminal`. `scripts/check-live-red-set.sh` refuses a full pass that holds no
-  // test from the fatal spec, or ran it before another test ended (review WR-C-01), and
-  // `liveProjects.source.test.ts` keeps this block and the reuse config's the same. Neither
+  // `--project live-terminal`. Keep this block and the reuse config's the same. Neither
   // project carries `launchOptions` (glPinConfig.test.ts: exactly one, the top-level pin above).
   projects: [
     {

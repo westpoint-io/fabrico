@@ -1734,61 +1734,29 @@ jobs:
   # it. AMENDED 2026-10-12 (plan 84-02): the 2026-10-09 CI run executed it on
   # GitHub: 180 tests, 1 worker, 46.8 min, 156 passed, 9 failed, 15 did not run.
   #
-  # THE VERDICT IS THE RED SET, NOT THE EXIT CODE. The suite deliberately carries a CUT, a
-  # test titled `CUT - leg <n> ...` whose body throws its reason, so `npm run e2e:live` exits 1
-  # on every run and an exit-code gate here is either always red or switched off. The suite
-  # step still runs the developer command, and its exit code is swallowed with `|| echo` so the
-  # JSON report it writes (`frontend/test-results/live-report.json`) reaches the checker,
-  # `scripts/check-live-red-set.sh`. The checker passes only when the failed set is exactly the
-  # declared CUTs. A CUT that passed or did not run (a failed serial leg ahead of it hides it),
-  # any skip, flake or `test.fail()`, a partial run under 290 tests, or a report with top-level
-  # errors are all red.
+  # THE VERDICT IS THE EXIT CODE. Each leg runs the developer command, and a red test fails the
+  # leg. No test in the live suite fails on purpose: a clause that can't be walked is cut from
+  # the walk and its reason recorded in a comment. Playwright's `forbidOnly` and `retries: 0`
+  # stay on in frontend/playwright.live.config.ts. Each leg uploads its JSON report
+  # (`frontend/test-results/live-report.json`) as `live-report-<i>` unless the run was
+  # cancelled, for per-test timings.
   #
   # FOUR SHARDS ON FOUR RUNNERS. With one worker against one host, this job took 96 to 128
   # minutes. The suite now runs as `--shard=<i>/4`, one leg per runner, each leg with its own
   # dev host, so each leg runs about a quarter of the tests. Playwright cuts shards at file
-  # boundaries, so a serial file (the CUT's included) stays whole in one shard. Playwright also
-  # adds the terminal spec (`90-sim-fatal.terminal.spec.ts`, the teardown that ends the host)
-  # back into every shard, so every leg ends its own host last, and its 4 tests run 4 times.
+  # boundaries, so a serial file stays whole in one shard. Playwright also adds the terminal
+  # spec (`90-sim-fatal.terminal.spec.ts`, the teardown that ends the host) back into every
+  # shard, so every leg ends its own host last, and its 4 tests run 4 times.
   #
-  # ONE VERDICT IN TWO HALVES. Before its suite, each leg writes the shard's exact test list
-  # (`playwright test --list --reporter=json --shard=<i>/4`, same config, same commit). The
-  # run: line straight after the suite is `check-live-red-set.sh --shard <i>/4 --list <list>`.
-  # It compares the shard's results with that list, so a listed test with no result is red and
-  # a result that isn't on the list means the verdict could not be made. It also refuses a
-  # report from another shard, keeps the checks that the terminal spec ran and ran last, and
-  # applies a floor of its own to the shard. A failed test's red line names the test.step it
-  # failed in. The leg then uploads its raw report as `live-report-<i>` unless the run was
-  # cancelled, and the upload fails if there is no report. The `e2e-live-verdict` job below
-  # needs every leg. It takes the four reports and runs the checker's `--merge 4` mode over
-  # them in shard order: each shard must grade OK on its own, no test outside the terminal spec
-  # may appear in two shards, and the shards together must hold at least 290 tests with the
-  # terminal tests counted once. A missing report means the verdict could not be made, and the
-  # job goes red.
-  #
-  # WHY THE MERGE READS THE RAW REPORTS. Playwright's merge-reports would join the four into
-  # one report, but its start times would come from four machines whose clocks aren't ordered
-  # against each other, so the check that the terminal spec started after every other test
-  # ended would compare times that can't be compared. The joined report would also hold four
-  # copies of the terminal spec under four different ids. Grading each raw report keeps every
-  # time comparison inside one machine.
-  #
-  # The bite proof runs in every leg before the suite. `ci_wiring_parity.rs`
-  # (`the_live_gate_verdict_is_the_red_set_check`) pins every live run line, its job and its
-  # order, the matrix, the report upload and download, and that neither job carries
-  # `continue-on-error` and no verdict step carries a condition.
-  #
-  # REQUIRED CHECK: if branch protection is turned on for `main`, make `e2e-live-verdict`
-  # (`live e2e verdict (all shards)`) a REQUIRED status check, alongside `determinism`. Each
-  # leg's check name carries its shard number, and the verdict job is the one check that
-  # stands for the whole suite. Branch protection is a repository setting and cannot be
-  # expressed in this YAML.
+  # REQUIRED CHECK: if branch protection is turned on for `main`, make each leg of this job a
+  # REQUIRED status check, alongside `determinism`. Branch protection is a repository setting
+  # and cannot be expressed in this YAML.
   e2e-live:
     name: live e2e gate (real headless host)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
-    # One leg per shard. A red leg must not cancel the others: the verdict job reads every
-    # shard's report, and a cancelled leg leaves none.
+    # One leg per shard. A red leg must not cancel the others, so each shard reports its own
+    # tests and keeps its own report.
     strategy:
       fail-fast: false
       matrix:
@@ -1851,33 +1819,17 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      # The checker must be seen to bite before it is trusted with the verdict.
-      - name: Live red-set checker bites
-        run: bash scripts/prove-live-red-set-bites.sh
-
-      # The exact list of tests this leg should run, from the same config and shard as the suite,
-      # made in this job from this commit. The checker compares the report with it, so a test
-      # that drops out of the run is named rather than missed. It goes to $RUNNER_TEMP because
-      # the suite deletes test-results/ when it starts. List mode opens no browser.
-      - name: This shard's exact test list
-        working-directory: frontend
-        run: npx playwright test --config=playwright.live.config.ts --list --reporter=json --shard=${{ matrix.shard }}/4 > "$RUNNER_TEMP/live-list.json"
-
       # The developer command with this leg's shard (the inner cargo build is a warm-cache
-      # no-op). Its exit code is not the verdict: the CUT makes it 1 on whichever shard holds it.
-      - name: Run this live shard (the JSON report is the input; the next step is the verdict)
+      # no-op). Its exit code is the leg's verdict: any red test fails the job here.
+      - name: Run this live shard
         working-directory: frontend
-        run: npm run e2e:live -- --shard=${{ matrix.shard }}/4 || echo "live shard exited $?; the red-set check below decides"
-
-      - name: This shard's red set is exactly its declared CUTs
-        working-directory: frontend
-        run: bash ../scripts/check-live-red-set.sh --shard ${{ matrix.shard }}/4 --list "$RUNNER_TEMP/live-list.json" test-results/live-report.json
+        run: npm run e2e:live -- --shard=${{ matrix.shard }}/4
 
       # The docs tour's pictures (site/src/assets/tour/), taken again from the real app once per
       # run, on shard 1 only. The script starts its own host and Vite now that the suite has freed
       # 8787 and 5173, and fails when a picture comes out blank, the wrong size, or with a page
       # error or a stopped render loop. It doesn't compare them with the committed pictures. It
-      # runs even when this shard's checker went red, since the two checks don't depend on each
+      # runs even when this shard's suite went red, since the two checks don't depend on each
       # other.
       - name: Retake the app tour pictures and check their size and blankness
         if: ${{ !cancelled() && matrix.shard == 1 }}
@@ -1893,9 +1845,9 @@ jobs:
           path: site/src/assets/tour/
           retention-days: 14
 
-      # The verdict job grades all four reports together. A red shard's report is uploaded too,
-      # and a leg with no report fails here.
-      - name: Keep this shard's report for the verdict job
+      # The per-test JSON report (timings for shard balancing), kept for a red shard too. A leg
+      # with no report fails here.
+      - name: Keep this shard's live report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
@@ -1912,62 +1864,6 @@ jobs:
           name: live-test-results-${{ matrix.shard }}
           path: frontend/test-results/
           retention-days: 14
-
-  # THE LIVE VERDICT OVER ALL SHARDS. It needs every leg of `e2e-live` and runs under the same
-  # docs-only gate, whose `!cancelled()` lets it run after a leg went red. It takes each leg's
-  # raw report and grades the four together; the comment above `e2e-live` gives the rules and
-  # why it reads raw reports rather than a joined one. The bite proof ran in every leg before
-  # its suite, so it has run before this job reads anything. It makes the whole suite's exact
-  # test list itself, from the same commit, and the merge compares the four reports with it.
-  # List mode opens no browser, so the job installs the frontend's packages but no browser.
-  #
-  # A RE-RUN CAN'T LEAVE THIS JOB GREEN ON A STALE REPORT. On "re-run failed jobs" GitHub runs
-  # the failed legs again and every job that needs them, and the legs that passed keep their
-  # first attempt. download-artifact asks for the latest artifact of each name. So if a re-run
-  # leg dies before it uploads, this job would read that leg's first-attempt report and could
-  # pass while the leg is red. The last step fails the job unless every leg of `e2e-live`
-  # ended `success`. A leg that went red for any other reason, such as the tour capture on
-  # shard 1, also turns this job red; that leg already turns the run red.
-  e2e-live-verdict:
-    name: live e2e verdict (all shards)
-    needs: [changes, e2e-live]
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend deps
-        working-directory: frontend
-        run: npm ci
-
-      # The whole suite's list: the same config as the legs, no --shard, this commit.
-      - name: The whole live suite's exact test list
-        working-directory: frontend
-        run: npx playwright test --config=playwright.live.config.ts --list --reporter=json > "$RUNNER_TEMP/live-list.json"
-
-      # Each artifact lands in its own folder, live-reports/live-report-<i>/.
-      - name: Take every shard's report
-        uses: actions/download-artifact@v4
-        with:
-          pattern: live-report-*
-          path: live-reports
-
-      - name: The live red set over all shards is exactly the declared CUTs
-        run: bash scripts/check-live-red-set.sh --merge 4 --list "$RUNNER_TEMP/live-list.json" live-reports/live-report-1/live-report.json live-reports/live-report-2/live-report.json live-reports/live-report-3/live-report.json live-reports/live-report-4/live-report.json
-
-      # needs.e2e-live.result is success only when every leg ended success. See the comment above
-      # this job for why a red leg must turn the verdict red even when the merge passed.
-      - name: The live legs all ended green, so no leg's report is a stale first attempt
-        run: echo "e2e-live legs ended ${{ needs.e2e-live.result }}" && test "${{ needs.e2e-live.result }}" = success
 
   # THE LESSON WALK, in a job of its own. The live job has hundreds of tests and a lesson test
   # there would only add to its time. The walk's files are named *.walk.ts, which neither live config

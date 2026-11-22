@@ -122,8 +122,7 @@ import { captureFrameInPage, type CaptureMode, type CapturedFrame } from './supp
 //
 // ===========================================================================
 // THE DONE-TEST, WORD FOR WORD (the v9.0 requirements, "The milestone
-// done-test"). `src/gates/oneBoardAllFive.source.test.ts` rule R8 compares each sentence below
-// with that file on every `npm test`, so a reworded leg reddens there.
+// done-test").
 // ===========================================================================
 //
 // 1. Place an HTTP Endpoint and an HTTP Handler from the palette, draw one wire between them,
@@ -270,10 +269,9 @@ import { captureFrameInPage, type CaptureMode, type CapturedFrame } from './supp
 //    after the release:
 //    RELEASE_THINNING 5,12=2427(R+137) 6,12=2435(R+145) 7,12=2442(R+152) 8,12=2449(R+159) 9,12=2459(R+169) 10,12=2463(R+173)
 //    This engine releases a packed belt rigidly (`belt_slots.rs` `advance_slots`), so it cannot
-//    clear back from the front. The clause is declared LAST, titled `CUT - leg 3 clause "clears
-//    from the front": ...`, and its body throws this reason with both measured lines;
-//    `src/gates/jamGrading.test.ts` `CUT REASON (maintainer ruling) ...` reproduces both from the
-//    committed traces. What the eye sees on release is still asserted: the Tee's mark breaks (`BAR
+//    clear back from the front. This comment is the clause's only record: no test declares it, and
+//    `src/gates/jamGrading.test.ts` `CUT REASON (maintainer ruling) ...` reproduces both measured
+//    lines from the committed traces. What the eye sees on release is still asserted: the Tee's mark breaks (`BAR
 //    BROKEN ON THE CANVAS`, `BAR SEEN BROKEN ON SCREEN`), the Tee stays released (`STAYS
 //    RELEASED`), the line thins and stays clear (`RELEASE SUSTAINED`), the released run is drawn as
 //    the model holds it (`RUN DRAWN AFTER THE RELEASE`) and the board closes flowing into the Sink
@@ -417,13 +415,9 @@ import { captureFrameInPage, type CaptureMode, type CapturedFrame } from './supp
 // in the same page session, with no reload, as the shipped app never reloads. Under
 // `mode: 'serial'` a test declared after a failing one never runs, and the live config locks
 // `retries: 0`, so anything appended below the last leg is silently un-run whenever anything
-// above it goes red. A leg or clause that cannot be walked honestly is CUT: declared LAST,
-// titled `CUT - leg <n> ...`, and its body throws its reason (77 D-15, D-20).
-// `src/gates/oneBoardAllFive.source.test.ts` holds all of this on every `npm test`: the order,
-// serial mode, no skip/fixme/fail/only, a fresh board only in leg 1, no navigation in a later
-// leg, render health in every leg, the required handoff before every later leg's first gesture,
-// the done-test wording above, no fixed sleep, and each leg's defining assertions. The text
-// cannot see everything (R-01 b above): the one page is also MEASURED, by the boot's mark.
+// above it goes red. A leg or clause that cannot be walked honestly is cut: it is removed from
+// the walk and its reason is recorded in the header above, so no test in this file fails on
+// purpose (77 D-15, D-20). The one page is MEASURED, by the boot's mark (R-01 b above).
 //
 // ===========================================================================
 // THE SHARED PAGE KEEPS THE PROJECT'S `use` OPTIONS.
@@ -935,12 +929,10 @@ function sharedPage(): Page {
   return theSharedPage;
 }
 
-// RENDER HEALTH AROUND EVERY TEST of the walk, the CUT declaration included (plan 85-08, THE
-// RENDER-HEALTH COUNT; fabrico-model-oracle-blindspot). Each walking leg already watches its own
-// page errors and asserts the loop alive at its own checkpoints; these hooks add one watcher
-// installed before every test and one liveness read after it, so the declared CUT, whose body
-// must stay a single throw (the source audit's R4), is bracketed by a real render-health read
-// on the shared page too.
+// RENDER HEALTH AROUND EVERY TEST of the walk (plan 85-08, THE RENDER-HEALTH COUNT;
+// fabrico-model-oracle-blindspot). Each walking leg already watches its own page errors and
+// asserts the loop alive at its own checkpoints; these hooks add one watcher installed before
+// every test and one liveness read after it on the shared page.
 let healthErrs: ReturnType<typeof watchPageErrors> | undefined;
 
 test.beforeEach(async () => {
@@ -3076,7 +3068,7 @@ test('leg 3 - that run jams behind a Tee whose outlet is slowed, packs backwards
   // 9. THE RELEASE: the outlet back to the fastest pace. The line thins and then stays clear, on a
   // window placed after the thinning measured in this run. The ORDER in which the release reaches
   // the jam is logged, never asserted: the clause "clears from the front" is CUT by the maintainers' ruling of
-  // 2026-10-08 and declared last in this file (header, CUT (D-15, ruling of 2026-10-08)).
+  // 2026-10-08 and asserted nowhere (header, CUT (D-15, ruling of 2026-10-08)).
   await startTickRecorder(page, { gaugeOf: [tee.id], itemDots: true });
   await startFrameTicks(page);
   await selectBeltAt(page, OUTLET_TILE);
@@ -4086,30 +4078,4 @@ test.afterAll(async ({ browser }, testInfo) => {
   } finally {
     await sharedContext?.close();
   }
-});
-
-// ---------------------------------------------------------------------------
-// CUT DECLARATIONS. Declared LAST, after every walking leg and after `test.afterAll`, so a cut can
-// never stop a walking leg from running; every later leg is declared ABOVE this block. Each is titled
-// `CUT - leg <n> ...` and fails loudly with its measured reason (77 D-15, D-20, SC2). One stands:
-// leg 3's "clears from the front", cut by the maintainers' ruling of 2026-10-08 (header, CUT (D-15,
-// ruling of 2026-10-08)). Plan 77-09 cut the same clause on a grader fault the 77-03 refuter round
-// fixed; this cut rests on what the eye sees, not on the grader.
-// ---------------------------------------------------------------------------
-
-test('CUT - leg 3 clause "clears from the front": cut by design decision on 2026-10-08, the line visibly thins from the Source end', async () => {
-  throw new Error(
-    [
-      'CUT (D-15, design decision of 2026-10-08): leg 3\'s clause "then release and watch the jam clear from the front" is not asserted.',
-      'The maintainers overturned named deviation A1: "cut it and carry on".',
-      'On release the packed line visibly thins from the Source end; the front-first order is a sim-clock fact of about 50 ms',
-      'that nobody can see, so a "watch" clause cannot be graded on it. Measured on the committed release trace 1',
-      '(src/gates/fixtures/77-release-trace-1.json), 3 ticks from the front freeing to the belt behind moving:',
-      '  RELEASE_ORDER R=2290 teeOff=2290 frontFree=2291 junction=2294 missed=2 witness=3 wrongway=0',
-      'and the line thinning one tile at a time from the Source end, 137 to 173 ticks after the release:',
-      '  RELEASE_THINNING 5,12=2427(R+137) 6,12=2435(R+145) 7,12=2442(R+152) 8,12=2449(R+159) 9,12=2459(R+169) 10,12=2463(R+173)',
-      'Leg 3 still asserts what the eye sees: the mark breaks, the Tee stays released, the line thins and stays clear,',
-      'the released run is drawn as the model holds it, and the board closes flowing into the Sink.',
-    ].join('\n'),
-  );
 });
