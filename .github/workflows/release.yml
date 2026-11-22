@@ -35,7 +35,6 @@
 # THE TAG reaches the scripts only through `env:`, never as an expression inside a script, and the
 # attach job refuses anything but vMAJOR.MINOR.PATCH before any release or API call. The build job
 # refuses a tag that isn't v plus fabrico-app's version in crates/fabrico-app/Cargo.toml.
-# `ci_wiring_parity.rs` pins all of this.
 
 name: release
 
