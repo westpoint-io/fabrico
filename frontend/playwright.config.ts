@@ -25,7 +25,7 @@ export default defineConfig({
   // paid for the compile. See e2e/support/warmVite.ts.
   globalSetup: './e2e/support/warmVite.ts',
   // The JSON report holds each test's duration. CI uploads it from every leg as
-  // mock-report-<i>, and the mock verdict reads it. `npm run test:e2e` deletes it
+  // mock-report-<i> for shard balancing. `npm run test:e2e` deletes it
   // first, so a run that never starts can't leave an old report behind.
   reporter: [['list'], ['json', { outputFile: 'test-results/mock-report.json' }]],
   use: {

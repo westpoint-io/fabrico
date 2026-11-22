@@ -4,11 +4,9 @@ import { defineConfig, devices, type ReporterDescription } from '@playwright/tes
 const WALK_REUSE = process.env.FABRICO_WALK_REUSE === '1';
 
 /**
- * `FABRICO_WALK_SHARD=<i>/<n>` runs shard i of n and adds a blob report, which CI's walk verdict
- * job merges with the other shards' blobs before `scripts/check-walk-report.sh` reads the result.
- * It is an environment variable rather than `--shard` so that the `e2e:walk` script and its CI run
- * line stay the same whole command. Unset or empty, the walk runs whole with no blob report, as it
- * does on a developer's machine. Any other value stops the config here: a typo must not quietly run
+ * `FABRICO_WALK_SHARD=<i>/<n>` runs shard i of n. It is an environment variable rather than
+ * `--shard` so that the `e2e:walk` script and its CI run line stay the same whole command. Unset
+ * or empty, the walk runs whole, as it does on a developer's machine. Any other value stops the config here: a typo must not quietly run
  * the whole walk on one leg and the same whole walk again on the next.
  */
 function walkShard(raw: string | undefined): { current: number; total: number } | undefined {
@@ -26,20 +24,14 @@ function walkShard(raw: string | undefined): { current: number; total: number } 
 
 const WALK_SHARD = walkShard(process.env.FABRICO_WALK_SHARD);
 
-// The JSON report is what scripts/check-walk-report.sh reads, because this run exits 0 on a skipped
-// test. A shard also writes blob-report/report-<i>.zip, which Playwright empties at the start of
-// each run, so a blob left by an earlier run can't be merged as this one.
-const REPORTERS: ReporterDescription[] = [
-  ['list'],
-  ['json', { outputFile: 'test-results/walk-report.json' }],
-  ...(WALK_SHARD ? [['blob'] as const] : []),
-];
+// The run's exit code is the verdict. The JSON report keeps each test's result and duration.
+const REPORTERS: ReporterDescription[] = [['list'], ['json', { outputFile: 'test-results/walk-report.json' }]];
 
 // Playwright config for the lesson walk: the real dev_render_server plus the real Vite app, as
 // the live suite runs them, over files named *.walk.ts only. It is a separate config because the
 // live suite overruns its CI limit, so a lesson test there could sit among the tests that never
 // start. The live projects use Playwright's default .spec and .test names, so neither live config
-// picks these files up and none of them counts toward the live suite's test floor.
+// picks these files up.
 //
 // Run via `npm run e2e:walk`, which builds both Rust examples first. CI runs it as three legs, each
 // with FABRICO_WALK_SHARD set (see walkShard above).

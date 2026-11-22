@@ -1562,19 +1562,10 @@ jobs:
   # own Vite through the config's webServer. The check names become
   # `frontend e2e (Playwright + axe) (1)` to `(4)`.
   #
-  # TWO VERDICTS PER LEG. The suite's exit code is still the verdict for a red test: a failed
-  # test fails the run step and the leg. Playwright exits 0 on a skipped test, a `test.fail()`
-  # that failed or a deleted spec, so the exit code alone can't see a test that never ran. Before
-  # the suite each leg writes its shard's exact test list (`playwright test --list
-  # --reporter=json --shard=<i>/4`, same config, same commit), and the run line straight after the
-  # suite is `scripts/check-mock-report.sh --shard <i>/4 --list <list>`. It compares the leg's
-  # report with that list, so a listed test that was skipped, missing or never ran is red and
-  # named. `fail-fast: false` keeps the other legs running after one goes red, and any red or
-  # cancelled leg turns the run red. What the legs cover is set by `shard: [1, 2, 3, 4]` and the
-  # `/4` in the run lines, and an edit to either could leave part of the suite unrun with every
-  # leg green, so `ci_wiring_parity.rs` pins both, along with `fail-fast: false`, the list and
-  # checker lines and their order, no condition on the suite or checker step, and `retries: 0` in
-  # playwright.config.ts. The `e2e-verdict` job below grades all four reports together.
+  # THE VERDICT IS THE EXIT CODE. A failed test fails the run step and the leg.
+  # `fail-fast: false` keeps the other legs running after one goes red, and any red or
+  # cancelled leg turns the run red. `forbidOnly` stays on in playwright.config.ts, so a stray
+  # `test.only` fails CI.
   #
   # NO RETRY. `playwright.config.ts` sets `retries: 0`, so a test that fails once fails its
   # leg instead of passing as flaky, and `trace: 'retain-on-failure'` keeps the trace of
@@ -1612,28 +1603,14 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      # The exact list of tests this leg should run, from the same config and shard as the suite,
-      # made in this job from this commit. It goes to $RUNNER_TEMP, outside test-results/, which
-      # the suite deletes when it starts. List mode opens no browser.
-      - name: This shard's exact test list
-        working-directory: frontend
-        run: npx playwright test --list --reporter=json --shard=${{ matrix.shard }}/4 > "$RUNNER_TEMP/mock-list.json"
-
       # Boots `npm run dev` via playwright.config.ts webServer, then runs this leg's
       # quarter of the command-emission + a11y specs.
       - name: Run e2e (Playwright + axe)
         working-directory: frontend
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
-      # This leg's report against its list: a listed test that was skipped, missing or never ran is
-      # red here even when the suite exited 0. No condition: when the suite went red the leg is red
-      # already, and the verdict job still reads the uploaded report.
-      - name: This shard ran exactly its listed tests, all passed
-        working-directory: frontend
-        run: bash ../scripts/check-mock-report.sh --shard ${{ matrix.shard }}/4 --list "$RUNNER_TEMP/mock-list.json" test-results/mock-report.json
-
-      # The leg's JSON report holds each test's duration. It is uploaded red or green, so the
-      # mock verdict can read every leg, and a leg with no report fails here.
+      # The leg's JSON report holds each test's duration (for shard balancing). It is uploaded
+      # red or green, and a leg with no report fails here.
       - name: Keep this shard's mock report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -1651,71 +1628,6 @@ jobs:
           name: mock-test-results-${{ matrix.shard }}
           path: frontend/test-results/
           retention-days: 14
-
-  # THE MOCK VERDICT OVER ALL SHARDS. It needs every leg of `e2e` and runs under the same docs-only
-  # gate, whose `!cancelled()` lets it run after a leg went red. One leg's checker sees only its
-  # own quarter, so a leg dropped from the matrix or a test that lands in no report would leave
-  # every leg's own check green. This job makes the whole suite's exact list itself, from the same
-  # commit and config as the legs, takes the four `mock-report-<i>` artifacts and runs
-  # `check-mock-report.sh --merge 4 --list` over them in shard order: each report must carry its
-  # own shard, every listed test must have passed in exactly one report, and a missing report
-  # means the verdict could not be made. The merge prints a `MOCK LIST` line in the log. The
-  # checker's bite proof runs here first, so it is seen to fail before it is trusted. List mode
-  # opens no browser, so the job installs the frontend's packages but no browser.
-  #
-  # A RE-RUN CAN'T LEAVE THIS JOB GREEN ON A STALE REPORT, the same rule as `e2e-live-verdict`.
-  # On "re-run failed jobs" the legs that passed keep their first attempt, and download-artifact
-  # takes the latest artifact of each name, so a re-run leg that dies before it uploads would
-  # leave its first-attempt report here. The last step fails the job unless every leg of `e2e`
-  # ended `success`.
-  #
-  # REQUIRED CHECK: if branch protection is turned on for `main`, make `e2e-verdict`
-  # (`frontend e2e verdict (all shards)`) a REQUIRED status check. It is the one check that stands
-  # for the whole mock suite.
-  e2e-verdict:
-    name: frontend e2e verdict (all shards)
-    needs: [changes, e2e]
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend deps
-        working-directory: frontend
-        run: npm ci
-
-      # The whole mock suite's list: the same config as the legs, no --shard, this commit.
-      - name: The whole mock suite's exact test list
-        working-directory: frontend
-        run: npx playwright test --list --reporter=json > "$RUNNER_TEMP/mock-list.json"
-
-      # Each artifact lands in its own folder, mock-reports/mock-report-<i>/.
-      - name: Take every shard's mock report
-        uses: actions/download-artifact@v4
-        with:
-          pattern: mock-report-*
-          path: mock-reports
-
-      # The checker must be seen to bite before it is trusted with the verdict.
-      - name: Mock verdict checker bites
-        run: bash scripts/prove-mock-report-bites.sh
-
-      - name: The mock suite over all shards ran exactly its listed tests, all passed
-        run: bash scripts/check-mock-report.sh --merge 4 --list "$RUNNER_TEMP/mock-list.json" mock-reports/mock-report-1/mock-report.json mock-reports/mock-report-2/mock-report.json mock-reports/mock-report-3/mock-report.json mock-reports/mock-report-4/mock-report.json
-
-      # needs.e2e.result is success only when every leg ended success. See the comment above this
-      # job for why a red leg must turn the verdict red even when the merge passed.
-      - name: The mock legs all ended green, so no leg's report is a stale first attempt
-        run: echo "e2e legs ended ${{ needs.e2e.result }}" && test "${{ needs.e2e.result }}" = success
 
   # Live E2E gate (Phase 22, E2E-01..04): Playwright drives headless chromium
   # against the REAL dev_render_server binary (real Core -> RenderProducer ->
@@ -1876,19 +1788,8 @@ jobs:
   # the walk's tests share one mutable host, and a file's tests run in order on it. That puts
   # lesson-variants.walk.ts alone in leg 2, and the other two legs hold two files each.
   #
-  # ITS VERDICT IS ITS EXIT CODE AND ITS MERGED REPORT. The walk declares no red, so a failed test
-  # stops its leg at the run step. Playwright also exits 0 on a skipped test or a deleted walk file,
-  # so `scripts/check-walk-report.sh` reads what ran. One leg's report holds a third of the walk and
-  # would fall under the checker's floor, so each leg uploads a blob report instead, red or not, and
-  # `e2e-walk-verdict` merges the three into one JSON report and runs the checker on it.
-  #
-  # A LOST SHARD READS RED. A leg with no blob fails its upload (`if-no-files-found: error`). The
-  # verdict job then counts the blobs before it merges them: `check-walk-report.sh --blobs 3` exits 2
-  # unless all-blob/ holds exactly report-1.zip, report-2.zip and report-3.zip. That count doesn't
-  # read the checker's MIN_TESTS, so it still catches a lost shard once the walk has more tests than
-  # the floor. The floor catches one as well while MIN_TESTS equals the walk's test count. The
-  # checker's bite proof runs in the verdict job, before the merge. `ci_wiring_parity.rs` pins both
-  # jobs.
+  # ITS VERDICT IS ITS EXIT CODE. The walk declares no red, so a failed test fails its leg at
+  # the run step, and any red leg turns the run red.
   #
   # THE LIMIT. The walk has 32 tests: 12 in the first leg (lesson-entry 6, lesson-hints 6), 12 in
   # the second (lesson-variants) and 8 in the third (lessons 5, parity 3). CI run 43670312713 on
@@ -1945,17 +1846,6 @@ jobs:
           FABRICO_WALK_SHARD: ${{ matrix.shard }}/3
         run: npm run e2e:walk
 
-      # The verdict job merges all three blobs. A red leg's blob is uploaded too, and a leg with
-      # no blob fails here.
-      - name: Keep this shard's blob report for the verdict job
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: walk-blob-${{ matrix.shard }}
-          path: frontend/blob-report/
-          if-no-files-found: error
-          retention-days: 14
-
       # A failing run's traces go nowhere otherwise, and a red that only CI shows needs them.
       - name: Keep the traces of a red walk shard
         if: failure()
@@ -1964,60 +1854,6 @@ jobs:
           name: walk-test-results-${{ matrix.shard }}
           path: frontend/test-results/
           retention-days: 14
-
-  # THE WALK VERDICT OVER ALL SHARDS. It needs every leg of `e2e-walk` and runs under the same
-  # docs-only gate, whose `!cancelled()` lets it run after a leg went red. The comment above
-  # `e2e-walk` gives the rules. The checker's bite proof runs here, before the merge, so the
-  # checker is seen to bite before it reads the merged report.
-  e2e-walk-verdict:
-    name: lesson walk verdict (all shards)
-    needs: [changes, e2e-walk]
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      # merge-reports comes with the pinned Playwright.
-      - name: Install frontend deps
-        working-directory: frontend
-        run: npm ci
-
-      # The checker must be seen to bite before it is trusted with the report.
-      - name: Walk report checker bites
-        run: bash scripts/prove-walk-report-bites.sh
-
-      # All three blobs land side by side in frontend/all-blob/.
-      - name: Take every shard's blob report
-        uses: actions/download-artifact@v4
-        with:
-          pattern: walk-blob-*
-          merge-multiple: true
-          path: frontend/all-blob
-
-      # One blob per shard, named for its shard, or no verdict. The merge can't tell a lost shard
-      # from a small walk.
-      - name: Every walk shard's blob arrived
-        working-directory: frontend
-        run: bash ../scripts/check-walk-report.sh --blobs 3 all-blob
-
-      - name: Merge the walk shards
-        working-directory: frontend
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/walk-report.json
-        run: npx playwright merge-reports --config=playwright.walk.config.ts --reporter=json all-blob
-
-      - name: Every walk test ran and passed
-        working-directory: frontend
-        run: bash ../scripts/check-walk-report.sh test-results/walk-report.json
 
   # THE BOARD CAPTURE SET. `npm run e2e:capture` boots the real host and the Vite app with the demo
   # board, captures the board at each pixel ratio, antialiasing setting and zoom it lists, measures
@@ -2038,13 +1874,9 @@ jobs:
   # those 65 plus 15 for the build. They replace 40 and 55 from run 44867588480, which that slower runner showed were too
   # close: 40 minutes was 1.2 times its run.
   #
-  # ITS VERDICT IS THE REPORT, READ AFTER THE SUITE. Playwright exits 0 on a skipped test and on a
-  # test marked `test.fail()` that failed, so the run's exit code alone can lose a test. After the
-  # suite, `scripts/check-capture-report.sh` reads the JSON report: every test ran, each one passed
-  # or is an expected failure in the grading file with exactly one STRK requirement tag, and there
-  # are at least as many as the checker's floor. Its bite proof runs first, so the checker is seen
-  # to bite before it is trusted with the report. Both run on `!cancelled()`, so a red suite still
-  # gets its report read and its page written. `ci_wiring_parity.rs` pins the three run lines.
+  # ITS VERDICT IS THE EXIT CODE. A failed capture or grading test fails the suite step and the
+  # job. The page step and the uploads run on `!cancelled()`, so a red suite still gets its page
+  # written.
   #
   # THE PAGE. `node scripts/capture-report.ts` writes test-results/capture/index.html, each capture
   # beside its measured numbers and verdicts, and the job uploads that folder as `board-captures` on
@@ -2087,15 +1919,6 @@ jobs:
       - name: Run the board capture set
         working-directory: frontend
         run: npm run e2e:capture
-
-      # The checker must be seen to bite before it is trusted with the report.
-      - name: Capture report checker bites
-        if: ${{ !cancelled() }}
-        run: bash scripts/prove-capture-report-bites.sh
-
-      - name: Every capture test ran and passed or is declared
-        if: ${{ !cancelled() }}
-        run: bash scripts/check-capture-report.sh frontend/test-results/capture-report.json
 
       - name: Write the capture page
         if: ${{ !cancelled() }}

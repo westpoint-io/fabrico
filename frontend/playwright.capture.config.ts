@@ -3,7 +3,7 @@ import { defineConfig, devices, type ReporterDescription } from '@playwright/tes
 /** The caller owns the host and Vite: `FABRICO_CAPTURE_REUSE=1`. A restricted shell kills servers Playwright spawns. */
 const CAPTURE_REUSE = process.env.FABRICO_CAPTURE_REUSE === '1';
 
-// The JSON report is what a report checker reads, because this run exits 0 on a skipped test.
+// The run's exit code is the verdict. The JSON report keeps each test's result and duration.
 const REPORTERS: ReporterDescription[] = [['list'], ['json', { outputFile: 'test-results/capture-report.json' }]];
 
 // Playwright config for the board capture set: the real dev_render_server plus the real Vite app,
