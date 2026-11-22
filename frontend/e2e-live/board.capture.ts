@@ -35,7 +35,8 @@ import {
 //
 // Each test opens its own browser context at the boot's pixel ratio (an `on` boot adds the dev-only
 // antialiasing flag from `src/render/testAntialias.ts` to the URL), brings the shared host back
-// to the demo board, reloads so the board's own fit runs, pauses through the toolbar and pins the
+// to the demo board, reloads so the board's own fit runs, fits again through the Fit control once
+// the web fonts have settled, pauses through the toolbar and pins the
 // render clock so nothing moves between the model read and the capture. Then for each zoom it
 // sets the camera through the shipped controls (`captureZoom.ts`). Where the board overflows the
 // viewport it pans to further tiles (`tilePlan`), tile 0 being the zoom's own camera. At each tile
@@ -156,6 +157,19 @@ for (const boot of CAPTURE_BOOTS) {
       await waitForAppReady(page);
       await waitForCameraSettle(page);
       hold(`${id} boot: the reload`);
+      // The board's own fit ran once, on the first packet after the reload, and read the palette's
+      // width as it was then. The chrome's web fonts can land after that fit and move the palette
+      // by a few CSS px (plan 107-10 measured x -733 against -737.796875 in dpr-follow.spec.ts), and
+      // every zoom below starts from this camera, so the sub-pixel phase of every capture, and with
+      // it which side reads odd, would hang on font timing. Once the fonts have settled, fit again
+      // through the shipped Fit control: the same fit body the boot ran (NAV-01), now reading the
+      // settled palette.
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      const fitAtBoot = await cameraOf(page);
+      await page.getByRole('button', { name: 'Fit factory to view' }).click();
+      await waitForCameraSettle(page);
+      const fitAfterFonts = await cameraOf(page);
+      hold(`${id} boot: the refit after the fonts`);
 
       await resumeIfPaused(page);
       const pausedAt = await pauseAndSettle(page, id);
@@ -171,7 +185,7 @@ for (const boot of CAPTURE_BOOTS) {
       const bootMs = Date.now() - bootStart;
       // As for a tile: the boot's time beyond the budgets its waits added is what BOOT_WORK_BUDGET_MS covers.
       console.log(
-        `CAPTURE_BOOT ${id} bootMs=${bootMs} uncoveredMs=${bootMs - (waitsGranted - grantedAtBootStart)} bootBudgetMs=${BOOT_WORK_BUDGET_MS} ceilingMs=${ceilingMs}`,
+        `CAPTURE_BOOT ${id} bootMs=${bootMs} uncoveredMs=${bootMs - (waitsGranted - grantedAtBootStart)} bootBudgetMs=${BOOT_WORK_BUDGET_MS} ceilingMs=${ceilingMs} refitMoved=${fitAfterFonts.x - fitAtBoot.x},${fitAfterFonts.y - fitAtBoot.y},${fitAfterFonts.scale - fitAtBoot.scale}`,
       );
       const entries: CaptureEntry[] = [];
       for (const zoom of CAPTURE_ZOOMS) {
