@@ -586,17 +586,24 @@ function oddSides(values: readonly { side: SideName; v: number }[]): { side: Sid
 }
 
 /**
- * Grade the outline-sides property for one cell. With antialiasing as shipped, the four median
- * cores of each machine must be equal; a side whose core differs from the others' is an offender.
- * With it on, the four effective widths must sit within `AA_ON_TOLERANCE` of each other (a side
- * more than half the tolerance from the median of the four is an offender), and at zoom 1 and at
- * the two boot zooms (the 1600x1000 fit and the full-screen fit) the fringe must also be 0 (STRK-01:
- * a crisp outline at the zooms people work at; each side with a fringe is an offender). A side that
- * wasn't measured is an offender, so is a scene machine no tile held whole (`neverClear`), and so
- * is a capture with no machine in it. Offenders come in node-id order, sides top, right, bottom,
- * left, one per key.
+ * Grade the outline-sides property for one cell. The rule follows `antialiased`, the `antialias`
+ * attribute the capture's live WebGL context reported (`gradeCell` reads it off the tiles), never
+ * the cell's label, so a build that turns antialiasing on is graded as antialiased. Without
+ * antialiasing, the four median cores of each machine must be equal; a side whose core differs
+ * from the others' is an offender. With it, the four effective widths must sit within
+ * `AA_ON_TOLERANCE` of each other (a side more than half the tolerance from the median of the four
+ * is an offender). Either way, at zoom 1 and at the two boot zooms (the 1600x1000 fit and the
+ * full-screen fit) the fringe must also be 0 (STRK-01: "the same width with no grey fringe"; each
+ * side with a fringe is an offender). A side that wasn't measured is an offender, so is a scene
+ * machine no tile held whole (`neverClear`), and so is a capture with no machine in it. Offenders
+ * come in node-id order, sides top, right, bottom, left, one per key.
  */
-export function gradeOutlineSides(results: readonly MachineOutline[], cell: CaptureCell, neverClear: readonly SceneMachine[] = []): Grade {
+export function gradeOutlineSides(
+  results: readonly MachineOutline[],
+  cell: CaptureCell,
+  antialiased: boolean,
+  neverClear: readonly SceneMachine[] = [],
+): Grade {
   const byKey = new Map<string, Offender>();
   const add = (key: string, unmeasured: boolean, text: string) => {
     const had = byKey.get(key);
@@ -624,7 +631,7 @@ export function gradeOutlineSides(results: readonly MachineOutline[], cell: Capt
     }
     if (measured.length < SIDES.length) continue;
     const list = (f: (s: (typeof measured)[number]) => number) => measured.map((s) => `${s.side} ${round3(f(s))}`).join(', ');
-    if (cell.aa === 'shipped') {
+    if (!antialiased) {
       for (const { side, v } of oddSides(measured.map((s) => ({ side: s.side, v: s.core })))) {
         add(`${m.nodeId}:${side}`, false, `${who} ${side}: core ${v} against the other sides (${list((s) => s.core)})`);
       }
@@ -639,10 +646,13 @@ export function gradeOutlineSides(results: readonly MachineOutline[], cell: Capt
           }
         }
       }
-      if (cell.zoom === 1 || isBootZoom(cell.zoom)) {
-        for (const s of measured) {
-          if (s.fringe !== 0) add(`${m.nodeId}:${s.side}`, false, `${who} ${s.side}: grey fringe at zoom ${zoomId(cell.zoom)} (fringe ${list((x) => x.fringe)}; core ${list((x) => x.core)})`);
-        }
+    }
+    // STRK-01's "no grey fringe" half, with antialiasing on or off: a fringe off an unantialiased
+    // context comes from somewhere else (a stretched canvas, an alpha-blended stroke, a filtered
+    // texture), and the eye sees it all the same.
+    if (cell.zoom === 1 || isBootZoom(cell.zoom)) {
+      for (const s of measured) {
+        if (s.fringe !== 0) add(`${m.nodeId}:${s.side}`, false, `${who} ${s.side}: grey fringe at zoom ${zoomId(cell.zoom)} (fringe ${list((x) => x.fringe)}; core ${list((x) => x.core)})`);
       }
     }
   }
@@ -656,7 +666,7 @@ export function gradeOutlineSides(results: readonly MachineOutline[], cell: Capt
     const [ib, sb] = rank(b);
     return ia - ib || sa - sb;
   });
-  const head = `outline sides at dpr=${cell.dpr} aa=${cell.aa} zoom=${zoomId(cell.zoom)}: ${results.length + neverClear.length} machines, ${offenders.length} offenders`;
+  const head = `outline sides at ${cellLabel(cell)} (live antialias ${antialiased}): ${results.length + neverClear.length} machines, ${offenders.length} offenders`;
   return { offenders, explain: offenders.length === 0 ? head : `${head}\n  ${offenders.map((o) => o.text).join('\n  ')}` };
 }
 
@@ -750,9 +760,13 @@ export interface TileMeasurements {
   'cap-in-cell': CapRow[];
 }
 
-/** One tile as the grade reads it: its scene, each property's subjects, and what it measured. */
+/**
+ * One tile as the grade reads it: its scene, each property's subjects, what it measured, and the
+ * live WebGL context's antialiasing attributes, which choose the rule each width is graded by.
+ */
 export interface TileRecord {
   scene: SceneMachine[];
+  gl: CaptureFacts['gl'];
   subjects: Record<PropertyId, string[]>;
   measurements: TileMeasurements;
 }
@@ -984,12 +998,13 @@ export function measureGlyphStrokes(
 }
 
 /**
- * Grade the glyph-strokes property: the outline rule applied to each Factory glyph's legs. With
- * antialiasing as shipped every leg's median core must be equal (a leg that differs from the most
- * common width is an offender); with it on, effective widths sit within `AA_ON_TOLERANCE` and, at
- * zoom 1 and the two boot zooms, no leg carries a fringe. A leg that wasn't measured is an offender.
+ * Grade the glyph-strokes property: the outline rule applied to each Factory glyph's legs, chosen
+ * by the live context's `antialiased` as `gradeOutlineSides` is. Without antialiasing every leg's
+ * median core must be equal (a leg that differs from the most common width is an offender); with
+ * it, effective widths sit within `AA_ON_TOLERANCE`. Either way, at zoom 1 and the two boot zooms,
+ * no leg carries a fringe. A leg that wasn't measured is an offender.
  */
-export function gradeGlyphStrokes(rows: readonly GlyphLegRow[], cell: CaptureCell): Grade {
+export function gradeGlyphStrokes(rows: readonly GlyphLegRow[], cell: CaptureCell, antialiased: boolean): Grade {
   const off = offenderList();
   const nodes = [...new Set(rows.map((r) => r.nodeId))];
   for (const id of nodes) {
@@ -1002,7 +1017,7 @@ export function gradeGlyphStrokes(rows: readonly GlyphLegRow[], cell: CaptureCel
     }
     if (measured.length < legs.length || measured.length === 0) continue;
     const list = (f: (s: (typeof measured)[number]) => number) => measured.map((s) => `${s.leg} ${round3(f(s))}`).join(', ');
-    if (cell.aa === 'shipped') {
+    if (!antialiased) {
       const { odd, ref } = oddOnes(measured.map((s) => ({ leg: s.leg, v: s.core })));
       for (const { leg, v } of odd) off.add(`${id}:${leg}`, false, `${who} ${leg}: core ${v} against ${ref} on the other legs (${list((s) => s.core)})`);
     } else {
@@ -1014,13 +1029,13 @@ export function gradeGlyphStrokes(rows: readonly GlyphLegRow[], cell: CaptureCel
           if (Math.abs(s.effective - mid) > AA_ON_TOLERANCE / 2) off.add(`${id}:${s.leg}`, false, `${who} ${s.leg}: effective widths spread ${round3(spreadPx)} px, over ${AA_ON_TOLERANCE} (${list((x) => x.effective)})`);
         }
       }
-      if (cell.zoom === 1 || isBootZoom(cell.zoom)) {
-        for (const s of measured) if (s.fringe !== 0) off.add(`${id}:${s.leg}`, false, `${who} ${s.leg}: grey fringe ${s.fringe} at zoom ${zoomId(cell.zoom)} (core ${s.core})`);
-      }
+    }
+    if (cell.zoom === 1 || isBootZoom(cell.zoom)) {
+      for (const s of measured) if (s.fringe !== 0) off.add(`${id}:${s.leg}`, false, `${who} ${s.leg}: grey fringe ${s.fringe} at zoom ${zoomId(cell.zoom)} (core ${s.core})`);
     }
   }
   const offenders = off.list();
-  return gradeOf(`glyph strokes at ${cellLabel(cell)}: ${nodes.length} Factory glyphs, ${offenders.length} offenders`, offenders);
+  return gradeOf(`glyph strokes at ${cellLabel(cell)} (live antialias ${antialiased}): ${nodes.length} Factory glyphs, ${offenders.length} offenders`, offenders);
 }
 
 // ---------------------------------------------------------------------------
@@ -1184,10 +1199,11 @@ export function measureFaultRing(
 
 /**
  * Grade the fault-ring property: a ring fails on any gap, on a closed hole, and on a stroke under
- * one device px (antialiasing as shipped: a radial core of 0 on some ray; on: an effective width
- * below 1). A ring that wasn't measured is an offender.
+ * one device px (chosen by the live context's `antialiased`: without antialiasing, a radial core
+ * under 1 on some ray; with it, an effective width below 1). A ring that wasn't measured is an
+ * offender.
  */
-export function gradeFaultRing(rows: readonly FaultRingRow[], cell: CaptureCell): Grade {
+export function gradeFaultRing(rows: readonly FaultRingRow[], cell: CaptureCell, antialiased: boolean): Grade {
   const off = offenderList();
   for (const row of rows) {
     const key = `${row.nodeId}:fault-${row.port}`;
@@ -1199,8 +1215,8 @@ export function gradeFaultRing(rows: readonly FaultRingRow[], cell: CaptureCell)
     }
     if (r.gaps > 0) off.add(key, false, `${who}: a gap in the ring on ${r.gaps} of ${r.rays} rays`);
     if (r.holeClosed > 0) off.add(key, false, `${who}: the hole is filled on ${r.holeClosed} of ${r.rays} rays`);
-    if (cell.aa === 'shipped' && r.minCore < 1) off.add(key, false, `${who}: radial core ${r.minCore} device px on some ray, under 1`);
-    if (cell.aa === 'on' && r.minEffective < 1) off.add(key, false, `${who}: effective width ${r.minEffective} device px on some ray, under 1`);
+    if (!antialiased && r.minCore < 1) off.add(key, false, `${who}: radial core ${r.minCore} device px on some ray, under 1`);
+    if (antialiased && r.minEffective < 1) off.add(key, false, `${who}: effective width ${r.minEffective} device px on some ray, under 1`);
   }
   const offenders = off.list();
   return gradeOf(`fault rings at ${cellLabel(cell)}: ${rows.length} rings, ${offenders.length} offenders`, offenders);
@@ -1509,10 +1525,11 @@ export function measureBeltDash(
 
 /**
  * Grade the belt-dash property: a tile fails on any gap; below the switch zoom a tick also fails
- * when it is thinner than one device px (antialiasing as shipped: core 0; on: effective under 1).
- * A tile that wasn't measured is an offender.
+ * when it is thinner than one device px (chosen by the live context's `antialiased`: without
+ * antialiasing, core under 1; with it, effective under 1). A tile that wasn't measured is an
+ * offender.
  */
-export function gradeBeltDash(rows: readonly BeltDashRow[], cell: CaptureCell): Grade {
+export function gradeBeltDash(rows: readonly BeltDashRow[], cell: CaptureCell, antialiased: boolean): Grade {
   const off = offenderList();
   for (const row of rows) {
     const key = `${row.beltId}:tile-${row.tile}`;
@@ -1523,8 +1540,8 @@ export function gradeBeltDash(rows: readonly BeltDashRow[], cell: CaptureCell): 
       continue;
     }
     if (s.gaps > 0) off.add(key, false, `${who}: ${s.gaps} gap${s.gaps === 1 ? '' : 's'} in the ${row.mode}, the longest ${s.longestGapPx} device px (${s.readPx} px read)`);
-    else if (row.mode === 'tick' && cell.aa === 'shipped' && s.core < 1) off.add(key, false, `${who}: the tick's core is ${s.core} device px, under 1`);
-    else if (row.mode === 'tick' && cell.aa === 'on' && s.effective < 1) off.add(key, false, `${who}: the tick's effective width is ${s.effective} device px, under 1`);
+    else if (row.mode === 'tick' && !antialiased && s.core < 1) off.add(key, false, `${who}: the tick's core is ${s.core} device px, under 1`);
+    else if (row.mode === 'tick' && antialiased && s.effective < 1) off.add(key, false, `${who}: the tick's effective width is ${s.effective} device px, under 1`);
   }
   const offenders = off.list();
   return gradeOf(`belt dash at ${cellLabel(cell)}: ${rows.length} straight tiles, ${offenders.length} offenders`, offenders);
@@ -1871,6 +1888,7 @@ export function measureTileProperties(image: DecodedImage, facts: CaptureFacts):
 
   return {
     scene: sceneMachines(facts),
+    gl: facts.gl,
     subjects,
     measurements: { 'outline-sides': outlines, 'glyph-strokes': glyphs, 'fault-ring': rings, 'belt-dash': dashes, 'rail-vs-outline': rails, 'cap-in-cell': caps },
   };
@@ -1903,12 +1921,29 @@ function rowSubject(property: Exclude<PropertyId, 'outline-sides'>, row: GlyphLe
 }
 
 /**
+ * Whether the tiles' live WebGL contexts drew with antialiasing: the one `gl.antialias` value every
+ * tile reported. A string says why there is no such value (a tile that read none, or tiles that
+ * disagree), and the caller grades nothing.
+ */
+export function liveAntialias(tiles: readonly Pick<TileRecord, 'gl'>[]): boolean | string {
+  if (tiles.length === 0) return 'there is no tile to read the live antialiasing from';
+  const seen = [...new Set(tiles.map((t) => t.gl?.antialias ?? null))];
+  if (seen.length === 1 && typeof seen[0] === 'boolean') return seen[0];
+  return `its ${tiles.length} tiles' WebGL contexts report antialias ${seen.map(String).join(' and ')}, not one true or false`;
+}
+
+/**
  * Grade one property over one cell's tiles: the dispatch every grading test hands to
  * `runGradeCell`. It first counts the cell's subjects for the property over all its tiles (for
  * `rail-vs-outline`, rails together with at least one machine outline). With none it returns one
  * unmeasured `no-subjects` offender before any rule runs, so a cell can't pass by finding nothing
  * to grade. Otherwise each subject is graded from the first tile that measured it, and a subject
  * no tile measured is an unmeasured `<subject>:never-clear` offender.
+ *
+ * The rule each width is graded by follows the `antialias` attribute every tile's live WebGL
+ * context reported, not the cell's `aa` label (`liveAntialias`). When the tiles don't all report
+ * the same true or false, the cell returns one unmeasured `antialias-unknown` offender: no rule
+ * can be chosen, so nothing is graded.
  */
 export function gradeCell(property: PropertyId, cell: CaptureCell, tiles: readonly TileRecord[]): Grade {
   const union = (p: PropertyId) => {
@@ -1922,9 +1957,14 @@ export function gradeCell(property: PropertyId, cell: CaptureCell, tiles: readon
     const text = `${property} at ${cellLabel(cell)}: ${missing} in any of its ${tiles.length} tiles, so this cell has nothing to grade`;
     return { offenders: [{ key: 'no-subjects', unmeasured: true, text }], explain: text };
   }
+  const live = liveAntialias(tiles);
+  if (typeof live === 'string') {
+    const text = `${property} at ${cellLabel(cell)}: ${live}, so no rule can be chosen and nothing is graded`;
+    return { offenders: [{ key: 'antialias-unknown', unmeasured: true, text }], explain: text };
+  }
   if (property === 'outline-sides') {
     const { outlines, neverClear } = outlinesForCell(tiles.map((t) => ({ scene: t.scene, outlines: t.measurements['outline-sides'] })));
-    return gradeOutlineSides(outlines, cell, neverClear);
+    return gradeOutlineSides(outlines, cell, live, neverClear);
   }
   const picked: (GlyphLegRow | FaultRingRow | BeltDashRow | RailRow | CapRow)[] = [];
   const neverClear: Offender[] = [];
@@ -1945,11 +1985,11 @@ export function gradeCell(property: PropertyId, cell: CaptureCell, tiles: readon
   }
   const graded =
     property === 'glyph-strokes'
-      ? gradeGlyphStrokes(picked as GlyphLegRow[], cell)
+      ? gradeGlyphStrokes(picked as GlyphLegRow[], cell, live)
       : property === 'fault-ring'
-        ? gradeFaultRing(picked as FaultRingRow[], cell)
+        ? gradeFaultRing(picked as FaultRingRow[], cell, live)
         : property === 'belt-dash'
-          ? gradeBeltDash(picked as BeltDashRow[], cell)
+          ? gradeBeltDash(picked as BeltDashRow[], cell, live)
           : property === 'rail-vs-outline'
             ? gradeRailVsOutline(picked as RailRow[], cell)
             : gradeCapInCell(picked as CapRow[], cell);

@@ -5,9 +5,9 @@
 // compared cell by cell: for each zoom it sets the camera through the shipped controls, holds the
 // render clock, reads the capture facts, captures the X display's root window, crops it to the
 // webview and runs the same measuring and grading functions the capture set's grading project uses
-// (`boardMeasure.ts`, with `{ dpr, aa: 'shipped', zoom }` as the cell). Where the board overflows the
-// webview it pans through the same tile plan the capture set uses (`tilePlan`), so every subject is
-// graded from a tile that holds it whole, as in CI.
+// (`boardMeasure.ts`, with `{ dpr, aa, zoom }` as the cell, `aa` read off the live WebGL context).
+// Where the board overflows the webview it pans through the same tile plan the capture set uses
+// (`tilePlan`), so every subject is graded from a tile that holds it whole, as in CI.
 //
 // IT NEVER LAUNCHES THE APP. Start the self-contained binary yourself, on a private X display (an
 // Xvfb server, with the GTK backend forced to X11 so no window opens anywhere else), with WebKit's
@@ -389,7 +389,11 @@ async function main(): Promise<void> {
       }
       if (first === null) throw new Error(`zoom=${zid}: no tile captured`);
 
-      const cell: CaptureMatrix.CaptureCell = { dpr: first.dpr, aa: 'shipped', zoom };
+      // The cell's label follows the live context, never an assumption about the build: a binary
+      // that booted with antialiasing on is labelled and graded as antialiased (`gradeCell` picks
+      // the rule from every tile's `gl.antialias` too). A context that reports neither is refused.
+      if (typeof first.gl.antialias !== 'boolean') throw new Error(`zoom=${zid}: the WebGL context reports antialias ${String(first.gl.antialias)}, so the walk can't say which rule grades it`);
+      const cell: CaptureMatrix.CaptureCell = { dpr: first.dpr, aa: first.gl.antialias ? 'on' : 'shipped', zoom };
       const verdicts: Record<string, Verdict> = {};
       for (const property of cm.PROPERTY_IDS) {
         const g = bm.gradeCell(property, cell, records);

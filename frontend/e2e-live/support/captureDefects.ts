@@ -57,8 +57,12 @@ export interface DeclaredDefect {
  * The rows, measured by `npm run e2e:capture` at the revisions that added them. Outline sides (plan
  * 107-06): 16 of the 18 cells fail; ratio 1 and ratio 2 at zoom 1 with antialiasing as shipped pass.
  * Glyph legs, fault rings, belt dash, rails and caps (plan 107-07): 14 of 18 glyph cells, 10 of 42
- * fault-ring cells, 2 of 48 belt-dash cells, 2 of 42 rail cells and 6 of 48 cap cells fail. Widths
- * are device px.
+ * fault-ring cells, 2 of 48 belt-dash cells, 2 of 42 rail cells and 6 of 48 cap cells fail. Since
+ * review 107 CR-01 the grey-fringe half of STRK-01 is graded with antialiasing as shipped too, and
+ * the rule follows the live WebGL context's `antialias`: at ratio 1.1818 the shipped boot and
+ * full-screen boot cells read a 1 px fringe on unantialiased strokes, so 15 of 18 glyph cells now
+ * fail (the shipped boot-zoom glyph cell at 1.1818 is new) and two outline rows and one more glyph
+ * row name more offenders. 51 rows in all. Widths are device px.
  */
 export const DECLARED_DEFECTS: readonly DeclaredDefect[] = [
   {
@@ -172,18 +176,20 @@ export const DECLARED_DEFECTS: readonly DeclaredDefect[] = [
     fixes: 'STRK-01',
     offenders: [
       '0:left',
-      '1:left',
-      '2:top',
-      '3:bottom',
-      '6:top',
+      '1:bottom', '1:left',
+      '2:top', '2:bottom',
+      '3:right', '3:bottom', '3:left',
+      '4:bottom',
+      '5:top', '5:bottom',
+      '6:top', '6:bottom',
       '7:right',
       '8:right',
-      '9:top', '9:bottom',
-      '10:top',
+      '9:top', '9:right', '9:bottom', '9:left',
+      '10:top', '10:right', '10:bottom', '10:left',
       '29:top', '29:bottom',
-      '30:top',
+      '30:top', '30:bottom',
     ],
-    why: 'ratio 1.1818, antialiasing as shipped, boot zoom (scale 1.3028): 11 of 13 machines draw a side at a different core width from their other sides (device px, the odd side vs the other sides): machine 0 left 5 vs 4, machine 1 left 4 vs 5, machine 2 top 4 vs 5, machine 3 bottom 4 vs 5, machine 6 top 4 vs 5, machine 7 right 4 vs 5, machine 8 right 4 vs 5, machine 9 top 4 bottom 4 vs 5, machine 10 top 4 vs 5, machine 29 top 4 bottom 4 vs 5, machine 30 top 4 vs 5',
+    why: 'ratio 1.1818, antialiasing as shipped, boot zoom (scale 1.3028): 27 sides of 13 of 13 machines fail. 11 machines draw a side at a different core width from their other sides (device px, the odd side vs the other sides): machine 0 left 5 vs 4, machine 1 left 4 vs 5, machine 2 top 4 vs 5, machine 3 bottom 4 vs 5, machine 6 top 4 vs 5, machine 7 right 4 vs 5, machine 8 right 4 vs 5, machine 9 top 4 bottom 4 vs 5, machine 10 top 4 vs 5, machine 29 top 4 bottom 4 vs 5, machine 30 top 4 vs 5. 18 sides on 10 machines carry a 1 px grey fringe beside a core of 4 or 5 with the WebGL context unantialiased (review 107 CR-01): machine 1 bottom, 2 bottom, 3 right and left, 4 bottom, 5 top and bottom, 6 bottom, 9 right and left, 10 all four, 29 top and bottom, 30 top and bottom',
   },
   {
     property: 'outline-sides',
@@ -214,14 +220,17 @@ export const DECLARED_DEFECTS: readonly DeclaredDefect[] = [
     zoom: FULLSCREEN_BOOT_ZOOM,
     fixes: 'STRK-01',
     offenders: [
-      '1:left',
-      '3:bottom',
-      '5:top', '5:left',
-      '9:top', '9:right',
-      '10:left',
+      '1:bottom', '1:left',
+      '2:bottom',
+      '3:right', '3:bottom', '3:left',
+      '5:top', '5:bottom', '5:left',
+      '7:right', '7:left',
+      '9:top', '9:right', '9:left',
+      '10:top', '10:right', '10:bottom', '10:left',
+      '29:top', '29:bottom',
       '30:top', '30:bottom',
     ],
-    why: 'ratio 1.1818, antialiasing as shipped, full-screen boot zoom (scale 2.8853): 6 of 13 machines draw a side at a different core width from their other sides (device px, the odd side vs the other sides): machine 1 left 11 vs 10, machine 3 bottom 11 vs 10, machine 5 top 10 left 10 vs 11, machine 9 top 10 right 10 vs 11, machine 10 left 11 vs 10, machine 30 top 10 bottom 10 vs 11',
+    why: 'ratio 1.1818, antialiasing as shipped, full-screen boot zoom (scale 2.8853): 22 sides of 10 of 13 machines fail. 6 machines draw a side at a different core width from their other sides (device px, the odd side vs the other sides): machine 1 left 11 vs 10, machine 3 bottom 11 vs 10, machine 5 top 10 left 10 vs 11, machine 9 top 10 right 10 vs 11, machine 10 left 11 vs 10, machine 30 top 10 bottom 10 vs 11. 18 sides on 9 machines carry a 1 px grey fringe beside a core of 10 or 11 with the WebGL context unantialiased (review 107 CR-01): machine 1 bottom, 2 bottom, 3 right and left, 5 top and bottom, 7 right and left, 9 right and left, 10 all four, 29 top and bottom, 30 top and bottom',
   },
   {
     property: 'outline-sides',
@@ -455,6 +464,18 @@ export const DECLARED_DEFECTS: readonly DeclaredDefect[] = [
     property: 'glyph-strokes',
     dpr: FRACTIONAL_DPR,
     aa: 'shipped',
+    zoom: 'boot',
+    fixes: 'STRK-01',
+    offenders: [
+      '1:leg-6', '1:leg-13', '30:leg-0', '30:leg-2', '30:leg-4', '30:leg-6', '30:leg-7', '30:leg-9',
+      '30:leg-11', '30:leg-13',
+    ],
+    why: 'ratio 1.18, antialiasing as shipped, boot zoom (scale 1.3028): 10 Factory glyph legs carry a 1 px grey fringe beside a core of 3 with the WebGL context unantialiased, while every leg reads the same core (review 107 CR-01): machine 1 legs 6 and 13; machine 30 legs 0, 2, 4, 6, 7, 9, 11 and 13',
+  },
+  {
+    property: 'glyph-strokes',
+    dpr: FRACTIONAL_DPR,
+    aa: 'shipped',
     zoom: 1,
     fixes: 'STRK-01',
     offenders: [
@@ -469,10 +490,11 @@ export const DECLARED_DEFECTS: readonly DeclaredDefect[] = [
     zoom: FULLSCREEN_BOOT_ZOOM,
     fixes: 'STRK-01',
     offenders: [
-      '1:leg-0', '1:leg-1', '1:leg-5', '1:leg-6', '1:leg-7', '1:leg-13', '30:leg-1', '30:leg-5',
-      '30:leg-8', '30:leg-12',
+      '1:leg-0', '1:leg-1', '1:leg-5', '1:leg-6', '1:leg-7', '1:leg-13', '30:leg-0', '30:leg-1',
+      '30:leg-2', '30:leg-4', '30:leg-5', '30:leg-6', '30:leg-7', '30:leg-8', '30:leg-9', '30:leg-11',
+      '30:leg-12', '30:leg-13',
     ],
-    why: 'ratio 1.18, antialiasing as shipped, full-screen boot zoom (scale 2.8853): 10 Factory glyph legs read a different core width from the most common one on their glyph (device px, leg number then core): machine 1, against 7: legs 0 6, 1 6, 5 6, 6 6, 7 6, 13 6; machine 30, against 7: legs 1 6, 5 6, 8 6, 12 6',
+    why: 'ratio 1.18, antialiasing as shipped, full-screen boot zoom (scale 2.8853): 18 Factory glyph legs fail. 10 read a different core width from the most common one on their glyph (device px, leg number then core): machine 1, against 7: legs 0 6, 1 6, 5 6, 6 6, 7 6, 13 6; machine 30, against 7: legs 1 6, 5 6, 8 6, 12 6. 8 carry a 1 px grey fringe beside a core of 7 with the WebGL context unantialiased (review 107 CR-01): machine 30 legs 0, 2, 4, 6, 7, 9, 11 and 13',
   },
   {
     property: 'glyph-strokes',

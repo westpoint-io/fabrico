@@ -39,8 +39,15 @@
 #                       about 35 px where the check scans, set
 #                       outward of the box so it stays off the
 #                       outline the outline check reads
+#   outline-fringe      layers/machines.ts: node 4 keeps its     outline-sides zoom=1, naming a
+#                       3 px outline and gains a half-opaque     grey fringe on machine 4's right
+#                       1 px column just outside its right       side (its cores stay equal, so
+#                       side                                     only the fringe rule can see it)
 #
-# Every target is the zoom-1 cell of its property, and every one of them passes at HEAD. Each
+# Every grading target is the zoom-1 cell of its property, and every one of them passes at HEAD.
+# `outline-fringe` proves the "no grey fringe" half of STRK-01 is graded with antialiasing as
+# shipped (review 107 CR-01): before that fix the shipped rule compared cores only, and this break
+# leaves the cores equal. Each
 # break is as narrow as it can be made: the cap is one belt end, because a cap wider than a
 # cell at zoom 1 placed on its port would cover that machine's outline, and the outline check
 # would change its verdict too.
@@ -83,10 +90,10 @@
 # HOW TO RUN: `bash scripts/prove-capture-checks-bite.sh` from anywhere in the checkout. It
 # takes no arguments. The worktree and every run directory go under `$TMPDIR`; on a machine
 # where /tmp is held in memory, point it at disk (`TMPDIR=$HOME/.cache/fabrico-tmp`). It
-# makes one unmutated run and one run per break, seven in all, each booting the host and
-# Vite. MEASURED: 202 s wall time for the seven runs on a developer machine at a load average
+# makes one unmutated run and one run per break, eight in all, each booting the host and
+# Vite. MEASURED: 202 s wall time for seven runs on a developer machine at a load average
 # under 5 (the PROVEN line prints each run's own figure); the worst case under the per-run
-# limit is 7 x 900 s, about 1 h 45 min, reached only if every run hangs.
+# limit is 8 x 900 s, 2 h, reached only if every run hangs.
 #
 # EXIT CODES:
 #   0  PROVEN: every break turned its cell red, changed no other property's verdict, and
@@ -534,6 +541,22 @@ prove cap-wide "$L/belts.ts" cap-in-cell "cap-in-cell ${BOOT_GREP} zoom=1" \
         } else {
           g.circle(cx, cy, capR).fill(plugCapColor(anchor.role));
         }
+"
+
+# outline-fringe: the same Sink keeps its outline as shipped and gains a 1 px column of its own
+# ink at half opacity just outside its right side, from 2.5 to 1.5 world px inside the footprint's
+# edge. At zoom 1 and ratio 1 that is one device px of coverage 0.5 beside a 3 px core: the right
+# side reads core 3 fringe 1, the other three core 3 fringe 0. The cores stay equal, so only the
+# grey-fringe rule can name it. The sample line's outer end, 2 px past the band, is still floor.
+prove outline-fringe "$L/machines.ts" outline-sides "outline-sides ${BOOT_GREP} zoom=1" \
+    "4:right" "" "machine 4 (kind 7) right: grey fringe" \
+    "          drawChassis(entry.chassis, node.w, node.h, skin, node.state);
+" \
+    "          drawChassis(entry.chassis, node.w, node.h, skin, node.state);
+          if (node.cell_x === 14 && node.cell_y === 4) {
+            const ink = skin.palette.ramp[skin.palette.ramp.length - 1];
+            entry.chassis.rect(node.w * CELL - 2.5, 2.5, 1, node.h * CELL - 5).fill({ color: ink, alpha: 0.5 });
+          }
 "
 
 # --- Every file is back to its kept bytes -----------------------------------------------

@@ -26,6 +26,7 @@ import {
   gradeGlyphStrokes,
   gradeOutlineSides,
   gradeRailVsOutline,
+  liveAntialias,
   measureBeltDash,
   measureCapWidth,
   measureCapture,
@@ -39,6 +40,7 @@ import {
   outlineWidthOf,
   outlinesForCell,
   readSampleLine,
+  type GlyphLegRow,
   type GlyphSegment,
   type MachineOutline,
   type Rgb,
@@ -211,7 +213,7 @@ describe('outline sides, antialiasing as shipped', () => {
     outline(img, SOLID3);
     const [m] = measure(img);
     expect(coresOf(m)).toEqual({ top: 3, right: 3, bottom: 3, left: 3 });
-    expect(gradeOutlineSides([m], SHIPPED_AT_1).offenders).toEqual([]);
+    expect(gradeOutlineSides([m], SHIPPED_AT_1, false).offenders).toEqual([]);
   });
 
   it('fails the same outline with its right side 2 px, naming the right side', () => {
@@ -219,7 +221,7 @@ describe('outline sides, antialiasing as shipped', () => {
     outline(img, SOLID3, { right: [FLOOR, IDLE_INK, IDLE_INK] });
     const [m] = measure(img);
     expect(coresOf(m)).toEqual({ top: 3, right: 2, bottom: 3, left: 3 });
-    const g = gradeOutlineSides([m], SHIPPED_AT_1);
+    const g = gradeOutlineSides([m], SHIPPED_AT_1, false);
     expect(g.offenders.map((o) => o.key)).toEqual(['1:right']);
     expect(g.offenders[0]).toMatchObject({ unmeasured: false });
     expect(g.offenders[0].text).toContain('right 2');
@@ -232,11 +234,11 @@ describe('outline sides, antialiasing as shipped', () => {
       outline(img, [ink, ink, ink]);
       const [m] = measure(img, facts({ nodes: [{ ...NODE, state }] }));
       expect(coresOf(m), `state ${state}`).toEqual({ top: 3, right: 3, bottom: 3, left: 3 });
-      expect(gradeOutlineSides([m], SHIPPED_AT_1).offenders, `state ${state}`).toEqual([]);
+      expect(gradeOutlineSides([m], SHIPPED_AT_1, false).offenders, `state ${state}`).toEqual([]);
       // The defect twin in the same colour: one side a pixel thinner fails.
       const thin = blank();
       outline(thin, [ink, ink, ink], { bottom: [FLOOR, ink, ink] });
-      expect(gradeOutlineSides(measure(thin, facts({ nodes: [{ ...NODE, state }] })), SHIPPED_AT_1).offenders, `state ${state}`).toHaveLength(1);
+      expect(gradeOutlineSides(measure(thin, facts({ nodes: [{ ...NODE, state }] })), SHIPPED_AT_1, false).offenders, `state ${state}`).toHaveLength(1);
     }
   });
 });
@@ -250,10 +252,10 @@ describe('outline sides, antialiasing on', () => {
     const results = measure(img);
     const [m] = results;
     expect(coresOf(m)).toEqual({ top: 2, right: 2, bottom: 2, left: 2 });
-    const atOne = gradeOutlineSides(results, AA_ON_AT_1);
+    const atOne = gradeOutlineSides(results, AA_ON_AT_1, true);
     expect(atOne.offenders.map((o) => o.key)).toEqual(['1:top', '1:right', '1:bottom', '1:left']);
     expect(atOne.offenders.every((o) => !o.unmeasured && o.text.includes('grey fringe'))).toBe(true);
-    expect(gradeOutlineSides(results, AA_ON_AT_2).offenders).toEqual([]);
+    expect(gradeOutlineSides(results, AA_ON_AT_2, true).offenders).toEqual([]);
   });
 
   /** One machine whose sides measured these effective widths, with no fringe. */
@@ -264,8 +266,8 @@ describe('outline sides, antialiasing on', () => {
 
   it(`passes effective widths spread by exactly ${AA_ON_TOLERANCE} px and fails a spread of 0.26 px`, () => {
     expect(AA_ON_TOLERANCE).toBe(0.25);
-    expect(gradeOutlineSides([withEffective({ top: 3, right: 3, bottom: 3, left: 3.25 })], AA_ON_AT_2).offenders).toEqual([]);
-    const over = gradeOutlineSides([withEffective({ top: 3, right: 3, bottom: 3, left: 3.26 })], AA_ON_AT_2);
+    expect(gradeOutlineSides([withEffective({ top: 3, right: 3, bottom: 3, left: 3.25 })], AA_ON_AT_2, true).offenders).toEqual([]);
+    const over = gradeOutlineSides([withEffective({ top: 3, right: 3, bottom: 3, left: 3.26 })], AA_ON_AT_2, true);
     expect(over.offenders.map((o) => o.key)).toEqual(['1:left']);
     expect(over.offenders[0].text).toContain('spread 0.26');
   });
@@ -308,17 +310,17 @@ describe('what the measurer refuses to read', () => {
     const [m] = measure(img, covered);
     expect(m.sides.right.measured).toBe(false);
     expect(m.sides.left.measured).toBe(true);
-    const g = gradeOutlineSides([m], SHIPPED_AT_1);
+    const g = gradeOutlineSides([m], SHIPPED_AT_1, false);
     expect(g.offenders.map((o) => [o.key, o.unmeasured])).toEqual([['1:right', true]]);
     expect(g.offenders[0].text).toMatch(/right: not measured .*a chrome panel/);
     // The clean twin: the same capture with no panel grades clean.
-    expect(gradeOutlineSides(measure(img), SHIPPED_AT_1).offenders).toEqual([]);
+    expect(gradeOutlineSides(measure(img), SHIPPED_AT_1, false).offenders).toEqual([]);
   });
 
   it('reads an image with no outline at the expected place as not measured on every side, never as a width of 0', () => {
     const [m] = measure(blank());
     expect(Object.values(m.sides).map((s) => s.measured)).toEqual([false, false, false, false]);
-    const g = gradeOutlineSides([m], SHIPPED_AT_1);
+    const g = gradeOutlineSides([m], SHIPPED_AT_1, false);
     expect(g.offenders).toHaveLength(4);
     expect(g.offenders.every((o) => o.unmeasured && o.text.includes('not measured'))).toBe(true);
     // An outline drawn somewhere else is no better: still nothing at the expected place.
@@ -328,7 +330,7 @@ describe('what the measurer refuses to read', () => {
   });
 
   it('grades a capture with no machine in it as an offender', () => {
-    expect(gradeOutlineSides([], SHIPPED_AT_1).offenders).toEqual([
+    expect(gradeOutlineSides([], SHIPPED_AT_1, false).offenders).toEqual([
       { key: 'capture:no-machine', unmeasured: true, text: 'no machine was measured in this capture' },
     ]);
   });
@@ -416,19 +418,19 @@ describe('tiles: each machine is graded in the first tile that holds its whole o
     expect(outlines.map((o) => o.nodeId)).toEqual([1, 2]);
     expect(coresOf(outlines[0]).right).toBe(3);
     expect(neverClear).toEqual([{ nodeId: 3, kind: 7 }]);
-    const g = gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear);
+    const g = gradeOutlineSides(outlines, SHIPPED_AT_1, false, neverClear);
     expect(g.offenders.map((o) => [o.key, o.unmeasured])).toEqual([['3:never-clear', true]]);
     expect(g.offenders[0].text).toContain('machine 3 (kind 7): never clear of chrome');
     // Swapping the tile order makes the thin outline the one graded.
     const swapped = outlinesForCell([tiles[1], tiles[0]]);
     expect(coresOf(swapped.outlines[0]).right).toBe(2);
-    expect(gradeOutlineSides(swapped.outlines, SHIPPED_AT_1, swapped.neverClear).offenders.map((o) => o.key)).toEqual(['1:right', '3:never-clear']);
+    expect(gradeOutlineSides(swapped.outlines, SHIPPED_AT_1, false, swapped.neverClear).offenders.map((o) => o.key)).toEqual(['1:right', '3:never-clear']);
   });
 
   it('grades a cell whose every machine was never clear as offenders, not as an empty pass', () => {
     const { outlines, neverClear } = outlinesForCell([{ scene: [{ nodeId: 4, kind: 2 }], outlines: [] }]);
     expect(outlines).toEqual([]);
-    expect(gradeOutlineSides(outlines, SHIPPED_AT_1, neverClear).offenders.map((o) => o.text)).toEqual([
+    expect(gradeOutlineSides(outlines, SHIPPED_AT_1, false, neverClear).offenders.map((o) => o.text)).toEqual([
       'machine 4 (kind 2): never clear of chrome (no tile held its whole outline on the canvas)',
     ]);
   });
@@ -443,17 +445,17 @@ describe('outline offenders: the side that differs, keyed by machine and side', 
   }
 
   it('names the side that differs from the other three, not the machine', () => {
-    const g = gradeOutlineSides([withCores(3, { top: 4, right: 3, bottom: 4, left: 4 })], SHIPPED_AT_1);
+    const g = gradeOutlineSides([withCores(3, { top: 4, right: 3, bottom: 4, left: 4 })], SHIPPED_AT_1, false);
     expect(g.offenders.map((o) => o.key)).toEqual(['3:right']);
   });
 
   it('names the thinner pair when two sides read one width and two another', () => {
-    const g = gradeOutlineSides([withCores(6, { top: 8, right: 7, bottom: 8, left: 7 })], SHIPPED_AT_1);
+    const g = gradeOutlineSides([withCores(6, { top: 8, right: 7, bottom: 8, left: 7 })], SHIPPED_AT_1, false);
     expect(g.offenders.map((o) => o.key)).toEqual(['6:right', '6:left']);
   });
 
   it('keys a side that was not measured as unmeasured', () => {
-    const g = gradeOutlineSides([withCores(4, { top: 3, right: null, bottom: 3, left: 3 })], SHIPPED_AT_1);
+    const g = gradeOutlineSides([withCores(4, { top: 3, right: null, bottom: 3, left: 3 })], SHIPPED_AT_1, false);
     expect(g.offenders).toEqual([expect.objectContaining({ key: '4:right', unmeasured: true })]);
   });
 });
@@ -483,7 +485,7 @@ describe('runGradeCell', () => {
 
   /** A grade function over fixed outlines, the shape board-grade.capture.ts hands in. */
   const gradeOf = (outlines: MachineOutline[], neverClear: { nodeId: number; kind: number }[] = []) => (cell: CaptureCell) =>
-    gradeOutlineSides(outlines, cell, neverClear);
+    gradeOutlineSides(outlines, cell, false, neverClear);
 
   /** Run one cell and answer whether it threw (and with what) and whether the mark was reached. */
   function run(row: DeclaredDefect | undefined, grade: (cell: CaptureCell) => ReturnType<typeof gradeOutlineSides>) {
@@ -557,13 +559,13 @@ describe('runGradeCell', () => {
   });
 
   it('checkDeclared lists each unmeasured offender, each declared key missing and each key not declared', () => {
-    const g = gradeOutlineSides([machine(3, 4, 4, 4, 4), machine(5, 4, null, 4, 3)], CELL_BOOT);
+    const g = gradeOutlineSides([machine(3, 4, 4, 4, 4), machine(5, 4, null, 4, 3)], CELL_BOOT, false);
     const reasons = checkDeclared(ROW, g);
     expect(reasons).toHaveLength(3);
     expect(reasons.filter((r) => r.startsWith('5:right was not measured'))).toHaveLength(1);
     expect(reasons.filter((r) => r.startsWith("5:right fails but the row doesn't declare it"))).toHaveLength(1);
     expect(reasons.some((r) => r.includes('3:right') && r.includes('declared'))).toBe(true);
-    expect(checkDeclared(ROW, gradeOutlineSides([THIN3], CELL_BOOT))).toEqual([]);
+    expect(checkDeclared(ROW, gradeOutlineSides([THIN3], CELL_BOOT, false))).toEqual([]);
   });
 });
 
@@ -699,13 +701,13 @@ describe('glyph strokes: the Factory glyph legs', () => {
     const rows = measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE);
     expect(rows).toHaveLength(14);
     for (const r of rows) expect(r.width, r.segment).toMatchObject({ measured: true, core: 3, fringe: 0 });
-    expect(gradeGlyphStrokes(rows, BOOT_SHIPPED).offenders).toEqual([]);
+    expect(gradeGlyphStrokes(rows, BOOT_SHIPPED, false).offenders).toEqual([]);
   });
 
   it('fails one leg at 2 px beside legs at 3 px, naming the leg', () => {
     const img = blank(GLYPH_SIZE);
     glyph(img, LEG3, { 1: [GLYPH_INK, GLYPH_INK] });
-    const g = gradeGlyphStrokes(measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE), BOOT_SHIPPED);
+    const g = gradeGlyphStrokes(measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE), BOOT_SHIPPED, false);
     expect(g.offenders).toEqual([expect.objectContaining({ key: '1:leg-1', unmeasured: false })]);
   });
 
@@ -715,8 +717,8 @@ describe('glyph strokes: the Factory glyph legs', () => {
     glyph(img, [half, GLYPH_INK, GLYPH_INK, half]);
     const rows = measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE);
     for (const r of rows) expect(r.width, r.segment).toMatchObject({ measured: true, core: 2, fringe: 2 });
-    expect(gradeGlyphStrokes(rows, AA_ON_AT_2).offenders).toEqual([]);
-    const atBoot = gradeGlyphStrokes(rows, BOOT_ON);
+    expect(gradeGlyphStrokes(rows, AA_ON_AT_2, true).offenders).toEqual([]);
+    const atBoot = gradeGlyphStrokes(rows, BOOT_ON, true);
     expect(atBoot.offenders).toHaveLength(14);
     expect(atBoot.explain).toMatch(/fringe/);
   });
@@ -724,7 +726,7 @@ describe('glyph strokes: the Factory glyph legs', () => {
   it('fails effective widths spread by more than the tolerance with antialiasing on', () => {
     const img = blank(GLYPH_SIZE);
     glyph(img, LEG3, { 4: [GLYPH_INK, GLYPH_INK, blend(GLYPH_INK, 0.5)] });
-    const g = gradeGlyphStrokes(measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE), AA_ON_AT_2);
+    const g = gradeGlyphStrokes(measureGlyphStrokes(img, glyphFacts(), GLYPH_NODE), AA_ON_AT_2, true);
     expect(g.offenders.map((o) => o.key)).toEqual(['1:leg-4']);
   });
 
@@ -734,7 +736,7 @@ describe('glyph strokes: the Factory glyph legs', () => {
     const f = glyphFacts({ panels: [{ left: 0, top: 0, width: GLYPH_SIZE, height: GLYPH_SIZE }] });
     const rows = measureGlyphStrokes(img, f, GLYPH_NODE);
     for (const r of rows) expect(r.width.measured).toBe(false);
-    const g = gradeGlyphStrokes(rows, BOOT_SHIPPED);
+    const g = gradeGlyphStrokes(rows, BOOT_SHIPPED, false);
     expect(g.offenders).toHaveLength(14);
     expect(g.offenders.every((o) => o.unmeasured)).toBe(true);
   });
@@ -798,7 +800,7 @@ describe('fault ring: continuous, keeps its hole, at least one device pixel wide
     if (!row.ring.measured) throw new Error('not measured');
     expect(row.ring.rays).toBeGreaterThanOrEqual(16);
     expect(row.ring.minCore).toBeGreaterThanOrEqual(1);
-    expect(gradeFaultRing([row], AT_HALF).offenders).toEqual([]);
+    expect(gradeFaultRing([row], AT_HALF, false).offenders).toEqual([]);
   });
 
   it('fails a ring with a 30 degree arc missing, on its gaps', () => {
@@ -808,7 +810,7 @@ describe('fault ring: continuous, keeps its hole, at least one device pixel wide
     expect(row.ring).toMatchObject({ measured: true });
     if (!row.ring.measured) throw new Error('not measured');
     expect(row.ring.gaps).toBeGreaterThanOrEqual(2);
-    const g = gradeFaultRing([row], AT_HALF);
+    const g = gradeFaultRing([row], AT_HALF, false);
     expect(g.offenders).toEqual([expect.objectContaining({ key: '4:fault-2', unmeasured: false })]);
     expect(g.explain).toMatch(/gap/);
   });
@@ -820,7 +822,7 @@ describe('fault ring: continuous, keeps its hole, at least one device pixel wide
     expect(row.ring).toMatchObject({ measured: true, gaps: 0 });
     if (!row.ring.measured) throw new Error('not measured');
     expect(row.ring.holeClosed).toBe(row.ring.rays);
-    const g = gradeFaultRing([row], AT_HALF);
+    const g = gradeFaultRing([row], AT_HALF, false);
     expect(g.offenders.map((o) => o.key)).toEqual(['4:fault-2']);
     expect(g.explain).toMatch(/hole/);
   });
@@ -830,7 +832,7 @@ describe('fault ring: continuous, keeps its hole, at least one device pixel wide
     ring(img, { ringInk: (deg) => (deg >= 20 && deg <= 50 ? blend(NUB_INK, 0.5) : NUB_INK) });
     const row = measureFaultRing(img, ringFacts(), RING_NODE, PORT);
     expect(row.ring).toMatchObject({ measured: true, gaps: 0, holeClosed: 0, minCore: 0 });
-    const g = gradeFaultRing([row], AT_HALF);
+    const g = gradeFaultRing([row], AT_HALF, false);
     expect(g.offenders.map((o) => o.key)).toEqual(['4:fault-2']);
     expect(g.explain).toMatch(/core/);
   });
@@ -840,7 +842,7 @@ describe('fault ring: continuous, keeps its hole, at least one device pixel wide
     ring(img);
     const row = measureFaultRing(img, ringFacts({ panels: [{ left: 40, top: 20, width: 50, height: 50 }] }), RING_NODE, PORT);
     expect(row.ring.measured).toBe(false);
-    expect(gradeFaultRing([row], AT_HALF).offenders).toEqual([expect.objectContaining({ key: '4:fault-2', unmeasured: true })]);
+    expect(gradeFaultRing([row], AT_HALF, false).offenders).toEqual([expect.objectContaining({ key: '4:fault-2', unmeasured: true })]);
   });
 });
 
@@ -884,7 +886,7 @@ describe('belt dash: no gap in a straight tile dash or its low-zoom tick', () =>
     expect(rows.map((r) => r.tile)).toEqual([0, 1, 2]);
     for (const r of rows) expect(r.stroke, `tile ${r.tile}`).toMatchObject({ measured: true, gaps: 0 });
     expect(rows[0].mode).toBe('dash');
-    expect(gradeBeltDash(rows, SHIPPED_AT_1).offenders).toEqual([]);
+    expect(gradeBeltDash(rows, SHIPPED_AT_1, false).offenders).toEqual([]);
   });
 
   it('fails the same run with a one-pixel hole inside one dash, naming the tile', () => {
@@ -892,7 +894,7 @@ describe('belt dash: no gap in a straight tile dash or its low-zoom tick', () =>
     dashBelt(img, { holeAt: 52 });
     const rows = measureBeltDash(img, facts({ nodes: [], belts: [DASH_BELT] }), DASH_BELT);
     expect(rows[0].stroke).toMatchObject({ measured: true, gaps: 1, longestGapPx: 1 });
-    expect(gradeBeltDash(rows, SHIPPED_AT_1).offenders).toEqual([expect.objectContaining({ key: '7:tile-0', unmeasured: false })]);
+    expect(gradeBeltDash(rows, SHIPPED_AT_1, false).offenders).toEqual([expect.objectContaining({ key: '7:tile-0', unmeasured: false })]);
   });
 
   it('below the switch zoom, passes a present 1 px tick and fails a tile whose tick is missing', () => {
@@ -901,11 +903,11 @@ describe('belt dash: no gap in a straight tile dash or its low-zoom tick', () =>
     const rows = measureBeltDash(clean, HALF_FACTS(), DASH_BELT);
     expect(rows[0].mode).toBe('tick');
     for (const r of rows) expect(r.stroke, `tile ${r.tile}`).toMatchObject({ measured: true, gaps: 0, core: 1 });
-    expect(gradeBeltDash(rows, AT_HALF).offenders).toEqual([]);
+    expect(gradeBeltDash(rows, AT_HALF, false).offenders).toEqual([]);
 
     const img = blank();
     tickBelt(img, { missing: 1 });
-    const g = gradeBeltDash(measureBeltDash(img, HALF_FACTS(), DASH_BELT), AT_HALF);
+    const g = gradeBeltDash(measureBeltDash(img, HALF_FACTS(), DASH_BELT), AT_HALF, false);
     expect(g.offenders.map((o) => o.key)).toEqual(['7:tile-1']);
   });
 
@@ -915,7 +917,7 @@ describe('belt dash: no gap in a straight tile dash or its low-zoom tick', () =>
     const f = facts({ nodes: [], belts: [DASH_BELT], cables: [[{ x: 30, y: 48 }, { x: 130, y: 48 }]] });
     const rows = measureBeltDash(img, f, DASH_BELT);
     for (const r of rows) expect(r.stroke.measured).toBe(false);
-    expect(gradeBeltDash(rows, SHIPPED_AT_1).offenders.every((o) => o.unmeasured)).toBe(true);
+    expect(gradeBeltDash(rows, SHIPPED_AT_1, false).offenders.every((o) => o.unmeasured)).toBe(true);
   });
 });
 
@@ -1130,7 +1132,7 @@ describe('measuring bugs found on the live board', () => {
     expect(row.ring).toMatchObject({ measured: true, gaps: 0, holeClosed: 0 });
     if (!row.ring.measured) throw new Error('not measured');
     expect(row.ring.minEffective).toBeGreaterThanOrEqual(1);
-    expect(gradeFaultRing([row], { dpr: 1, aa: 'on', zoom: 1 }).offenders).toEqual([]);
+    expect(gradeFaultRing([row], { dpr: 1, aa: 'on', zoom: 1 }, true).offenders).toEqual([]);
   });
 
   it('reads caps merged into one blob along a machine side as wider than the cell, not as unmeasured', () => {
@@ -1160,5 +1162,69 @@ describe('measuring bugs found on the live board', () => {
     const row = measureRailWidth(img, f, plugged, outlineWidthOf(measureCapture(img, facts())));
     // Three lines per rail per tile, all clear of the stems that run between the rails.
     expect(row.rail).toMatchObject({ measured: true, core: 1, lines: 12, skipped: 0 });
+  });
+});
+
+// --- STRK-01's fringe half in every cell, and the rule chosen by the live context (review CR-01) --
+
+describe('the grey-fringe rule and the live antialiasing state', () => {
+  /** One machine whose four sides each read this core, fringe and effective width. */
+  const machineReading = (core: number, fringe: number, effective: number[]): MachineOutline => {
+    const side = (e: number) => ({ measured: true as const, core, fringe, effective: e, lines: 5, skipped: 0 });
+    return { nodeId: 1, kind: 2, sides: { top: side(effective[0]), right: side(effective[1]), bottom: side(effective[2]), left: side(effective[3]) } };
+  };
+  /** A tile record holding only that machine, as a context with this `antialias` reported it. */
+  const tileOf = (m: MachineOutline, antialias: boolean | null): TileRecord => ({
+    scene: [{ nodeId: m.nodeId, kind: m.kind }],
+    gl: { antialias, samples: antialias === true ? 4 : 0 },
+    subjects: { 'outline-sides': [String(m.nodeId)], 'glyph-strokes': [], 'fault-ring': [], 'belt-dash': [], 'rail-vs-outline': [], 'cap-in-cell': [] },
+    measurements: { 'outline-sides': [m], 'glyph-strokes': [], 'fault-ring': [], 'belt-dash': [], 'rail-vs-outline': [], 'cap-in-cell': [] },
+  });
+
+  it('fails a shipped cell whose four sides read core 3 fringe 2, which the cores alone would pass', () => {
+    const fringed = machineReading(3, 2, [4, 4, 4, 4]);
+    const g = gradeOutlineSides([fringed], SHIPPED_AT_1, false);
+    expect(g.offenders.map((o) => o.key)).toEqual(['1:top', '1:right', '1:bottom', '1:left']);
+    expect(g.offenders.every((o) => !o.unmeasured && o.text.includes('grey fringe'))).toBe(true);
+    // Its crisp twin passes, and away from zoom 1 and the boot zooms the fringe isn't promised.
+    expect(gradeOutlineSides([machineReading(3, 0, [3, 3, 3, 3])], SHIPPED_AT_1, false).offenders).toEqual([]);
+    expect(gradeOutlineSides([fringed], { dpr: 1, aa: 'shipped', zoom: 2 }, false).offenders).toEqual([]);
+  });
+
+  it('fails a fringed glyph leg in a shipped cell, and passes its crisp twin', () => {
+    const leg = (name: string, fringe: number): GlyphLegRow => ({
+      nodeId: 1,
+      leg: name,
+      segment: 'H',
+      width: { measured: true as const, core: 2, fringe, effective: 2 + fringe / 2, lines: 3, skipped: 0 },
+    });
+    const crisp = [leg('leg-0', 0), leg('leg-1', 0)];
+    const fringed = [leg('leg-0', 1), leg('leg-1', 0)];
+    expect(gradeGlyphStrokes(crisp, BOOT_SHIPPED, false).offenders).toEqual([]);
+    const g = gradeGlyphStrokes(fringed, BOOT_SHIPPED, false);
+    expect(g.offenders.map((o) => o.key)).toEqual(['1:leg-0']);
+    expect(g.offenders[0].text).toContain('grey fringe');
+  });
+
+  it('grades by the antialias the tiles measured, not by the cell label', () => {
+    // Equal cores and no fringe, but effective widths 0.5 px apart: the unantialiased rule passes
+    // it and the antialiased rule fails it.
+    const m = machineReading(3, 0, [3, 3, 3, 2.5]);
+    const shippedLabel: CaptureCell = { dpr: 1, aa: 'shipped', zoom: 2 };
+    const onLabel: CaptureCell = { dpr: 1, aa: 'on', zoom: 2 };
+    expect(gradeCell('outline-sides', shippedLabel, [tileOf(m, false)]).offenders).toEqual([]);
+    expect(gradeCell('outline-sides', shippedLabel, [tileOf(m, true)]).offenders.map((o) => o.key)).toEqual(['1:left']);
+    expect(gradeCell('outline-sides', onLabel, [tileOf(m, false)]).offenders).toEqual([]);
+    expect(gradeCell('outline-sides', onLabel, [tileOf(m, true)]).offenders.map((o) => o.key)).toEqual(['1:left']);
+  });
+
+  it('grades nothing when the tiles report no antialias, or disagree', () => {
+    const m = machineReading(3, 0, [3, 3, 3, 3]);
+    expect(liveAntialias([tileOf(m, true), tileOf(m, true)])).toBe(true);
+    expect(liveAntialias([tileOf(m, false)])).toBe(false);
+    for (const tiles of [[tileOf(m, null)], [tileOf(m, false), tileOf(m, true)]]) {
+      const g = gradeCell('outline-sides', SHIPPED_AT_1, tiles);
+      expect(g.offenders).toEqual([expect.objectContaining({ key: 'antialias-unknown', unmeasured: true })]);
+    }
   });
 });
