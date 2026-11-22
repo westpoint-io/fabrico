@@ -1832,7 +1832,17 @@ jobs:
   # docs-only gate, whose `!cancelled()` lets it run after a leg went red. It takes each leg's
   # raw report and grades the four together; the comment above `e2e-live` gives the rules and
   # why it reads raw reports rather than a joined one. The bite proof ran in every leg before
-  # its suite, so it has run before this job reads anything.
+  # its suite, so it has run before this job reads anything. It makes the whole suite's exact
+  # test list itself, from the same commit, and the merge compares the four reports with it.
+  # List mode opens no browser, so the job installs the frontend's packages but no browser.
+  #
+  # A RE-RUN CAN'T LEAVE THIS JOB GREEN ON A STALE REPORT. On "re-run failed jobs" GitHub runs
+  # the failed legs again and every job that needs them, and the legs that passed keep their
+  # first attempt. download-artifact asks for the latest artifact of each name. So if a re-run
+  # leg dies before it uploads, this job would read that leg's first-attempt report and could
+  # pass while the leg is red. The last step fails the job unless every leg of `e2e-live`
+  # ended `success`. A leg that went red for any other reason, such as the tour capture on
+  # shard 1, also turns this job red; that leg already turns the run red.
   e2e-live-verdict:
     name: live e2e verdict (all shards)
     needs: [changes, e2e-live]
@@ -1843,6 +1853,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      # The whole suite's list: the same config as the legs, no --shard, this commit.
+      - name: The whole live suite's exact test list
+        working-directory: frontend
+        run: npx playwright test --config=playwright.live.config.ts --list --reporter=json > "$RUNNER_TEMP/live-list.json"
+
       # Each artifact lands in its own folder, live-reports/live-report-<i>/.
       - name: Take every shard's report
         uses: actions/download-artifact@v4
@@ -1851,7 +1877,12 @@ jobs:
           path: live-reports
 
       - name: The live red set over all shards is exactly the declared CUTs
-        run: bash scripts/check-live-red-set.sh --merge 4 live-reports/live-report-1/live-report.json live-reports/live-report-2/live-report.json live-reports/live-report-3/live-report.json live-reports/live-report-4/live-report.json
+        run: bash scripts/check-live-red-set.sh --merge 4 --list "$RUNNER_TEMP/live-list.json" live-reports/live-report-1/live-report.json live-reports/live-report-2/live-report.json live-reports/live-report-3/live-report.json live-reports/live-report-4/live-report.json
+
+      # needs.e2e-live.result is success only when every leg ended success. See the comment above
+      # this job for why a red leg must turn the verdict red even when the merge passed.
+      - name: The live legs all ended green, so no leg's report is a stale first attempt
+        run: echo "e2e-live legs ended ${{ needs.e2e-live.result }}" && test "${{ needs.e2e-live.result }}" = success
 
   # THE LESSON WALK, in a job of its own. The live job has hundreds of tests and a lesson test
   # there would only add to its time. The walk's files are named *.walk.ts, which neither live config
