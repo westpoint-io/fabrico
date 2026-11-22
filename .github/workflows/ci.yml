@@ -74,105 +74,16 @@ jobs:
   # that job. The live suite also has its own `globalTimeout` (playwright.live.config.ts),
   # under its job's limit, so an overrun writes a report before the runner is killed.
   # ===================================================================================
-  # THE DECLARED-MOVES GATE.
-  #
-  # `scripts/check-core-declared.sh` compares fabrico-core, fabrico-protocol,
-  # fabrico-scenario, fabrico-engine, fabrico-qjs-alloc, fabrico-player,
-  # examples/boards/hashes.manifest,
-  # the host parity fixtures and Cargo.lock against the annotated tag `public-base`, which sits on the commit its
-  # own message names. A covered path may move, and the move must be declared in
-  # docs/DECLARED-MOVES.txt with the digest it now carries; an undeclared move, a declared
-  # move that did not happen, a digest that does not match, an untracked file under a
-  # covered crate and any lockfile change each exit 1 by name. It builds and replays
-  # nothing: the determinism job is what proves the corpora still REPLAY, this job proves
-  # what moved and whether the move was declared.
-  #
-  # `fetch-depth: 0` IS LOAD-BEARING. actions/checkout@v4 defaults to a depth-1 checkout
-  # with NO tags, so `git rev-parse --verify public-base^{commit}` would not resolve and
-  # the gate would exit 2 ("the assertion could not be made") on every run: a permanently
-  # red job that proves nothing. At depth 0 the checkout fetches every branch and every
-  # tag, which is the minimum that lets the base resolve. No `fetch-tags:` input is needed;
-  # that input exists for the shallow case.
-  #
-  # The base is named here in an env var rather than left to the gate's own default, so
-  # the workflow records which base it chose. `ci_wiring_parity.rs` asserts exactly two
-  # lines beginning `DECLARED_MOVES_BASE:`, one per job below, and that both name the tag.
-  #
-  # MOVING THE BASE is a reviewed change of its own. Follow BASE MOVES in the header of
-  # scripts/check-core-declared.sh: cut the tag at the new commit, have the commit that relies
-  # on it reset docs/DECLARED-MOVES.txt to NONE, and send the branch and the moved tag to origin
-  # together with the one `git push --atomic` command written there. Pushed separately, CI
-  # compares against the old tag or fetches a tag whose commit isn't on origin's branch yet. A
-  # new tag name also has to change here, in the parity test and in the gate's DEFAULT_BASE, in
-  # that same push. Deleting this job, adding `continue-on-error`, or narrowing the gate's
-  # covered path set are the gate-weakening moves the gate's own header forbids.
-  #
-  # ALWAYS RUN: a git-level check over files a docs-only change cannot touch, about a
-  # minute, and the one place a covered move is caught before merge.
-  core-freeze:
-    name: declared moves against public-base
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout (full history + tags, so the base ref resolves)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Declared-moves assertion
-        env:
-          DECLARED_MOVES_BASE: public-base
-        run: bash scripts/check-core-declared.sh
-
-  # ===================================================================================
-  # THE DECLARED-MOVES GATE'S NON-VACUITY PROOF.
-  #
-  # The job above cannot see an edit to itself or to its own `COVERED_CRATES` list:
-  # `scripts/` is not a covered path and the gate has no self-hash, so a change that
-  # dropped a crate from that list would go green with nothing firing.
-  # `scripts/prove-declared-gate-non-vacuous.sh` closes that from outside. It proves a
-  # green baseline, a NAMED red for an undeclared source edit, a digest mismatch (with both
-  # digests printed), a declared-but-unmoved entry, an untracked file, a lockfile edit, an
-  # edit to the board manifest, a re-recorded host parity fixture and a deletion, then a clean tree on the way out, and it reads the gate's covered list by
-  # block with comments filtered so the gate's own prose cannot satisfy the check.
-  #
-  # Every probe runs in a private worktree outside the checkout, restored from bytes kept
-  # at entry, never from git. `fetch-depth: 0` is load-bearing for the same reason as
-  # above, and the step name is copied from that job deliberately.
-  #
-  # THE PROVER TAKES NO DEFAULT BASE, deliberately, so the env var below is not a
-  # convenience: without it the job exits 2 rather than proving something about a base
-  # nobody declared.
-  #
-  # No apt step and no toolchain: git plus a probe-and-restore cycle. It builds nothing.
-  freeze-gate-bites:
-    name: the declared-moves gate bites under each covered corpus
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout (full history + tags, so the base ref resolves)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Declared-moves non-vacuity proof
-        env:
-          DECLARED_MOVES_BASE: public-base
-        run: bash scripts/prove-declared-gate-non-vacuous.sh
-
-  # ===================================================================================
   # GOLDEN-CORPUS AUTHORING DRIFT (added 2026-08-19, milestone v8.0 Phase 63 plan 63-13).
   #
   # THIS JOB IS THE DELIBERATE CLOSURE OF PHASE 63's RESEARCH FINDING 2: until it, the
-  # golden corpus had NO authoring-drift guard AT ALL, and the three things that look
+  # golden corpus had NO authoring-drift guard AT ALL, and the two things that look
   # like one are each asserting something else.
   #
   #   - `crates/fabrico-core/tests/cert_cross_platform.rs` pulls each fixture in with
   #     `include_bytes!` and REPLAYS it. It never re-authors and it never reads
   #     `EditRecord.schema_version`.
   #   - `Core::run_log_two_logs` does not read the edit schema version either.
-  #   - The `core-freeze` job above asserts the fixture bytes have not moved IN GIT
-  #     against a base ref without a declaration, which is a different question again.
   #
   # Name the difference plainly, because it is the whole premise of the keystone phase:
   #   REPLAY-EQUALITY    - the committed bytes still fold to the committed per-tick

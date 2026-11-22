@@ -23,11 +23,10 @@ The folder's [README.md](https://github.com/westpoint-io/fabrico/blob/main/crate
 
 ## The checks that use it
 
-Three checks read the corpus, and each answers a different question.
+Two checks read the corpus, and each answers a different question.
 
 - Does it still replay? [cert_cross_platform.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-core/tests/cert_cross_platform.rs) builds every recording into the test binary, replays it from its starting state and compares each tick's hash with `hashes.txt`. It runs as part of `cargo test --workspace`, so CI's "determinism gate" job replays the corpus on Linux, macOS and Windows on every push to main, and on Linux for a pull request. [corpus_registration.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-core/tests/corpus_registration.rs) fails when a folder exists that the replay doesn't list.
 - Would today's code record the same bytes? CI's `golden-corpus` job runs [scripts/measure-golden-corpus.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/measure-golden-corpus.sh). It re-records every run with its generator in `crates/fabrico-core/tests/regen.rs`, inside a private copy of the repository, and compares the result with the committed files byte for byte. It does the same for `examples/boards/hashes.manifest`. A replay alone can't catch this: an input to a generator can move, for example a machine's port list in `fabrico-command`, while the old recordings go on replaying green.
-- Did the files change without a declaration? [The determinism gate](../determinism-gate/) fails on any recording that differs from `public-base` and isn't declared.
 
 The `wasm-player` job also replays the recordings in the WebAssembly build with [scripts/check-wasm-corpus.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-wasm-corpus.sh), and compares each tick with the desktop build.
 
@@ -52,7 +51,7 @@ A replay failure means today's core gives a different hash at some tick of a rec
 
 `measure-golden-corpus.sh` exits 1 when a regenerated file differs from the committed one and names each file. Something a generator reads has moved, and the recording wasn't made again. It exits 2 when it couldn't measure, for example because the number of recordings no longer matches `EXPECTED_GOLDEN_FIXTURES` in the script. Exit 2 is a failure too.
 
-When the behaviour change is deliberate, re-record each affected run, review the diff, and declare the new digests in `docs/DECLARED-MOVES.txt`:
+When the behaviour change is deliberate, re-record each affected run, review the diff, and say why in the commit message:
 
 ```bash
 bash scripts/regen-golden.sh bless 0001-source-belt-collector
@@ -64,4 +63,3 @@ bash scripts/regen-golden.sh bless 0001-source-belt-collector
 2. Run `bash scripts/regen-golden.sh new <id>`. It refuses to overwrite a folder that already exists.
 3. Add the recording to the `CORPUS` list in `cert_cross_platform.rs`.
 4. Raise `EXPECTED_GOLDEN_FIXTURES` in `scripts/measure-golden-corpus.sh` by one.
-5. Declare the new folder under `[fixtures]` and the two edited test files under `[source]` in `docs/DECLARED-MOVES.txt`, because both sit under `fabrico-core`.

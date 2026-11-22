@@ -1,71 +1,34 @@
 ---
 title: The determinism gate
-description: What scripts/check-core-declared.sh checks, which crates and recorded test files it covers, and how to declare a change to one of them.
+description: The checks that keep Fabrico's core deterministic, what each one catches, and how to run them before you push.
 sidebar:
   order: 2
 ---
 
-Fabrico's core has to give the same result from the same starting state and the same events on every run and every computer. The determinism gate is the script that stops a change to the core, or to the recorded runs that prove it still behaves that way, from going in unnoticed. A change to a covered file is allowed, but you have to declare it first in `docs/DECLARED-MOVES.txt` with the digest the file will have afterwards.
+Fabrico's core has to give the same result from the same starting state and the same events on every run and every computer. No single script guards that. A handful of checks do, and each one fails on a different kind of change. CI runs all of them on every push.
 
 [Determinism and replay](../../concepts/determinism-and-replay/) explains what that promise means on a running board, and where it ends.
 
-## What it covers
+## Lints that stop nondeterministic code
 
-[scripts/check-core-declared.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-core-declared.sh) compares your working tree, uncommitted edits included, with the tag `public-base`. It covers three groups of files.
-
-- Source: every tracked file under six crates, `fabrico-core`, `fabrico-protocol`, `fabrico-scenario`, `fabrico-engine`, `fabrico-qjs-alloc` and `fabrico-player`. The list is the `COVERED_CRATES` array near the top of the script. `fabrico-wasm-corpus` stays off it because it's a test harness that never ships, and `fabrico-command`, `fabrico-host` and `fabrico-app` aren't covered.
-- Recorded test data: the golden corpus under `crates/fabrico-core/tests/golden/`, the scenario fixtures and snapshots under `crates/fabrico-scenario/`, the protocol fixtures under `crates/fabrico-protocol/tests/fixtures/`, the host's per-tick hashes under `crates/fabrico-host/tests/fixtures/host_parity/`, and the board hash list `examples/boards/hashes.manifest`.
-- The lockfile: `Cargo.lock` has to match `public-base` byte for byte. A dependency update can change the bytes the core writes without touching a line under `crates/`, so it can't be declared. Moving the base tag is a reviewed change of its own.
-
-## What it checks
-
-The script fails, and names each file at fault, when any of these is true:
-
-1. A recorded test file differs from `public-base` and isn't listed under `[fixtures]` with the sha256 it has now. A listed file that didn't change fails too, and so does a digest that doesn't match, with both digests printed.
-2. A source file differs and isn't listed under `[source]`, or a listed source file didn't change.
-3. An untracked file sits under a covered path. A diff can't see a file git has never been told about, so the script looks for them separately.
-4. `Cargo.lock` changed.
-
-A deleted file counts as a change. Declare a deleted recorded file with `DELETED` in place of its digest, and a deleted source file as a bare path.
-
-A golden corpus folder counts as one file. Its digest is the sha256 of the `sha256sum` lines of every file in it, sorted by path. The header of [docs/DECLARED-MOVES.txt](https://github.com/westpoint-io/fabrico/blob/main/docs/DECLARED-MOVES.txt) gives the exact command.
-
-## Declaring a change
-
-`docs/DECLARED-MOVES.txt` has two sections, `[fixtures]` then `[source]`. Each entry is one line, with the reason on a `#` line above it. For example:
-
-```text
-[fixtures]
-# A new docs board adds a line to the board hash list.
-examples/boards/hashes.manifest <sha256 of the new file>
-
-[source]
-# The snapshot schema version goes up by one.
-crates/fabrico-core/src/snapshot.rs
-```
-
-A section with no entries holds the single line `NONE`. Delete that line when you add the section's first entry, because the script refuses a section holding both. Entries build up for as long as `public-base` stays where it is: leave older entries in place, since a file that changed last month still differs from the base today. A line the script can't parse fails the run rather than being skipped.
-
-## Running it
+[clippy.toml](https://github.com/westpoint-io/fabrico/blob/main/clippy.toml) bans floats, `HashMap` and `HashSet`, the wall clock, ambient random numbers and file, network and process I/O. `fabrico-core`, `fabrico-engine` and `fabrico-player` turn those lints into errors, so a banned type or call in them fails the build under clippy. The CI job named "determinism gate" runs clippy over the workspace with warnings as errors. Run the same line locally:
 
 ```bash
-bash scripts/check-core-declared.sh
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-With no argument it compares against `public-base`. CI's `core-freeze` job sets `DECLARED_MOVES_BASE=public-base`, which gives the same result. The tag has to be in your clone, so run `git fetch --tags` first if the script says it can't resolve it.
+[scripts/check-no-usize-state.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-no-usize-state.sh) fails when a field of a serialized struct is `usize` or `isize`. Those types change size between a desktop build and the wasm player, so the bytes the core writes would change with them. The same CI job runs it.
 
-| Exit | Meaning |
-|---|---|
-| 0 | Every covered file matches the declarations. The last line starts with `OK:`. |
-| 1 | At least one doesn't. Each file at fault is named on stderr. |
-| 2 | The check couldn't be made: no base tag, a missing or unreadable declaration file, or a covered folder that's missing. Treat it as a failure. |
+## Recorded runs that must still replay
 
-## When it fails
+[The golden corpus](../golden-corpus/) is a set of recorded runs with the hash of every tick. The certification tests replay each recording and compare every tick with the recorded hash, on Linux, macOS and Windows. The golden corpus job also re-records the corpus from today's generators and fails when the result differs from the committed files, so a change that moves the bytes a generator writes shows up even while the old recordings still replay.
 
-Declare the change or revert it. Don't move `public-base` and don't shorten `COVERED_CRATES` to get a pass. The script can't see an edit to itself, so CI's `freeze-gate-bites` job runs [scripts/prove-declared-gate-non-vacuous.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/prove-declared-gate-non-vacuous.sh), which plants each kind of change in a private copy, checks that the script fails on each one, and reads the covered list from outside the script.
+The host parity tests in `crates/fabrico-host/tests/host_parity.rs` run the host's tick loop on the shipped scenes and compare each tick's hash with a committed fixture. A change to the order of work inside a tick fails them. Don't re-record those fixtures to make the test pass; a mismatch is the thing the test exists to report.
 
-## What it doesn't check
+## The wasm player against the native build
 
-The script builds nothing and runs nothing. It only checks which files moved and whether you declared them. Whether the recorded runs still replay is the job of [the golden corpus](../golden-corpus/).
+[scripts/check-wasm-corpus.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/check-wasm-corpus.sh) replays the corpus in the wasm player under Node and compares each tick with a native run of the same revision. It needs the player built first with `scripts/build-wasm.sh`. CI's wasm player job runs both.
 
-Two more guards catch nondeterministic code before it runs. [clippy.toml](https://github.com/westpoint-io/fabrico/blob/main/clippy.toml) bans floats, `HashMap` and `HashSet`, the wall clock, ambient random numbers and file, network and process I/O, and `fabrico-core`, `fabrico-engine` and `fabrico-player` turn those lints into errors. The CI job named "determinism gate" runs clippy with them, runs the whole workspace's tests, and runs [scripts/determinism-gate-negative-test.sh](https://github.com/westpoint-io/fabrico/blob/main/scripts/determinism-gate-negative-test.sh), which plants a float, a hash map and an environment read in `fabrico-core` and checks that the build fails.
+## When one fails
+
+Find out why the output moved before you touch a recording. If the change in behaviour is deliberate, re-record the affected runs as [the golden corpus](../golden-corpus/) page describes, review the diff, and say why in the commit message. If it isn't deliberate, the check has found a bug.

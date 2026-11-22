@@ -39,9 +39,8 @@ The repository splits into four parts. The Rust crates under `crates/` hold the 
   - boards/ the board files the app and these pages run
     - docs/ the boards these pages embed, one file each
     - hashes.manifest the end tick and end state hash of every board file
-- scripts/ the checks CI runs, such as check-core-declared.sh and check-docs.sh
+- scripts/ the checks CI runs, such as check-no-usize-state.sh and check-docs.sh
 - docs/
-  - DECLARED-MOVES.txt the declared changes to files the determinism check covers
   - brand/ the icon and wordmark files
 </FileTree>
 

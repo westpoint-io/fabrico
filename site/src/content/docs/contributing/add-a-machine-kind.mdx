@@ -28,7 +28,7 @@ A machine kind runs through every layer of Fabrico: the protocol gives it a numb
    cargo build --workspace
    ```
 
-   `fabrico-core`, `fabrico-protocol` and `fabrico-engine` are covered by [the determinism gate](../determinism-gate/), so list each file you changed under `[source]` in `docs/DECLARED-MOVES.txt`. Label also added a recording to [the golden corpus](../golden-corpus/) that replays a board holding one.
+   `fabrico-core`, `fabrico-protocol` and `fabrico-engine` are held by [the determinism gate](../determinism-gate/), so a change there that moves recorded output fails the replay tests. Label also added a recording to [the golden corpus](../golden-corpus/) that replays a board holding one.
 
 3. Give it ports and a size. Add an arm to `port_catalog` and the number to `kind_has_catalog_arm` in [crates/fabrico-command/src/command.rs](https://github.com/westpoint-io/fabrico/blob/main/crates/fabrico-command/src/command.rs). The arm returns the footprint and the port list. A kind with no ports returns an empty list, as Label does. Then add the same row to `MACHINE_CATALOG` in `frontend/src/protocol/decode.ts`, which the placement preview reads.
 
@@ -83,7 +83,6 @@ A machine kind runs through every layer of Fabrico: the protocol gives it a numb
    ```bash
    cargo test --workspace --no-fail-fast
    cargo clippy --all-targets --all-features -- -D warnings
-   DECLARED_MOVES_BASE=public-base bash scripts/check-core-declared.sh
    ```
 
    Then run `npx tsc --noEmit` and `CI=1 npm run test:e2e` from `frontend/`.

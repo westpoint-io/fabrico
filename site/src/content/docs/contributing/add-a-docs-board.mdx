@@ -1,6 +1,6 @@
 ---
 title: Add a docs board
-description: How to write a running board for a docs page, pin its end state, declare the new hash list, embed it with Board and pass the docs suite.
+description: How to write a running board for a docs page, pin its end state, embed it with Board and pass the docs suite.
 sidebar:
   order: 5
 ---
@@ -8,7 +8,7 @@ sidebar:
 import Fact from '../../../components/Fact.astro';
 import { Steps } from '@astrojs/starlight/components';
 
-A docs board is a board file that a page embeds and plays in the reader's browser. The repository pins the end state of every board file, so adding one also changes a file the determinism gate covers. The steps below go from the file to a page that passes the docs suite.
+A docs board is a board file that a page embeds and plays in the reader's browser. The repository pins the end state of every board file, so adding one also changes the board hash list. The steps below go from the file to a page that passes the docs suite.
 
 <Steps>
 
@@ -34,16 +34,7 @@ A docs board is a board file that a page embeds and plays in the reader's browse
 
    It rewrites `examples/boards/hashes.manifest` with the end tick and end state hash of every board file. Don't edit that file by hand. Without the new line, `cargo test -p fabrico-engine --test board_manifest` fails naming the board.
 
-4. Declare the new hash list. `examples/boards/hashes.manifest` is covered by [the determinism gate](../determinism-gate/), and `docs/DECLARED-MOVES.txt` holds one line for it under `[fixtures]`. Replace that line's digest with the new one, and replace the comment above it with one that names the board you added.
-
-   ```bash
-   sha256sum examples/boards/hashes.manifest
-   DECLARED_MOVES_BASE=public-base bash scripts/check-core-declared.sh
-   ```
-
-   The second command prints a line starting `OK:` when the digest matches.
-
-5. Embed it on the page.
+4. Embed it on the page.
 
    ```mdx
    import Board from '../../../components/Board.astro';
@@ -53,7 +44,7 @@ A docs board is a board file that a page embeds and plays in the reader's browse
 
    The site build fails when no board file has that id. A board that faults on purpose names each fault reason it shows, separated by spaces, for example `<Board name="docs-faults-no-match" faultsAbout="NoMatch" />`, and a line under the board tells the reader the faults are intended. The names have to be the reasons the board really raises, as `examples/boards/faults.manifest` records them, or the build fails. A board that faults needs its line in that file: `cargo test -p fabrico-engine --test board_faults` plays every board, reads the reason of each fault, and fails with the line to write when a board's reasons differ from its line. The [Fault reasons](../../reference/board/fault-reasons/) page shows several, and the [Router](../../reference/machines/router/) page shows a board with none.
 
-6. Build the site and run the docs suite.
+5. Build the site and run the docs suite.
 
    ```bash
    bash scripts/build-site.sh
