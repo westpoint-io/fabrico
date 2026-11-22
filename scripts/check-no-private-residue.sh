@@ -163,7 +163,6 @@ SITE_ALLOWED_TOKENS='UTF-16'
 
 EXCLUSIONS=(
     "scripts/check-no-private-residue.sh"
-    "scripts/prove-no-private-residue-bites.sh"
 )
 
 ALLOWED_FILE=".gitignore"

@@ -307,17 +307,15 @@ change) and a state-evolution drift (behavior change) surface distinctly.
    openers and requires the two counts to agree, so a fixture registered in only
    one of the two files is RED. Step 3 alone is not enough and this step was
    missing from these instructions until plan `74-08` followed them and found out.
-5. **Move the corpus-size constant**: `EXPECTED_GOLDEN_FIXTURES` in
-   `scripts/measure-golden-corpus.sh` is read as an EQUALITY twice, against the
-   directory count and against the number of generators that ran, so it moves in
-   the SAME commit as the fixture. Either half alone exits 2.
-6. `cargo test -p fabrico-core --test cert_cross_platform --test corpus_registration`
-   must pass, and `bash scripts/measure-golden-corpus.sh` must exit 0.
-7. Commit all FIVE data files (`genesis.snapshot`, `log.postcard`,
+5. `cargo test -p fabrico-core --test cert_cross_platform --test corpus_registration`
+   must pass, and `bash scripts/measure-golden-corpus.sh` must exit 0. That script
+   counts the fixture folders on disk and requires one generator per folder, so it
+   needs no edit for a new fixture.
+6. Commit all FIVE data files (`genesis.snapshot`, `log.postcard`,
    `edit-log.postcard`, `hashes.txt` and `meta.toml`; this line said "four" until
    `74-08`, because `meta.toml` is written by the same `freeze()` call and is as
-   much a part of the fixture as the rest) plus the runner, guard, generator and
-   constant edits.
+   much a part of the fixture as the rest) plus the runner, guard and generator
+   edits.
 
 ## BLESS policy (non-negotiable, threat T-3-BLESS)
 

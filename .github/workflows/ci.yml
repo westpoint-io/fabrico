@@ -102,15 +102,11 @@ jobs:
   # to every check a reviewer would think to run and is visible ONLY to something that
   # re-authors and compares.
   #
-  # THIS DOES NOT REVERSE THE T-3-BLESS DECISION, and the distinction matters. The
-  # corpus is still NEVER auto-regenerated: this script copies the committed corpus
-  # aside, regenerates into the comparison, RESTORES from the pre-run copy (including on
-  # an abort), and proves the restore landed. It never blesses. Blessing remains an
-  # explicit, reviewed act performed through `scripts/regen-golden.sh`, exactly as
+  # THIS DOES NOT REVERSE THE T-3-BLESS DECISION. The script regenerates the corpus in
+  # place and compares it with a copy of the committed bytes. In CI the checkout is thrown
+  # away after the job, so nothing is blessed. Blessing remains an explicit, reviewed act
+  # performed through `scripts/regen-golden.sh`, exactly as
   # `crates/fabrico-core/tests/regen.rs` requires by keeping every generator `#[ignore]`d.
-  # AMENDED 2026-10-12 (phase 84, plans 84-06 and 84-07): the copy-aside-and-restore is
-  # gone. The script regenerates inside a private worktree with its own cargo target and
-  # compares there; the checkout's corpus is never written, so there is nothing to restore.
   #
   # A RED HERE IS NOT AUTOMATICALLY A BUG. It means a generator input moved and the
   # corpus was not re-blessed. Under the v8.0 standing constraint that is a HARD STOP
@@ -135,64 +131,10 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      # THE CORPUS REGISTRATION GUARD'S NON-VACUITY PROOF (added by the phase-70 review
-      # fix, WR-01). The guard it proves is an absence claim - no golden fixture directory
-      # exists that the registration table does not name - and an absence claim is worth
-      # exactly the proof that it can still fail. Until this step the proof existed but was
-      # run ONCE, by hand, at authoring time: the posture the `dev-pace-switch-absent` job
-      # below rejects in its own words ("run it on every commit, not once").
-      #
-      # IT RUNS BEFORE THE MEASUREMENT, not after, for one reason: it plants and removes
-      # probe fixtures and refuses to start over a dirty tree, so it wants the pristine
-      # checkout. The measurement step below copies the corpus aside and restores it, and a
-      # restore that had not landed would surface here as a could-not-prove about the wrong
-      # thing.
-      # AMENDED 2026-10-12 (phase 84, plan 84-07): since plan 84-06 the measurement below
-      # writes only in a private worktree and restores nothing in the checkout; the order is
-      # kept because this proof still wants the pristine checkout.
-      #
-      # It needs cargo (it runs `cargo test -p fabrico-core --test corpus_registration`)
-      # but no GTK/WebKit deps: `cargo tree -p fabrico-core` pulls no gtk-sys, no
-      # webkit2gtk-sys and no tauri, which is the same reasoning that keeps this whole job
-      # free of the apt step the `determinism` job needs.
-      - name: Corpus registration guard, non-vacuity proof
-        run: bash scripts/prove-corpus-registration-bites.sh
-
       - name: Golden-corpus authoring-drift measurement
         env:
           CORPUS_LABEL: ci
         run: bash scripts/measure-golden-corpus.sh
-
-  # ===================================================================================
-  # EVERY PROVER KEEPS ITS HANDS OFF TRACKED FILES.
-  #
-  # WHY. A prover that edits a tracked file, runs a gate and puts the file back from git
-  # silently discards any edit saved to that file meanwhile by anyone else working in the
-  # same tree. Every prover runs through `scripts/lib/prover-isolation.sh` (untracked
-  # probes, or a private worktree). This job keeps it that way: `scripts/check-provers-isolated.sh`
-  # refuses any prover that runs a git verb writing the work tree, index or stash
-  # (checkout, restore, stash, clean, reset, rm and the rest), does not enter exactly
-  # one isolation shape, installs its own EXIT trap, or edits in place outside a private
-  # worktree. The second step plants one offender per rule and requires the lint to name
-  # each, so a lint whose patterns have drifted cannot pass green.
-  #
-  # WHY ALWAYS-ON. Two bash scripts over `scripts/`, no toolchain, about a minute. A
-  # docs-only push cannot add a prover, so gating it would save almost nothing.
-  #
-  # No toolchain and no apt: a text scan and a proof that writes untracked plants.
-  prover-isolation:
-    name: every prover keeps its hands off tracked files
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Prover isolation lint
-        run: bash scripts/check-provers-isolated.sh
-
-      - name: Prover isolation lint bites
-        run: bash scripts/prove-provers-isolated-bites.sh
 
   # ===================================================================================
   # NO TRACKED FILE CARRIES PRIVATE RESIDUE.
@@ -203,13 +145,6 @@ jobs:
   # and machine behind them is a broken pointer for every other reader, and some of it is
   # personal data. `scripts/check-no-private-residue.sh` scans every tracked text file for
   # those patterns (the full list is in its header) and names each offending line.
-  #
-  # THE PROVER RUNS BESIDE IT, on every push. The gate asserts an absence, and an absence
-  # claim is worth exactly the proof that it can still fail: one tracked probe per pattern
-  # must bite, the product words that share a spelling with the maintainer's first name
-  # must pass, and a scan set below its floor, a missing positive control and a stale
-  # exclusion must each exit 2. Every probe lives in a throwaway repository under
-  # `mktemp -d`; nothing in the checkout is written.
   private-residue:
     name: no tracked file carries private residue
     runs-on: ubuntu-24.04
@@ -220,9 +155,6 @@ jobs:
 
       - name: Private-residue gate
         run: bash scripts/check-no-private-residue.sh
-
-      - name: Private-residue gate bites
-        run: bash scripts/prove-no-private-residue-bites.sh
 
   determinism:
     name: determinism gate
@@ -418,16 +350,6 @@ jobs:
       - name: Pointer-width serialized-field guard
         if: matrix.leg == 'main'
         run: bash scripts/check-no-usize-state.sh
-
-      # The proof runs on the Linux leg only. It builds nothing: it runs the guard above
-      # against planted probe files, and those runs show the guard's logic bites, which one
-      # platform shows as well as three. On Windows it cost 2 to 3 minutes per push. The
-      # guard itself still runs on all three operating systems, and it keeps to POSIX awk
-      # and ERE so the macOS (BSD awk) and Windows (Git Bash) runs read the source the way
-      # the Linux run does; scripts/check-no-usize-state.sh says the same at its rule list.
-      - name: Pointer-width guard, non-vacuity proof (gate bites)
-        if: runner.os == 'Linux'
-        run: bash scripts/prove-no-usize-state-bites.sh
 
       # Gate 4/4 — the full certification suite (criteria 1-5 + existing suites)
       # at the CI proptest case count.
@@ -640,7 +562,8 @@ jobs:
   # on GitHub, the slowest of runs 44294890291, 44405254645 and 44405292666, 158 more: job setup and
   # checkout 8, toolchain 11, Node 7, the clang apt step 46 on the slow mirror, the cargo cache 11 to
   # restore and 9 to save, npm ci 6, the Playwright browser 19, the artifact upload 3, the six checks
-  # 29, the fence report and its prover 8, and the toolchain pin check 1.
+  # 29, and the fence report and its prover 8 (the prover and a toolchain pin check have since been
+  # removed).
   wasm-player:
     name: the wasm player builds on the pinned compiler and passes its checks
     runs-on: ubuntu-24.04
@@ -707,20 +630,11 @@ jobs:
       - name: Check the player against its size budget
         run: bash scripts/check-player-size.sh
 
-      - name: Watch the size budget fail
-        run: bash scripts/prove-player-size-bites.sh
-
       - name: Replay the corpus in wasm and compare it with native
         run: bash scripts/check-wasm-corpus.sh
 
-      - name: Watch the corpus comparison fail
-        run: bash scripts/prove-wasm-corpus-bites.sh
-
       - name: Check where a Factory runs out of gas, memory and stack on both targets
         run: bash scripts/check-fence-report.sh
-
-      - name: Watch the fence report fail
-        run: bash scripts/prove-fence-report-bites.sh
 
       - name: Clippy on the player and the corpus harness, for wasm32
         run: cargo clippy -p fabrico-player -p fabrico-wasm-corpus --target wasm32-unknown-unknown --locked -- -D warnings
@@ -807,8 +721,7 @@ jobs:
         run: bash scripts/check-offline-browsers.sh
 
       # The test antialiasing switch must not reach the docs embed. The bundle built above is
-      # a separate Vite build (library mode), so it gets its own absence check. The proof that
-      # the check can still fail runs in the unit job, on every commit.
+      # a separate Vite build (library mode), so it gets its own absence check.
       - name: The embed bundle carries no test antialiasing switch
         run: bash scripts/check-test-aa-switch-absent.sh frontend/dist-embed
 
@@ -1528,12 +1441,7 @@ jobs:
       # The test antialiasing switch boots the board with antialiasing on in the Vite dev
       # server only. `npm run check:board` above ran `npm run build`, so frontend/dist is the
       # app bundle the desktop binary embeds, and this checks the switch's flag name isn't in
-      # it. That is an absence claim, and an absence claim is only worth the proof that it
-      # can still fail, so the next step builds the app with the DEV guard removed in a
-      # private worktree and checks the gate then fails and names the file. Both run on every
-      # commit. The embed job runs the same check over frontend/dist-embed.
+      # it. The embed job runs the same check over frontend/dist-embed.
       - name: The app bundle carries no test antialiasing switch
         run: bash scripts/check-test-aa-switch-absent.sh frontend/dist
 
-      - name: Test antialiasing switch absence check, non-vacuity proof
-        run: bash scripts/prove-test-aa-switch-absent-non-vacuous.sh

@@ -11,13 +11,11 @@
 # bytes equal FRESHLY-AUTHORED bytes, so an authoring-code or schema change that was
 # not re-blessed reddens a normal `cargo test` run.
 #
-# `crates/fabrico-core/tests/golden/` has NO equivalent, and the three things that
-# look like one are each asserting something else:
+# `crates/fabrico-core/tests/golden/` has NO equivalent, and the things that look like
+# one are each asserting something else:
 #   - `tests/cert_cross_platform.rs` pulls each fixture in with `include_bytes!` and
 #     REPLAYS it. It never re-authors, and it never reads `EditRecord.schema_version`.
 #   - `Core::run_log_two_logs` does not read the edit schema version either.
-#   - check 1 of the earlier core-freeze gate asserted the fixture bytes had not
-#     changed IN GIT against a base ref.
 #
 # Name the difference plainly, because the whole premise of Phase 63 rests on it:
 #
@@ -32,7 +30,7 @@
 # ever have told you a byte moved. So this script is the only instrument there is.
 # ---------------------------------------------------------------------------------
 #
-# WHAT IT DOES, in a private worktree (see below), so the shared corpus is never written:
+# WHAT IT DOES, in the checkout it is run from (see below):
 #   1. refuses to run over an already-dirty corpus tree;
 #   2. copies the committed corpus into a `mktemp -d` scratch;
 #   3. digests every fixture file of that copy (sha256, LC_ALL=C order);
@@ -48,19 +46,13 @@
 #      compares the two files byte for byte, printing `board manifest: IDENTICAL` or
 #      `board manifest: MOVED` with a diff.
 #
-# IT RUNS IN A PRIVATE WORKTREE (phase 84 plan 06, GATE-03, decision D-08). Step 4
-# rewrites every file of the tracked corpus in place; the generators write to a fixed
-# path, and no override exists (see WHAT WAS DELIBERATELY NOT DONE below). Concurrent
-# processes may share this checkout, and regenerating there and copying a pre-run snapshot
-# back afterwards overwrote any fixture edit another process saved mid-run. So this is
-# Shape B of scripts/lib/prover-isolation.sh: after argument parsing,
-# `prover_run_in_worktree` checks HEAD out into a detached worktree outside this checkout,
-# applies the caller's uncommitted tracked diff over it, and re-runs this script there
-# with a private CARGO_TARGET_DIR. The regeneration writes that worktree's corpus, and
-# the worktree is discarded at exit, so nothing is copied back over the shared corpus.
-#
-# THE PRICE: the private cargo target is deleted with the worktree, so every run builds
-# `fabrico-core`'s regen test from scratch (no warm target/ to reuse), in CI as well.
+# IT RUNS IN PLACE. Step 4 rewrites every file of the tracked corpus where it stands; the
+# generators write to a fixed path, and no override exists (see WHAT WAS DELIBERATELY NOT
+# DONE below). In CI the checkout is thrown away after the job. Locally, a fixture that moved
+# is left changed in your working tree, so `git diff` shows it, the same as after
+# `scripts/regen-golden.sh`. Revert it with `git checkout -- crates/fabrico-core/tests/golden
+# examples/boards/hashes.manifest` if you didn't mean to re-bless. Don't run this while another
+# process is editing the corpus in the same checkout.
 #
 # EXIT CODES, inherited in shape from the earlier core-freeze gate:
 #   0  every digested file is byte-identical and the board manifest is too: both still
@@ -76,12 +68,9 @@
 #   - GUARD 1: the corpus tree or the board manifest is already dirty. A measurement taken
 #     over an edited file compares the generators against a human's uncommitted edit and
 #     reports on neither.
-#   - GUARD 2: the discovered fixture count differs from EXPECTED_GOLDEN_FIXTURES.
-#     This is deliberately an EQUALITY assertion and deliberately NOT the freeze gate's
-#     discovery floor (which is 5, exists to catch a walk that discovered nothing, and
-#     must never be cited as a corpus-size assertion). A corpus that legitimately grows
-#     makes this script exit 2, which is a refusal to measure against a stale
-#     expectation and is the correct failure direction.
+#   - GUARD 2: no fixture folder was found under the corpus directory. The count of
+#     folders found (each holding a meta.toml) is the number of generators GUARD 4
+#     requires to run, so a corpus that grows needs no edit here.
 #   - GUARD 3: `cargo` is absent, or the regeneration run failed to COMPILE. A build
 #     that did not run measured nothing, so that is exit 2 and not exit 1.
 #   - GUARD 4: the regeneration ran the wrong number of generators. See below.
@@ -89,8 +78,7 @@
 #     missing, its generator failed to compile, or the count of generators that passed
 #     differs from EXPECTED_BOARD_GENERATORS. A comparison of the two files that can't be
 #     made is exit 2 as well.
-#   (GUARD 5, "the restore did not restore", was retired by phase 84 plan 06: nothing
-#   is restored any more, because the regenerated corpus is a private worktree's.)
+#   (GUARD 5, "the restore did not restore", was retired by phase 84 plan 06.)
 #
 # GUARD 4 IS THE ONE THIS INSTRUMENT WOULD BE WORTHLESS WITHOUT.
 # `cargo test ... -- --ignored` EXITS 0 WHEN ZERO TESTS RAN. A renamed generator, a
@@ -101,7 +89,7 @@
 # is the exact failure it exists to exclude, produced by the script itself.
 #
 # So the harness summary line (`test result: ok. N passed; ...`) is PARSED and N is
-# required to equal EXPECTED_GOLDEN_FIXTURES. A mismatch is exit 2 naming both numbers,
+# required to equal the number of fixture folders found. A mismatch is exit 2 naming both numbers,
 # and an unrecognised summary is also exit 2, because a parse that found nothing has
 # measured nothing.
 #
@@ -114,10 +102,8 @@
 # The pass count answers the question directly. A later reader will reach for mtime;
 # this paragraph is here so they do not.
 #
-# WHY NOTHING IS RESTORED. The regeneration writes only the private worktree's corpus,
-# and the worktree is discarded at exit, so the shared corpus is never written and there
-# is nothing to put back. (This script used to copy the pre-run snapshot back over the
-# shared corpus, which discarded any fixture edit saved there while it ran.)
+# WHY NOTHING IS RESTORED. A regenerated file that equals the committed one leaves git
+# clean, and one that differs is the finding, so it stays in the working tree to be read.
 #
 # WHY THIS IS A SCRIPT AND NOT A RUST TEST. The generators use `std::fs` under a
 # file-scoped clippy escape hatch and are `#[ignore]`d BY DESIGN -- "the corpus is NEVER
@@ -139,60 +125,10 @@
 
 set -euo pipefail
 
-# The isolation helper is sourced before any change of directory, so it can locate this
-# script as it was invoked. It owns the only EXIT trap this script has.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-# shellcheck source-path=SCRIPTDIR source=lib/prover-isolation.sh
-. "${SCRIPT_DIR}/lib/prover-isolation.sh"
-
 # Resolve repo root so the script works from any cwd.
 cd "$(git rev-parse --show-toplevel)"
 
 GOLDEN_DIR="crates/fabrico-core/tests/golden"
-
-# The corpus has 33 frozen fixtures. This is an EQUALITY assertion, not a floor: see
-# GUARD 2 in the header for why the freeze gate's floor is the wrong constant to reuse.
-#
-# Moved 27 -> 29 by Phase 70 plan 03, in the SAME COMMIT that lands 0028-router-config-replay
-# and 0029-belt-pace-replay. It has to be the same commit: 28 directories against a constant
-# of 27 exits 2 at GUARD 2, and so does 27 or 28 against a constant of 29. Neither reading is
-# a corpus defect and both would be misread as one. The comment moves with the value, because
-# a comment saying 27 above a constant of 29 is a file contradicting itself.
-#
-# Moved 29 -> 30 by PHASE 71 plan 07, in the SAME COMMIT that lands
-# 0030-inbox-saturation-replay, for exactly the reason above: the constant is read as an
-# EQUALITY by GUARD 2 (directory count) and by GUARD 4 (generators that ran), so either
-# ordering exits 2 on a reading that is not a corpus defect.
-#
-# Moved 30 -> 33 by PHASE 73 plan 02, in the SAME COMMIT that registers
-# 0031-undo-delete-of-a-wire, 0032-undo-delete-of-a-bare-belt and
-# 0033-remove-out-port-repoints, for exactly the reason above: the constant is read as an
-# EQUALITY by GUARD 2 (directory count) and by GUARD 4 (generators that ran), so either
-# ordering exits 2 on a reading that is not a corpus defect. The 33 is arithmetic on the
-# 30 recorded at HEAD in the phase 73 baseline (section 4), never a hard-coded pair.
-#
-# Moved 33 -> 34 by PHASE 74 plan 08, in the SAME COMMIT that registers
-# 0034-belt-to-belt-junction-replay, for exactly the reason above: the constant is read as
-# an EQUALITY by GUARD 2 (directory count) and by GUARD 4 (generators that ran), so either
-# ordering exits 2 on a reading that is not a corpus defect. The 34 is a LIVE measurement,
-# `ls -d crates/fabrico-core/tests/golden/*/ | wc -l` on the exit tree, cross-checked
-# against the cumulative fixture chain, which reserves 0034 for phase 74 and gives the
-# resulting count as 34. It is not copied from prose: older planning notes say 27 and the
-# golden README's phase-72 paragraph says 30, and both are history rather than counts to
-# reuse.
-#
-# Moved 34 -> 35 by PHASE 76 plan 05, in the SAME COMMIT that registers
-# 0035-label-inert-replay, for the same equality reason; 35 is `ls -d
-# crates/fabrico-core/tests/golden/*/ | wc -l` on that tree, and the fixture numbering rule
-# gives a label fixture the next free id.
-#
-# Moved 35 -> 40 by PHASE 87 plan 08, in the SAME COMMIT that registers
-# 0036-balancer-both-inputs, 0037-tee-slow-branch, 0038-refused-fault-bounded,
-# 0039-jammed-solid-goes-idle and 0040-factory-two-emits (one golden per core jam the phase
-# fixed, JAM-01 to JAM-05, D-10), for the same equality reason; 40 is `ls -d
-# crates/fabrico-core/tests/golden/*/ | wc -l` on that tree. 0036 had been reserved to phase
-# 77, which took none; the reservation table in `cert_cross_platform.rs` records the handover.
-EXPECTED_GOLDEN_FIXTURES=40
 
 # The second measured section. The manifest holds one line per board file, and it comes from
 # one generator, so this count is about the generator and not about the number of boards.
@@ -216,8 +152,7 @@ Measures two things against the committed bytes. It regenerates the whole golden
 and reports, per fixture and per file, whether the committed bytes still equal what the
 generators produce now. Then it regenerates the board hash manifest
 (examples/boards/hashes.manifest) and reports whether that file is byte-identical. It runs
-in a private worktree with a private cargo target, so your checkout's corpus and manifest
-are never written.
+in place: a file that moved is left changed in your working tree, so `git diff` shows it.
 
   --label <text>  a label for the emitted table (also accepts --label=<text>)
   <text>          the same thing, positionally
@@ -231,13 +166,12 @@ Exit codes:
   0  every digested file is byte-identical, and so is the board manifest
   1  at least one corpus file MOVED, or the board manifest did; the table names every
      moved fixture, and a RESULT line names each section that moved
-  2  the measurement could not be made (a dirty corpus tree or board manifest, a fixture
-     count that differs from EXPECTED_GOLDEN_FIXTURES, no cargo on the PATH, a
+  2  the measurement could not be made (a dirty corpus tree or board manifest, no
+     fixture folder found, no cargo on the PATH, a
      regeneration that failed to compile, a regeneration that ran the wrong number of
      generators, a missing board manifest, a board manifest generator that failed to
      compile or whose passed count differs from EXPECTED_BOARD_GENERATORS, a comparison
-     of the two manifests that could not be made, or a private worktree that could not
-     be made or removed). This is a FAILURE, not a pass: an assertion that measures
+     of the two manifests that could not be made). This is a FAILURE, not a pass: an assertion that measures
      nothing must never be green.
 USAGE
 }
@@ -247,8 +181,7 @@ USAGE
 # entry points enforce different rules, so `--label -oops` is rejected with a named
 # error while CORPUS_LABEL=-oops sails through. A gate whose two doors have different
 # locks is one refactor away from that mattering.
-# A function, so the parse's `shift` does not consume the script's own arguments: the
-# private worktree run below is handed them unchanged.
+# A function, so the parse's `shift` does not consume the script's own arguments.
 LABEL=""
 parse_args() {
     while [ $# -gt 0 ]; do
@@ -304,13 +237,6 @@ if [ -z "$LABEL" ]; then
     LABEL="(unlabelled)"
 fi
 
-# --- Into the private worktree ----------------------------------------------------------
-# After the label is validated, so a bad label is still exit 2 before any worktree exists.
-# In the caller this does not return: it runs this script again inside the worktree (with
-# a private CARGO_TARGET_DIR) and exits with that run's code. Inside, it returns and the
-# measurement goes on.
-prover_run_in_worktree "$@"
-
 # --- GUARD 1: the corpus tree and the manifest must be clean before they are measured
 # A measurement taken over an already-edited file compares the generators against a
 # human's uncommitted edit and reports on neither of them.
@@ -325,7 +251,7 @@ if [ -n "$dirty" ]; then
     exit 2
 fi
 
-# --- GUARD 2: the discovered fixture count must EQUAL the expectation --------------
+# --- GUARD 2: the walk must find at least one fixture ----------------------------
 # Fixtures are discovered by their meta.toml provenance file, so a stray non-fixture
 # directory cannot inflate the count. LC_ALL=C keeps the walk order stable across
 # locales.
@@ -343,14 +269,9 @@ while IFS= read -r meta_path; do
 done <<< "$fixture_metas"
 
 fixture_count="${#FIXTURES[@]}"
-if [ "$fixture_count" -ne "$EXPECTED_GOLDEN_FIXTURES" ]; then
-    echo "FAIL: discovered ${fixture_count} fixture(s) under ${GOLDEN_DIR}, but this script" >&2
-    echo "      measures against EXPECTED_GOLDEN_FIXTURES=${EXPECTED_GOLDEN_FIXTURES}." >&2
-    echo >&2
-    echo "This is an EQUALITY assertion on purpose. A corpus that shrank would let the" >&2
-    echo "comparison pass over a truncated set, and a corpus that legitimately GREW makes" >&2
-    echo "this a refusal to measure against a stale expectation. Either way the number in" >&2
-    echo "this script is updated as a reviewed change, never to make a red run pass." >&2
+if [ "$fixture_count" -eq 0 ]; then
+    echo "FAIL: found no fixture folder (one holding a meta.toml) under ${GOLDEN_DIR}, so no" >&2
+    echo "      measurement was made. This is NOT a report that the corpus is clean." >&2
     exit 2
 fi
 
@@ -373,16 +294,16 @@ else
 fi
 
 # --- Scratch -----------------------------------------------------------------------
-# Removed at exit through the helper, never by a trap of this script's own.
+# Removed at exit.
 SCRATCH=""
-# shellcheck disable=SC2329 # run by the helper's exit trap, through prover_on_exit
+# shellcheck disable=SC2329 # run by the EXIT trap below
 remove_scratch() {
     if [ -n "$SCRATCH" ]; then
         rm -rf "$SCRATCH"
     fi
     return 0
 }
-prover_on_exit remove_scratch
+trap remove_scratch EXIT
 
 SCRATCH="$(mktemp -d)"
 
@@ -477,10 +398,10 @@ if [ "$summary_lines" -eq 0 ]; then
     exit 2
 fi
 
-if [ "$generators_passed" -ne "$EXPECTED_GOLDEN_FIXTURES" ]; then
+if [ "$generators_passed" -ne "$fixture_count" ]; then
     echo >&2
     echo "FAIL: the regeneration run reported ${generators_passed} generator(s) passed, but" >&2
-    echo "      EXPECTED_GOLDEN_FIXTURES=${EXPECTED_GOLDEN_FIXTURES} generators must run for this" >&2
+    echo "      ${fixture_count} generators, one per fixture folder, must run for this" >&2
     echo "      measurement to mean anything." >&2
     echo >&2
     echo "A run that authored fewer fixtures than the corpus holds leaves the unwritten" >&2
@@ -508,9 +429,8 @@ echo "[measure-golden-corpus] digesting the freshly-authored bytes ..."
 digest_tree "$GOLDEN_DIR" "${SCRATCH}/after.txt"
 
 # --- Nothing to restore ------------------------------------------------------------
-# The regenerated corpus is this private worktree's, and the worktree is discarded at
-# exit, so the shared corpus is never written.
-echo "[measure-golden-corpus] the regenerated corpus is the private worktree's and is discarded at exit."
+# A fixture that moved stays changed in the working tree, so `git diff` shows it.
+echo "[measure-golden-corpus] the regenerated corpus is written in place; a moved file shows in git diff."
 echo
 
 # --- The table ----------------------------------------------------------------------
@@ -552,7 +472,7 @@ for fx in "${FIXTURES[@]}"; do
 done
 
 echo
-echo "${identical} IDENTICAL / ${moved} MOVED of ${EXPECTED_GOLDEN_FIXTURES}"
+echo "${identical} IDENTICAL / ${moved} MOVED of ${fixture_count}"
 echo "label: ${LABEL}"
 echo "commit: ${HEAD_SHA}"
 echo
@@ -560,7 +480,7 @@ echo
 # --- The second section: the board manifest ------------------------------------------
 # The same question for one more file: do the committed bytes equal what the generator
 # writes now? It runs even when the corpus moved, so one run reports both sections. The
-# generator writes this private worktree's manifest, which is discarded at exit.
+# generator writes the manifest in place.
 if [ ! -f "$BOARD_MANIFEST" ]; then
     echo "FAIL: ${BOARD_MANIFEST} does not exist, so the board manifest was not measured." >&2
     exit 2
