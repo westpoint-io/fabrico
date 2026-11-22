@@ -507,7 +507,7 @@ fail_with() {
     }
 }
 ERR='{"message":"Error: planted"}'
-LOC='{"file":"/home/runner/work/fabrico/fabrico/frontend/e2e-live/77-one-board-all-five.live.spec.ts","line":131,"column":7}'
+LOC='{"file":"/work/fabrico/frontend/e2e-live/77-one-board-all-five.live.spec.ts","line":131,"column":7}'
 fail_with "$TMP/p1.json" "[{\"title\":\"boot\",\"duration\":10,\"error\":$ERR,\"steps\":[]}]" '[]' "$LOC"
 run_case "P1 a failure inside a step at depth 1" 1 "$LEG2  step: boot" --min-tests 1 "$TMP/p1.json"
 fail_with "$TMP/p2.json" "[{\"title\":\"boot\",\"duration\":10,\"steps\":[]},{\"title\":\"outer\",\"duration\":10,\"error\":$ERR,\"steps\":[{\"title\":\"before\",\"duration\":1,\"steps\":[]},{\"title\":\"inner\",\"duration\":1,\"error\":$ERR,\"steps\":[]}]}]" '[]' "$LOC"
