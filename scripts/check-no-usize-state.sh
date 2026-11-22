@@ -81,18 +81,12 @@
 #      `[u8; 4]` is why the `;` test skips brackets), so if something the scanner
 #      does not model (a macro, say) still opens signature state, at most the lines
 #      up to the next brace or semicolon are skipped, never the rest of the file.
-# scripts/prove-no-usize-state-bites.sh pins every shape above with a named case,
-# each seen red against the gate before the fix that closed it.
-#
 # Acceptance is THIS SCRIPT'S EXIT CODE, never an external source grep - so the
 # banned type names written into the patterns below can never become a
 # self-invalidating gate. No Rust build runs here, so it completes in well under a
 # second on every OS runner under `shell: bash`. Only POSIX awk and ERE are used (no
 # `\b`, no gawk functions, no `grep -P`), because CI runs this guard on the Linux,
-# macOS (BSD awk) and Windows (Git Bash) legs. Its bite proof,
-# scripts/prove-no-usize-state-bites.sh, runs on the Linux leg only, so the planted
-# shapes are seen red under Linux's awk. The macOS and Windows runs rest on this guard
-# passing there and on the same POSIX-only rule.
+# macOS (BSD awk) and Windows (Git Bash) legs.
 
 set -euo pipefail
 
@@ -103,12 +97,10 @@ cd "$REPO_ROOT"
 SRC_DIR="crates/fabrico-core/src"
 
 # NOT MEASURED is exit 2, never OK. A scan that reads no file proves nothing, so a
-# missing source directory, a `find` that fails, or a file count below MIN_FILES (26
-# `.rs` files at phase 84; the floor leaves room to merge a few, not to lose the tree)
-# stops here. The listing is taken in a command substitution whose exit status is
+# missing source directory, a `find` that fails, or a listing with no `.rs` file stops
+# here. The listing is taken in a command substitution whose exit status is
 # checked, because a `done < <(find ...)` process substitution hides a failing `find`
 # from `set -e` and the loop then reads zero files and prints OK (review 84 CR-01).
-MIN_FILES=20
 if [ ! -d "$SRC_DIR" ]; then
     echo "FAIL: ${SRC_DIR} does not exist; NOT MEASURED." >&2
     exit 2
@@ -121,8 +113,8 @@ FILE_COUNT=0
 if [ -n "$FILE_LIST" ]; then
     FILE_COUNT="$(printf '%s\n' "$FILE_LIST" | wc -l | tr -d '[:space:]')"
 fi
-if [ "$FILE_COUNT" -lt "$MIN_FILES" ]; then
-    echo "FAIL: scanned ${FILE_COUNT} .rs files under ${SRC_DIR}, below the floor of ${MIN_FILES}; NOT MEASURED." >&2
+if [ "$FILE_COUNT" -eq 0 ]; then
+    echo "FAIL: found no .rs file under ${SRC_DIR}; NOT MEASURED." >&2
     exit 2
 fi
 

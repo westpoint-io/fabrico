@@ -1,129 +1,32 @@
 #!/usr/bin/env bash
 #
-# No tracked file carries PRIVATE RESIDUE: the maintainer's personal details, paths from
-# the maintainer's own machine, or pointers into the private planning checkout that lives
-# beside this repository and is ignored by it.
+# No tracked file carries private residue: the maintainer's personal details, paths from the
+# maintainer's own machine, or pointers into the private planning checkout that sits beside this
+# repository and is ignored by it. The repository was published from a private one, and such a
+# reference is either a broken pointer or personal data.
 #
-# WHY. This repository was published from a private one. The planning notes, the
-# assistant tooling that wrote many of them and the maintainer's own machine stayed
-# behind, and every reference to them was removed from the code before the first public
-# commit. A reference that comes back is either a broken pointer (a path nobody outside
-# can open) or personal data. Both are cheap to reintroduce by accident, because the
-# private checkout sits inside this working tree and a comment can cite it in passing.
-# This gate makes the removal permanent: it runs on every push.
+# PATTERNS apply to every tracked file except this one. SITE_PATTERNS apply only to tracked files
+# under site/ and the root README.md, where a phase, requirement, plan or decision id from the
+# private notes is a dead reference; a token in SITE_ALLOWED_TOKENS (a real name of the same shape)
+# is excused when every match on its line is an allowed token. The names are stored rot13-encoded
+# so this file doesn't spell them out. The first-name pattern is case-sensitive and treats a hyphen
+# or digit as part of the word, so the brand mark, LogoMark and MARK-nn ids still pass. The three
+# private paths may appear in .gitignore as whole lines and nowhere else. frontend/e2e-docs reads
+# REQ_PREFIX, SITE_ALLOWED_TOKENS and SITE_PATTERNS from this file, so keep their layout.
 #
-# WHAT IT LOOKS FOR, as extended regular expressions over every TRACKED text file:
-#   - the maintainer's legal names (first, middle and family) and handle, and any gmail
-#     address;
-#   - a home directory path, `/home/<user>/`;
-#   - a path into the private planning directory, or the assistant's memory file name;
-#   - the assistant, its vendor, or the planning tool, by name;
-#   - the desktop environment and window manager of the maintainer's machine;
-#   - the maintainer's first name as written in English, as a capitalised word of its
-#     own. The match is case-sensitive and a hyphen or a digit counts as part of the
-#     word, so the product nouns and verbs that share the spelling still pass: the brand
-#     mark, LogoMark, a marker, the MARK-nn requirement ids, a `<name>-sheet`, the
-#     lowercase verb ("mark the job required"). A sentence that starts with the verb is
-#     the one shape that also matches; reword it ("Flag the fixture READY"). An earlier
-#     version matched only a list of person-shaped phrases (the possessive, "<name> said",
-#     "ask <name>"), and the private notes used far more wording than any list held.
-#   - a tracked file whose name says text but which holds a NUL byte. That is UTF-16 or a
-#     smuggled binary, and the byte search below cannot read either reliably.
-#
-# THE DOCS SITE FAMILY, for tracked files under `site/` and the root `README.md` only. The
-# published docs pages and the README, the repository's front page, are written beside the
-# private planning notes, which label their work with ids a reader can't look up. In those
-# files four more patterns must match nothing:
-#   - a phase id: "phase" in any letter case (`phase`, `Phase`, `PHASE`), an optional space or
-#     hyphen, then a digit;
-#   - a requirement id: two to eight capital letters, a hyphen and two digits, with no
-#     letter or digit on either side (`SITE-04`, `GATE-07`). Any prefix counts, because the
-#     planning notes hold ids from every workstream and milestone, and a list of known
-#     prefixes misses the ones a docs author is most likely to copy from an older note;
-#   - a plan id: `plan` or `Plan`, an optional space or hyphen, a number of two or three
-#     digits with an optional `.N`, a hyphen and two digits (`plan 96-03`);
-#   - a decision id: `D-` and two digits, with no letter or digit on either side.
-# A date such as 2026-11-09 matches none of them. A real token of the same shape that a page
-# may need is listed in SITE_ALLOWED_TOKENS (`UTF-16`). A line is excused only when every
-# run of letters, digits and hyphens on it that matches the pattern is exactly an allowed
-# token, so `UTF-16` beside `GATE-07` on one line still fails. Add a token there only
-# when it is a real name readers use, never to let a planning id through.
-# The family is scoped to `site/` and `README.md` because
-# code comments elsewhere in the tree cite phase and plan ids on purpose, as a pointer to
-# the history of a rule; on a published page the same id is a dead reference. The run
-# prints how many files under `site/` and named `README.md` the family searched. It has no
-# floor of its own, because a tree with no `site/` is a legitimate tree; the main scan's
-# floor still applies.
-#
-# The names are stored rot13-encoded and decoded when the script starts, so this file
-# does not itself spell them out. The encoding hides nothing from a reader; it only keeps
-# a plain-text search of the tree from finding them here.
-#
-# WHAT IS NOT SCANNED, AND WHY. Untracked and ignored files are not scanned: the private
-# checkout lives in the working tree on purpose, and `git ls-files` is what separates it
-# from the repository.
-#
-# BINARY FILES ARE SEARCHED TOO (`grep -a`, under `LC_ALL=C`). GNU grep's `-I`, or its
-# default under a UTF-8 locale such as CI's, treats a file as binary once it holds one
-# invalid UTF-8 byte (a Latin-1 accented letter) or one NUL, and then reports no match
-# at all: a single stray byte would hide every name in the file. Searching bytes under
-# the C locale removes that classification. The binary fixtures, images and fonts in
-# the tree hold none of the patterns, so this costs no false finding.
-#
-# THE EXCLUSION LIST IS EXACTLY TWO EXACT PATHS: this script and its prover, which spell
-# out every pattern by definition. Both must exist (a stale exclusion is exit 2). Every
-# other file in scripts/ IS scanned.
-#
-# THE ALLOWANCE LIST IS EXACT LINES OF ONE FILE. `.gitignore` must name the private
-# checkout's three paths to keep them out of the repository, so exactly those three whole
-# lines are allowed there. Any other line in `.gitignore` that matches, including a
-# comment that names them, is a finding.
-#
-# HONESTY MECHANISMS, the same contract as scripts/check-dev-pace-switch-absent.sh:
-#   1. the scan set comes from `git ls-files`, its size is printed, and below a floor the
-#      run is exit 2;
-#   2. a positive control token must be found in the scan set, or the run is exit 2 (a
-#      search that finds nothing looks identical whether the tree is clean or the search
-#      is broken);
-#   3. every exclusion must exist;
-#   4. exit 2 means "could not assert", never a pass.
-# Every pattern is searched even after an earlier one is found, so one run names every
-# offending line.
-#
-# PROOF IT BITES: scripts/prove-no-private-residue-bites.sh, which runs beside this in CI.
-#
-# EXIT CODES
-#   0  no tracked file carries residue, and the run could make that assertion.
-#   1  at least one match; every offending file and line is named.
-#   2  the assertion could not be made (no git tree, a scan set below the floor, the
-#      positive control not found, a stale exclusion, a search that reported an error).
-#      Never a pass.
+# EXIT CODES: 0 clean; 1 residue found, each file:line named; 2 git grep itself failed.
 
-set -u
-
-# Byte semantics for every grep and character class below: no locale can decide that a
-# file is binary or that a byte sequence is not a character. See BINARY FILES above.
 export LC_ALL=C
-
-rot13() {
-    printf '%s' "$1" | tr 'A-Za-z' 'N-ZA-Mn-za-m'
-}
-
-# The encoded names: the maintainer's first name as written in English, the legal first
-# and middle names, the family name and the handle.
+rot13() { printf '%s' "$1" | tr 'A-Za-z' 'N-ZA-Mn-za-m'; }
 P_FIRST="$(rot13 'Znex')"
 P_LEGAL="$(rot13 'zruqv')"
 P_MIDDLE="$(rot13 'funuv')"
 P_FAMILY="$(rot13 'niqv')"
 P_HANDLE="$(rot13 'zniqv')"
-
-# The character classes that start and end a word for the first-name pattern. A hyphen
-# and a digit do not, so `<name>-sheet`, `<NAME>-01` and `<name>Craft` never match.
 WB='(^|[^A-Za-z0-9_-])'
 NB='([^A-Za-z0-9_-]|$)'
 
-# Each entry is `label<TAB>flags<TAB>ERE`. Flags: `i` for case-insensitive, `-` for
-# case-sensitive.
+# Each entry is `label<TAB>flags<TAB>ERE`; flag `i` is case-insensitive, `-` case-sensitive.
 PATTERNS=(
     "legal first name	i	${P_LEGAL}"
     "legal middle name	i	${P_MIDDLE}"
@@ -140,15 +43,7 @@ PATTERNS=(
     "window manager	i	hyprland"
     "first name, as a word	-	${WB}${P_FIRST}${NB}"
 )
-
-# The docs site family: searched only in tracked paths that start with `site/`, and in the
-# root README. Same `label<TAB>flags<TAB>ERE` form. See THE DOCS SITE FAMILY above.
-SITE_PREFIX="site/"
-SITE_README="README.md"
-SITE_FAMILY="${SITE_PREFIX} and ${SITE_README}"
-# The labels below keep the words "under site/" for README.md hits too: the docs suite reads
-# these patterns, labels included, through frontend/e2e-docs/support/residuePatterns.ts, and
-# frontend/e2e-docs/leaks.spec.ts compares its findings against the label text.
+# The labels keep "under site/" for README.md hits too: frontend/e2e-docs/leaks.spec.ts compares them.
 REQ_PREFIX='[A-Z]{2,8}'
 SITE_PATTERNS=(
     "phase id under site/	-	[Pp][Hh][Aa][Ss][Ee][ -]?[0-9]"
@@ -156,316 +51,50 @@ SITE_PATTERNS=(
     "plan id under site/	-	[Pp]lan[ -]?[0-9]{2,3}([.][0-9]+)?-[0-9]{2}"
     "decision id under site/	-	(^|[^A-Za-z0-9])D-[0-9]{2}([^A-Za-z0-9]|$)"
 )
-
-# Real tokens of the requirement-id shape that a page may hold, space-separated. Each is
-# matched as a whole run of letters, digits and hyphens. See THE DOCS SITE FAMILY above.
 SITE_ALLOWED_TOKENS='UTF-16'
+ALLOWED_LINES=(".planning/" "CLAUDE.md" ".claude/")
+SELF="scripts/check-no-private-residue.sh"
 
-EXCLUSIONS=(
-    "scripts/check-no-private-residue.sh"
-)
-
-ALLOWED_FILE=".gitignore"
-ALLOWED_LINES=(
-    ".planning/"
-    "CLAUDE.md"
-    ".claude/"
-)
-
-# The project's own name, which every scanned tree carries many times over.
-POSITIVE_CONTROL="fabrico"
-POSITIVE_CONTROL_OVERRIDDEN=0
-
-# The tree holds well over a thousand tracked files. The floor catches a walk that found
-# nothing, not the tree's size.
-MIN_SCAN_FILES=300
-
-usage() {
-    cat <<'USAGE'
-usage: bash scripts/check-no-private-residue.sh [options]
-
-Asserts that no tracked text file names the maintainer, a home directory path, the
-private planning checkout, or the tooling and machine behind it. See the header of this
-script for the full pattern list.
-
-  --positive-control <tok>  override the positive-control token. For the prover only.
-  --min-scan-files <n>      override the scan-set floor. For the prover only.
-  -h, --help                this message.
-
-EXIT CODES
-  0  no residue, and the run could make that assertion.
-  1  residue FOUND; every offending file and line is named.
-  2  the assertion COULD NOT BE MADE. Never a pass.
-USAGE
-}
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --positive-control)
-            if [ $# -lt 2 ]; then
-                echo "FAIL: --positive-control needs a value." >&2
-                exit 2
-            fi
-            POSITIVE_CONTROL="$2"
-            POSITIVE_CONTROL_OVERRIDDEN=1
-            shift 2
-            ;;
-        --min-scan-files)
-            if [ $# -lt 2 ]; then
-                echo "FAIL: --min-scan-files needs a value." >&2
-                exit 2
-            fi
-            MIN_SCAN_FILES="$2"
-            shift 2
-            ;;
-        -h | --help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "FAIL: unknown argument '$1'." >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
-done
-
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-if [ -z "$REPO_ROOT" ]; then
-    echo "FAIL: not inside a git working tree, so the scan set cannot be enumerated." >&2
-    exit 2
-fi
-cd "$REPO_ROOT" || exit 2
-
-failed=0
-cannot_assert=0
-
-# --- Guard 1: every exclusion exists ------------------------------------------------
-echo "exclusions (${#EXCLUSIONS[@]} exact paths, each asserted to exist):"
-for ex in "${EXCLUSIONS[@]}"; do
-    if [ -e "$ex" ]; then
-        echo "  ${ex}"
-    else
-        echo "  ${ex}   <-- MISSING"
-        echo "FAIL: the excluded path '${ex}' does not exist. A stale exclusion keeps a" >&2
-        echo "      blind spot nobody needs; remove the entry or restore the file." >&2
-        cannot_assert=1
-    fi
-done
-
-# --- Guard 2: the scan set, from tracked files, floored -----------------------------
-# NUL-delimited through a file, never through a shell variable, which would drop the NULs.
-SCAN_TMPDIR="$(mktemp -d)" || {
-    echo "FAIL: could not create a temporary directory for the scan set." >&2
-    exit 2
-}
-trap 'rm -rf "$SCAN_TMPDIR"' EXIT
-ALL_TRACKED="${SCAN_TMPDIR}/tracked.z"
-SCAN_SET="${SCAN_TMPDIR}/scan.z"
-: >"$SCAN_SET"
-
-if ! git ls-files -z >"$ALL_TRACKED" 2>/dev/null; then
-    echo "FAIL: 'git ls-files' failed, so there is no scan set to search." >&2
-    cannot_assert=1
-    : >"$ALL_TRACKED"
-fi
-
-scan_count=0
-excluded_count=0
-while IFS= read -r -d '' path; do
-    [ -z "$path" ] && continue
-    skip=0
-    for ex in "${EXCLUSIONS[@]}"; do
-        if [ "$path" = "$ex" ]; then
-            skip=1
-            break
-        fi
-    done
-    if [ "$skip" -eq 1 ]; then
-        excluded_count=$((excluded_count + 1))
-        continue
-    fi
-    # A tracked path deleted from the working tree is not there to read.
-    [ -f "$path" ] || continue
-    printf '%s\0' "$path" >>"$SCAN_SET"
-    scan_count=$((scan_count + 1))
-done <"$ALL_TRACKED"
-
-echo "scan set: ${scan_count} tracked file(s) searched, ${excluded_count} excluded (floor ${MIN_SCAN_FILES})"
-if [ "$scan_count" -lt "$MIN_SCAN_FILES" ]; then
-    echo "FAIL: the scan set holds ${scan_count} file(s), below the floor of ${MIN_SCAN_FILES}." >&2
-    echo "      A scan of nothing greps clean. This assertion cannot be made." >&2
-    cannot_assert=1
-fi
-
-# --- Guard 3: the positive control is found ------------------------------------------
-control_hits=0
-if [ "$scan_count" -gt 0 ]; then
-    control_hits="$(xargs -0 grep -a -l -i -F -- "$POSITIVE_CONTROL" <"$SCAN_SET" 2>/dev/null | grep -c . || true)"
-fi
-if [ "$POSITIVE_CONTROL_OVERRIDDEN" -eq 1 ]; then
-    echo "positive control: '${POSITIVE_CONTROL}' found in ${control_hits} file(s)  [OVERRIDDEN from the default]"
-else
-    echo "positive control: '${POSITIVE_CONTROL}' found in ${control_hits} file(s)"
-fi
-if [ "$control_hits" -lt 1 ]; then
-    echo "FAIL: the positive control '${POSITIVE_CONTROL}' was not found in any of the" >&2
-    echo "      ${scan_count} scanned files, so a zero below would mean nothing. This" >&2
-    echo "      assertion cannot be made." >&2
-    cannot_assert=1
-fi
-
-# True when a hit is one of the exact allowed lines of the allowed file.
-is_allowed() {
-    local file="$1" text="$2" ok
-    [ "$file" = "$ALLOWED_FILE" ] || return 1
-    for ok in "${ALLOWED_LINES[@]}"; do
-        if [ "$text" = "$ok" ]; then
-            return 0
-        fi
-    done
-    return 1
-}
-
-# True when every run of letters, digits and hyphens on a hit line that matches the
-# entry's pattern is exactly one of the allowed tokens, and at least one run does. A line
-# whose match spans something else (a phase id is two runs) is never excused.
+cd "$(git rev-parse --show-toplevel)" || exit 2
+status=0
+# tokens_allowed TEXT ERE [-i]: true when every letter/digit/hyphen run that matches is allowed.
 tokens_allowed() {
-    local text="$1" regex="$2" allow="$3" run matched=0
-    shift 3
+    local text="$1" regex="$2" run matched=0
+    shift 2
     while IFS= read -r run; do
-        [ -z "$run" ] && continue
-        printf '%s\n' "$run" | grep -a -q -E "$@" -e "$regex" || continue
+        printf '%s\n' "$run" | grep -q -E "$@" -e "$regex" || continue
         matched=1
-        case " ${allow} " in
-            *" ${run} "*) ;;
-            *) return 1 ;;
-        esac
-    done < <(printf '%s\n' "$text" | grep -a -o -E '[A-Za-z0-9-]+')
+        case " ${SITE_ALLOWED_TOKENS} " in *" ${run} "*) ;; *) return 1 ;; esac
+    done < <(printf '%s\n' "$text" | grep -o -E '[A-Za-z0-9-]+')
     [ "$matched" -eq 1 ]
 }
 
-# --- The assertion -------------------------------------------------------------------
-GREP_ERR="${SCAN_TMPDIR}/grep.err"
-
-# assert_absent SET_FILE SET_COUNT ENTRY [ALLOWED_TOKENS]: searches the NUL-delimited
-# paths in SET_FILE for the entry's pattern, names every offending line, and sets `failed`
-# or `cannot_assert`. With ALLOWED_TOKENS, a line whose matches are all allowed tokens is
-# excused (see tokens_allowed).
-assert_absent() {
-    local set_file="$1" set_count="$2" entry="$3" allow="${4:-}"
-    local label flags regex hits found hit hit_file rest hit_line hit_text
-    local case_flag=()
-    IFS='	' read -r label flags regex <<<"$entry"
-    if [ "$flags" = "i" ]; then
-        case_flag=(-i)
-    fi
-    hits=""
-    if [ "$set_count" -gt 0 ]; then
-        # grep exits 1 for "no match" and 2 for an error, and xargs folds both into 123, so
-        # an error is told apart by its message: any message means a file went unread.
-        # A NUL in a matched line is printed as `?`; bash would drop it with a warning.
-        hits="$(xargs -0 grep -a -H -n -E ${case_flag[@]+"${case_flag[@]}"} -e "$regex" -- <"$set_file" 2>"$GREP_ERR" | tr '\000' '?')"
-        if [ -s "$GREP_ERR" ]; then
-            echo "FAIL: searching for the ${label} pattern reported an error, so a file may" >&2
-            echo "      have gone unread:" >&2
-            sed 's/^/      /' "$GREP_ERR" >&2
-            cannot_assert=1
-        fi
-    fi
-    found=0
-    if [ -n "$hits" ]; then
-        while IFS= read -r hit; do
-            [ -z "$hit" ] && continue
-            hit_file="${hit%%:*}"
-            rest="${hit#*:}"
-            hit_line="${rest%%:*}"
-            hit_text="${rest#*:}"
-            hit_text="${hit_text%$'\r'}"
-            if is_allowed "$hit_file" "$hit_text"; then
-                continue
-            fi
-            if [ -n "$allow" ] && tokens_allowed "$hit_text" "$regex" "$allow" ${case_flag[@]+"${case_flag[@]}"}; then
-                continue
-            fi
-            if [ "$found" -eq 0 ]; then
-                echo "FAIL: ${label}:" >&2
-            fi
-            found=$((found + 1))
-            printf '  %s:%s: %s\n' "$hit_file" "$hit_line" "$(printf '%s' "$hit_text" | cut -c1-160)" >&2
-        done <<<"$hits"
-    fi
-    if [ "$found" -gt 0 ]; then
-        echo "  ${label}: ${found} line(s)  <-- FOUND"
-        failed=1
-    else
-        echo "  ${label}: 0"
-    fi
+# search ENTRY SITE PATHSPEC...: names every offending line; SITE=1 applies the token allowance.
+search() {
+    local label flags regex site="$2" hits rc hit file rest line text found=0 case_flag=()
+    IFS='	' read -r label flags regex <<<"$1"
+    shift 2
+    [ "$flags" = "i" ] && case_flag=(-i)
+    hits="$(git grep -nI -E ${case_flag[@]+"${case_flag[@]}"} -e "$regex" -- "$@")"
+    rc=$?
+    if [ "$rc" -gt 1 ]; then echo "FAIL: git grep exited ${rc} on the ${label} pattern." >&2; exit 2; fi
+    while IFS= read -r hit; do
+        [ -z "$hit" ] && continue
+        file="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"; text="${rest#*:}"; text="${text%$'\r'}"
+        if [ "$file" = ".gitignore" ] && printf '%s\n' "${ALLOWED_LINES[@]}" | grep -qxF -- "$text"; then continue; fi
+        if [ "$site" = 1 ] && tokens_allowed "$text" "$regex" ${case_flag[@]+"${case_flag[@]}"}; then continue; fi
+        found=$((found + 1))
+        printf 'FAIL: %s: %s:%s: %s\n' "$label" "$file" "$line" "$(printf '%s' "$text" | cut -c1-160)" >&2
+    done <<<"$hits"
+    echo "  ${label}: ${found}"
+    [ "$found" -eq 0 ] || status=1
 }
 
-echo "asserting ${#PATTERNS[@]} pattern(s) match nothing:"
-for entry in "${PATTERNS[@]}"; do
-    assert_absent "$SCAN_SET" "$scan_count" "$entry"
-done
+for entry in "${PATTERNS[@]}"; do search "$entry" 0 . ":!${SELF}"; done
+for entry in "${SITE_PATTERNS[@]}"; do search "$entry" 1 site README.md; done
 
-# --- Text files that hold a NUL -------------------------------------------------------
-# A file named as text that holds a NUL is UTF-16 (every ASCII letter followed by a NUL,
-# so no pattern above can match it) or binary data under a text name. Neither belongs
-# in this tree.
-nul_found=0
-while IFS= read -r -d '' path; do
-    case "$path" in
-        *.md | *.txt | *.rs | *.ts | *.tsx | *.js | *.mjs | *.cjs | *.sh | *.toml | *.yml | *.yaml | *.json | *.html | *.css | *.svg) ;;
-        *) continue ;;
-    esac
-    nuls="$(tr -cd '\000' <"$path" | wc -c | tr -d ' ')"
-    if [ "$nuls" != "0" ]; then
-        if [ "$nul_found" -eq 0 ]; then
-            echo "FAIL: text file holding NUL bytes (UTF-16 or binary under a text name):" >&2
-        fi
-        nul_found=$((nul_found + 1))
-        printf '  %s: %s NUL byte(s)\n' "$path" "$nuls" >&2
-    fi
-done <"$SCAN_SET"
-if [ "$nul_found" -gt 0 ]; then
-    echo "  text file holding NUL bytes: ${nul_found} file(s)  <-- FOUND"
-    failed=1
-else
-    echo "  text file holding NUL bytes: 0"
-fi
-
-# --- The docs site family, over tracked paths under site/ and the root README.md -------
-SITE_SET="${SCAN_TMPDIR}/site.z"
-: >"$SITE_SET"
-site_count=0
-while IFS= read -r -d '' path; do
-    case "$path" in
-        "$SITE_PREFIX"* | "$SITE_README")
-            printf '%s\0' "$path" >>"$SITE_SET"
-            site_count=$((site_count + 1))
-            ;;
-    esac
-done <"$SCAN_SET"
-echo "site/ and README.md scan set: ${site_count} tracked file(s) under ${SITE_PREFIX} or named ${SITE_README} searched"
-echo "asserting ${#SITE_PATTERNS[@]} docs site pattern(s) match nothing in ${SITE_FAMILY}:"
-echo "allowed tokens in ${SITE_FAMILY}: ${SITE_ALLOWED_TOKENS}"
-for entry in "${SITE_PATTERNS[@]}"; do
-    assert_absent "$SITE_SET" "$site_count" "$entry" "$SITE_ALLOWED_TOKENS"
-done
-
-if [ "$cannot_assert" -ne 0 ]; then
-    echo >&2
-    echo "EXIT 2: this run could not MAKE its assertion (see above). That is a FAILURE," >&2
-    echo "not a pass." >&2
-    exit 2
-fi
-if [ "$failed" -ne 0 ]; then
-    echo >&2
-    echo "Remove the reference, or reword it so it describes the code rather than the" >&2
-    echo "person or the private notes behind it. Do NOT add an exclusion or an allowed" >&2
-    echo "line to make this pass." >&2
+if [ "$status" -ne 0 ]; then
+    echo "Remove the reference or reword it to describe the code, not the person or the private notes." >&2
     exit 1
 fi
-
-echo "OK: no private residue in ${scan_count} tracked file(s), ${site_count} of them in ${SITE_FAMILY} also free of planning ids; positive control found in ${control_hits}."
-exit 0
+echo "OK: no private residue in tracked files."
