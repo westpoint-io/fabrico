@@ -3742,6 +3742,207 @@ fn the_capture_gate_check_names_each_way_of_switching_it_off() {
     );
 }
 
+/// The job that builds the app bundle (`npm run check:board` runs `npm run build`) and checks it.
+const AA_UNIT_JOB: &str = "unit";
+/// The step that builds `frontend/dist`, as the whole of its `run:` line. The app check reads that
+/// folder, so it has to come after this step.
+const AA_APP_BUILD_RUN: &str = "run: npm run check:board";
+/// The test antialiasing switch's absence check over the app bundle, as the whole of its `run:` line.
+const AA_APP_CHECK_RUN: &str = "run: bash scripts/check-test-aa-switch-absent.sh frontend/dist";
+/// The proof that the absence check can still fail, as the whole of its `run:` line.
+const AA_PROVER_RUN: &str = "run: bash scripts/prove-test-aa-switch-absent-non-vacuous.sh";
+/// The same absence check over the docs embed bundle, as the whole of its `run:` line. It runs in
+/// `EMBED_JOB`, after `EMBED_RUN_LINES[0]` builds `frontend/dist-embed`.
+const AA_EMBED_CHECK_RUN: &str =
+    "run: bash scripts/check-test-aa-switch-absent.sh frontend/dist-embed";
+
+/// Everything wrong with how `yml` wires the three steps that keep the dev-only antialiasing
+/// switch out of the shipped bundles. Empty means right.
+fn aa_switch_gate_wrong(yml: &str) -> Vec<String> {
+    let mut wrong: Vec<String> = Vec::new();
+    let blocks = job_blocks_in(yml);
+
+    // Each run line exactly once in the file, in its job, as the whole of its line. A whole-line
+    // match is what refuses `|| true`, `; true` and a pipe, each of which turns a red step green.
+    for (needle, want) in [
+        (
+            "scripts/check-test-aa-switch-absent.sh",
+            vec![(EMBED_JOB, AA_EMBED_CHECK_RUN), (AA_UNIT_JOB, AA_APP_CHECK_RUN)],
+        ),
+        (
+            "scripts/prove-test-aa-switch-absent-non-vacuous.sh",
+            vec![(AA_UNIT_JOB, AA_PROVER_RUN)],
+        ),
+    ] {
+        let mut found: Vec<(&str, &str)> = blocks
+            .iter()
+            .flat_map(|(id, lines)| lines.iter().map(move |line| (*id, step_key(line))))
+            .filter(|(_, line)| line.starts_with("run:") && line.contains(needle))
+            .collect();
+        found.sort();
+        let mut want = want;
+        want.sort();
+        if found != want {
+            wrong.push(format!(
+                "the `run:` lines invoking `{needle}` are {found:?}, expected exactly {want:?}. \
+                 With anything else on that line, or the step moved or gone, the dev-only \
+                 antialiasing switch can reach a shipped bundle while CI stays green."
+            ));
+        }
+    }
+
+    // Each check reads a bundle its job built first.
+    for (job, build, check) in [
+        (AA_UNIT_JOB, AA_APP_BUILD_RUN, AA_APP_CHECK_RUN),
+        (EMBED_JOB, EMBED_RUN_LINES[0], AA_EMBED_CHECK_RUN),
+    ] {
+        let Some((_, lines)) = blocks.iter().find(|(id, _)| *id == job) else {
+            wrong.push(format!("there is no job `{job}` under `jobs:`."));
+            continue;
+        };
+        let at = |expected: &str| lines.iter().position(|line| step_key(line) == expected);
+        match (at(build), at(check)) {
+            (None, _) => wrong.push(format!(
+                "job `{job}` has no `{build}` step, so `{check}` has no bundle to read."
+            )),
+            (Some(b), Some(c)) if c < b => wrong.push(format!(
+                "job `{job}` runs `{check}` before `{build}` builds the bundle it reads."
+            )),
+            _ => {}
+        }
+    }
+
+    // No `continue-on-error` in either job, and no condition on any of these steps.
+    wrong.extend(step_guards_wrong(
+        yml,
+        AA_UNIT_JOB,
+        &[
+            "npm run check:board",
+            "scripts/check-test-aa-switch-absent.sh",
+            "scripts/prove-test-aa-switch-absent-non-vacuous.sh",
+        ],
+    ));
+    wrong.extend(step_guards_wrong(
+        yml,
+        EMBED_JOB,
+        &["scripts/check-test-aa-switch-absent.sh"],
+    ));
+    wrong
+}
+
+/// The dev-only antialiasing switch is kept out of both shipped bundles by three CI steps, and none
+/// of them can be switched off.
+///
+/// # Why
+///
+/// `src/render/testAntialias.ts` turns antialiasing on from a URL flag, under a guard that Vite
+/// folds away in a production build. `scripts/check-test-aa-switch-absent.sh` checks the flag's
+/// name is absent from `frontend/dist` (the bundle the desktop binary embeds) and from
+/// `frontend/dist-embed` (the docs embed), and `scripts/prove-test-aa-switch-absent-non-vacuous.sh`
+/// shows the check still fails when the guard is gone. Those steps are the only thing that stops a
+/// URL from turning antialiasing on in the shipped app (review 107 WR-06). Deleting one, appending
+/// `|| true`, a step condition, `continue-on-error`, or a check moved before its build would each
+/// leave CI green without that guarantee, so those facts are pinned here.
+#[test]
+fn the_test_antialias_switch_gate_cannot_be_switched_off() {
+    let wrong = aa_switch_gate_wrong(CI_YML);
+    assert!(
+        wrong.is_empty(),
+        "{} fact(s) about the test antialiasing switch's absence checks are wrong:\n\n{}\n\n\
+         Update the WORKFLOW to match this test. Do NOT re-point this test at whatever the \
+         workflow currently says: these assertions are what keep the switch out of the shipped \
+         bundles.",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+}
+
+/// `aa_switch_gate_wrong` can fail: each of these breaks is planted in a copy of the real workflow,
+/// and the check has to name it.
+#[test]
+fn the_test_antialias_switch_gate_check_names_each_way_of_switching_it_off() {
+    const APP_STEP: &str = "      - name: The app bundle carries no test antialiasing switch\n";
+    const PROVER_STEP: &str =
+        "      - name: Test antialiasing switch absence check, non-vacuity proof\n";
+    const EMBED_STEP: &str = "      - name: The embed bundle carries no test antialiasing switch\n";
+    const UNIT_HEADER: &str = "    name: frontend unit (vitest + tsc)\n";
+    const EMBED_HEADER: &str = "    name: the read-only board embed runs from disk in a browser\n";
+    let line = |run: &str| format!("        {run}\n");
+    let app_step = format!("{APP_STEP}{}", line(AA_APP_CHECK_RUN));
+    let board_step = format!(
+        "      - name: Art board structural gate\n        working-directory: frontend\n{}",
+        line(AA_APP_BUILD_RUN)
+    );
+    for (what, text) in [
+        ("the app check step", &app_step),
+        ("the board build step", &board_step),
+        ("the prover step", &format!("{PROVER_STEP}{}", line(AA_PROVER_RUN))),
+        ("the embed check step", &format!("{EMBED_STEP}{}", line(AA_EMBED_CHECK_RUN))),
+    ] {
+        assert_eq!(CI_YML.matches(text.as_str()).count(), 1, "{what} reads as planted");
+    }
+
+    let mut plants: Vec<(String, String, String)> = Vec::new();
+    for (step, run, job) in [
+        (APP_STEP, AA_APP_CHECK_RUN, AA_UNIT_JOB),
+        (PROVER_STEP, AA_PROVER_RUN, AA_UNIT_JOB),
+        (EMBED_STEP, AA_EMBED_CHECK_RUN, EMBED_JOB),
+    ] {
+        let needle = if run == AA_PROVER_RUN {
+            "scripts/prove-test-aa-switch-absent-non-vacuous.sh"
+        } else {
+            "scripts/check-test-aa-switch-absent.sh"
+        };
+        plants.push((
+            format!("`{run}` deleted"),
+            without_step(CI_YML, step),
+            format!("the `run:` lines invoking `{needle}` are"),
+        ));
+        plants.push((
+            format!("`{run}` with `|| true`"),
+            CI_YML.replace(&line(run), &format!("        {run} || true\n")),
+            format!("the `run:` lines invoking `{needle}` are"),
+        ));
+        plants.push((
+            format!("`if: false` on `{run}`"),
+            CI_YML.replace(&line(run), &format!("        if: false\n{}", line(run))),
+            format!("the step that runs `{needle}` in job `{job}` carries `if: false`"),
+        ));
+    }
+    plants.push((
+        "`continue-on-error` on the unit job".to_string(),
+        CI_YML.replace(UNIT_HEADER, &format!("{UNIT_HEADER}    continue-on-error: true\n")),
+        format!("job `{AA_UNIT_JOB}` carries `continue-on-error: true`"),
+    ));
+    plants.push((
+        "`continue-on-error` on the embed job".to_string(),
+        CI_YML.replace(EMBED_HEADER, &format!("{EMBED_HEADER}    continue-on-error: true\n")),
+        format!("job `{EMBED_JOB}` carries `continue-on-error: true`"),
+    ));
+    plants.push((
+        "the app check moved before the board build".to_string(),
+        CI_YML
+            .replace(&format!("{app_step}\n"), "")
+            .replace(&board_step, &format!("{app_step}\n{board_step}")),
+        format!("runs `{AA_APP_CHECK_RUN}` before `{AA_APP_BUILD_RUN}` builds the bundle it reads"),
+    ));
+    assert_eq!(plants.len(), 12, "twelve ways of switching the antialiasing switch gate off");
+
+    let mut missed: Vec<String> = Vec::new();
+    for (what, yml, must_name) in &plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = aa_switch_gate_wrong(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "a planted break in the antialiasing switch gate went unnamed:\n{}",
+        missed.join("\n")
+    );
+}
+
 /// The mock e2e suite's Playwright config, the one `npm run test:e2e` runs in the `e2e` job.
 const MOCK_CONFIG: &str = include_str!("../../../frontend/playwright.config.ts");
 /// The warm-up the mock config runs before any test. Embedded so that moving or deleting it is a
