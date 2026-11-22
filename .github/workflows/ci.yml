@@ -103,8 +103,8 @@ jobs:
   # page's command under `site/` does.
   #
   # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
-  # embed, golden-corpus, e2e, e2e-live, e2e-live-verdict, e2e-walk, e2e-walk-verdict and
-  # unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
+  # embed, golden-corpus, e2e, e2e-verdict, e2e-live, e2e-live-verdict, e2e-walk,
+  # e2e-walk-verdict and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
   # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
   # private-residue and neutrality. Each always-on job either reads files a docs-only
   # change can edit or costs about one minute, so gating it would save little and risk a
@@ -1651,6 +1651,71 @@ jobs:
           name: mock-test-results-${{ matrix.shard }}
           path: frontend/test-results/
           retention-days: 14
+
+  # THE MOCK VERDICT OVER ALL SHARDS. It needs every leg of `e2e` and runs under the same docs-only
+  # gate, whose `!cancelled()` lets it run after a leg went red. One leg's checker sees only its
+  # own quarter, so a leg dropped from the matrix or a test that lands in no report would leave
+  # every leg's own check green. This job makes the whole suite's exact list itself, from the same
+  # commit and config as the legs, takes the four `mock-report-<i>` artifacts and runs
+  # `check-mock-report.sh --merge 4 --list` over them in shard order: each report must carry its
+  # own shard, every listed test must have passed in exactly one report, and a missing report
+  # means the verdict could not be made. The merge prints a `MOCK LIST` line in the log. The
+  # checker's bite proof runs here first, so it is seen to fail before it is trusted. List mode
+  # opens no browser, so the job installs the frontend's packages but no browser.
+  #
+  # A RE-RUN CAN'T LEAVE THIS JOB GREEN ON A STALE REPORT, the same rule as `e2e-live-verdict`.
+  # On "re-run failed jobs" the legs that passed keep their first attempt, and download-artifact
+  # takes the latest artifact of each name, so a re-run leg that dies before it uploads would
+  # leave its first-attempt report here. The last step fails the job unless every leg of `e2e`
+  # ended `success`.
+  #
+  # REQUIRED CHECK: if branch protection is turned on for `main`, make `e2e-verdict`
+  # (`frontend e2e verdict (all shards)`) a REQUIRED status check. It is the one check that stands
+  # for the whole mock suite.
+  e2e-verdict:
+    name: frontend e2e verdict (all shards)
+    needs: [changes, e2e]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      # The whole mock suite's list: the same config as the legs, no --shard, this commit.
+      - name: The whole mock suite's exact test list
+        working-directory: frontend
+        run: npx playwright test --list --reporter=json > "$RUNNER_TEMP/mock-list.json"
+
+      # Each artifact lands in its own folder, mock-reports/mock-report-<i>/.
+      - name: Take every shard's mock report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mock-report-*
+          path: mock-reports
+
+      # The checker must be seen to bite before it is trusted with the verdict.
+      - name: Mock verdict checker bites
+        run: bash scripts/prove-mock-report-bites.sh
+
+      - name: The mock suite over all shards ran exactly its listed tests, all passed
+        run: bash scripts/check-mock-report.sh --merge 4 --list "$RUNNER_TEMP/mock-list.json" mock-reports/mock-report-1/mock-report.json mock-reports/mock-report-2/mock-report.json mock-reports/mock-report-3/mock-report.json mock-reports/mock-report-4/mock-report.json
+
+      # needs.e2e.result is success only when every leg ended success. See the comment above this
+      # job for why a red leg must turn the verdict red even when the merge passed.
+      - name: The mock legs all ended green, so no leg's report is a stale first attempt
+        run: echo "e2e legs ended ${{ needs.e2e.result }}" && test "${{ needs.e2e.result }}" = success
 
   # Live E2E gate (Phase 22, E2E-01..04): Playwright drives headless chromium
   # against the REAL dev_render_server binary (real Core -> RenderProducer ->

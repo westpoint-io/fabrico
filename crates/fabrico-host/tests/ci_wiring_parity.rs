@@ -481,8 +481,9 @@ const EMBED_NEEDS: &str = "needs: [changes, wasm-player]";
 /// The heavy jobs whose `needs:` line is not `HEAVY_NEEDS`, each with the one line it must carry.
 /// Each of these jobs reads what an earlier job made, so it needs that job as well as the
 /// classifier. Every other heavy job carries `HEAVY_NEEDS` and nothing else.
-const JOB_NEEDS: [(&str, &str); 3] = [
+const JOB_NEEDS: [(&str, &str); 4] = [
     (EMBED_JOB, EMBED_NEEDS),
+    (MOCK_VERDICT_JOB, MOCK_VERDICT_NEEDS),
     (LIVE_VERDICT_JOB, LIVE_VERDICT_NEEDS),
     (WALK_VERDICT_JOB, WALK_VERDICT_NEEDS),
 ];
@@ -509,13 +510,17 @@ const DETERMINISM_MATRIX: &str = r#"os: ${{ fromJSON(github.event_name == 'pull_
 /// `frontend/`, which the classifier never counts as docs, so editing it runs the job.
 /// `e2e-capture` (the board capture set) reads `frontend/` and `crates/` and never a markdown file
 /// at the repository root, so it skips on a docs-only change like `e2e-walk`.
-const HEAVY_JOBS: [&str; 12] = [
+/// `e2e-verdict` (the mock suite's verdict over all shards, plan 111-10) reads `frontend/`, its
+/// `scripts/` checker and the mock legs' reports, never a markdown file at the repository root, so
+/// it skips with the legs it grades.
+const HEAVY_JOBS: [&str; 13] = [
     "determinism",
     "headless-build",
     "wasm-player",
     "embed",
     "golden-corpus",
     "e2e",
+    "e2e-verdict",
     "e2e-live",
     "e2e-live-verdict",
     "e2e-walk",
@@ -3871,6 +3876,18 @@ const MOCK_REPORT_PATH: &str = "path: frontend/test-results/mock-report.json";
 
 /// The mock suite's verdict against its exact list.
 const MOCK_CHECKER: &str = "scripts/check-mock-report.sh";
+/// The mock checker's bite proof over hand-made reports.
+const MOCK_BITES: &str = "scripts/prove-mock-report-bites.sh";
+/// The job that grades every mock leg's report together.
+const MOCK_VERDICT_JOB: &str = "e2e-verdict";
+/// The mock verdict job's dependency: the classifier, and every leg of the mock job.
+const MOCK_VERDICT_NEEDS: &str = "needs: [changes, e2e]";
+/// The mock verdict job takes every leg's report by this pattern, into this folder.
+const MOCK_REPORT_PATTERN: &str = "pattern: mock-report-*";
+const MOCK_REPORTS_DIR: &str = "path: mock-reports";
+/// The mock job's combined result as the verdict job reads it: `success` only when every leg ended
+/// success.
+const MOCK_LEGS_RESULT: &str = "${{ needs.e2e.result }}";
 /// Where each mock job writes its exact list, through the runner's own variable. Outside
 /// `test-results/`, because the suite deletes that folder when it starts.
 const MOCK_LIST_FILE: &str = "\"$RUNNER_TEMP/mock-list.json\"";
@@ -3889,11 +3906,27 @@ struct MockRunLines {
     suite: String,
     /// This leg's report against its list, the run line straight after the suite.
     checker: String,
+    /// The whole suite's exact test list in `MOCK_VERDICT_JOB`, unsharded, after Node and the
+    /// frontend's packages are installed and before the reports are taken.
+    verdict_list: String,
+    /// The checker's bite proof in `MOCK_VERDICT_JOB`, before the merge.
+    bites: String,
+    /// The merged verdict in `MOCK_VERDICT_JOB`, over every leg's report in shard order, against
+    /// `verdict_list`.
+    merge: String,
+    /// The last step of `MOCK_VERDICT_JOB`: red unless every leg of `MOCK_JOB` ended success, so a
+    /// re-run leg that died before uploading can't leave the verdict green on its first attempt's
+    /// report.
+    legs_result: String,
 }
 
 fn mock_run_lines() -> MockRunLines {
     let n = MOCK_SHARDS;
     let shard = "${{ matrix.shard }}";
+    let reports = (1..=n)
+        .map(|i| format!("mock-reports/mock-report-{i}/mock-report.json"))
+        .collect::<Vec<_>>()
+        .join(" ");
     MockRunLines {
         list: format!(
             "run: npx playwright test {LIVE_LIST_FLAGS} --shard={shard}/{n} > {MOCK_LIST_FILE}"
@@ -3902,6 +3935,12 @@ fn mock_run_lines() -> MockRunLines {
         checker: format!(
             "run: bash ../{MOCK_CHECKER} --shard {shard}/{n} --list {MOCK_LIST_FILE} \
              test-results/mock-report.json"
+        ),
+        verdict_list: format!("run: npx playwright test {LIVE_LIST_FLAGS} > {MOCK_LIST_FILE}"),
+        bites: format!("run: bash {MOCK_BITES}"),
+        merge: format!("run: bash {MOCK_CHECKER} --merge {n} --list {MOCK_LIST_FILE} {reports}"),
+        legs_result: format!(
+            "run: echo \"e2e legs ended {MOCK_LEGS_RESULT}\" && test \"{MOCK_LEGS_RESULT}\" = success"
         ),
     }
 }
@@ -3930,9 +3969,13 @@ fn mock_gate_wrong(yml: &str) -> Vec<String> {
     // The list and the checker once each in the workflow, in their own job, as the whole of their
     // line. A whole-line match is what refuses `|| true`, another shard or a dropped `--list`.
     let lines = mock_run_lines();
-    let pinned: [(&str, &str, &str); 2] = [
+    let pinned: [(&str, &str, &str); 6] = [
         ("the exact list", &lines.list, MOCK_JOB),
         ("the shard checker", &lines.checker, MOCK_JOB),
+        ("the verdict job's list", &lines.verdict_list, MOCK_VERDICT_JOB),
+        ("the bite proof", &lines.bites, MOCK_VERDICT_JOB),
+        ("the merge", &lines.merge, MOCK_VERDICT_JOB),
+        ("the leg-result check", &lines.legs_result, MOCK_VERDICT_JOB),
     ];
     for (what, line, job) in pinned {
         let homes: Vec<&str> = blocks
@@ -3953,14 +3996,17 @@ fn mock_gate_wrong(yml: &str) -> Vec<String> {
         }
     }
 
-    // Every run line that names the mock checker or writes the mock list is a pinned one.
+    // Every run line that names the mock checker or its proof, writes the mock list or reads the
+    // mock legs' result is a pinned one.
     for (id, job) in &blocks {
         for line in job
             .iter()
             .map(|l| step_key(l))
             .filter(|l| l.starts_with("run:"))
         {
-            let names_mock = line.contains(MOCK_CHECKER) || line.contains("mock-list.json");
+            let names_mock = [MOCK_CHECKER, MOCK_BITES, "mock-list.json", "needs.e2e.result"]
+                .iter()
+                .any(|needle| line.contains(needle));
             if names_mock && !pinned.iter().any(|(_, p, _)| *p == line) {
                 wrong.push(format!(
                     "job `{id}` runs `{line}`, which is none of the pinned mock run lines. A list \
@@ -4013,10 +4059,84 @@ fn mock_gate_wrong(yml: &str) -> Vec<String> {
         }
     }
 
+    match blocks.iter().find(|(id, _)| *id == MOCK_VERDICT_JOB) {
+        None => wrong.push(format!("there is no job `{MOCK_VERDICT_JOB}` under `jobs:`.")),
+        Some((_, job)) => {
+            // The reports are downloaded into the folder the merge reads.
+            match one_step_with(job, MOCK_REPORT_PATTERN, MOCK_VERDICT_JOB) {
+                Err(message) => wrong.push(format!("{message} The merge would read no report.")),
+                Ok((_, step)) => {
+                    for key in ["uses: actions/download-artifact@v4", MOCK_REPORTS_DIR] {
+                        if !step.iter().any(|l| step_key(l) == key) {
+                            wrong.push(format!(
+                                "the step carrying `{MOCK_REPORT_PATTERN}` in job \
+                                 `{MOCK_VERDICT_JOB}` has no `{key}` line, so the merge would \
+                                 read no report."
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Node and the packages before the list, the list and the reports before the proof and
+            // the merge, and the legs' result last. The pinned lines' counts are checked above;
+            // Node and npm ci are counted here.
+            let order: [(&str, &str); 7] = [
+                ("Setup Node", "uses: actions/setup-node@v4"),
+                ("npm ci", "run: npm ci"),
+                ("the list", &lines.verdict_list),
+                ("the report download", MOCK_REPORT_PATTERN),
+                ("the bite proof", &lines.bites),
+                ("the merge", &lines.merge),
+                ("the leg-result check", &lines.legs_result),
+            ];
+            let mut positions: Vec<Option<usize>> = Vec::new();
+            for (what, key) in order {
+                let at: Vec<usize> = job
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| step_key(l) == key)
+                    .map(|(i, _)| i)
+                    .collect();
+                if at.len() != 1 && matches!(what, "Setup Node" | "npm ci") {
+                    wrong.push(format!(
+                        "`{key}` appears {} time(s) in job `{MOCK_VERDICT_JOB}`, expected 1. \
+                         The list step runs Playwright from the frontend's packages, so the job \
+                         needs Node and `npm ci` before it.",
+                        at.len()
+                    ));
+                }
+                positions.push(if at.len() == 1 { Some(at[0]) } else { None });
+            }
+            if let Some(found) = positions.iter().copied().collect::<Option<Vec<usize>>>()
+                && !found.windows(2).all(|w| w[0] < w[1])
+            {
+                wrong.push(format!(
+                    "job `{MOCK_VERDICT_JOB}` has Setup Node, npm ci, the list, the report \
+                     download, the bite proof, the merge and the leg-result check at lines \
+                     {found:?}, expected that order. The list needs Node and the packages, the \
+                     merge needs the list, the reports and a checker seen to bite, and the \
+                     leg-result check comes after the merge so the merge's red lines are in the \
+                     log first."
+                ));
+            }
+        }
+    }
+
     wrong.extend(step_guards_wrong(
         yml,
         MOCK_JOB,
         &["npm run test:e2e", lines.list.as_str(), lines.checker.as_str()],
+    ));
+    wrong.extend(step_guards_wrong(
+        yml,
+        MOCK_VERDICT_JOB,
+        &[
+            lines.verdict_list.as_str(),
+            lines.bites.as_str(),
+            lines.merge.as_str(),
+            lines.legs_result.as_str(),
+        ],
     ));
     wrong
 }
@@ -4099,6 +4219,11 @@ fn mock_retries_wrong(config: &str) -> Vec<String> {
 /// against it with `check-mock-report.sh --shard i/4 --list`. Both lines are pinned whole, in that
 /// order, with no condition on either step. Each leg uploads its JSON report as `mock-report-<i>`,
 /// red or green, and the upload fails when the report is missing.
+///
+/// `MOCK_VERDICT_JOB` needs every leg. It makes the whole suite's list, takes the four reports,
+/// runs the checker's bite proof, grades the reports together with `--merge 4 --list`, and fails
+/// unless every leg ended success. Each of those lines is pinned whole, once, in that job and that
+/// order, and no step of it can carry a condition or `continue-on-error`.
 #[test]
 fn the_mock_suite_runs_every_test_once_with_no_retry() {
     let mut wrong = mock_gate_wrong(CI_YML);
@@ -4113,8 +4238,9 @@ fn the_mock_suite_runs_every_test_once_with_no_retry() {
     );
 }
 
-/// `mock_gate_wrong`, `mock_report_upload_wrong` and `mock_retries_wrong` can fail: each break
-/// below is planted in a copy of the real files, and the check has to name it.
+/// `mock_gate_wrong`, `mock_report_upload_wrong`, `mock_retries_wrong` and, for the verdict job's
+/// `needs:` line, `job_classes_wrong` can fail: each break below is planted in a copy of the real
+/// files, and the check has to name it.
 #[test]
 fn the_mock_gate_check_names_each_way_of_losing_tests() {
     const MOCK_HEADER: &str = "    name: frontend e2e (Playwright + axe)\n";
@@ -4134,6 +4260,32 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
     let list_on_five = lines.list.replace("/4 >", "/5 >");
     let checker_no_list = lines.checker.replace(&format!(" --list {MOCK_LIST_FILE}"), "");
     let checker_swallowed = format!("{} || true", lines.checker);
+
+    const VERDICT_JOB_LINE: &str = "  e2e-verdict:\n";
+    const VERDICT_HEADER: &str = "    name: frontend e2e verdict (all shards)\n";
+    const MERGE_STEP: &str =
+        "      - name: The mock suite over all shards ran exactly its listed tests, all passed\n";
+    const LEGS_STEP: &str =
+        "      - name: The mock legs all ended green, so no leg's report is a stale first attempt\n";
+    const BITES_STEP: &str = "      - name: Mock verdict checker bites\n";
+    let verdict_start = CI_YML.find(VERDICT_JOB_LINE).expect("the mock verdict job is in the workflow");
+    let verdict_len = CI_YML[verdict_start..]
+        .find("\n  # ")
+        .expect("a commented job follows the mock verdict job")
+        + 1;
+    let without_verdict_job = format!(
+        "{}{}",
+        &CI_YML[..verdict_start],
+        &CI_YML[verdict_start + verdict_len..]
+    );
+    let merge_line = format!("        {}\n", lines.merge);
+    let bites_step = format!("{BITES_STEP}        {}\n", lines.bites);
+    assert_eq!(CI_YML.matches(&bites_step).count(), 1, "the mock bite proof step is one block");
+    let merge_no_list = lines.merge.replace(&format!(" --list {MOCK_LIST_FILE}"), "");
+    let merge_three = lines.merge.replace(
+        &format!(" mock-reports/mock-report-{MOCK_SHARDS}/mock-report.json"),
+        "",
+    );
 
     // (what, the planted workflow, what the check must name)
     let yml_plants: Vec<(&str, String, String)> = vec![
@@ -4274,6 +4426,74 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
     );
     assert_eq!(report_plants.len(), 4, "four ways of losing a mock leg's report");
 
+    // (what, the planted workflow, which check reads it, what it must name)
+    type WorkflowCheck = fn(&str) -> Vec<String>;
+    let verdict_plants: Vec<(&str, String, WorkflowCheck, String)> = vec![
+        (
+            "the mock verdict job removed",
+            without_verdict_job,
+            mock_gate_wrong,
+            format!("there is no job `{MOCK_VERDICT_JOB}` under `jobs:`."),
+        ),
+        (
+            "the verdict job's needs line set to `needs: [changes]`",
+            CI_YML.replace(&format!("    {MOCK_VERDICT_NEEDS}\n"), "    needs: [changes]\n"),
+            job_classes_wrong,
+            format!("heavy job `{MOCK_VERDICT_JOB}` is missing `{MOCK_VERDICT_NEEDS}`"),
+        ),
+        (
+            "the merge without `--list`",
+            CI_YML.replace(&merge_line, &format!("        {merge_no_list}\n")),
+            mock_gate_wrong,
+            format!("job `{MOCK_VERDICT_JOB}` runs `{merge_no_list}`, which is none of the pinned"),
+        ),
+        (
+            "the merge given three reports",
+            CI_YML.replace(&merge_line, &format!("        {merge_three}\n")),
+            mock_gate_wrong,
+            format!("job `{MOCK_VERDICT_JOB}` runs `{merge_three}`, which is none of the pinned"),
+        ),
+        (
+            "the leg-result step removed",
+            without_step(CI_YML, LEGS_STEP),
+            mock_gate_wrong,
+            format!("the leg-result check's run line `{}` is in job(s) []", lines.legs_result),
+        ),
+        (
+            "continue-on-error on the mock verdict job",
+            CI_YML.replace(
+                VERDICT_HEADER,
+                &format!("{VERDICT_HEADER}    continue-on-error: true\n"),
+            ),
+            mock_gate_wrong,
+            format!("job `{MOCK_VERDICT_JOB}` carries `continue-on-error: true`"),
+        ),
+        (
+            "`if: false` on the merge step",
+            CI_YML.replace(MERGE_STEP, &format!("{MERGE_STEP}        if: false\n")),
+            mock_gate_wrong,
+            format!(
+                "the step that runs `{}` in job `{MOCK_VERDICT_JOB}` carries `if: false`",
+                lines.merge
+            ),
+        ),
+        (
+            "the bite proof step removed",
+            without_step(CI_YML, BITES_STEP),
+            mock_gate_wrong,
+            format!("the bite proof's run line `{}` is in job(s) []", lines.bites),
+        ),
+        (
+            "the bite proof moved after the merge",
+            CI_YML
+                .replace(&bites_step, "")
+                .replace(&merge_line, &format!("{merge_line}\n{bites_step}")),
+            mock_gate_wrong,
+            "expected that order".to_string(),
+        ),
+    ];
+    assert_eq!(verdict_plants.len(), 9, "nine ways of switching the mock verdict job off");
+
     let mut missed: Vec<String> = Vec::new();
     for (what, yml, must_name) in &yml_plants {
         assert_ne!(yml, CI_YML, "{what}: the plant landed");
@@ -4285,6 +4505,13 @@ fn the_mock_gate_check_names_each_way_of_losing_tests() {
     for (what, yml, must_name) in &report_plants {
         assert_ne!(yml, CI_YML, "{what}: the plant landed");
         let named = mock_report_upload_wrong(yml).join("\n");
+        if !named.contains(must_name.as_str()) {
+            missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
+        }
+    }
+    for (what, yml, check, must_name) in &verdict_plants {
+        assert_ne!(yml, CI_YML, "{what}: the plant landed");
+        let named = check(yml).join("\n");
         if !named.contains(must_name.as_str()) {
             missed.push(format!("{what}: expected `{must_name}` named, got: {named:?}"));
         }
