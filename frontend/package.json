@@ -24,8 +24,7 @@
     "build:lockup": "node scripts/build-lockup.ts",
     "build:header-cut": "node scripts/build-header-cut.ts",
     "build:icons": "node scripts/build-icons.ts",
-    "check:board": "bash scripts/check-board-structure.sh",
-    "check:neutrality": "bash ../scripts/check-neutrality.sh"
+    "check:board": "bash scripts/check-board-structure.sh"
   },
   "dependencies": {
     "@codemirror/commands": "6.10.4",

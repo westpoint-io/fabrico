@@ -3,9 +3,8 @@
 # This closes the carried Phase-1 obligation: the four determinism lints are
 # CLIPPY-load-bearing, not compiler-enforced. A plain `cargo build` / `cargo test`
 # does NOT catch a float or an unordered HashMap in fabrico-core — only
-# `cargo clippy … -D warnings` does, and `determinism-gate-negative-test.sh` proves
-# that gate actually bites. So CI MUST run clippy + the negative-test or a
-# determinism-killer can merge silently.
+# `cargo clippy … -D warnings` does, with the bans in clippy.toml. So CI MUST run
+# clippy or a determinism-killer can merge silently.
 #
 # The job re-proves the full certification suite (criteria 1-5) on all three Tauri
 # target platforms at the CI proptest case count, plus two cross-platform guards.
@@ -29,8 +28,7 @@ on:
   pull_request:
   push:
     branches: [master, main]
-  # Manual full run: the classifier below always decides
-  # docs_only=false for this event, so every job and every determinism leg runs.
+  # Manual full run: every job and every determinism leg runs.
   workflow_dispatch:
 
 # LEAST PRIVILEGE, workflow-wide. With no `permissions:` block
@@ -74,92 +72,7 @@ jobs:
   # share of a month's Actions minutes (a wedged macOS leg ten times that). Each
   # `timeout-minutes` is about one and a half to two times the slowest measured duration of
   # that job. The live suite also has its own `globalTimeout` (playwright.live.config.ts),
-  # under this job's limit, so an overrun writes a report whose interrupted tests the red-set
-  # checker names.
-  # ===================================================================================
-  # DOCS-ONLY CHANGES SKIP THE HEAVY JOBS.
-  #
-  # WHY. macOS minutes are billed 10x and Windows 2x, so running every heavy job on a change
-  # that touches only markdown notes spends the Actions budget for nothing.
-  #
-  # DOCS-ONLY means the changed-path list is non-empty and every path is a markdown file
-  # at the repository root (such as README.md) or a file under `site/` (the docs site).
-  # `docs/**`, markdown under `crates/` or `frontend/`, a root `site.txt` or `sites/`, and
-  # every other non-markdown file are NOT docs. `scripts/ci-classify-change.sh` decides it.
-  #
-  # THE SECOND OUTPUT, docs_suite, says whether the `docs` job runs. It is `false` only when
-  # every changed path is root markdown and none of them is README.md. So root markdown
-  # without README.md gives docs_only=true, docs_suite=false (only the always-on jobs run);
-  # a change made of root markdown and `site/` paths with README.md or at least one path
-  # under `site/` among them gives true/true (the heavy jobs skip, the docs suite runs);
-  # anything else, and every fail-safe path, gives false/true (everything runs, the docs
-  # suite too). The classifier writes both lines in one write, so the output can't hold one
-  # without the other.
-  #
-  # README.md RUNS THE DOCS SUITE because the docs suite checks it
-  # (`frontend/e2e-docs/readme.spec.ts`). The live job reads the README's curl block, and the
-  # docs suite runs the same parse (`frontend/e2e-live/support/pageCurl.ts`), so a README-only
-  # push that breaks the command fails in the docs job, as one that breaks the first-webhook
-  # page's command under `site/` does.
-  #
-  # GATED (skipped on a docs-only change): determinism, headless-build, wasm-player,
-  # embed, golden-corpus, e2e, e2e-verdict, e2e-live, e2e-live-verdict, e2e-walk,
-  # e2e-walk-verdict and unit. ALWAYS RUN: this job, core-freeze, freeze-gate-bites, wire-op-truth,
-  # belt-end-resolver, belt-ports-truth, dev-pace-switch-absent, prover-isolation,
-  # private-residue and neutrality. Each always-on job either reads files a docs-only
-  # change can edit or costs about one minute, so gating it would save little and risk a
-  # missed red.
-  #
-  # FAIL-SAFE. The classifier decides false on every uncertain path (manual runs, any
-  # event other than push or pull_request, an empty, malformed, all-zero or missing SHA,
-  # a force push, a shallow checkout, an empty diff, any git error). Each heavy job's
-  # gate is `!cancelled() && needs.changes.outputs.docs_only != 'true'`: it skips only on
-  # the exact string `true`. If this job fails, or its classify step never runs, the
-  # output is empty, which is not `true`, so the heavy jobs run. `!cancelled()` is there
-  # because a plain `needs:` skips a job when its dependency fails; with it, a failed
-  # classifier still runs everything, while a superseded PR run can still be cancelled.
-  # The docs job's gate reads docs_suite the other way round: it skips only on the exact
-  # string `false`, so an empty output runs it too.
-  #
-  # THE RESIDUAL: if a heavy job reads a markdown file at the repository root or a file
-  # under `site/`, a docs-only push that edits that file skips that job, and the next code push re-runs
-  # every heavy job over the whole tree and surfaces the red one push late.
-  #
-  # THE PROVER RUNS FIRST, in this job, on every run. If it fails the job fails before the
-  # classifier runs, the output stays empty, and every heavy job runs.
-  # `ci_wiring_parity.rs` asserts the two run lines are adjacent and in this order.
-  #
-  # FORCE A FULL RUN: `gh workflow run ci.yml --ref <branch>`, or "Run workflow" in the
-  # Actions tab. That event always classifies as false.
-  #
-  # `fetch-depth: 0` is load-bearing: both ends of the diff must resolve, and the
-  # classifier refuses a shallow checkout. The prover builds its own throwaway history.
-  changes:
-    name: classify the change (docs-only or not)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      docs_only: ${{ steps.classify.outputs.docs_only }}
-      docs_suite: ${{ steps.classify.outputs.docs_suite }}
-    steps:
-      - name: Checkout (full history, so both ends of the diff resolve)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Docs-only classifier, proof it bites
-        run: bash scripts/prove-ci-classify-change.sh
-
-      - name: Classify the change
-        id: classify
-        env:
-          CLASSIFY_EVENT: ${{ github.event_name }}
-          CLASSIFY_PR_BASE: ${{ github.event.pull_request.base.sha }}
-          CLASSIFY_PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          CLASSIFY_PUSH_BEFORE: ${{ github.event.before }}
-          CLASSIFY_PUSH_AFTER: ${{ github.sha }}
-        run: bash scripts/ci-classify-change.sh
-
+  # under its job's limit, so an overrun writes a report before the runner is killed.
   # ===================================================================================
   # THE DECLARED-MOVES GATE.
   #
@@ -299,8 +212,6 @@ jobs:
   # here. Checkout depth is left at the default: this job resolves no ref.
   golden-corpus:
     name: golden corpus reproduces from its own generators
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -340,153 +251,6 @@ jobs:
         env:
           CORPUS_LABEL: ci
         run: bash scripts/measure-golden-corpus.sh
-
-  # ===================================================================================
-  # THE WIRE-OP TRUTH GATE (added 2026-08-19, milestone v8.0 Phase 63 plans 63-03/63-13).
-  #
-  # Asserts that no artifact in `crates`, `frontend/src`, `scripts` or `.github` still
-  # claims the wire-drawing edit op has no behaviour. It had none from Phase 35 until
-  # Phase 63 gave it a real fold; plan 63-03 corrected fifteen surviving claims to the
-  # contrary, plus four its own inventory did not have.
-  #
-  # WHY IT RUNS ON EVERY COMMIT RATHER THAN HAVING BEEN A ONE-TIME CLEANUP. A comment
-  # asserting that an op does nothing is a sentence a later engineer reasons FROM, and
-  # this repository has been bitten repeatedly by a surviving artifact letting a
-  # superseded decision be re-derived. The cleanup fixed the fifteen that existed;
-  # nothing stopped the sixteenth.
-  #
-  # The script is NOT the original single-line grep. That one could not see a claim
-  # split across two comment lines, and site 1 of the 63-03 inventory was exactly that
-  # shape and was missed by it. The committed version strips comment leaders and joins
-  # lines before matching (a two-way proximity match, window 120), self-tests its own
-  # matcher against that split shape plus a one-word negative control, exits 2 if any
-  # of its four roots is missing, and refuses to report green on a corpus below its
-  # floor.
-  #
-  # The second step proves the gate bites. It writes untracked probe files (one per
-  # claim shape, root and extension), requires the gate to exit 1 and name each one,
-  # pins the window, roots and matcher exactly, checks the scanned-file count against
-  # an independent find, and never modifies a tracked file.
-  #
-  # No toolchain and no apt: it is a filesystem walk.
-  wire-op-truth:
-    name: no artifact claims the wire op has no behaviour
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Wire-op truth gate
-        run: bash scripts/check-drawwire-truth.sh
-
-      - name: Wire-op truth gate bites
-        run: bash scripts/prove-drawwire-truth-bites.sh
-
-  # THE BELT-END RESOLVER IS ONE DEFINITION (Phase 74, LINK-11).
-  #
-  # Sits beside the wire-op truth gate because it is the same instrument aimed at a
-  # different drift: a source gate that runs on every commit, so a correction made once
-  # cannot quietly come undone.
-  #
-  # WHAT IT GUARDS. Until phase 74 the derivation of a belt end's world cell and outward
-  # side was written out TWICE, byte for byte, in two crates - one of the two commenting
-  # itself as a mirror of the other while citing a line number that had already rotted.
-  # Two copies of the rule that decides whether a dock REACHES agree on the first belt
-  # pair anybody tests and drift later. Plan 74-02 collapsed them; this gate keeps them
-  # collapsed.
-  #
-  # THE PROVER RUNS HERE TOO, NOT ONCE AT AUTHORING TIME. The gate asserts an ABSENCE,
-  # and an absence claim is worth exactly the proof that it can still fail. The prover
-  # drives THREE DIFFERENT checks red - a second definition, a reader that stops asking,
-  # and the subject disappearing entirely - and re-asserts the gate's own floors, which
-  # the gate structurally cannot see edits to. It plants and reverts inside the checkout,
-  # so it needs the git history `actions/checkout` already provides and nothing else.
-  # AMENDED 2026-10-12 (phase 84, plans 84-04 and 84-07): it now plants and reverts only in
-  # a private worktree outside the checkout, restoring from bytes kept at entry.
-  #
-  # No toolchain and no apt: both are filesystem walks over the checkout.
-  belt-end-resolver:
-    name: the belt-end resolver is one definition
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Belt-end resolver gate
-        run: bash scripts/check-belt-end-resolver.sh
-
-      - name: Belt-end resolver gate bites
-        run: bash scripts/prove-belt-end-resolver-bites.sh
-
-  # NO ARTEFACT STILL CLAIMS A BELT HAS NO PORTS (Phase 74, LINK-12).
-  #
-  # The third of the three truth gates, and the closest twin of `wire-op-truth` above:
-  # two claims that were true from the beginning of the project until plan 74-02 became
-  # false in one commit, and eight measured artefacts carried them.
-  #
-  # WHY IT IS NOT A BARE PROXIMITY GREP, recorded here because the shape looks like an
-  # over-complication until you have the measurement. The precedent's blunt form was tried
-  # first and named twenty-eight sites, of which three were the dead claim and twenty-five
-  # were correct prose written BY this phase recording what used to be true. So the matcher
-  # asks for a PRESENT-TENSE assertion about the product, and a sentence that scopes itself
-  # to the pre-thaw past is a record and is exempt. The prover asserts that exemption has
-  # not grown into a blanket, which is the one edit that could make this gate stop biting
-  # with every one of its own checks still passing.
-  #
-  # THE CORPUS INCLUDES THE ROADMAP, under ruling R-05, and probe D of the prover is what
-  # makes that membership real rather than declared.
-  #
-  # No toolchain and no apt: both are filesystem walks over the checkout.
-  belt-ports-truth:
-    name: no artefact claims a belt has no ports
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Belt-ports truth gate
-        run: bash scripts/check-belt-ports-truth.sh
-
-      - name: Belt-ports truth gate bites
-        run: bash scripts/prove-belt-ports-truth-bites.sh
-
-  # The development pace switch is absent from the TREE (Phase 68, BELT-05,
-  # `68-CONTEXT.md` D-68-13 as amended by D-68-18).
-  #
-  # THIS JOB EXISTS BECAUSE ITS PREDECESSOR COULD NOT. Until plan 68-07 the absence
-  # proof was the earlier built-artifact check, three checks over BUILT ARTIFACTS
-  # needing a release `fabrico-app` binary and a production frontend bundle - and this
-  # file recorded, in its own words, that the script "is NOT invoked by any job in this
-  # file". Cost was the reason. The successor is a fixed-string grep over
-  # `git ls-files`, with no build of any kind, so it costs a checkout and runs on every
-  # push. That conversion from a manual instrument into a running gate is the strongest
-  # form BELT-05's "the guarantee survives whatever replaces it" can take, and it is the
-  # one thing the removal made strictly better.
-  #
-  # No toolchain, no cargo cache, no Node. If this job ever grows a build step, that is
-  # a sign the assertion drifted back toward artifacts and should be questioned.
-  dev-pace-switch-absent:
-    name: the development pace switch is absent from the tree
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Dev pace switch absence gate
-        run: bash scripts/check-dev-pace-switch-absent.sh
-
-      # The gate above is an ABSENCE claim, and an absence claim is only worth the
-      # proof that it can still fail. A grep whose pattern has rotted matches nothing
-      # for the wrong reason and is indistinguishable, from the outside, from a tree
-      # that is genuinely clean. Proving non-vacuity once at authoring time does not
-      # survive the next edit to either the gate or the thing it looks for: run it on
-      # every commit, not once. This one runs in a private worktree (plan 84-06).
-      - name: Dev pace switch absence gate, non-vacuity proof
-        run: bash scripts/prove-dev-pace-switch-absent-non-vacuous.sh
 
   # ===================================================================================
   # EVERY PROVER KEEPS ITS HANDS OFF TRACKED FILES.
@@ -535,10 +299,6 @@ jobs:
   # must pass, and a scan set below its floor, a missing positive control and a stale
   # exclusion must each exit 2. Every probe lives in a throwaway repository under
   # `mktemp -d`; nothing in the checkout is written.
-  #
-  # ALWAYS RUN: a docs-only change can add residue to a root markdown file, which is the
-  # most likely place for it, and the job is two bash scripts, no toolchain, about a
-  # minute.
   private-residue:
     name: no tracked file carries private residue
     runs-on: ubuntu-24.04
@@ -553,42 +313,8 @@ jobs:
       - name: Private-residue gate bites
         run: bash scripts/prove-no-private-residue-bites.sh
 
-  # THE ART BOARD COPY STAYS NEUTRAL, MARKDOWN HALF (moved here 2026-09-30 from the
-  # `unit` job, step and invocation unchanged).
-  #
-  # The art board's two shell gates (phase 57 review WR-01). Until this step NOTHING
-  # invoked either one: `grep -rn "check-neutrality\|check-board-structure" .github/
-  # Makefile* justfile*` returned nothing, `check:board` existed as an npm script no job
-  # called, and `check-neutrality.sh` had no npm script at all. Both files open by
-  # presenting themselves as blocking gates ("MUTATION-PROVEN", "the two non-tradeable
-  # guards"), and docs/style-bible.md's section 8a lists `scripts/check-neutrality.sh` as
-  # a locked output that "stays green by rewording copy, never by shortening its token
-  # list" - which nothing kept green. This is the same charge the scripts level at a bare
-  # `grep | wc -l`: a decorative gate.
-  #
-  # RUN FROM THE REPOSITORY ROOT, deliberately, and with no path argument. Both scripts
-  # resolve their own corpus from `${BASH_SOURCE[0]}` and refuse argv input, so the
-  # working directory cannot make either one scan a smaller set.
-  #
-  # WHY ITS OWN JOB (2026-09-30): it once read a markdown design note that a docs-only
-  # change could edit, so it had to run on docs-only changes, and `unit` no longer does.
-  # It now reads only `docs/style-bible.md`, and stays always-on because it is pure bash,
-  # no toolchain, no Node: about one minute.
-  neutrality:
-    name: the art board copy stays neutral (markdown half)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Neutrality gate (markdown half)
-        run: bash scripts/check-neutrality.sh
-
   determinism:
     name: determinism gate
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     # WHICH LEGS RUN ON WHICH EVENT (a spend control). A leg is one (os, leg) pair of the
     # matrix below.
     #   pull_request: one leg, (ubuntu-24.04, main).
@@ -619,9 +345,7 @@ jobs:
     # the PR.
     #
     # REQUIRED CHECKS. If branch protection is enabled, never require the macOS or Windows
-    # legs: a required check must not wait on a leg that never runs on a PR. Note also
-    # that a matrix job skipped by `if:` (a docs-only change) does not expand its legs, so
-    # per-leg check names do not appear on such a commit at all.
+    # legs: a required check must not wait on a leg that never runs on a PR.
     strategy:
       fail-fast: false
       matrix:
@@ -655,9 +379,8 @@ jobs:
       # resolve their linkage through `system-deps`/`pkg-config` at build-script time,
       # so they need the .pc files that only the GTK/WebKit *-dev packages install.
       # A stock GitHub `ubuntu-latest` image does not ship them. Without this step the
-      # Linux leg cannot compile the workspace at all, so `Clippy`, the negative-test
-      # (which runs the same clippy line itself) and the certification suite would all
-      # die in the build-script phase rather than on the predicate they exist to test.
+      # Linux leg cannot compile the workspace at all, so `Clippy` and the certification
+      # suite would both die in the build-script phase rather than on the predicate they exist to test.
       #
       # WHY IT IS GATED ON `runner.os`, NOT ON `matrix.os`. The matrix is expressed as
       # `os: [ubuntu-latest, macos-latest, windows-latest]` feeding `runs-on:
@@ -739,49 +462,6 @@ jobs:
           rustup show
           rustup component add clippy || true
 
-      # THE PIN CHECK'S NON-VACUITY PROOF, LINUX LEG ONLY (added by the phase-70 review
-      # fix, WR-01). Until this step the prover was run ONCE, by hand, at authoring time -
-      # the posture the `dev-pace-switch-absent` job above rejects in its own words
-      # ("Proving non-vacuity once at authoring time does not survive the next edit to
-      # either the gate or the thing it looks for ... run it on every commit, not once").
-      # The gate it proves is a version COMPARISON, which is the easiest shape in this
-      # repository to make vacuous without anyone noticing.
-      #
-      # WHY HERE AND NOT LATER. It refuses a dirty tree - any modified tracked file
-      # anywhere - so it wants the state a fresh `actions/checkout` leaves. `rustup show`
-      # above touches no tracked file; `cargo build` below can rewrite Cargo.lock, which
-      # would make this exit 2 for a reason that has nothing to do with the gate. It is
-      # also placed clear of the two pin-check steps further down so it cannot come between
-      # one of them and the clippy invocation it qualifies.
-      #
-      # WHY LINUX ONLY. Its properties are properties of the gate's shell logic, not of the
-      # host OS, so proving them once per commit is the whole value; running the same probe
-      # three times costs three toolchain installs (below) for no additional assertion.
-      #
-      # STATED PLAINLY, NOT GLOSSED: on a rustup runner steps 4/5 of the prover edit the
-      # pinned channel to one minor below the real pin, and the gate's own
-      # `cargo --version` probe then resolves THROUGH that edited pin, so rustup will
-      # download and install that channel on demand before the edit is reverted. That is a
-      # real minute or two of runtime on a cold cache. It is the cost of proving the gate
-      # bites on the pin file itself rather than only on the `RUSTUP_TOOLCHAIN` route, and
-      # it is paid deliberately.
-      #
-      # AMENDED 2026-09-30: the paragraph above named the defect without
-      # seeing it. Because rustup installs and then RUNS the edited channel, the gate saw a
-      # matched pair and exited 0, the prover reported NOT PROVEN, and this step was red on
-      # the observed ubuntu runs.
-      # The prover's pin-edit step now holds the running toolchain at the real pin with
-      # RUSTUP_TOOLCHAIN whenever rustup is present, so it no longer
-      # downloads anything; step 2 (the RUSTUP_TOOLCHAIN route) still makes the gate's
-      # clippy probe download the minted channel once. Reproduced and proved locally with
-      # rustup 1.29.1 in a scratch RUSTUP_HOME; not yet observed on a GitHub runner.
-      # AMENDED 2026-10-12 (phase 84, plan 84-07): since plan 84-06 the prover runs in a
-      # private worktree outside the checkout and no longer refuses a dirty tree; the pin
-      # edit and its revert happen there. The step placement above is kept.
-      - name: Toolchain pin check, non-vacuity proof
-        if: runner.os == 'Linux'
-        run: bash scripts/prove-toolchain-pin-bites.sh
-
       # Both Windows legs share this job's one cache entry: the key is the job id, the
       # runner's OS and architecture and a hash of the toolchain and lockfiles, and the leg is
       # not part of it. Both restore it, and only the `main` leg saves it, so the two never
@@ -818,79 +498,9 @@ jobs:
         if: matrix.leg == 'main'
         run: cargo build -p fabrico-core --all-targets --all-features
 
-      # Gate 1/4 — determinism lints at deny level. THIS is the load-bearing
-      # check the carried Phase-1 obligation requires (T-3-CI).
-      #
-      # Already carries `--all-features`, so it does not share the certification
-      # step's blind spot. It carries no `-p`, which means it lints every workspace
-      # member including the Tauri shell - that is why the Linux apt step above is a
-      # precondition for this line, not a nicety. `scripts/determinism-gate-negative-test.sh`
-      # in the next step runs this exact command itself, so it has the same precondition.
-      # `--no-fail-fast` does not exist for clippy (there is no test harness to abort).
-      # Gate 1/4's PRECONDITION - refuse a verdict from the wrong compiler (THAW-10,
-      # plan 70-02). The clippy line below is the milestone's load-bearing determinism
-      # assertion, and that verdict is only worth what the compiler behind it is worth:
-      # a different release has a different lint set and a different idea of what
-      # `-D warnings` denies.
-      #
-      # WHAT THIS STEP CAN ACTUALLY ASSERT ON THIS RUNNER. Stated because an overstated
-      # gate comment is itself a defect - this file's own rule, at the top. The previous
-      # version of this paragraph claimed the step "exits 1 NAMING BOTH versions" when the
-      # active toolchain is not the pinned one. ON A RUSTUP RUNNER THAT CONDITION CANNOT
-      # ARISE, so the claim was false. `cargo` here is a rustup PROXY: it walks up from the
-      # cwd, reads `rust-toolchain.toml` itself, and selects exactly what that file names,
-      # which the `Install pinned toolchain` step above has already installed. So
-      # `cargo --version` reports the pin BY CONSTRUCTION and the version comparison
-      # compares a value against itself. That was CR-03 of this phase's code review.
-      #
-      # What the step DOES assert here, all of it reachable:
-      #   - the pin file exists and its channel parses. Neither is exit 0: an assertion
-      #     that could not be made reports 2, never green.
-      #   - THE PINNED CHANNEL IS ACTUALLY INSTALLED, read from `rustup toolchain list` -
-      #     the set of toolchains on the machine, which the pin file does not steer. This
-      #     is the clause that can exit 1 on THIS runner, and it fires if the install step
-      #     above is ever dropped or reordered below this one, if the runner cannot reach
-      #     the toolchain server, or if the pin is moved to a channel that does not exist.
-      #   - clippy's own `0.1.<minor>` is on the pinned channel, as corroboration.
-      # The version comparison it also makes is real on a machine with NO rustup (where the
-      # pin file is inert and whatever cargo is on PATH runs) and on the `RUSTUP_TOOLCHAIN`
-      # override route. Both of those are now MEASURED on every commit rather than asserted
-      # in prose, by the `Toolchain pin check, non-vacuity proof` step earlier in this job.
-      #
-      # ITS POSITION IS THE REQUIREMENT, NOT ITS PRESENCE. THAW-10 says immediately before
-      # EVERY clippy invocation, and this job has TWO: the `cargo clippy` line below, and
-      # the one `scripts/determinism-gate-negative-test.sh` runs itself (its own `CLIPPY`
-      # array - the Gate 2/4 comment below records that too). Each gets its own copy of
-      # this step immediately before it; the second is not redundant, because the negative
-      # test takes a compiler verdict of its own, on a mutated tree, minutes after this
-      # one. `crates/fabrico-host/tests/ci_wiring_parity.rs` asserts the ordinal adjacency
-      # for BOTH sites rather than mere presence, because a presence-only assertion would
-      # pass with this step sitting at the bottom of the job doing nothing - and because
-      # its earlier form, a grep over `run:` lines, was structurally unable to see the
-      # clippy invocation that lives inside a script (WR-02 of the same review).
-      #
-      # Both pin-check steps carry no condition, so they run on every leg, the Windows
-      # all-features leg included: that leg's certification verdict comes from the pinned
-      # compiler too.
-      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
-        run: bash scripts/check-toolchain-pin.sh
-
       - name: Clippy (determinism lints, -D warnings)
         if: matrix.leg == 'main'
         run: cargo clippy --all-targets --all-features -- -D warnings
-
-      # Gate 2/4 — prove the clippy gate actually BITES on a determinism-killer
-      # (injects an f64 + HashMap probe, asserts the build fails, then recovers).
-      #
-      # THE SCRIPT RUNS CLIPPY ITSELF (its own `CLIPPY` array), which is why the pin check
-      # is repeated immediately below rather than relied on from before the `Clippy` step
-      # above: THAW-10's requirement is per-invocation, and this is the second invocation.
-      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
-        run: bash scripts/check-toolchain-pin.sh
-
-      - name: Determinism negative-test (gate bites)
-        if: matrix.leg == 'main'
-        run: bash scripts/determinism-gate-negative-test.sh
 
       # Gate 3/4 — pointer-width serialized-field forward guard (cross-platform
       # postcard width-trap, T-3-WIDTH).
@@ -959,15 +569,7 @@ jobs:
       # capability - so the gap this paragraph used to warn about (a run proving a build
       # the shipped app must never be) no longer exists. The default build is still
       # covered on its own by the SHIPPED-default step below, by the `Build` step above
-      # and by the clippy/negative-test gates.
-      #
-      # THE ABSENCE PROOF IS NOW A RUNNING GATE, WHICH IS THE ONE THING THIS REMOVAL
-      # MADE STRICTLY BETTER. The earlier built-artifact check needed a
-      # release binary and a production frontend bundle, and this file recorded in its
-      # own words that NO JOB HERE INVOKED IT. Its successor,
-      # `scripts/check-dev-pace-switch-absent.sh`, is a tree grep over tracked files with
-      # no build at all, so it runs on every push in the `dev-pace-switch-absent` job
-      # below.
+      # and by the clippy gate.
       #
       # WHY `--no-fail-fast`. Without it cargo stops at the first test binary that
       # exits non-zero, so a red run names one crate and leaves the other 70-plus
@@ -1058,17 +660,13 @@ jobs:
   # `--all-features` resolves features for that package alone.
   #
   # Clippy runs on the same two configurations, because a dead import under the off
-  # configuration is only a warning to `cargo check`. Each clippy step has its own pin check
-  # immediately before it, as the determinism job's do. `ci_wiring_parity.rs` asserts these
-  # four lines, and that they stay in this job.
+  # configuration is only a warning to `cargo check`.
   #
   # No apt step: neither package reaches the Tauri shell. The vendored QuickJS needs the C
   # compiler the runner image already has. Linux only: the determinism job compiles each
   # platform, and which features are on does not depend on the platform.
   headless-build:
     name: the engine and the core build with redb off
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -1089,14 +687,8 @@ jobs:
       - name: Check the core with its default features off
         run: cargo check -p fabrico-core --no-default-features --locked
 
-      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
-        run: bash scripts/check-toolchain-pin.sh
-
       - name: Clippy on the engine, redb off
         run: cargo clippy -p fabrico-engine --locked -- -D warnings
-
-      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
-        run: bash scripts/check-toolchain-pin.sh
 
       - name: Clippy on the core, redb off
         run: cargo clippy -p fabrico-core --no-default-features --locked -- -D warnings
@@ -1118,8 +710,7 @@ jobs:
   #
   # THE WASM CLIPPY STEP. The workspace clippy line compiles for the host only, so it never reads code
   # under a wasm32 `cfg` or a build script's wasm32 branch. This step lints the player and the corpus
-  # harness for wasm32, with the toolchain pin check directly before it as on every clippy step. It
-  # compiles the vendored QuickJS outside scripts/build-wasm.sh, which is why CC and AR for wasm32 are
+  # harness for wasm32. It compiles the vendored QuickJS outside scripts/build-wasm.sh, which is why CC and AR for wasm32 are
   # in the job's `env`.
   #
   # THE BROWSER, WITHOUT APT. The Playwright step installs Chromium with no `--with-deps`. The
@@ -1141,8 +732,6 @@ jobs:
   # 29, the fence report and its prover 8, and the toolchain pin check 1.
   wasm-player:
     name: the wasm player builds on the pinned compiler and passes its checks
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
@@ -1222,9 +811,6 @@ jobs:
       - name: Watch the fence report fail
         run: bash scripts/prove-fence-report-bites.sh
 
-      - name: Toolchain pin check (refuse a verdict from the wrong compiler)
-        run: bash scripts/check-toolchain-pin.sh
-
       - name: Clippy on the player and the corpus harness, for wasm32
         run: cargo clippy -p fabrico-player -p fabrico-wasm-corpus --target wasm32-unknown-unknown --locked -- -D warnings
 
@@ -1265,8 +851,7 @@ jobs:
   # more boards.
   embed:
     name: the read-only board embed runs from disk in a browser
-    needs: [changes, wasm-player]
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    needs: wasm-player
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -1325,9 +910,8 @@ jobs:
   # built site leaks no source map or private path).
   #
   # IT BUILDS THE PLAYER ITSELF. build-site.sh builds the wasm player and the embed bundle from this
-  # commit before the site, so the boards on the pages come from the same commit as the pages. It
-  # can't take wasm-player's artifact, because a docs-only push skips wasm-player and still runs
-  # this job. That is why it carries the same toolchain, clang and llvm, and wasm-opt steps as
+  # commit before the site, so the boards on the pages come from the same commit as the pages, and
+  # the job doesn't wait on wasm-player. That is why it carries the same toolchain, clang and llvm, and wasm-opt steps as
   # wasm-player, and why it calls build-wasm.sh and build-embed.sh only through build-site.sh.
   #
   # THE README'S HERO. build-site.sh also captures the README's animated hero from the demo board
@@ -1340,9 +924,6 @@ jobs:
   # again after its first run on GitHub with the hero in.
   #
   # NODE 24. astro 7.4.4 refuses Node 22 below 22.23.4, and the site's package.json asks for 24.
-  #
-  # GATE. It runs unless the classifier says the change is root markdown only: the gate skips only
-  # on the exact string `false`, so a failed classifier, whose output is empty, runs it.
   #
   # TIME LIMIT. The first GitHub run of this job took 5 min 51 s on a cold cargo cache (the facts
   # step compiled fabrico-host for 74 s and the site build took 2 min 10 s). With the reference,
@@ -1357,8 +938,6 @@ jobs:
   # to 42 (review 101 WR-06). Measure again when the suite grows a lot.
   docs:
     name: the docs site builds and passes its checks
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_suite != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 42
     env:
@@ -1575,8 +1154,6 @@ jobs:
   # doubled is under 20, and setup comes on top.
   e2e:
     name: frontend e2e (Playwright + axe)
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1665,8 +1242,6 @@ jobs:
   # and cannot be expressed in this YAML.
   e2e-live:
     name: live e2e gate (real headless host)
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     # One leg per shard. A red leg must not cancel the others, so each shard reports its own
     # tests and keeps its own report.
     strategy:
@@ -1802,8 +1377,6 @@ jobs:
   # render-clock steps, which added about 23 s per run on the local GPU proxy.
   e2e-walk:
     name: lesson walk (real headless host)
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     strategy:
@@ -1861,8 +1434,7 @@ jobs:
   # that reads only what the first one wrote. No capture is compared with a stored image.
   #
   # WHY ITS OWN JOB. The live suite's job already runs close to its limit, so the capture set gets a
-  # runner and a time limit of its own. It reads `frontend/` and `crates/` and never a markdown file
-  # at the repository root, so it takes the same docs-only gate as `e2e-walk`.
+  # runner and a time limit of its own.
   #
   # THE LIMIT. The slowest recorded run is CI run 45022991094 on 1df4880, on a runner 1.6 to 1.9
   # times slower than run 44867588480's (18.5 job minutes). Its capture test for ratio 2 with
@@ -1883,8 +1455,6 @@ jobs:
   # every run that isn't cancelled. A red run also uploads test-results/ with its traces.
   e2e-capture:
     name: board capture set (real headless host)
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     steps:
@@ -2003,18 +1573,12 @@ jobs:
   # AFTER the `check:board` repair that day; before it, the last step exited 1 on two
   # separate assertions and had done since 2026-08-02, which is why this job would
   # have gone red on its first ever run.
-  # AMENDED 2026-09-30: four of those five run-steps remain in this
-  # job. The fifth, `bash scripts/check-neutrality.sh`, moved to the always-on
-  # `neutrality` job, because this job is now skipped on docs-only changes and that gate
-  # then read a markdown design note.
   #
   # REQUIRED CHECK: mark `unit` a REQUIRED status check in branch protection for
-  # `master` (alongside `determinism` and `e2e-live-verdict`). Branch protection is a
+  # `master` (alongside `determinism` and the `e2e-live` legs). Branch protection is a
   # repository setting and cannot be expressed in this YAML.
   unit:
     name: frontend unit (vitest + tsc)
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -2040,20 +1604,8 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit
 
-      # The art board's two shell gates (phase 57 review WR-01). Until this step
-      # NOTHING invoked either one: `grep -rn "check-neutrality\|check-board-structure"
-      # .github/ Makefile* justfile*` returned nothing, `check:board` existed as an npm
-      # script no job called, and `check-neutrality.sh` had no npm script at all. Both
-      # files open by presenting themselves as blocking gates ("MUTATION-PROVEN", "the
-      # two non-tradeable guards"), and docs/style-bible.md's section 8a lists
-      # `scripts/check-neutrality.sh` as a locked output that "stays green by rewording
-      # copy, never by shortening its token list" - which nothing kept green. This is
-      # the same charge the scripts level at a bare `grep | wc -l`: a decorative gate.
-      #
-      # AMENDED 2026-09-30: the neutrality half of the pair moved out
-      # of this job into the always-on `neutrality` job, because it then read a markdown
-      # design note and this job is skipped on docs-only changes. Only the
-      # structural gate below remains here.
+      # The art board's structural gate (phase 57 review WR-01). Until this step nothing in
+      # CI invoked it; `check:board` existed as an npm script no job called.
       # Runs `npm run build` internally (check 1 asserts the board is structurally
       # absent from dist/), which is why it sits after the typecheck rather than before:
       # a type error is a faster and clearer failure than a bundle grep over a tree that
