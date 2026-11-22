@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CELL, nubAnchor } from '../../../shared/geometry';
-import { stripComments } from '../../gates/walkSpecSource';
+import { stripComments } from '../../gates/stripComments';
 import { doorstepCell, dropHitRadiusWorld, wireNubHitRadiusWorld } from '../../protocol/ports';
 import * as hint from './HintPointer';
 import { doorstepSquareBox, dropDiscBox } from './HintPointer';

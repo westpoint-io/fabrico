@@ -30,7 +30,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { stripComments } from './walkSpecSource';
+import { stripComments } from './stripComments';
 
 const FRONTEND = fileURLToPath(new URL('../../', import.meta.url));
 

@@ -30,7 +30,7 @@ import { ADD_OUTPUT_WORDS } from '../tutorial/lessons/twoOutputs.ts';
 import { MAX_INSTRUCTION_CHARS, MAX_NOTE_CHARS, REAL_TABLES, phrasePlain } from '../tutorial/phrase.ts';
 import { PORT_ZERO_WORDS, acceptRouteUrl } from '../tutorial/request.ts';
 import type { Lesson, LessonId, Stage } from '../tutorial/types.ts';
-import { stripComments } from './walkSpecSource';
+import { stripComments } from './stripComments';
 
 const LESSONS_DIR = new URL('../tutorial/lessons/', import.meta.url);
 const E2E_LIVE_DIR = new URL('../../e2e-live/', import.meta.url);
