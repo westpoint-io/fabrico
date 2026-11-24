@@ -510,7 +510,7 @@ fn no_variant_produced_from_a_load_leaks_the_path() {
 }
 
 #[test]
-fn the_clause_the_live_spec_pins_is_actually_what_a_malformed_load_says() {
+fn the_refusal_card_clause_is_what_a_malformed_load_says() {
     // The refusal card shows this host sentence for an undecodable file, and the
     // clause `postcard decode failed` is the part of it chosen on ruling R-16 route (a):
     // a clause from a span this plan's reword does not touch. No live spec reads the
