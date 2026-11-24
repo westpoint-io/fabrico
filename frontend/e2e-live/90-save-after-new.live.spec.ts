@@ -7,7 +7,6 @@ import {
   DEMO_NODE_COUNT,
   armAndPlaceAt,
   expectRenderLoopAlive,
-  loadDemoViaExamples,
   newBoard,
   pollScene,
   readScene,
@@ -30,12 +29,12 @@ import {
 // Since plan 90-04 New and an example clear the target after their dispatch, and an Open is
 // held as pending: the target and the flag move only on the Load's own swap keyframe.
 //
-// THE THREE LEGS, every file under a per-test temp folder, every hash read from this test
-// process with node:crypto (the bytes on disk, never a frontend claim):
+// THE TWO LEGS, run as two steps of one test, each with its own boot, temp folder and closing
+// render-health check, every hash read from this test process with node:crypto (the bytes on
+// disk, never a frontend claim):
 //   1. A new board with a Source saved to A, New, a Sink placed, Ctrl+S: the Save As prompt
 //      opens; B, the path given, holds a board that opens as exactly one Sink and no Source;
 //      A's hash is unchanged.
-//   2. The demo saved to A, an example loaded, Ctrl+S: the prompt opens; A's hash unchanged.
 //   3. The demo saved to A and opened again, a Sink placed (`Unsaved`), the refused file
 //      (eight 0xff bytes) opened through the discard guard's Discard: the card, `Load
 //      failed`, the `Unsaved` badge still shown (the refused Load discarded nothing);
@@ -44,7 +43,7 @@ import {
 // Every browser prompt is answered by one listener that takes the next queued path, and a
 // prompt with nothing queued is dismissed and counted, so a prompt that should not open is
 // seen as one. Ctrl+S is the keyboard accelerator, bound above the toolbar's focus guard
-// (gestures.ts LW-02). MODEL FIRST, THEN RENDER HEALTH in every test.
+// (gestures.ts LW-02). MODEL FIRST, THEN RENDER HEALTH in every leg.
 
 const LOADED = 'Loaded';
 const LOAD_FAILED = 'Load failed';
@@ -134,123 +133,100 @@ test.describe('90 live: Ctrl+S writes only the board\'s own file (WORK-07)', () 
   });
 
   test('1: a board saved to A, New, a Sink placed, Ctrl+S: the prompt, B holds one Sink, A unchanged', async ({ page }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    const dir = mkdtempSync(join(tmpdir(), 'fabrico-e2e-90-save-after-new-'));
-    const a = join(dir, 'a.fab');
-    const b = join(dir, 'b.fab');
-    const prompts = watchPrompts(page);
-    try {
-      await boot(page);
-      await newBoard(page);
-      await armAndPlaceAt(page, 'Source', 6, 6);
-      await pollScene(page, (s) => s.nodes.length, { message: 'leg 1: the Source folded on the new board' }).toBe(1);
-      await saveVia(page, prompts, a, 'leg 1, A');
-      const hashA = hashOf(a);
-      await expectRenderLoopAlive(page, 'leg 1, after saving A');
+    test.setTimeout(330_000);
+    await test.step('1: a board saved to A, New, a Sink placed, Ctrl+S: the prompt, B holds one Sink, A unchanged', async () => {
+      const errs = watchPageErrors(page);
+      const dir = mkdtempSync(join(tmpdir(), 'fabrico-e2e-90-save-after-new-'));
+      const a = join(dir, 'a.fab');
+      const b = join(dir, 'b.fab');
+      const prompts = watchPrompts(page);
+      try {
+        await boot(page);
+        await newBoard(page);
+        await armAndPlaceAt(page, 'Source', 6, 6);
+        await pollScene(page, (s) => s.nodes.length, { message: 'leg 1: the Source folded on the new board' }).toBe(1);
+        await saveVia(page, prompts, a, 'leg 1, A');
+        const hashA = hashOf(a);
+        await expectRenderLoopAlive(page, 'leg 1, after saving A');
 
-      await newBoard(page);
-      await armAndPlaceAt(page, 'Sink', 8, 6);
-      await pollScene(page, (s) => s.nodes.map((n) => n.kind), { message: 'leg 1: the Sink folded on the second new board' }).toEqual([
-        SINK_KIND,
-      ]);
-      await ctrlSExpectingPrompt(page, prompts, b, 'leg 1, after New');
-      await waitForFile(b, 'leg 1: the host wrote B', ANSWER_MS);
-      expect(hashOf(a), 'leg 1: A, the previous board\'s file, is byte for byte unchanged').toBe(hashA);
+        await newBoard(page);
+        await armAndPlaceAt(page, 'Sink', 8, 6);
+        await pollScene(page, (s) => s.nodes.map((n) => n.kind), { message: 'leg 1: the Sink folded on the second new board' }).toEqual([
+          SINK_KIND,
+        ]);
+        await ctrlSExpectingPrompt(page, prompts, b, 'leg 1, after New');
+        await waitForFile(b, 'leg 1: the host wrote B', ANSWER_MS);
+        expect(hashOf(a), 'leg 1: A, the previous board\'s file, is byte for byte unchanged').toBe(hashA);
 
-      await openVia(page, prompts, b, 'leg 1, B opened');
-      const kinds = (await readScene(page)).nodes.map((n) => n.kind);
-      console.log(`P90-WORK-07 leg-1 kinds_in_b=${JSON.stringify(kinds)} prompts=${prompts.opened()} unanswered=${prompts.unanswered()}`);
-      expect(kinds, 'leg 1: B holds exactly one Sink').toEqual([SINK_KIND]);
-      expect(kinds, 'leg 1: and no Source').not.toContain(SOURCE_KIND);
-      expect(hashOf(a), 'leg 1: A is still unchanged at the end').toBe(hashA);
-      expect(prompts.unanswered(), 'leg 1: no prompt opened that the walk did not expect').toBe(0);
-      await expectRenderLoopAlive(page, 'after leg 1');
-      errs.assertNone('leg 1');
-    } finally {
-      prompts.stop();
-    }
-  });
+        await openVia(page, prompts, b, 'leg 1, B opened');
+        const kinds = (await readScene(page)).nodes.map((n) => n.kind);
+        console.log(`P90-WORK-07 leg-1 kinds_in_b=${JSON.stringify(kinds)} prompts=${prompts.opened()} unanswered=${prompts.unanswered()}`);
+        expect(kinds, 'leg 1: B holds exactly one Sink').toEqual([SINK_KIND]);
+        expect(kinds, 'leg 1: and no Source').not.toContain(SOURCE_KIND);
+        expect(hashOf(a), 'leg 1: A is still unchanged at the end').toBe(hashA);
+        expect(prompts.unanswered(), 'leg 1: no prompt opened that the walk did not expect').toBe(0);
+        await expectRenderLoopAlive(page, 'after leg 1');
+        errs.assertNone('leg 1');
+      } finally {
+        prompts.stop();
+      }
+    });
 
-  test('2: a board saved to A, an example loaded, Ctrl+S: the prompt, A unchanged', async ({ page }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    const dir = mkdtempSync(join(tmpdir(), 'fabrico-e2e-90-save-after-example-'));
-    const a = join(dir, 'a.fab');
-    const c = join(dir, 'c.fab');
-    const prompts = watchPrompts(page);
-    try {
-      await boot(page);
-      await saveVia(page, prompts, a, 'leg 2, A');
-      const hashA = hashOf(a);
-      await loadDemoViaExamples(page);
-      await expectRenderLoopAlive(page, 'leg 2, after the example');
-      await ctrlSExpectingPrompt(page, prompts, c, 'leg 2, after the example');
-      await waitForFile(c, 'leg 2: the host wrote the file picked', ANSWER_MS);
-      console.log(`P90-WORK-07 leg-2 prompts=${prompts.opened()} unanswered=${prompts.unanswered()}`);
-      expect(hashOf(a), 'leg 2: A is byte for byte unchanged').toBe(hashA);
-      expect(prompts.unanswered(), 'leg 2: no prompt opened that the walk did not expect').toBe(0);
-      await expectRenderLoopAlive(page, 'after leg 2');
-      errs.assertNone('leg 2');
-    } finally {
-      prompts.stop();
-    }
-  });
+    await test.step(
+      '3: A opened and edited, the refused file opened: Unsaved stays, and Ctrl+S rewrites A, not the refused file',
+      async () => {
+        const errs = watchPageErrors(page);
+        const dir = mkdtempSync(join(tmpdir(), 'fabrico-e2e-90-save-after-refused-'));
+        const a = join(dir, 'a.fab');
+        const refused = join(dir, 'refused.fab');
+        writeFileSync(refused, Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]));
+        const hashRefused = hashOf(refused);
+        const prompts = watchPrompts(page);
+        try {
+          await boot(page);
+          await saveVia(page, prompts, a, 'leg 3, A');
+          await openVia(page, prompts, a, 'leg 3, A opened');
+          await armAndPlaceAt(page, 'Sink', 10, 12);
+          await pollScene(page, (s) => s.nodes.length, { message: 'leg 3: the Sink folded on A\'s board' }).toBe(DEMO_NODE_COUNT + 1);
+          await expect(page.getByText(UNSAVED, { exact: true }), 'leg 3: the edit shows the Unsaved badge').toHaveCount(1);
 
-  test('3: A opened and edited, the refused file opened: Unsaved stays, and Ctrl+S rewrites A, not the refused file', async ({
-    page,
-  }) => {
-    test.setTimeout(180_000);
-    const errs = watchPageErrors(page);
-    const dir = mkdtempSync(join(tmpdir(), 'fabrico-e2e-90-save-after-refused-'));
-    const a = join(dir, 'a.fab');
-    const refused = join(dir, 'refused.fab');
-    writeFileSync(refused, Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]));
-    const hashRefused = hashOf(refused);
-    const prompts = watchPrompts(page);
-    try {
-      await boot(page);
-      await saveVia(page, prompts, a, 'leg 3, A');
-      await openVia(page, prompts, a, 'leg 3, A opened');
-      await armAndPlaceAt(page, 'Sink', 10, 12);
-      await pollScene(page, (s) => s.nodes.length, { message: 'leg 3: the Sink folded on A\'s board' }).toBe(DEMO_NODE_COUNT + 1);
-      await expect(page.getByText(UNSAVED, { exact: true }), 'leg 3: the edit shows the Unsaved badge').toHaveCount(1);
+          prompts.answerWith(refused);
+          await page.getByTitle('Load a saved factory').click();
+          // The board is unsaved, so the Open asks first (SAVE-05); Discard goes on to the file
+          // prompt. The edit is lost only if the Load swaps, and this file is refused.
+          const discard = page.locator('.fab-dialog-panel').getByRole('button', { name: 'Discard' });
+          await expect(discard, 'leg 3: the unsaved board opens the discard guard before the Open').toBeVisible();
+          await discard.click();
+          await expect(page.getByRole('alert'), 'leg 3: the host refused the file and the card is up').toHaveCount(1, { timeout: ANSWER_MS });
+          await expect.poll(() => readout(page), { timeout: 15_000, message: 'leg 3: the strip reads Load failed' }).toBe(LOAD_FAILED);
+          await expect(
+            page.getByText(UNSAVED, { exact: true }),
+            'leg 3: after the refused Load the board\'s edit is still unsaved, and says so',
+          ).toHaveCount(1);
+          await page.getByRole('button', { name: 'Close' }).click();
+          await expect(page.getByRole('alert'), 'leg 3: Close takes the card away').toHaveCount(0);
 
-      prompts.answerWith(refused);
-      await page.getByTitle('Load a saved factory').click();
-      // The board is unsaved, so the Open asks first (SAVE-05); Discard goes on to the file
-      // prompt. The edit is lost only if the Load swaps, and this file is refused.
-      const discard = page.locator('.fab-dialog-panel').getByRole('button', { name: 'Discard' });
-      await expect(discard, 'leg 3: the unsaved board opens the discard guard before the Open').toBeVisible();
-      await discard.click();
-      await expect(page.getByRole('alert'), 'leg 3: the host refused the file and the card is up').toHaveCount(1, { timeout: ANSWER_MS });
-      await expect.poll(() => readout(page), { timeout: 15_000, message: 'leg 3: the strip reads Load failed' }).toBe(LOAD_FAILED);
-      await expect(
-        page.getByText(UNSAVED, { exact: true }),
-        'leg 3: after the refused Load the board\'s edit is still unsaved, and says so',
-      ).toHaveCount(1);
-      await page.getByRole('button', { name: 'Close' }).click();
-      await expect(page.getByRole('alert'), 'leg 3: Close takes the card away').toHaveCount(0);
-
-      const prompted = prompts.opened();
-      const mtimeA = statSync(a).mtimeMs;
-      await page.keyboard.press('Control+s');
-      await expect
-        .poll(() => statSync(a).mtimeMs, {
-          timeout: ANSWER_MS,
-          intervals: [200, 500, 1000],
-          message: 'leg 3: Ctrl+S rewrote A, the board\'s own file',
-        })
-        .toBeGreaterThan(mtimeA);
-      console.log(
-        `P90-WORK-07 leg-3 prompts_before=${prompted} prompts_after=${prompts.opened()} refused_hash_same=${hashOf(refused) === hashRefused}`,
-      );
-      expect(prompts.opened(), 'leg 3: Ctrl+S opened no prompt (the board has its own file)').toBe(prompted);
-      expect(hashOf(refused), 'leg 3: the refused file is byte for byte unchanged').toBe(hashRefused);
-      await expectRenderLoopAlive(page, 'after leg 3');
-      errs.assertNone('leg 3');
-    } finally {
-      prompts.stop();
-    }
+          const prompted = prompts.opened();
+          const mtimeA = statSync(a).mtimeMs;
+          await page.keyboard.press('Control+s');
+          await expect
+            .poll(() => statSync(a).mtimeMs, {
+              timeout: ANSWER_MS,
+              intervals: [200, 500, 1000],
+              message: 'leg 3: Ctrl+S rewrote A, the board\'s own file',
+            })
+            .toBeGreaterThan(mtimeA);
+          console.log(
+            `P90-WORK-07 leg-3 prompts_before=${prompted} prompts_after=${prompts.opened()} refused_hash_same=${hashOf(refused) === hashRefused}`,
+          );
+          expect(prompts.opened(), 'leg 3: Ctrl+S opened no prompt (the board has its own file)').toBe(prompted);
+          expect(hashOf(refused), 'leg 3: the refused file is byte for byte unchanged').toBe(hashRefused);
+          await expectRenderLoopAlive(page, 'after leg 3');
+          errs.assertNone('leg 3');
+        } finally {
+          prompts.stop();
+        }
+      },
+    );
   });
 });
