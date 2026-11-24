@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { expectRenderLoopAlive, readScene, waitForAppReady, watchPageErrors } from './support/oracle';
 
 // 15-disconnected.spec.ts (SAFE-01) - the honest disconnected state gate.

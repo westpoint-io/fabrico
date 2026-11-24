@@ -1,7 +1,15 @@
 import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test, expect, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
+import {
+  test,
+  expect,
+  startLiveCoverage,
+  stopLiveCoverage,
+  type BrowserContext,
+  type CDPSession,
+  type Page,
+} from './support/liveTest';
 import {
   DEMO_NODE_COUNT,
   applyConfig,
@@ -911,6 +919,9 @@ test.beforeAll(async ({ browser }, testInfo) => {
     viewport: { width: 1280, height: 800 },
   });
   theSharedPage = await sharedContext.newPage();
+  // A local coverage reading only (FABRICO_LIVE_COVERAGE); the legs take no `page`, so the shared
+  // fixture never sees this page.
+  await startLiveCoverage(theSharedPage);
 });
 
 /** The mark the boot leaves on the shared page's window (R-01 b). A reload or a navigation gives
@@ -4076,6 +4087,10 @@ test.afterAll(async ({ browser }, testInfo) => {
       }
     }
   } finally {
-    await sharedContext?.close();
+    try {
+      if (theSharedPage !== undefined) await stopLiveCoverage(theSharedPage);
+    } finally {
+      await sharedContext?.close();
+    }
   }
 });

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // The PNG decoder @playwright/test already bundles (pngjs), the idiom
 // `06-fault-red-probe.spec.ts` uses: no new dependency is added to read the canvas.

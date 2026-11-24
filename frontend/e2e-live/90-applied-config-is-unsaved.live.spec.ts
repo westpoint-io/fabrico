@@ -1,4 +1,4 @@
-import { test, expect, type Dialog, type Page } from '@playwright/test';
+import { test, expect, type Dialog, type Page } from './support/liveTest';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

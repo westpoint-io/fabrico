@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { GESTURE_FRAME_VERSION } from '../e2e/support/wire';
 import {
   CELL,

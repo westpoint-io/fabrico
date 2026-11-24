@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { addFrameBudget } from '../e2e/support/frameSampler';
 import {
   DEMO_NODE_COUNT,

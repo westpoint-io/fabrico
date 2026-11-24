@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/liveTest';
 import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import {
   DRAWN_STATE_FRAMES,

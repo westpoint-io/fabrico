@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 import {
   DRAWN_STATE_FRAMES,
@@ -123,6 +123,8 @@ const SETTLE_AFTER_INPUT_MS = 1_000;
 
 // The card's Copy details leg reads the clipboard back in the page (Chromium grants both).
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
+// This spec stops the sim on purpose and checks the held board itself in every test.
+test.use({ renderHealthAtEnd: false });
 
 /** The transport button: `Pause` while the page believes the sim runs, `Play` while paused. */
 function transportOf(page: Page) {

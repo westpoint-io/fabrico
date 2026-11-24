@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { expectRenderLoopAlive, waitForAppReady, watchPageErrors } from './support/oracle';
 
 // 14-demo-badge.spec.ts (ONB-01) - the "Demo scene" badge + the getByRole

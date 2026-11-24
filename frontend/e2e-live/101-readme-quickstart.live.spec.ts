@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { PNG } from 'playwright-core/lib/utilsBundle';
 import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import { CELL } from '../shared/geometry';

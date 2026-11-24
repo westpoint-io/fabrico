@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { cameraOf, waitForAppReady } from './support/oracle';
 
 // 07-zoom-readout.spec.ts (NAV-02) - the live proof that the on-canvas camera

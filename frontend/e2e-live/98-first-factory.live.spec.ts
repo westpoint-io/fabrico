@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/liveTest';
 import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
 import {
   DRAWN_STATE_FRAMES,

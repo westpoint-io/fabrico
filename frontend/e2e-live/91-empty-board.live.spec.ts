@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 import { EMPTY_FLOOR_BODY, EMPTY_FLOOR_HEADING } from '../src/chrome/configCopy';
 import {
   armAndPlaceAt,

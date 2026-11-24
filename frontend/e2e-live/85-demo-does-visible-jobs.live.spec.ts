@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/liveTest';
 import { addWaitBudget, tickBudgetMs } from '../e2e/support/frameSampler';
 import {
   anchorOf,

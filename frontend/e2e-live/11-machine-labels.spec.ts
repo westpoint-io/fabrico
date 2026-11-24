@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/liveTest';
 import { PNG } from 'playwright-core/lib/utilsBundle';
 import { cameraOf, captureClip, expectRenderLoopAlive, readScene, waitForAppReady, watchPageErrors } from './support/oracle';
 import { KIND_NAMES } from '../shared/kindNames';

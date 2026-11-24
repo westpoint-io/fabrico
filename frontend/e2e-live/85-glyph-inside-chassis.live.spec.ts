@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/liveTest';
 import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 import {
   DRAWN_STATE_FRAMES,

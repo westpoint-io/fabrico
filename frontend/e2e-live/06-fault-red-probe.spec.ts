@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/liveTest';
 // The PNG decoder @playwright/test already bundles (pngjs). No new dependency is
 // added by this spec - we reach the bundled decoder rather than installing one
 // (the same idiom as e2e/dpr-crispness.spec.ts).
