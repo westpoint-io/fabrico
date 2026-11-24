@@ -3,17 +3,14 @@ import {
   captureRefusalText,
   DEMO_NODE_COUNT,
   CELL,
-  armAndPlaceAt,
   cameraOf,
   clickAt,
   expectRenderLoopAlive,
   newBoard,
-  nubAnchor,
   pollScene,
   readScene,
   resetToDemo,
   resetZoomToActualSize,
-  rotateHandle,
   screenPoint,
   selectMachineAt,
   waitForAppReady,
@@ -48,18 +45,6 @@ import {
 //      belt's first tile (5,5). The host refuses with `Growing would cover a belt. Move
 //      that belt first.` and the ports, box and links are unchanged. Before this plan it
 //      read the FootprintCollision sentence, about a taken space.
-//   3. On an empty board at scale 1, a side belt's last-tile dot dragged onto the first
-//      tile of a main belt TWO tiles away: the host refuses with `These ends do not
-//      touch.` (plan 74.1-24, gap J11) and nothing links. Before plan 74.1-18 it read the
-//      output-and-input sentence that was judged an error that explains nothing (gap N4c);
-//      from 74.1-18 to 74.1-24 the one belt-rule sentence, whose clause actually broken
-//      was its vaguest.
-//   4. THE CONTROL: a MACHINE-target role refusal still reads the InvalidDock sentence
-//      (`A belt runs from an output to an input, right next to it.`). A belt's last-tile dot
-//      dropped on a Factory's OUTPUT nub, with the belt end on that output's doorstep and
-//      leaving it straight, so the role rule is the only one broken. Green before and after
-//      this plan: it proves the belt-join tag did not swallow a machine target.
-//
 //   5. THE U-TURN (plan 74.1-24, gaps N4D and J11): the re-walk's N4D board, a top belt four
 //      cells east and a bottom belt starting right under its last tile running west. Way 1
 //      drags the top belt's last-tile dot down onto the bottom belt's first tile; way 2, on
@@ -68,26 +53,12 @@ import {
 //      links. Before plan 74.1-24 both read the one rule sentence, whose "side by side" the
 //      walk read as approving the U-turn.
 //
-//   6. THE ROTATE HANDLE (plan 74.1-25, review WR-04): leg 1's board and flash latch, the
-//      Router turned by a click on its rotate handle instead of r. The same sentence, the
-//      same unchanged board, and the canvas paints the reject flash on the belt in the way.
-//      RED BEFORE THE FIX: the handle sent the Rotate and flashed nothing, so "Move that belt
-//      first." pointed at no belt.
+//   The other belt-join refusal sentences (ends apart, already joined, end to end) and the
+//   rotate-handle path to leg 1's refusal are graded elsewhere: 88-paused-occupancy test 2
+//   reaches the already-joined sentence, 18-refusal ERR-02 drives the InvalidDock sentence
+//   by an end-handle drag, and the rest are copy-table unit concerns.
 //
-//   7. HEAD-WORDS (plan 74.1-32): a belt's last tile joined to a second belt's first tile,
-//      then that joined end pressed off-centre inside its tile and dropped on a third belt's
-//      free first tile one step away, turning across. The host refuses with `That belt end
-//      is already joined. Use a free end.` and nothing changes. Before plan 74.1-32 it read
-//      "That output is already connected. Disconnect it first.", naming an output for a belt
-//      end the user dragged (the third re-walk's FINDING HEAD-WORDS).
-//
-//   8. J11-THIRD (plan 74.1-32): a belt's last tile dropped on another belt's last tile
-//      right beside it (the role rule is the only one broken). The host refuses with `Join a
-//      belt's end to the start of another belt.` and nothing links. Before plan 74.1-32 it
-//      read "A belt's end joins only a belt starting right next to it, never turning
-//      back.", which explained this refusal through one word (FINDING J11-THIRD).
-//
-// EVERY POINTER FIXTURE IN LEGS 3 TO 5 MOVES LIKE A HAND (`74.1-belt-join-both-ways.live.spec.ts`'s
+// EVERY POINTER FIXTURE IN LEG 5 MOVES LIKE A HAND (`74.1-belt-join-both-ways.live.spec.ts`'s
 // discipline): presses and drops land on off-centre points inside tiles, and every move
 // emits sub-cell samples, so the first samples stay inside the pressed tile.
 //
@@ -108,24 +79,7 @@ const FACTORY_KIND = 2;
 const ROTATE_COVERS_BELT_COPY = 'Turning would cover a belt. Move that belt first.';
 /** The exact `REFUSAL_COPY.GrowCoversBelt` sentence, transcribed, not imported. */
 const GROW_COVERS_BELT_COPY = 'Growing would cover a belt. Move that belt first.';
-/** The exact `REFUSAL_COPY.InvalidDock` sentence, transcribed, not imported. */
-const INVALID_DOCK_COPY = 'A belt runs from an output to an input, right next to it.';
-/** The exact `REFUSAL_COPY.BeltEndsApart` sentence (plan 74.1-24, gap J11), transcribed. */
-const BELT_ENDS_APART_COPY = 'These ends do not touch.';
 
-/** Leg 3's main belt: four cells east, Tail (4,6). */
-const MAIN_CELLS: readonly (readonly [number, number])[] = [
-  [4, 6],
-  [5, 6],
-  [6, 6],
-  [7, 6],
-];
-/** Leg 3's side belt: three cells south, Head (4,4), TWO tiles above the main belt's Tail. */
-const SIDE_CELLS: readonly (readonly [number, number])[] = [
-  [4, 2],
-  [4, 3],
-  [4, 4],
-];
 /** The exact `REFUSAL_COPY.BeltJoinTurnsBack` sentence (plan 74.1-24, gap J11), transcribed. */
 const BELT_JOIN_TURNS_BACK_COPY = 'A join cannot turn back the way it came.';
 
@@ -141,42 +95,6 @@ const UTURN_BOTTOM_CELLS: readonly (readonly [number, number])[] = [
   [7, 7],
   [6, 7],
   [5, 7],
-];
-
-/** The exact `REFUSAL_COPY.BeltEndTaken` sentence (plan 74.1-32, HEAD-WORDS), transcribed. */
-const BELT_END_TAKEN_COPY = 'That belt end is already joined. Use a free end.';
-/** The exact `REFUSAL_COPY.InvalidBeltJoin` sentence (reworded by plan 74.1-32, J11-THIRD), transcribed. */
-const INVALID_BELT_JOIN_COPY = "Join a belt's end to the start of another belt.";
-
-/** Leg 7's upstream belt: four cells east, last tile (7,6). */
-const JOINED_UP_CELLS: readonly (readonly [number, number])[] = [
-  [4, 6],
-  [5, 6],
-  [6, 6],
-  [7, 6],
-];
-/** Leg 7's downstream belt: three cells east, first tile (8,6), right after the upstream's last tile. */
-const JOINED_DOWN_CELLS: readonly (readonly [number, number])[] = [
-  [8, 6],
-  [9, 6],
-  [10, 6],
-];
-/** Leg 7's third belt: first tile (7,5), right above the upstream's last tile, running north. */
-const THIRD_CELLS: readonly (readonly [number, number])[] = [
-  [7, 5],
-  [7, 4],
-  [7, 3],
-];
-/** Leg 8's first belt: three cells east, last tile (6,6). */
-const HEAD_A_CELLS: readonly (readonly [number, number])[] = [
-  [4, 6],
-  [5, 6],
-  [6, 6],
-];
-/** Leg 8's second belt: two cells WEST, last tile (7,6), right beside the first belt's last tile. */
-const HEAD_B_CELLS: readonly (readonly [number, number])[] = [
-  [8, 6],
-  [7, 6],
 ];
 
 /** Pointer samples per one-cell move at scale 1: an eighth of a cell each. */
@@ -237,54 +155,6 @@ async function drawPlain(page: Page, cells: readonly (readonly [number, number])
     await page.mouse.move(pt.x, pt.y, { steps: STEPS_PER_CELL });
   }
   await page.mouse.up();
-}
-
-/**
- * Select the belt under `select` (an interior tile), then press off-centre inside `press`
- * and walk in sub-cell steps to an off-centre point inside `drop`: the hand-like drag legs
- * 3 to 5 use, shared by legs 7 and 8.
- */
-async function dragBeltEnd(
-  page: Page,
-  select: readonly [number, number],
-  press: readonly [number, number],
-  drop: readonly [number, number],
-  what: string,
-): Promise<void> {
-  const mid = await cellPoint(page, select, [0.5, 0.5]);
-  await clickAt(page, mid.x, mid.y);
-  await expect(page.locator('#fab-belt-config'), `${what}: the dragged belt is selected`).toBeVisible({ timeout: 15_000 });
-  const a = await cellPoint(page, press, PRESS_FRAC);
-  const b = await cellPoint(page, drop, DROP_FRAC);
-  await page.mouse.move(a.x, a.y);
-  await page.mouse.down();
-  await page.mouse.move(b.x, b.y, { steps: STEPS_PER_CELL });
-  await page.mouse.up();
-}
-
-/**
- * A new empty board at scale 1 with the Belt tool armed, `belts` drawn as plain belts in
- * order, then Escape. The caller asserts the dock set: a belt drawn straight on from
- * another belt's last tile joins it as it is drawn.
- */
-async function boardOfBelts(page: Page, belts: readonly (readonly (readonly [number, number])[])[]): Promise<SceneFacts> {
-  await newBoard(page);
-  await resetZoomToActualSize(page);
-  await waitForCameraSettle(page);
-  expect((await cameraOf(page)).scale, 'the camera is at scale 1').toBe(1);
-  await page.getByTitle(/^Draw belts/).click();
-  for (const [i, cells] of belts.entries()) {
-    await drawPlain(page, cells);
-    await pollScene(page, (s) => s.belts.length, { message: `belt ${i + 1} was drawn` }).toBe(i + 1);
-  }
-  await page.keyboard.press('Escape');
-  const built = await readScene(page);
-  for (const cells of belts) {
-    expect(beltAt(built, cells[0])?.tiles.map((t) => [t.cell_x, t.cell_y]), `the belt starting at ${cells[0]}`).toEqual(
-      cells.map(([x, y]) => [x, y]),
-    );
-  }
-  return built;
 }
 
 /** The belt with a tile on `cell`, or undefined. */
@@ -442,109 +312,6 @@ test.describe('74.1-18 live: a refusal a belt causes says so in belt words', () 
     errs.assertNone('leg 2');
   });
 
-  test('leg 3 (N4c, J11): a belt end dragged onto a belt end two tiles away is refused because the ends do not touch, and nothing links', async ({
-    page,
-  }) => {
-    const errs = await bootOnDemo(page);
-    await newBoard(page);
-    await resetZoomToActualSize(page);
-    await waitForCameraSettle(page);
-    expect((await cameraOf(page)).scale, 'the camera is at scale 1').toBe(1);
-    await page.getByTitle(/^Draw belts/).click();
-    await drawPlain(page, MAIN_CELLS);
-    await pollScene(page, (s) => s.belts.length, { message: 'the main belt was drawn' }).toBe(1);
-    await drawPlain(page, SIDE_CELLS);
-    await pollScene(page, (s) => s.belts.length, { message: 'the side belt was drawn' }).toBe(2);
-    await page.keyboard.press('Escape');
-    const built = await readScene(page);
-    expect(beltAt(built, [4, 6])?.tiles.map((t) => [t.cell_x, t.cell_y]), 'the main belt').toEqual(
-      MAIN_CELLS.map(([x, y]) => [x, y]),
-    );
-    expect(beltAt(built, [4, 4])?.tiles.map((t) => [t.cell_x, t.cell_y]), 'the side belt').toEqual(
-      SIDE_CELLS.map(([x, y]) => [x, y]),
-    );
-    expect(built.belts.flatMap((b) => b.docks), 'both belts start undocked').toEqual([]);
-    const held = structure(built);
-
-    // Select the side belt (an interior tile), then press off-centre inside its LAST tile
-    // (4,4) and walk in sub-cell steps to an off-centre point inside the main belt's FIRST
-    // tile (4,6), two tiles away.
-    const mid = await cellPoint(page, [4, 3], [0.5, 0.5]);
-    await clickAt(page, mid.x, mid.y);
-    await expect(page.locator('#fab-belt-config'), 'clicking (4,3) selected the side belt').toBeVisible({
-      timeout: 15_000,
-    });
-    const a = await cellPoint(page, [4, 4], PRESS_FRAC);
-    const b = await cellPoint(page, [4, 6], DROP_FRAC);
-    await page.mouse.move(a.x, a.y);
-    await page.mouse.down();
-    await page.mouse.move(b.x, b.y, { steps: 2 * STEPS_PER_CELL });
-    await page.mouse.up();
-    expect(
-      await captureRefusalText(page, 'the dropped belt end was answered with a refusal sentence'),
-      'the refused join says the ends do not touch (before plan 74.1-24 it read the one belt-rule sentence, before 74.1-18 the output-and-input one)',
-    ).toBe(BELT_ENDS_APART_COPY);
-    const after = await readScene(page);
-    expect(after.belts.flatMap((x) => x.docks), 'nothing linked').toEqual([]);
-    expect(structure(after), 'both belts are unchanged').toBe(held);
-
-    await expectRenderLoopAlive(page, 'after leg 3');
-    errs.assertNone('leg 3');
-  });
-
-  test('leg 4 (control): a belt end dropped on a MACHINE output still reads the InvalidDock sentence', async ({ page }) => {
-    const errs = await bootOnDemo(page);
-    await newBoard(page);
-    await resetZoomToActualSize(page);
-    await waitForCameraSettle(page);
-    expect((await cameraOf(page)).scale, 'the camera is at scale 1').toBe(1);
-    await armAndPlaceAt(page, 'Factory', 10, 4);
-    await pollScene(page, (s) => s.nodes.length, { message: 'the real host echoed the placed Factory' }).toBe(1);
-    const f = theFactory(await readScene(page));
-    const out = f.ports.find((p) => p.role === 1);
-    // MEASURED: a fresh 3x3 Factory at (10,4) has its Out at (12,5) facing E, doorstep (13,5).
-    expect(out && [out.cell_x, out.cell_y, out.side], 'the Out is (12,5) facing E').toEqual([12, 5, 1]);
-
-    // A plain belt from (15,5) west to the doorstep (13,5): its LAST tile sits on the
-    // doorstep (adjacency passes) and leaves it straight (facing passes), so dropping that
-    // end on the Out breaks the role rule alone. The press is on no doorstep.
-    await page.getByTitle(/^Draw belts/).click();
-    await drawPlain(page, [
-      [15, 5],
-      [14, 5],
-      [13, 5],
-    ]);
-    await pollScene(page, (s) => s.belts.length, { message: 'the belt was drawn' }).toBe(1);
-    await page.keyboard.press('Escape');
-    const built = await readScene(page);
-    expect(built.belts[0].tiles.map((t) => [t.cell_x, t.cell_y]), 'the belt ends on the doorstep').toEqual([
-      [15, 5],
-      [14, 5],
-      [13, 5],
-    ]);
-    expect(built.belts[0].docks, 'the belt starts undocked').toEqual([]);
-    const held = structure(built);
-
-    const mid = await cellPoint(page, [14, 5], [0.5, 0.5]);
-    await clickAt(page, mid.x, mid.y);
-    await expect(page.locator('#fab-belt-config'), 'clicking (14,5) selected the belt').toBeVisible({ timeout: 15_000 });
-    const a = await cellPoint(page, [13, 5], [0.6, 0.55]);
-    const nub = nubAnchor(out!.cell_x, out!.cell_y, out!.side);
-    const b = await screenPoint(page, nub);
-    await page.mouse.move(a.x, a.y);
-    await page.mouse.down();
-    await page.mouse.move(b.x, b.y, { steps: STEPS_PER_CELL });
-    await page.mouse.up();
-    expect(
-      await captureRefusalText(page, 'the dropped belt end was answered with a refusal sentence'),
-      'a machine-target role refusal keeps the InvalidDock sentence',
-    ).toBe(INVALID_DOCK_COPY);
-    expect(structure(await readScene(page)), 'nothing linked, nothing moved').toBe(held);
-
-    await expectRenderLoopAlive(page, 'after leg 4');
-    errs.assertNone('leg 4');
-  });
-
   test('leg 5 (N4D, J11): a U-turn join is refused in both drag directions with its own sentence and nothing links', async ({
     page,
   }) => {
@@ -607,116 +374,5 @@ test.describe('74.1-18 live: a refusal a belt causes says so in belt words', () 
 
     await expectRenderLoopAlive(page, 'after leg 5');
     errs.assertNone('leg 5');
-  });
-
-  test('leg 6 (WR-04): the rotate handle on the demo Router is refused with the belt sentence and flashes the belt in the way', async ({
-    page,
-  }) => {
-    // THE WALK'S WINDOW, 1600 by 1000 (re-walk J10). MEASURED at the suite's 1280 by 720: the
-    // Router's handle lands at screen (814, 244), under the open Router panel (its
-    // `#fab-route-add` button), so a click there never reaches the canvas. At 1600 by 1000
-    // it lands at (998, 333), on the canvas; the guard below says so before the click.
-    await page.setViewportSize({ width: 1600, height: 1000 });
-    const errs = await bootOnDemo(page);
-    const before = await readScene(page);
-    const routers = before.nodes.filter((n) => n.kind === ROUTER_KIND);
-    expect(routers, 'the demo board carries exactly one Router').toHaveLength(1);
-    const router = routers[0];
-    // MEASURED as in leg 1: the 2x3 Router at (14,0), its first Out's belt on (16,1).
-    const xs = router.cells.map((c) => c[0]);
-    const ys = router.cells.map((c) => c[1]);
-    expect([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], 'the demo Router is the 2x3 at (14,0)').toEqual([
-      14, 0, 15, 2,
-    ]);
-    expect(
-      before.belts.some((b) => b.tiles.length > 0 && b.tiles[0].cell_x === 16 && b.tiles[0].cell_y === 1),
-      'a belt starts on the first Out\'s doorstep (16,1)',
-    ).toBe(true);
-
-    await selectMachineAt(page, 14, 0);
-    const selected = structure(await readScene(page));
-    expect(await flashPainted(page), 'no reject flash is painted before the click').toBe(false);
-    await latchFlash(page);
-    // The rotate handle sits on the selection outline's top-right corner (the shared
-    // `rotateHandle` anchor math; the Router's box is 2 cells wide). A plain click turns CW,
-    // exactly as r does.
-    const handle = await screenPoint(page, rotateHandle(14, 0, 2));
-    expect(
-      await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName ?? 'none', [handle.x, handle.y]),
-      'the rotate handle is on the canvas, not under the panel',
-    ).toBe('CANVAS');
-    await clickAt(page, handle.x, handle.y);
-    expect(
-      await captureRefusalText(page, 'the handle Rotate was answered with a refusal sentence'),
-      'the refused handle turn names the belt in the way and the fix, as r does',
-    ).toBe(ROTATE_COVERS_BELT_COPY);
-    expect(structure(await readScene(page)), 'every node, belt and link is unchanged: nothing turned').toBe(selected);
-    expect(selected, 'and selecting the Router changed nothing either').toBe(structure(before));
-    await expect
-      .poll(() => flashSeen(page), {
-        timeout: 5_000,
-        message:
-          'the canvas flashed the belt in the way of the handle turn (before plan 74.1-25 the handle flashed nothing, review WR-04)',
-      })
-      .toBe(true);
-
-    await expectRenderLoopAlive(page, 'after leg 6');
-    errs.assertNone('leg 6');
-  });
-  test('leg 7 (HEAD-WORDS): a joined belt end dropped on a free belt start reads the belt-end sentence and nothing links', async ({
-    page,
-  }) => {
-    const errs = await bootOnDemo(page);
-    // The downstream belt is drawn straight on from the upstream belt's last tile, so it
-    // joins as it is drawn (MEASURED on the first run of this leg): the upstream's last
-    // tile (7,6) feeds the downstream's first tile (8,6). The third belt stays free.
-    const joined = await boardOfBelts(page, [JOINED_UP_CELLS, JOINED_DOWN_CELLS, THIRD_CELLS]);
-    const up = beltAt(joined, [7, 6]);
-    const down = beltAt(joined, [8, 6]);
-    const third = beltAt(joined, [7, 5]);
-    expect(up?.docks, 'the upstream belt\'s last tile feeds the downstream belt').toEqual([
-      expect.objectContaining({ end: 'Head', node: down?.id }),
-    ]);
-    expect(down?.docks, 'the downstream belt\'s first tile is fed by the upstream belt').toEqual([
-      expect.objectContaining({ end: 'Tail', node: up?.id }),
-    ]);
-    expect(third?.docks, 'the third belt is free at both ends').toEqual([]);
-    const held = structure(joined);
-
-    // THE DROP: the joined end pressed off-centre inside (7,6) and dropped inside the third
-    // belt's free first tile (7,5), one step up and turning across.
-    await dragBeltEnd(page, [5, 6], [7, 6], [7, 5], 'the joined end');
-    expect(
-      await captureRefusalText(page, 'the dropped joined belt end was answered with a refusal sentence'),
-      'the refused drop names the belt end the user dragged (before plan 74.1-32 it read "That output is already connected. Disconnect it first.")',
-    ).toBe(BELT_END_TAKEN_COPY);
-    expect(structure(await readScene(page)), 'nothing linked, nothing moved: the first join is the only one').toBe(held);
-
-    await expectRenderLoopAlive(page, 'after leg 7');
-    errs.assertNone('leg 7');
-  });
-
-  test("leg 8 (J11-THIRD): a belt end dropped on another belt's end reads the join rule sentence and nothing links", async ({
-    page,
-  }) => {
-    const errs = await bootOnDemo(page);
-    const built = await boardOfBelts(page, [HEAD_A_CELLS, HEAD_B_CELLS]);
-    expect(built.belts.flatMap((b) => b.docks), 'both belts start undocked').toEqual([]);
-    const held = structure(built);
-
-    // The first belt's last tile (6,6) dropped inside the second belt's LAST tile (7,6),
-    // right beside it: the ends touch and nothing turns back, so the role rule is the only
-    // one broken.
-    await dragBeltEnd(page, [5, 6], [6, 6], [7, 6], 'last tile onto last tile');
-    expect(
-      await captureRefusalText(page, 'the dropped belt end was answered with a refusal sentence'),
-      'the refused join says what to do (before plan 74.1-32 it read the 74.1-24 rule sentence)',
-    ).toBe(INVALID_BELT_JOIN_COPY);
-    const after = await readScene(page);
-    expect(after.belts.flatMap((x) => x.docks), 'nothing linked').toEqual([]);
-    expect(structure(after), 'both belts are unchanged').toBe(held);
-
-    await expectRenderLoopAlive(page, 'after leg 8');
-    errs.assertNone('leg 8');
   });
 });

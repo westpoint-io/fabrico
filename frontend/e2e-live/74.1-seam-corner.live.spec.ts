@@ -57,29 +57,25 @@ import {
 // kind at read (`GridState::effective_belt_tiles`, shipped by `render_packet.rs`
 // `current_views`); the stored geometry stays the Straight route() typed.
 //
-// ---------------------------------------------------------------------------
-// WHY A NEW FILE
-// ---------------------------------------------------------------------------
-//
-// `74.1-corner-connects.live.spec.ts` is count-gated at exactly 6 tests by its plans, so the
-// seam legs live here. The helpers were COPIED from it, not imported: spec files export
-// nothing. Since plan 106-08 the ink reader lives in `support/seamInk.ts`. This file declares exactly 1 test after plan 74.1-07 and 3 after plan 74.1-09.
+// The helpers were COPIED from `74.1-corner-connects.live.spec.ts`, not imported: spec
+// files export nothing. Since plan 106-08 the ink reader lives in `support/seamInk.ts`.
 //
 // ---------------------------------------------------------------------------
-// THE THREE LEGS (this file declares exactly 3 tests)
+// THE TWO LEGS
 // ---------------------------------------------------------------------------
 //
-//   1. S1 ON THE REAL HOST (plan 74.1-07): the seam tile KIND the packet ships is the
-//      corner, the link alone is not the claim.
-//   2. THE SEAM DRAWS AS THE REFERENCE CORNER (plan 74.1-09, gap 3): the canvas PIXELS
+// The seam tile KIND the packet ships after a belt drawn north at once off a belt end is
+// graded by `74.1-release-and-undo.live.spec.ts` leg 4, so this file does not repeat it.
+//
+//   1. THE SEAM DRAWS AS THE REFERENCE CORNER (plan 74.1-09, gap 3): the canvas PIXELS
 //      of the seam tile read like a reference Corner{E,N} drawn east then north on the same
 //      board, and unlike a reference north-south straight, at scale 1 and at 3 or more.
 //      This is the one leg here that reads no model fact for its claim: a renderer that
-//      drew the shipped Corner as a straight would pass leg 1 and fail this one. Since plan
+//      drew the shipped Corner as a straight would pass a model check and fail this one. Since plan
 //      74.1-21 (review WR-06) it also grades the corner's PRESENCE and DIRECTION with two
 //      positive boxes, so a seam tile drawn blank, not drawn, or turned the wrong way
 //      fails it too (each watched RED at both scales).
-//   3. A HANDLE DRAG THAT DOCKS SIDEWAYS SHIPS A CORNER (plan 74.1-09, review CR-01): the
+//   2. A HANDLE DRAG THAT DOCKS SIDEWAYS SHIPS A CORNER (plan 74.1-09, review CR-01): the
 //      Dock command path that adds no tile still ships the derived corner, and one Ctrl+Z,
 //      which undoes the Dock, returns the straight end.
 //
@@ -127,14 +123,14 @@ const WHEEL_NOTCHES_MAX = 20;
  */
 const WHEEL_NOTCH_FRAMES = 4;
 
-/** Leg 3's belt A: drawn north, Head (8,6). */
+/** Leg 2's belt A: drawn north, Head (8,6). */
 const HANDLE_A_CELLS: readonly (readonly [number, number])[] = [
   [8, 9],
   [8, 8],
   [8, 7],
   [8, 6],
 ];
-/** Leg 3's belt B: drawn east, Tail (9,6), one step east of A's Head. */
+/** Leg 2's belt B: drawn east, Tail (9,6), one step east of A's Head. */
 const HANDLE_B_CELLS: readonly (readonly [number, number])[] = [
   [9, 6],
   [10, 6],
@@ -168,13 +164,6 @@ function junction(scene: SceneFacts): string {
   const a = (up.docks ?? []).filter((d) => d.end === 'Head' && d.node === down.id).length;
   const b = (down.docks ?? []).filter((d) => d.end === 'Tail' && d.node === up.id).length;
   return `${a}/${b}`;
-}
-
-/** The new belt's shipped tile kinds, in tile order, or `null` before it exists. */
-function seamBeltKinds(scene: SceneFacts): unknown[] | null {
-  const down = beltsAt(scene, BELT_DOORSTEP[0], BELT_DOORSTEP[1]);
-  if (down.length !== 1) return null;
-  return down[0].tiles.map((t) => t.kind);
 }
 
 /**
@@ -246,72 +235,6 @@ const PARK_WORLD = { x: 10.5 * CELL, y: 5 * CELL } as const;
 test.describe.configure({ mode: 'serial' });
 
 test.describe('CORNER-01 seam on the real host: the join is graded on the shipped tile kind', () => {
-  test('S1 ON THE REAL HOST: a belt drawn north at once off a belt end ships a 90 degree corner at the seam', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await boardWithOneBelt(page);
-    const before = await readScene(page);
-    for (const [cx, cy] of CORNER_CELLS) {
-      expect(beltsAt(before, cx, cy), `(${cx},${cy}) is free floor before the corner`).toHaveLength(0);
-    }
-
-    // Press the doorstep centre and drag north at once, sub-cell samples throughout.
-    const door = await screenCellCentre(page, BELT_DOORSTEP[0], BELT_DOORSTEP[1]);
-    const last = await screenCellCentre(page, CORNER_CELLS[3][0], CORNER_CELLS[3][1]);
-    await expectOnCanvas(page, [door, last], 'the seam draw');
-    await pointerTravel(page, door.x, door.y);
-    await page.mouse.down();
-    await moveThroughCells(page, CORNER_CELLS.slice(1), STEPS_PER_CELL);
-    await page.mouse.up();
-    await page.keyboard.press('Escape');
-
-    // The link, read from both sides. Necessary, and NOT the join claim: this passed while
-    // the screen showed a T.
-    await pollScene(page, (s) => s.belts.length, { message: 'a second belt was minted' }).toBe(2);
-    await pollScene(page, junction, {
-      message: "belt A's Head dock names the new belt AND the new belt's Tail dock names A",
-    }).toBe('1/1');
-    const after = await readScene(page);
-    const drawn = beltsAt(after, BELT_DOORSTEP[0], BELT_DOORSTEP[1]);
-    expect(drawn, 'exactly one belt starts on the doorstep').toHaveLength(1);
-    expect(
-      drawn[0].tiles.map((t) => [t.cell_x, t.cell_y]),
-      'the new belt starts ON the pressed doorstep and turns north at once',
-    ).toEqual([
-      [8, 6],
-      [8, 5],
-      [8, 4],
-      [8, 3],
-    ]);
-
-    // THE JOIN CLAIM: the seam tile the packet ships is a 90 degree corner from A's flow (E)
-    // into the new belt's (N). Polled, because the Dock echo lands one packet after the
-    // DrawBelt echo.
-    await pollScene(page, (s) => seamBeltKinds(s)?.[0] ?? null, {
-      message: "the new belt's seam tile (8,6) ships Corner{from:E, to:N}, not the Straight route() stored",
-    }).toEqual({ Corner: { from: 1, to: 0 } });
-    const settled = await readScene(page);
-    const kinds = seamBeltKinds(settled);
-    expect(kinds, 'the new belt is readable by cell').not.toBeNull();
-    expect(kinds![0], 'tile 0 is the seam corner').toEqual(SEAM_CORNER);
-    for (let i = 1; i < 4; i++) {
-      expect(kinds![i], `the new belt's tile ${i} stays a north-south straight`).toEqual(STRAIGHT_NS);
-    }
-    const a = beltsAt(settled, HEAD_CELL[0], HEAD_CELL[1]);
-    expect(a, 'belt A is readable by cell').toHaveLength(1);
-    a[0].tiles.forEach((t, i) => {
-      expect(t.kind, `belt A's tile ${i} stays an east-west straight (only the carrier bends)`).toEqual(
-        STRAIGHT_EW,
-      );
-    });
-
-    await expectRenderLoopAlive(page, 'after a seam corner off a belt end');
-    errs.assertNone('the S1 seam leg');
-  });
-
   test('THE SEAM DRAWS AS THE REFERENCE CORNER, NOT AS A T: pixels at scale 1 and at 3 or more', async ({
     page,
   }) => {
