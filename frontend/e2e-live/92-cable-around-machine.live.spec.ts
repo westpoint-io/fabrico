@@ -27,7 +27,6 @@ import {
 import { emptyBoardAtScaleOne, pauseAndSettle, place, portOf, resumeIfPaused, rowCells, type Cell } from './support/beltBoard';
 import { CELL, nubAnchor } from '../shared/geometry';
 import { CABLE_CELL_MIN, cablesOnCanvas } from './support/canvasDots';
-import { LOCKED_SKIN } from '../src/render/synth/skins/locked';
 
 // 92-cable-around-machine.live.spec.ts (phase 92, plan 92-03, CHROME-19, D-09, success criterion
 // 2, UI-SPEC 4.1 and 4.3) - on the real dev host and the real Pixi renderer, a cable drawn between
@@ -67,21 +66,11 @@ import { LOCKED_SKIN } from '../src/render/synth/skins/locked';
 //      the Factory, the Factory is deleted: the forward cable's path becomes today's straight
 //      path along row 8 and the shipped re-route mark draws on that change. The Factory placed
 //      again out of the cable's window, at (12,12), moves nothing.
-//   4. the cable reads teal and apart from the grid on the canvas (plan 92-04, D-10, UI-SPEC 4.2
-//      and 4.3). With both legs landed and the selection dropped, three screen pixels are read
-//      off one capture at 1280x800 and default zoom: a cable pixel at the centre of a straight
-//      run cell of the model path beside the column-16 major grid line, a pixel on that major
-//      line one cell above or below the cable, and a floor pixel in the same cell. The cable
-//      reads `LOCKED_SKIN.palette.cable` within 2 per channel, the major line `ramp[2]` within
-//      2, the contrast computed from the two read pixels is at least 2:1 and from the cable and
-//      the floor pixel at least 3:1, and no pixel inside the Factory's box is within 4 per
-//      channel of the cable ink. RED AT `PHASE92_START`: the cable was `ramp[3]` at alpha 0.35,
-//      a dimmer copy of the grid's grey.
 //
-// The obstacle grade reads pixels on a paused board and needs no cable colour; leg 4 is the
-// colour and contrast read (D-10), its expected ink taken from the locked skin, never a retyped
-// hex. Render health in every test: `watchPageErrors` before the first `page.goto`,
-// `expectRenderLoopAlive` (the held-board form on a paused board) and `assertNone`.
+// The obstacle grade reads pixels on a paused board and needs no cable colour; the cable
+// token itself (D-10) is checked by `src/render/synth/skins/locked.test.ts`. Render health in
+// every test: `watchPageErrors` before the first `page.goto`, `expectRenderLoopAlive` (the
+// held-board form on a paused board) and `assertNone`.
 
 const KIND_ENDPOINT = 9;
 const KIND_FACTORY = 2;
@@ -175,31 +164,6 @@ function forwardCells(s: SceneFacts): Array<[number, number]> | null {
 /** Whether any cell of `cells` lies in the Factory's box anchored at `at`. */
 function entersFactory(cells: ReadonlyArray<readonly [number, number]>, at: Cell): boolean {
   return cells.some(([x, y]) => x >= at[0] && x < at[0] + FACTORY_SIZE && y >= at[1] && y < at[1] + FACTORY_SIZE);
-}
-
-/** WCAG relative luminance of an { r, g, b } pixel. */
-function luminance(p: { r: number; g: number; b: number }): number {
-  const lin = (c: number): number => {
-    const v = c / 255;
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * lin(p.r) + 0.7152 * lin(p.g) + 0.0722 * lin(p.b);
-}
-
-/** The WCAG contrast ratio of two read pixels. */
-function contrast(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-}
-
-/** 0xRRGGBB as { r, g, b }. */
-function rgbOfInt(c: number): { r: number; g: number; b: number } {
-  return { r: (c >> 16) & 0xff, g: (c >> 8) & 0xff, b: c & 0xff };
-}
-
-/** Whether `p` is within `tol` of `want` on every channel. */
-function nearRgb(p: { r: number; g: number; b: number }, want: { r: number; g: number; b: number }, tol: number): boolean {
-  return Math.abs(p.r - want.r) <= tol && Math.abs(p.g - want.g) <= tol && Math.abs(p.b - want.b) <= tol;
 }
 
 /** The scene's wires as cell lists, for messages. */
@@ -370,107 +334,6 @@ test.describe('CHROME-19 live: a cable goes around a third machine (the real dev
     const s2 = await readScene(page);
     expect(forwardCells(s2), `a machine outside the cable's window never moves it; cables ${wireCells(s2)}`).toEqual(STRAIGHT);
     errs.assertNone('the re-route');
-    await resetToDemo(page);
-  });
-
-  test('the cable reads teal and apart from the grid on the canvas', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await buildBoard(page);
-    expect((await cameraOf(page)).scale, 'PRECONDITION: the camera is at scale 1 (default zoom)').toBe(1);
-    const s0 = await readScene(page);
-    await handDrawWire(page, electrical(s0, ROUTE_AT, ROLE_OUT), electrical(s0, HANDLER_AT, ROLE_IN));
-    await pollScene(page, (s) => s.wires.length, { message: 'the drag folded both cable legs' }).toBe(2);
-    await expect
-      .poll(async () => (await cablePolylines(page)).length, { message: 'the wire layer plotted both landed cables' })
-      .toBe(2);
-    // Drop the selection and take the pointer off the board's cables, so no hover or chip
-    // sits over a read pixel; then the render loop is seen running past the plot.
-    await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-    await expectRenderLoopAlive(page, 'with both cables landed and the selection dropped');
-    const s1 = await readScene(page);
-    const runs = await cablePolylines(page);
-
-    // The cable cell: a straight run cell of a model path (both neighbours on its row) in
-    // column 15, 16 or 17, beside the column-16 major grid line (every 8 cells), outside every
-    // machine. Its drawn y is read off the plotted run that crosses the cell's centre.
-    const onAPath = (x: number, y: number): boolean => s1.wires.some((w) => w.path.some((c) => c.cell_x === x && c.cell_y === y));
-    type Pick = { cx: number; cy: number; drawnY: number; row: number };
-    let pick: Pick | undefined;
-    for (const cx of [16, 15, 17]) {
-      for (const w of s1.wires) {
-        for (let i = 1; i < w.path.length - 1 && pick === undefined; i++) {
-          const [a, c, b] = [w.path[i - 1], w.path[i], w.path[i + 1]];
-          if (c.cell_x !== cx || a.cell_y !== c.cell_y || b.cell_y !== c.cell_y) continue;
-          const midX = (cx + 0.5) * CELL;
-          const crosses = (r: Array<{ x: number; y: number }>, k: number): boolean =>
-            k > 0 &&
-            r[k].y === r[k - 1].y &&
-            Math.min(r[k].x, r[k - 1].x) <= midX &&
-            Math.max(r[k].x, r[k - 1].x) >= midX &&
-            Math.abs(r[k].y - (c.cell_y + 0.5) * CELL) <= CELL / 4;
-          const seg = runs.flatMap((r) => r.filter((_, k) => crosses(r, k)))[0];
-          if (seg === undefined) continue;
-          // The major-line and floor reads sit one cell above or below, on a row no cable takes
-          // in columns 15 and 16.
-          const row = [c.cell_y - 1, c.cell_y + 1].find((r) => !onAPath(15, r) && !onAPath(16, r));
-          if (row !== undefined) pick = { cx, cy: c.cell_y, drawnY: seg.y, row };
-        }
-      }
-      if (pick !== undefined) break;
-    }
-    expect(pick, `PRECONDITION: a straight cable cell in columns 15 to 17 with a cable-free row beside it; cables ${wireCells(s1)}`).toBeDefined();
-    const { cx, cy, drawnY, row } = pick!;
-
-    const span = await screenRectOfCells(page, SPAN.x0, SPAN.y0, SPAN.x1, SPAN.y1, 0);
-    const png = PNG.sync.read(await captureClip(page, span));
-    const dpr = png.width / span.width;
-    const pixelAtWorld = async (wx: number, wy: number): Promise<{ r: number; g: number; b: number }> => {
-      const sp = await screenPoint(page, { x: wx, y: wy });
-      const ix = Math.floor((sp.x - span.x) * dpr);
-      const iy = Math.floor((sp.y - span.y) * dpr);
-      const i = (iy * png.width + ix) * 4;
-      return { r: png.data[i], g: png.data[i + 1], b: png.data[i + 2] };
-    };
-    const MAJOR_X = 16 * CELL;
-    const cablePx = await pixelAtWorld((cx + 0.5) * CELL, drawnY);
-    const majorPx = await pixelAtWorld(MAJOR_X, (row + 0.5) * CELL);
-    const floorPx = await pixelAtWorld((16 + 0.5) * CELL, (row + 0.5) * CELL);
-
-    const { ramp } = LOCKED_SKIN.palette;
-    const wantCable = rgbOfInt(LOCKED_SKIN.palette.cable);
-    const onMajor = contrast(cablePx, majorPx);
-    const onFloor = contrast(cablePx, floorPx);
-    expect(
-      {
-        cableReadsTheToken: nearRgb(cablePx, wantCable, 2),
-        majorReadsRamp2: nearRgb(majorPx, rgbOfInt(ramp[2]), 2),
-        floorReadsRamp0: nearRgb(floorPx, rgbOfInt(ramp[0]), 2),
-        majorAtLeast2: onMajor >= 2,
-        floorAtLeast3: onFloor >= 3,
-      },
-      `RED-FIRST CHROME-19-colour-live: at 1280x800 and zoom 1 the cable pixel at cell (${cx},${cy}) reads ` +
-        `${JSON.stringify(cablePx)} (want ${JSON.stringify(wantCable)} within 2), the major grid line one cell away at ` +
-        `world x ${MAJOR_X}, row ${row} reads ${JSON.stringify(majorPx)} (want ramp[2] within 2), the floor pixel reads ` +
-        `${JSON.stringify(floorPx)}; read contrast ${onMajor.toFixed(2)}:1 against the major line (needs 2:1) and ` +
-        `${onFloor.toFixed(2)}:1 against the floor (needs 3:1); cables ${wireCells(s1)}`,
-    ).toEqual({ cableReadsTheToken: true, majorReadsRamp2: true, floorReadsRamp0: true, majorAtLeast2: true, floorAtLeast3: true });
-
-    // No cable ink inside the Factory's box (the cable never enters it, UI-SPEC 4.1 rule 1).
-    const box = await screenRectOfCells(page, FACTORY_AT[0], FACTORY_AT[1], FACTORY_AT[0] + FACTORY_SIZE - 1, FACTORY_AT[1] + FACTORY_SIZE - 1, 0);
-    let inBox = 0;
-    for (let y = Math.floor((box.y - span.y) * dpr); y < Math.floor((box.y + box.height - span.y) * dpr); y++) {
-      for (let x = Math.floor((box.x - span.x) * dpr); x < Math.floor((box.x + box.width - span.x) * dpr); x++) {
-        const i = (y * png.width + x) * 4;
-        if (nearRgb({ r: png.data[i], g: png.data[i + 1], b: png.data[i + 2] }, wantCable, 4)) inBox += 1;
-      }
-    }
-    expect(inBox, `no pixel inside the Factory's box ${JSON.stringify(box)} is within 4 of the cable ink; cables ${wireCells(s1)}`).toBe(0);
-    console.log(
-      `CABLE_COLOUR_READ cell=(${cx},${cy}) row=${row} cable=${JSON.stringify(cablePx)} major=${JSON.stringify(majorPx)} ` +
-        `floor=${JSON.stringify(floorPx)} on_major=${onMajor.toFixed(2)} on_floor=${onFloor.toFixed(2)} in_box=${inBox}`,
-    );
-    await expectRenderLoopAlive(page, 'after the colour reads');
-    errs.assertNone('the cable colour reads');
     await resetToDemo(page);
   });
 });

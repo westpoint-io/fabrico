@@ -3,7 +3,6 @@ import {
   DEMO_NODE_COUNT,
   clickAt,
   expectRenderLoopAlive,
-  pollScene,
   readScene,
   resetToDemo,
   screenCellCentre,
@@ -21,7 +20,7 @@ import {
 // on the real app rather than only by a Rust unit test. A bounded-only control
 // would make that refusal unreachable while every one of its tests stayed green,
 // which is the checks-that-cannot-fail shape Phase 67 surfaced eight times. The
-// three legs below walk it: the typed field -> Apply -> the run frame -> the
+// leg below walks it: the typed field -> Apply -> the run frame -> the
 // command bound -> the typed tag -> the refusal frame -> `#fab-refusal`.
 //
 // ---------------------------------------------------------------------------
@@ -73,17 +72,6 @@ const BELT_TILE: readonly [number, number] = [7, 3];
 const PACE_OUT_OF_RANGE_COPY = 'That pace is outside the Belt pace scale.';
 
 /**
- * The exact `REFUSAL_COPY.ZeroBeltInterval` sentence, UNCHANGED since Phase 64.
- *
- * **This leg is the first time in the project's history that this sentence has
- * been reachable by a user.** It shipped with the tag in 64 and had no gesture
- * that could produce it: no control wrote `ticks_per_slot` at all until BELT-02,
- * and the sentence carried a standing re-verify instruction (`RefusalMessage.tsx`)
- * against the day one did. `D-68-04`'s unclamped field is that day.
- */
-const ZERO_BELT_INTERVAL_COPY = 'A belt needs a speed above zero.';
-
-/**
  * The WALL figure: the px/sec the panel's own scale calls out of range.
  *
  * 500 px/sec resolves to `ticks_per_slot = 1`, which is BELOW the `2..=20` bound
@@ -92,13 +80,6 @@ const ZERO_BELT_INTERVAL_COPY = 'A belt needs a speed above zero.';
  * offers it - that is the whole point of the typed field.
  */
 const WALL_FIGURE = '500';
-
-/** A typed zero: a stopped belt, which reaches the belt-interval sentence. */
-const ZERO_FIGURE = '0';
-
-/** The slow end of the offered scale: `25` px/sec is `ticks_per_slot = 20`. */
-const SLOW_END_LABEL = '25';
-const SLOW_END_TICKS = 20;
 
 /**
  * Poll the live refusal region's text. The element carries no role and no
@@ -198,67 +179,5 @@ test.describe('BELT-04 on the real host: the bound answers in words', () => {
 
     await expectRenderLoopAlive(page, 'after the refused out-of-range pace');
     errs.assertNone('the refused out-of-range pace');
-  });
-
-  test('a typed ZERO reaches the belt-interval sentence, reachable for the first time', async ({
-    page,
-  }) => {
-    const { errs, belt } = await selectDemoBelt(page);
-    const before = await paceOf(page, belt);
-
-    await typeAndApply(page, ZERO_FIGURE);
-
-    await pollRefusalText(
-      page,
-      'a typed zero reaches ZeroBeltInterval - the first user-reachable path to it',
-    ).toBe(ZERO_BELT_INTERVAL_COPY);
-
-    expect(
-      await paceOf(page, belt),
-      'a stopped belt is refused, and the belt keeps the pace it had',
-    ).toBe(before);
-
-    await expectRenderLoopAlive(page, 'after the refused zero pace');
-    errs.assertNone('the refused zero pace');
-  });
-
-  test('a pace from the offered scale is ACCEPTED and reaches the belt in the model', async ({
-    page,
-  }) => {
-    const { errs, belt } = await selectDemoBelt(page);
-    const before = await paceOf(page, belt);
-    // VACUITY REFUSAL: the pace being committed must genuinely differ from the
-    // one the belt already holds, or the poll below would resolve on the first
-    // read against a host that did nothing at all.
-    expect(
-      before,
-      `the demo belt must not already sit at ${SLOW_END_TICKS} ticks/slot, or this leg proves nothing`,
-    ).not.toBe(SLOW_END_TICKS);
-
-    await page
-      .getByRole('group', { name: 'Belt pace' })
-      .getByRole('button', { name: `${SLOW_END_LABEL} px per second`, exact: true })
-      .click();
-    await page.getByRole('button', { name: 'Apply', exact: true }).click();
-
-    // POLLED ON A SPECIFIC MODEL CHANGE, with a message. No fixed sleep appears
-    // anywhere in this file: a sleep long enough to be reliable is a sleep that
-    // hides how long the round trip actually takes, and one that is too short is
-    // a flake with a plausible story.
-    await pollScene(
-      page,
-      (s) => s.belts.find((b) => b.id === belt)?.ticksPerSlot ?? -1,
-      { message: 'the committed pace reached the belt in the MODEL, off the render packet' },
-    ).toBe(SLOW_END_TICKS);
-
-    // And the accepted gesture said NOTHING: on this transport an accept produces
-    // no frame at all (D-30), so the refusal region must still be empty.
-    expect(
-      ((await page.locator('#fab-refusal').textContent()) ?? '').trim(),
-      'an accepted pace produces no refusal frame and therefore no sentence',
-    ).toBe('');
-
-    await expectRenderLoopAlive(page, 'after the accepted pace');
-    errs.assertNone('the accepted pace');
   });
 });

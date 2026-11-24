@@ -27,15 +27,10 @@ import { nubAnchor } from '../shared/geometry';
 
 // 18-refusal.spec.ts (ERR-01) - the live gate for phase 64's refusal path.
 //
-// This file grew in three waves and is now COMPLETE: 64-01 laid the geometry
-// precondition, 64-06 added the tracer leg (a real refusal message reaching the
-// DOM), and 64-11 added the remaining two legs plus the distinctness assertion.
-// Together they are ROADMAP criterion 3b - three refusals a user can actually
-// reach today, each saying a DIFFERENT thing, against a real Rust host.
-//
-// The first test below is the GEOMETRY PRECONDITION the MediumMismatch leg stands
-// on: the exact draw that provokes that verdict, asserted cell by cell so a
-// demo-scene change fails HERE rather than draining a refusal leg of its subject.
+// ERR-02 below is ROADMAP criterion 3b: the three refusals a user can actually reach
+// today (FootprintCollision, MediumMismatch, InvalidDock), driven in one test against a
+// real Rust host, each checked against its exact sentence and against the other two. The
+// two tests after it cover the refusals of a hand-drawn wire.
 //
 // WHY THE SOURCE PORT IS A PLACED ROUTE'S AND NOT (6,3).
 // Two older planning documents write the recipe as "draw from node 1's Out at
@@ -54,13 +49,6 @@ import { nubAnchor } from '../shared/geometry';
 // A belt is Mechanical, so docking either end is a medium mismatch (PORT-08) -
 // which is exactly the refusal the later legs want - while the PATH itself,
 // (3,10) (4,10) (5,10), is unobstructed and legal (asserted free from the live scene).
-//
-// WHAT THAT FIRST TEST DOES NOT ASSERT.
-// Nothing about a refusal message. It proves only that the DRAW is legal and
-// lands precisely where the recipe says it does - RESEARCH assumption A1,
-// discharged by execution rather than by argument. The message that draw now
-// provokes is asserted by its own test further down, so a failure tells you
-// WHICH half broke: the geometry, or the verdict reaching the user.
 //
 // THE INVALIDDOCK LEG WAS RE-AUTHORED BY PLAN 74-14, AND THE OLD NAMES ARE RECORDED
 // HERE so a reader who greps the old wording finds the record rather than a hole.
@@ -534,259 +522,18 @@ async function driveInvalidDock(
   return { beltsBefore: before.belts.length, cells };
 }
 
-test.describe('ERR-01 refusal path: the MediumMismatch draw geometry', () => {
-  test("a Mechanical belt draws cleanly between a placed Route and a placed HTTP Handler, (3,10) to (5,10)", async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page, DEMO_NODE_COUNT);
-
-    for (const [cx, cy] of BELT_CELLS) {
-      expect(
-        isBareFloor(await readScene(page), cx, cy),
-        `(${cx},${cy}) is bare floor on the demo, so the authored run is drawable`,
-      ).toBe(true);
-    }
-    await expectBareAnchor(page, 'Route', OWN_CALLER_ANCHOR);
-    await armAndPlaceAt(page, 'Route', OWN_CALLER_ANCHOR[0], OWN_CALLER_ANCHOR[1]);
-    const source = await ownMachineFolded(page, 'Route', OWN_CALLER_ANCHOR);
-    await expectBareAnchor(page, 'HTTP Handler', OWN_HANDLER_ANCHOR);
-    await armAndPlaceAt(page, 'HTTP Handler', OWN_HANDLER_ANCHOR[0], OWN_HANDLER_ANCHOR[1]);
-    const target = await ownMachineFolded(page, 'HTTP Handler', OWN_HANDLER_ANCHOR);
-    const before = await readScene(page);
-    const beltsBefore = before.belts.length;
-    expect(source, `the placed Route is anchored at (${OWN_CALLER_ANCHOR[0]},${OWN_CALLER_ANCHOR[1]})`).toBeTruthy();
-    expect(target, `the placed HTTP Handler is anchored at (${OWN_HANDLER_ANCHOR[0]},${OWN_HANDLER_ANCHOR[1]})`).toBeTruthy();
-
-    // The PORT COUNTS are pinned: a machine that grew a port would change which nub the
-    // release ranker resolves, and the refusal legs further down this file depend on that.
-    // A palette Route carries an electrical In and an electrical Out on its one cell; a
-    // palette HTTP Handler carries an electrical In, an electrical Out and a Mechanical
-    // Fault. Both ports this leg uses are selected BY ROLE AND MEDIUM, never by an index.
-    // (Until 85-07 this leg read the demo's caller, which carried ONE port, and its handler,
-    // which carried TWO since D-26.)
-    expect(source.ports.length, 'the placed Route exposes exactly two ports').toBe(2);
-    expect(
-      target.ports.length,
-      'the placed HTTP Handler exposes exactly THREE ports: an electrical In, an electrical Out and a Fault',
-    ).toBe(3);
-    const callerOuts = source.ports.filter((p) => p.role === 1 && p.medium === 1);
-    expect(callerOuts.length, 'the Route carries exactly one electrical Out').toBe(1);
-    const fromPort: PortFacts = callerOuts[0];
-    const handlerIns = target.ports.filter((p) => p.role === 0);
-    expect(handlerIns.length, 'the handler carries exactly one In port').toBe(1);
-    const toPort: PortFacts = handlerIns[0];
-
-    expect(
-      [fromPort.cell_x, fromPort.cell_y, fromPort.role],
-      'the caller port is an Out (role 1) at (2,10)',
-    ).toEqual([2, 10, 1]);
-    expect(
-      [toPort.cell_x, toPort.cell_y, toPort.role],
-      'the handler port is an In (role 0) at (6,10)',
-    ).toEqual([6, 10, 0]);
-    // Both ports are ELECTRICAL (medium 1); a belt is Mechanical. This is the
-    // mismatch the later refusal legs provoke - recorded here so a catalog change
-    // that quietly makes these Mechanical fails HERE, in the file that depends on
-    // them, rather than silently draining the refusal legs of their subject.
-    expect(fromPort.medium, 'the caller port is Electrical (medium 1)').toBe(1);
-    expect(toPort.medium, 'the handler port is Electrical (medium 1)').toBe(1);
-
-    await drawBeltThroughCells(page, fromPort, BELT_CELLS, toPort);
-
-    await pollScene(page, (s) => s.belts.length, {
-      message: 'the drawn belt committed on the host (belt count grew by exactly one)',
-    }).toBe(beltsBefore + 1);
-
-    const after = await readScene(page);
-    const knownBefore = new Set(before.belts.map((b) => b.id));
-    const drawn = after.belts.filter((b) => !knownBefore.has(b.id));
-    expect(drawn.length, 'exactly one NEW belt handle exists after the draw').toBe(1);
-
-    expect(
-      drawn[0].tiles.map((t) => [t.cell_x, t.cell_y]),
-      'the drawn belt occupies exactly (3,10) (4,10) (5,10), in path order',
-    ).toEqual([
-      [3, 10],
-      [4, 10],
-      [5, 10],
-    ]);
-
-    await expectRenderLoopAlive(page, 'after the MediumMismatch-recipe belt draw');
-    errs.assertNone('the MediumMismatch-recipe belt draw');
-  });
-});
-
 // ---------------------------------------------------------------------------
-// THE TRACER (plan 64-06)
-// ---------------------------------------------------------------------------
-//
-// The thinnest honest path through EVERY layer this phase builds, driven against a real
-// Rust host rather than an injected packet: a real pointer Place onto an occupied cell
-// -> `apply_gesture` -> the gesture envelope's reply seam -> the paired counter ->
-// the refusal frame on the TEXT relay -> the frontend resolver -> the verdict sink ->
-// the App-level `showRefusal` -> the always-mounted live region -> the 4000ms hold ->
-// and out again.
-//
-// IT CLOSES A SHIPPED BUG, which is why the green here is a real fix rather than a
-// plumbing demonstration. Until this wave, a Place onto a belt tile did all three wrong
-// things at once: the ghost painted valid-blue over the belt (the client's occupancy
-// predicate counted nodes but not belt tiles, fixed in plan 64-03), the click then
-// returned early and emitted nothing at all, and no message appeared. The user clicked,
-// nothing happened, and nothing said why.
-test.describe('ERR-01 tracer: a refused Place says why, then takes itself away', () => {
-  test('a Place onto an occupied belt tile paints the FootprintCollision sentence and self-dismisses', async ({
-    page,
-  }) => {
-    // The preamble is MANDATORY, not optional: the live suite runs at one worker
-    // against ONE shared mutable host, so a prior spec's board is whatever this test
-    // would otherwise inherit. The 11 is the demo baseline - 9 belt-demo machines plus
-    // its caller and handler pair.
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page, DEMO_NODE_COUNT);
-
-    // State 1: the live region is present and EMPTY before any gesture. An
-    // `aria-live` region that mounts together with its content is unreliably
-    // announced, so it is mounted from boot and renders nothing when idle - which
-    // means "no message" is an EMPTY region, never an absent element.
-    await expect(page.locator('#fab-refusal'), 'the live region is mounted at rest').toHaveCount(1);
-    expect(
-      ((await page.locator('#fab-refusal').textContent()) ?? '').trim(),
-      'the live region is silent before any gesture',
-    ).toBe('');
-
-    const before = await readScene(page);
-    const nodesBefore = before.nodes.length;
-    const [cx, cy] = OCCUPIED_BELT_CELL;
-    expect(
-      before.belts.some((b) => b.tiles.some((t) => t.cell_x === cx && t.cell_y === cy)),
-      'the target cell really is occupied by a demo belt tile',
-    ).toBe(true);
-
-    // A real arm-then-click Place through the shipped palette, no injected command.
-    await armAndPlaceAt(page, 'Source', cx, cy);
-
-    // The refusal reaches the DOM as the exact authored sentence - not a host
-    // `Display` string, not a generic fallback, not a raw tag name.
-    await pollRefusalText(page, 'the refused Place named its reason in the live region').toBe(
-      FOOTPRINT_COLLISION_COPY,
-    );
-
-    // Nothing was placed: the host refused, and the client never wrote the scene.
-    expect(
-      (await readScene(page)).nodes.length,
-      'the refused Place added no machine (no optimistic local write)',
-    ).toBe(nodesBefore);
-
-    // State 5: the hold expires on a plain wall clock and the box unmounts, leaving
-    // the region mounted and empty. Polled rather than asserted after a fixed sleep,
-    // and proved rather than assumed - a message that appears and never leaves is a
-    // different defect from one that never appears.
-    await pollRefusalText(page, 'the refusal took itself away after its 4000ms hold').toBe('');
-
-    // NOT OPTIONAL, EITHER OF THEM. A DOM-text assertion alone passes against a
-    // completely dead renderer, and only a handful of the live specs opt into this
-    // check today.
-    await expectRenderLoopAlive(page, 'after the refused Place');
-    errs.assertNone('the refused Place onto an occupied belt tile');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// THE REMAINING TWO LEGS, AND THE ASSERTION THAT TIES THEM TOGETHER (plan 64-11)
+// THE THREE REACHABLE REFUSALS, AND THE ASSERTION THAT TIES THEM TOGETHER (plan 64-11)
 // ---------------------------------------------------------------------------
 //
 // ROADMAP criterion 3b names THREE refusals a user can actually reach today, and it
-// names three deliberately. The tracer above proved the path exists; these two prove
-// the path carries DIFFERENT information depending on what the host objected to.
+// names three deliberately. The test below drives all three and proves the path carries
+// DIFFERENT information depending on what the host objected to.
 //
 // All three legs are reachable only because plan 64-08 removed the five frontend
 // suppression gates. Before that wave the client answered on the host's behalf - a
 // Place onto an occupied cell returned early, a Head dock onto a wire nub was never
 // recorded - so the host was never asked and these messages could not exist at all.
-
-test.describe('ERR-01: a Mechanical belt aimed at an Electrical port says so', () => {
-  test('a belt drawn between a placed Route and HTTP Handler paints the MediumMismatch sentence and self-dismisses', async ({
-    page,
-  }) => {
-    const errs = await bootOnDemo(page);
-
-    const beltsBefore = await driveMediumMismatch(page);
-
-    // The DRAW is legal and commits; it is the DOCK the host refuses. Asserting the
-    // belt landed separates the two failure modes: a red here means the path was
-    // rejected (an `evalBeltPath` regression), a red below means the dock never
-    // reached the host or its answer never reached the user.
-    await pollScene(page, (s) => s.belts.length, {
-      message: 'the belt itself committed - the refusal is about the DOCK, not the path',
-    }).toBe(beltsBefore + 1);
-
-    await pollRefusalText(page, 'the refused Head dock named the medium as its reason').toBe(
-      MEDIUM_MISMATCH_COPY,
-    );
-
-    await pollRefusalText(page, 'the MediumMismatch message took itself away after its hold').toBe(
-      '',
-    );
-
-    await expectRenderLoopAlive(page, 'after the MediumMismatch dock');
-    errs.assertNone('the MediumMismatch belt dock');
-  });
-});
-
-test.describe('ERR-01: a belt end dropped on a port it cannot dock says so', () => {
-  test('a Dock the host refuses on ROLE paints the InvalidDock sentence and self-dismisses', async ({
-    page,
-  }) => {
-    const errs = await bootOnDemo(page);
-
-    const { beltsBefore, cells } = await driveInvalidDock(page);
-
-    await pollScene(page, (s) => s.belts.length, {
-      message: 'the two-cell belt committed - the refusal is about the DOCK, not the path',
-    }).toBe(beltsBefore + 1);
-
-    // The path is asserted EXACTLY, because this leg is defined by WHICH END was dropped:
-    // the Head is the second tile, and the Head is the end whose role the host refuses
-    // onto an Out. A relaxation to a length check, a `toContain` or a prefix would let a
-    // differently-shaped belt (one whose dragged handle was its TAIL, which an Out
-    // ACCEPTS by role) satisfy this while earning a different verdict or none at all.
-    const after = await readScene(page);
-    const drawn = after.belts.reduce((longest, b) => (b.id > longest.id ? b : longest));
-    const tiles = drawn.tiles.map((t) => [t.cell_x, t.cell_y]);
-    expect(
-      tiles,
-      `the newest belt runs WEST from (${cells[0][0]},${cells[0][1]}) to its HEAD at (${cells[1][0]},${cells[1][1]}), the end the handle drag moved`,
-    ).toEqual(cells);
-    // And the derived run is the one this file names: the placed Router's top Out at
-    // (21,9), so the press (23,9) and the head (22,9).
-    expect(cells, 'the authored run is (23,9) then (22,9)').toEqual([
-      [OWN_ROUTER_ANCHOR[0] + 3, OWN_ROUTER_ANCHOR[1]],
-      [OWN_ROUTER_ANCHOR[0] + 2, OWN_ROUTER_ANCHOR[1]],
-    ]);
-
-    await pollRefusalText(page, 'the refused Head dock named the dock rule as its reason').toBe(
-      INVALID_DOCK_COPY,
-    );
-
-    // The refusal changed NOTHING: the host answered with words, not a dock. A build that
-    // accepted the Head onto an Out would show a dock here as well as (or instead of) the
-    // sentence.
-    expect(
-      ((await readScene(page)).belts.find((b) => b.id === drawn.id)?.docks ?? []),
-      'the refused Dock left the belt with NO dock at either end',
-    ).toHaveLength(0);
-
-    await pollRefusalText(page, 'the InvalidDock message took itself away after its hold').toBe('');
-
-    await expectRenderLoopAlive(page, 'after the InvalidDock belt release');
-    errs.assertNone('the InvalidDock belt release');
-  });
-});
 
 test.describe('ERR-02: the three reachable refusals say three DIFFERENT things', () => {
   test('an occupancy conflict, a medium mismatch and an invalid dock produce pairwise-distinct non-empty sentences', async ({

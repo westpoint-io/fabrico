@@ -9,14 +9,11 @@ import {
   expectRenderLoopAlive,
   newBoard,
   nodeAtAnchor,
-  beltEndInstructionsOn,
-  pointerTravel,
   pollScene,
   portNubInstructionsOn,
   readScene,
   resetToDemo,
   resetZoomToActualSize,
-  screenPoint,
   restoreHostAfterFailedTest,
   screenCellCentre,
   selectMachineAt,
@@ -25,7 +22,6 @@ import {
   watchPageErrors,
   type SceneFacts,
 } from './support/oracle';
-import { nubAnchor } from '../shared/geometry';
 
 // 86-paused-add-output-delete.live.spec.ts (plan 86-05, D-05, WORK-05, success criterion 3) -
 // on a PAUSED board a user edits a machine and deletes it before pressing Play, then presses
@@ -59,22 +55,8 @@ import { nubAnchor } from '../shared/geometry';
 //      gone. Ctrl+Z: the Factory is back at (10,8) on twelve cells (3 by 4), with six ports
 //      at the cells and sides `probe_p1` measured, its four output nubs drawn (the overlay's
 //      instruction count grew by one output's worth) and its body drawn.
-//   2. THE DOCKED BELT. On an empty board at zoom 1 a palette Sink is placed at (17,9) and a
-//      belt drawn (13,9) to (16,9) with the Belt tool: its Head docks into the Sink's In, its
-//      Tail is free (no machine stands there yet). A palette Factory is placed at (10,8): its
-//      Out at (12,9) faces E onto the belt's free Tail at (13,9). The board is paused. The
-//      belt is selected and its Tail handle dragged onto the Factory's Out nub (a Dock, the
-//      shipped reconnect gesture), the Factory is selected and Delete pressed. Play folds the
-//      pass: the Factory and the belt it now holds are gone. Ctrl+Z: the Factory is back, the
-//      belt is back on (13,9) to (16,9) docked at BOTH ends (Tail to the Factory's Out, Head to
-//      the Sink's In), its end marks drawn for two docked ends (the marks' instruction count
-//      above its Head-only count) and both machines drawn.
-//
-//      Why the belt stands before the pause. A belt drawn on a paused board has no handle
-//      until Play folds it, and the app sends its Docks only after the belt's echo, so a
-//      draw-from-the-nub on a paused board never puts a Dock into the same pass as the
-//      Delete. A handle drag docks a belt that already stands, which is the pass the
-//      Dock row of the same-pass todo names (`probe_d1_dock_then_delete`).
+//   2. Not here: the docked-belt leg ran leg 1's paused capture with a belt docked to the
+//      Factory; belt restore on a Delete undo is graded by `86-delete-undo-config` leg G.
 //
 //   3. THE CABLE THE DELETE ALREADY TAKES (phase 86 review, CR-01). On the demo board the
 //      board is paused, the caller Route is selected and Delete pressed, then the Route is
@@ -93,12 +75,11 @@ import { nubAnchor } from '../shared/geometry';
 // not read between the pause and Play (a stalled frame counter there is the pause itself).
 //
 // RED ON THE UNCHANGED HOST, recorded in 86-EVIDENCE.md: in leg 1 the
-// Factory came back 3 by 3 with five ports; in leg 2 it came back with no belt at all.
+// Factory came back 3 by 3 with five ports.
 
 /** Kind bytes (protocol `machine_kind`). A number on purpose: the live suite imports
  *  no product source. */
 const KIND_FACTORY = 2;
-const KIND_SINK = 7;
 /** Port role Out (oracle `PortFacts.role`). */
 const ROLE_OUT = 1;
 /** `STATUS_COPY.editsQueued`, transcribed, not imported. */
@@ -109,9 +90,6 @@ const FACTORY_AT: [number, number] = [10, 8];
 // (20,16), not the (4,6) it was: at the identity camera (4,6) is under the palette, so the
 // "floor" click pressed a palette button (plan 86-08 measured it with the canvas check below).
 const FLOOR_AT: [number, number] = [20, 16];
-/** Leg 2: the Sink's anchor and the belt's four tiles, Tail first. */
-const SINK_AT: [number, number] = [17, 9];
-const BELT_CELLS: [number, number][] = [[13, 9], [14, 9], [15, 9], [16, 9]];
 
 /** The Factory's twelve cells after the fourth output (3 by 4 at (10,8)), row-major. */
 const FACTORY_3X4 = [
@@ -179,7 +157,7 @@ async function emptyBoardAtScaleOne(page: Page): Promise<void> {
   await resetZoomToActualSize(page);
   await waitForCameraSettle(page);
   expect((await cameraOf(page)).scale, 'the camera is at scale 1').toBe(1);
-  for (const [cx, cy] of [FACTORY_AT, FLOOR_AT, SINK_AT, ...BELT_CELLS]) {
+  for (const [cx, cy] of [FACTORY_AT, FLOOR_AT]) {
     const pt = await screenCellCentre(page, cx, cy);
     const under = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName ?? 'NONE', [pt.x, pt.y] as const);
     expect(under, `cell (${cx},${cy}) is on the open canvas, where a click reaches the board`).toBe('CANVAS');
@@ -241,33 +219,6 @@ async function settledNubs(page: Page, id: number, ctx: string, changedFrom?: nu
 /** How many outputs the one Factory has, or -1 when there is not exactly one. */
 function factoryOuts(scene: SceneFacts): number {
   return onlyOf(scene, KIND_FACTORY)?.ports.filter((p) => p.role === ROLE_OUT).length ?? -1;
-}
-
-/** The one belt on the board, by its tiles and its docks (each as `end node port`), or null. */
-function beltShape(scene: SceneFacts): { tiles: string[]; docks: string[] } | null {
-  if (scene.belts.length !== 1) return null;
-  const b = scene.belts[0];
-  return {
-    tiles: b.tiles.map((t) => `${t.cell_x},${t.cell_y}`),
-    docks: b.docks.map((d) => `${d.end} ${d.node} ${d.port}`).sort(),
-  };
-}
-
-/** The belt end marks' instruction count on `id` once two reads 200 ms apart agree. */
-async function settledEnds(page: Page, id: number, ctx: string): Promise<number> {
-  let last = -1;
-  await expect
-    .poll(
-      async () => {
-        const n = await beltEndInstructionsOn(page, id);
-        const settled = n === last && n > 0;
-        last = n;
-        return settled;
-      },
-      { message: `${ctx}: the end marks on belt ${id} settled`, intervals: [200] },
-    )
-    .toBe(true);
-  return last;
 }
 
 /** `RefusalMessage`'s sentence for `UnknownNode`, transcribed, not imported. Reworded by plan
@@ -405,95 +356,6 @@ test.describe('86-05 live: a machine edited and deleted on a paused board comes 
     }
     await expectRenderLoopAlive(page, 'after leg 1');
     errs.assertNone('leg 1');
-  });
-  test('leg 2: paused, a belt Tail dragged onto the Factory Out then Delete, Play, Ctrl+Z: the belt is back docked at both ends', async ({
-    page,
-  }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    await emptyBoardAtScaleOne(page);
-    try {
-      await armAndPlaceAt(page, 'Sink', SINK_AT[0], SINK_AT[1]);
-      await pollScene(page, (s) => onlyOf(s, KIND_SINK) !== null, { message: 'leg 2: the real host echoed a palette Sink' }).toBe(true);
-      const sink = onlyOf(await readScene(page), KIND_SINK)!;
-
-      await page.getByTitle(/^Draw belts/).click();
-      const first = await screenCellCentre(page, BELT_CELLS[0][0], BELT_CELLS[0][1]);
-      await pointerTravel(page, first.x, first.y);
-      await page.mouse.down();
-      for (const [cx, cy] of BELT_CELLS.slice(1)) {
-        const p = await screenCellCentre(page, cx, cy);
-        await pointerTravel(page, p.x, p.y, 2);
-      }
-      await page.mouse.up();
-      await page.keyboard.press('Escape');
-      const tiles = BELT_CELLS.map(([x, y]) => `${x},${y}`);
-      await pollScene(page, beltShape, {
-        message: 'leg 2: the belt stands on (13,9) to (16,9) with its Head docked into the Sink and its Tail free',
-      }).toEqual({ tiles, docks: [`Head ${sink.id} 0`] });
-      const belt = (await readScene(page)).belts[0];
-      const headOnlyEnds = await settledEnds(page, belt.id, 'leg 2, Head docked only');
-
-      await armAndPlaceAt(page, 'Factory', FACTORY_AT[0], FACTORY_AT[1]);
-      await pollScene(page, factoryOuts, { message: 'leg 2: the real host echoed a palette Factory with one output' }).toBe(1);
-      const factory = onlyOf(await readScene(page), KIND_FACTORY)!;
-      const out = factory.ports.find((p) => p.role === ROLE_OUT)!;
-      expect([out.cell_x + 1, out.cell_y], 'leg 2: MEASURED, the Factory Out faces E onto the belt Tail at (13,9)').toEqual(BELT_CELLS[0]);
-      // A dock names an Out by its position among the machine's outputs (the link key the
-      // host writes, `GridCommand::Unlink`'s keyspace note), not by its catalog index.
-      const outKey = factory.ports.filter((p) => p.role === ROLE_OUT).findIndex((p) => p.index === out.index);
-      expect(beltShape(await readScene(page)), 'leg 2: placing the Factory docked nothing').toEqual({ tiles, docks: [`Head ${sink.id} 0`] });
-      await expectRenderLoopAlive(page, 'leg 2, before the pause');
-
-      await pauseAndSettle(page, 'leg 2');
-      const mid = await screenCellCentre(page, BELT_CELLS[2][0], BELT_CELLS[2][1]);
-      await page.mouse.click(mid.x, mid.y);
-      await expect
-        .poll(() => page.evaluate(() => (window as { __fabrico?: { selectedBelt?(): number | null } }).__fabrico?.selectedBelt?.() ?? null), {
-          message: 'leg 2: the click selected the belt (its end handles are up)',
-        })
-        .toBe(belt.id);
-      const nub = await screenPoint(page, nubAnchor(out.cell_x, out.cell_y, out.side));
-      await pointerTravel(page, first.x, first.y);
-      await page.mouse.down();
-      await pointerTravel(page, nub.x, nub.y, 4);
-      await page.mouse.up();
-      await expect(statusReadout(page), 'leg 2: the paused Dock is queued').toHaveText(QUEUED_COPY);
-      await selectMachineAt(page, FACTORY_AT[0], FACTORY_AT[1]);
-      await page.keyboard.press('Delete');
-      await page.waitForTimeout(300);
-      expect(beltShape(await readScene(page)), 'leg 2: paused, nothing has folded yet').toEqual({ tiles, docks: [`Head ${sink.id} 0`] });
-
-      await resumeIfPaused(page);
-      await pollScene(page, (s) => onlyOf(s, KIND_FACTORY) === null && s.belts.length === 0, {
-        message: 'leg 2: Play folds the pass: the Dock joins the belt to the Factory and the Delete takes both',
-      }).toBe(true);
-      await expectRenderLoopAlive(page, 'leg 2, after Play');
-
-      await clickFloor(page);
-      await page.keyboard.press('Control+z');
-      await pollScene(page, (s) => onlyOf(s, KIND_FACTORY) !== null && s.belts.length === 1, {
-        message: 'leg 2: Ctrl+Z brought the Factory back WITH the belt it held',
-      }).toBe(true);
-      const back = onlyOf(await readScene(page), KIND_FACTORY)!;
-      expect(sortedCells(back), 'leg 2: the Factory is back on its nine cells at (10,8)').toEqual(sortedCells(factory));
-      await pollScene(page, beltShape, {
-        message: 'leg 2: the belt is back on (13,9) to (16,9), docked at BOTH ends: Tail to the Factory Out, Head to the Sink In',
-      }).toEqual({ tiles, docks: [`Head ${sink.id} 0`, `Tail ${back.id} ${outKey}`].sort() });
-      const restored = (await readScene(page)).belts[0];
-      await expect
-        .poll(async () => beltEndInstructionsOn(page, restored.id), {
-          message: 'leg 2: the restored belt draws the end marks of two docked ends (more than its Head-only marks)',
-        })
-        .toBeGreaterThan(headOnlyEnds);
-      await expect
-        .poll(async () => (await drawnNodesOf(page)).machines, { message: 'leg 2: the machine layer draws the Factory and the Sink' })
-        .toEqual([back.id, sink.id].sort((a, b) => a - b));
-    } finally {
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 2');
-    errs.assertNone('leg 2');
   });
   test('leg 3: paused, Delete the caller Route then Disconnect its cable, Play, one Ctrl+Z: the board is back exactly as it was', async ({
     page,

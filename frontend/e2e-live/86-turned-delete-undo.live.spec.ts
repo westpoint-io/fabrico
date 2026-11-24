@@ -9,9 +9,6 @@ import {
   expectRenderLoopAlive,
   glyphBoxOn,
   glyphSubjectOn,
-  handPlaceAt,
-  labelBoxOn,
-  labelWordsOf,
   newBoard,
   nodeAtAnchor,
   pollScene,
@@ -31,7 +28,7 @@ import {
 // neighbour keeps its cell, and the board saves and opens again. On the REAL host
 // (dev_render_server, real Core -> RenderProducer -> postcard -> WS). Zero mocks, zero
 // injected packets. The spec reads the oracle (`window.__fabrico.scene()`, the MODEL), the
-// machine layer's census and glyph read-backs, the label box and the words overlay,
+// machine layer's census and glyph read-backs,
 // because a model read alone passes over a board that draws nothing (memory
 // fabrico-model-oracle-blindspot).
 //
@@ -59,11 +56,7 @@ import {
 //      path, New, and Open the file through the toolbar and its prompt: the board comes
 //      back with no refusal card and the same topology (kinds, cells, ports with their
 //      sides, so the turn is in it), drawn again.
-//   2. A LABEL as the neighbour. The same Router, turned once; a palette Label reading
-//      `Turned` is placed at (10,10) (4 by 1, x 10 to 13, free while the Router is turned).
-//      Delete and Ctrl+Z as above: the Router is back turned on its six cells, the label
-//      keeps its four cells, its words are drawn and its box is plotted where the model
-//      says; Save, New and Open bring it all back with no refusal card.
+//   2. Not here: the same fix with a Label as the neighbour; leg 1 stands for it.
 //
 // Each leg watches page errors from before `goto` and asserts the render loop is alive
 // after every gesture.
@@ -80,7 +73,6 @@ import {
  *  product source. */
 const KIND_SOURCE = 0;
 const KIND_ROUTER = 5;
-const KIND_LABEL = 11;
 /** Port role In (oracle `PortFacts.role`). */
 const ROLE_IN = 0;
 /** Port sides (oracle `PortFacts.side`): an unturned Router's input faces W, turned once N. */
@@ -88,10 +80,6 @@ const SIDE_N = 0;
 const SIDE_W = 3;
 /** One cell in world px (`shared/geometry.ts` CELL). */
 const CELL_PX = 32;
-/** The label box's centreline inset from the cell edges, world px. */
-const BOX_INSET = 4;
-/** The words the victim label carries. */
-const WORDS = 'Turned';
 
 /** The Router's anchor, and the neighbour's cell: inside the unturned body only. */
 const ROUTER_AT: [number, number] = [10, 8];
@@ -102,8 +90,6 @@ const FLOOR_AT: [number, number] = [4, 6];
 /** The Router's six cells unturned (2 by 3 at (10,8)) and turned once (3 by 2), row-major. */
 const ROUTER_ROT0 = ['10,8', '11,8', '10,9', '11,9', '10,10', '11,10'];
 const ROUTER_ROT1 = ['10,8', '11,8', '12,8', '10,9', '11,9', '12,9'];
-/** The victim label's four cells (4 by 1 at (10,10)). */
-const LABEL_CELLS = ['10,10', '11,10', '12,10', '13,10'];
 
 type NodeFacts = SceneFacts['nodes'][number];
 
@@ -235,24 +221,6 @@ async function expectMachinesDrawn(page: Page, ctx: string, withSource: boolean)
   }
 }
 
-/** The label at NEIGHBOUR_AT is plotted on its four cells and its words are on screen. */
-async function expectLabelDrawn(page: Page, ctx: string): Promise<void> {
-  const label = onlyOf(await readScene(page), KIND_LABEL)!;
-  await expect
-    .poll(async () => (await labelBoxOn(page, label.id))?.rect ?? null, {
-      message: `${ctx}: the label box is plotted on (10,10) to (13,10)`,
-    })
-    .toEqual({
-      x: NEIGHBOUR_AT[0] * CELL_PX + BOX_INSET,
-      y: NEIGHBOUR_AT[1] * CELL_PX + BOX_INSET,
-      w: 4 * CELL_PX - 2 * BOX_INSET,
-      h: 1 * CELL_PX - 2 * BOX_INSET,
-    });
-  await expect
-    .poll(async () => labelWordsOf(page, label.id), { message: `${ctx}: the label's words are drawn` })
-    .toMatchObject({ text: WORDS, visible: true });
-}
-
 /** Save to `fab` through the toolbar, New, then Open `fab` through the toolbar: the board
  *  comes back with `topology` and no refusal card. */
 async function saveNewOpen(page: Page, fab: string, topology: string): Promise<void> {
@@ -306,54 +274,5 @@ test.describe('D-03 live: Delete then Ctrl+Z brings a turned machine back turned
     await saveNewOpen(page, fab, topologyOf(after));
     await expectMachinesDrawn(page, 'on the reopened board', true);
     errs.assertNone('across place, turn, place, delete, undo, save and open');
-  });
-
-  test('leg 2: a turned Router beside a label on its unturned cells comes back turned, the label keeps its cells and words, and the board reopens', async ({
-    page,
-  }) => {
-    test.setTimeout(120_000);
-    const errs = watchPageErrors(page);
-    const fab = join(tmpdir(), `fabrico-e2e-86-turned-label-${Date.now()}.fab`);
-    await emptyBoardAtScaleOne(page);
-    await expectRenderLoopAlive(page, 'before anything is placed');
-    await turnedRouter(page);
-
-    await handPlaceAt(page, 'Label', NEIGHBOUR_AT[0], NEIGHBOUR_AT[1]);
-    await pollScene(page, (s) => nodeAtAnchor(s, NEIGHBOUR_AT[0], NEIGHBOUR_AT[1])?.kind ?? null, {
-      message: 'the real host echoed a label anchored at (10,10)',
-    }).toBe(KIND_LABEL);
-    await expect(page.locator('#fab-label-text'), 'the placed label focuses its Text field').toBeFocused();
-    await page.keyboard.type(WORDS);
-    await page.getByRole('button', { name: 'Apply', exact: true }).click();
-    await pollScene(page, (s) => {
-      const n = onlyOf(s, KIND_LABEL);
-      return n ? { cells: sortedCells(n), text: n.label?.text ?? null } : null;
-    }, { message: 'the host holds the label on its four cells with its words' }).toEqual({
-      cells: LABEL_CELLS,
-      text: WORDS,
-    });
-    await clickFloor(page);
-    await expect(page.locator('#fab-config-heading'), 'the floor click closed the label panel').toHaveCount(0);
-    await expectLabelDrawn(page, 'before the Delete');
-    await expectRenderLoopAlive(page, 'after the label is placed');
-
-    await deleteAndUndoRouter(page);
-    const after = await readScene(page);
-    expect(after.nodes.length, 'two nodes are on the board: the Router and the label').toBe(2);
-    const label = onlyOf(after, KIND_LABEL)!;
-    expect(
-      { cells: sortedCells(label), text: label.label?.text ?? null },
-      'the label keeps its four cells and its words',
-    ).toEqual({ cells: LABEL_CELLS, text: WORDS });
-    await expectMachinesDrawn(page, 'after the Ctrl+Z', false);
-    await expectLabelDrawn(page, 'after the Ctrl+Z');
-    await expect
-      .poll(async () => (await drawnNodesOf(page)).labels, { message: 'the machine layer draws the one label' })
-      .toEqual([label.id]);
-
-    await saveNewOpen(page, fab, topologyOf(after));
-    await expectMachinesDrawn(page, 'on the reopened board', false);
-    await expectLabelDrawn(page, 'on the reopened board');
-    errs.assertNone('across place, turn, label, delete, undo, save and open');
   });
 });

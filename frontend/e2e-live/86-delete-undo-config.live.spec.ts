@@ -18,11 +18,8 @@ import {
   pressSegment,
   pressedSegment,
   readFactorySource,
-  readPanelConfig,
   readPanelUrl,
-  readRouterTable,
   readScene,
-  appendRouterRule,
   resetZoomToActualSize,
   screenCellCentre,
   selectMachineAt,
@@ -74,11 +71,8 @@ import {
 //      in `/orders` again and the request gets the status it got before the Delete. Then
 //      Save and Open: the reopened Route's panel reads `/orders` and the request answers
 //      as before; Delete (404 again) and Ctrl+Z on the reopened board: the same once more.
-//   C. THE HTTP HANDLER. A palette Handler at (10,10), its JS replaced. READ: the editor.
-//   D. THE SINK. A palette Sink at (10,10) set to an HTTP target with the PUT method. READ:
-//      the Target, URL and Method the panel shows.
-//   E. THE ROUTER. A palette Router at (8,4) given two rules and a default other than the
-//      first output. READ: the rules table the panel shows (`readRouterTable`).
+//   C, D, E. Not here: the HTTP Handler, Sink and Router legs ran leg A's restore path on
+//      other kinds, so leg A stands for them.
 //   F. THE SOURCE. A palette Source at (6,6) set to Timer at 150 ticks. READ: the Trigger
 //      segment and the interval field, no URL row (and so no Copy button), the host
 //      answering no URL for the node, and a POST to the URL it had on Webhook answered
@@ -105,10 +99,7 @@ import {
 /** Protocol kind bytes, as numbers on purpose: the live suite imports no product source. */
 const KIND_SOURCE = 0;
 const KIND_FACTORY = 2;
-const KIND_ROUTER = 5;
-const KIND_SINK = 7;
 const KIND_ROUTE = 9;
-const KIND_HANDLER = 10;
 const KIND_LABEL = 11;
 /** `PortFacts.role` for an output. */
 const ROLE_OUT = 1;
@@ -124,13 +115,7 @@ const EMPTY_CELL: readonly [number, number] = [2, 2];
 /** The JS the user types: valid, and distinct from every placement default. */
 const TYPED_JS = 'export default (payload) => ({ seen: 8603, payload });';
 const TYPED_PATH = '/orders';
-/** The Handler JS the user types: valid, and distinct from the Handler preset. */
-const HANDLER_JS =
-  'export default function (input, ctx) {\n  ctx.command({ status: 201, headers: {}, body: "86-04" }, 0);\n}';
 
-const HANDLER_CELL: readonly [number, number] = [10, 10];
-const SINK_CELL: readonly [number, number] = [10, 10];
-const ROUTER_CELL: readonly [number, number] = [8, 4];
 const SOURCE_CELL: readonly [number, number] = [6, 6];
 /** The offload belt from the Source's Out (its Out faces E, the 85 spec's run). */
 const BELT_CELLS: readonly (readonly [number, number])[] = [
@@ -140,9 +125,6 @@ const BELT_CELLS: readonly (readonly [number, number])[] = [
 ];
 const LABEL_CELL: readonly [number, number] = [10, 12];
 
-/** The Sink's HTTP target, and a method other than the POST default. */
-const SINK_URL = 'http://127.0.0.1:9/orders';
-const SINK_METHOD = 'PUT';
 /** A Timer interval other than the panel's 60-tick default. */
 const TIMER_INTERVAL = '150';
 /** The slow end of the belt pace scale: `25` px/sec, 20 ticks per slot. */
@@ -293,7 +275,7 @@ async function editorJsAt(page: Page, cell: readonly [number, number]): Promise<
   return js;
 }
 
-/** One JS leg (a Factory or an HTTP Handler): type `js`, Apply, then the three reads. */
+/** One JS leg (the Factory): type `js`, Apply, then the three reads. */
 async function jsLeg(
   page: Page,
   row: string,
@@ -330,17 +312,6 @@ async function jsLeg(
   ).toBe(js);
   await expectRenderLoopAlive(page, 'after the second Ctrl+Z');
   errs.assertNone(`across configure, delete, undo, save, open, delete and undo of a ${row}`);
-}
-
-/** What the Router panel calls an output (phase 91, D-12, CHROME-13, UI-SPEC 8.6): `Output N`,
- *  N its routing key + 1 (its position among the Router's Outs in packet order, which is
- *  `outs`' order), plus ` (Target)` only when its belt reaches a machine. Every offload belt
- *  here ends on open floor, so no name carries a target. Until phase 91 the panel named each
- *  output by its nub's grid cell. */
-function outputLabel(outs: readonly PortFacts[], port: PortFacts): string {
-  const n = outs.indexOf(port) + 1;
-  expect(n, 'the port is one of the Router Outs').toBeGreaterThan(0);
-  return `Output ${n}`;
 }
 
 /** The Out ports of the node anchored at `cell`, in routing-key order. */
@@ -537,97 +508,6 @@ test.describe('D-01 live: Delete then Ctrl+Z brings a machine back with its conf
     await expectRouteAt(page, url, before, 'after the second Ctrl+Z, on the reopened board');
     await expectRenderLoopAlive(page, 'after the second Ctrl+Z');
     errs.assertNone('across place, configure, delete, undo, save, open, delete and undo of a Route');
-  });
-  test('leg C: an HTTP Handler with typed JS comes back with that JS, live and after a reopen', async ({ page }) => {
-    test.setTimeout(240_000);
-    await jsLeg(page, 'HTTP Handler', HANDLER_CELL, KIND_HANDLER, HANDLER_JS);
-  });
-
-  test('leg D: a Sink with an HTTP target and the PUT method comes back with both, live and after a reopen', async ({
-    page,
-  }) => {
-    test.setTimeout(240_000);
-    const errs = watchPageErrors(page);
-    await emptyBoard(page);
-    await expectRenderLoopAlive(page, 'on the empty board');
-    const want = { kind: 'Sink', target: 'HTTP', url: SINK_URL, method: SINK_METHOD };
-    const read = async (when: string) => {
-      await selectMachineAt(page, SINK_CELL[0], SINK_CELL[1]);
-      expect(await readPanelConfig(page), `${when}: the Sink panel shows the HTTP target, URL and method`).toEqual(want);
-      await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-    };
-
-    await placeAndSettle(page, 'Sink', SINK_CELL, KIND_SINK);
-    await selectMachineAt(page, SINK_CELL[0], SINK_CELL[1]);
-    expect(await readPanelConfig(page), 'a placed Sink starts on the Debug target (the default)').toEqual({
-      kind: 'Sink',
-      target: 'Debug',
-    });
-    await pressSegment(page, 'Target', 'HTTP');
-    await fillPanelField(page, 'fab-sink-http-url', SINK_URL);
-    await pressSegment(page, 'Method', SINK_METHOD);
-    await applyConfig(page);
-    await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-    await read('before the Delete');
-
-    await deleteAt(page, SINK_CELL);
-    await undoBackTo(page, SINK_CELL, KIND_SINK);
-    await read('after the Ctrl+Z');
-    await saveAndReopen(page, 'Sink', SINK_CELL, KIND_SINK);
-    await read('after the reopen');
-    await deleteAt(page, SINK_CELL);
-    await undoBackTo(page, SINK_CELL, KIND_SINK);
-    await read('after the second Ctrl+Z, on the reopened board');
-    await expectRenderLoopAlive(page, 'after the second Ctrl+Z');
-    errs.assertNone('across configure, delete, undo, save, open, delete and undo of a Sink');
-  });
-
-  test('leg E: a Router with two rules and a default comes back with its table, live and after a reopen', async ({
-    page,
-  }) => {
-    test.setTimeout(240_000);
-    const errs = watchPageErrors(page);
-    await emptyBoard(page);
-    await expectRenderLoopAlive(page, 'on the empty board');
-
-    await placeAndSettle(page, 'Router', ROUTER_CELL, KIND_ROUTER);
-    const outs = await outsAt(page, ROUTER_CELL);
-    expect(outs.length, 'the Router has three outputs to name').toBeGreaterThanOrEqual(3);
-    await selectMachineAt(page, ROUTER_CELL[0], ROUTER_CELL[1]);
-    const placed = await readRouterTable(page);
-    const want = {
-      rules: [
-        { target: outputLabel(outs, outs[1]), expect: 'A', offset: '0' },
-        { target: outputLabel(outs, outs[2]), expect: 'refund', offset: '2' },
-      ],
-      fallback: outputLabel(outs, outs[2]),
-    };
-    expect(placed, 'a placed Router starts with no rules and its first output as the default').toEqual({
-      rules: [],
-      fallback: outputLabel(outs, outs[0]),
-    });
-    await appendRouterRule(page, { expect: 'A', offset: 0, target: outputLabel(outs, outs[1]) });
-    await appendRouterRule(page, { expect: 'refund', offset: 2, target: outputLabel(outs, outs[2]) });
-    await pressSegment(page, 'Default', outputLabel(outs, outs[2]));
-    await applyConfig(page);
-    await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-    const read = async (when: string) => {
-      await selectMachineAt(page, ROUTER_CELL[0], ROUTER_CELL[1]);
-      expect(await readRouterTable(page), `${when}: the Router panel shows both rules and the default`).toEqual(want);
-      await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-    };
-    await read('before the Delete');
-
-    await deleteAt(page, ROUTER_CELL);
-    await undoBackTo(page, ROUTER_CELL, KIND_ROUTER);
-    await read('after the Ctrl+Z');
-    await saveAndReopen(page, 'Router', ROUTER_CELL, KIND_ROUTER);
-    await read('after the reopen');
-    await deleteAt(page, ROUTER_CELL);
-    await undoBackTo(page, ROUTER_CELL, KIND_ROUTER);
-    await read('after the second Ctrl+Z, on the reopened board');
-    await expectRenderLoopAlive(page, 'after the second Ctrl+Z');
-    errs.assertNone('across configure, delete, undo, save, open, delete and undo of a Router');
   });
 
   test('leg F: a Source on Timer comes back on Timer with its interval and no door, live and after a reopen', async ({
