@@ -78,7 +78,7 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 // (`crates/fabrico-host/src/input_apply.rs:504,545`). Any leg here that touches a
 // belt's pace is exercising THAT seam and not the Configure one.
 //
-// WHY RENDER HEALTH IS ASSERTED AT ALL, in the shape 19-router-rules' header uses:
+// WHY RENDER HEALTH IS ASSERTED AT ALL:
 // the live oracle reads only the MODEL, so a board that routes perfectly behind a
 // renderer that has stopped drawing satisfies every state assertion in this file.
 // That exact failure is a recorded finding on this project, and the recorded shape
@@ -143,8 +143,8 @@ const KIND = { ROUTER: 5, ENDPOINT: 9 } as const;
  * which plan 65-05 widened (ROUTE-02), and - since plan 71-04 (PILE-10) appended a
  * spatial Role::Fault nub to the ROUTER catalog entry - one Fault. The browser seeds
  * the Fault because `gestures.ts`'s `seedRouterPreset` derives its AddPort legs from
- * the WHOLE catalog entry; measured on the real host 2026-09-02, and see
- * `16-router-presets.spec.ts` for the Rust/browser preset disagreement it exposed.
+ * the WHOLE catalog entry; measured on the real host 2026-09-02, which exposed a
+ * Rust/browser preset disagreement that plan 85-05 closed.
  * This leg never touches the Fault nub.
  */
 const EXPECTED_ROLES = [ROLE.IN, ROLE.OUT, ROLE.OUT, ROLE.OUT, ROLE.FAULT] as const;
@@ -158,7 +158,7 @@ const EXPECTED_OUTS = EXPECTED_ROLES.filter((r) => r === ROLE.OUT).length;
 // THE BOARD LAYOUT. Named constants, because later legs address the SAME cells.
 // ---------------------------------------------------------------------------
 //
-// Leg 1's block is 19-router-rules' measured geometry, unchanged: a 2x3 Router at
+// Leg 1's block is measured geometry: a 2x3 Router at
 // (8,4) puts its In nub on the W edge at (8,5) (facing cell (7,5)) and its three
 // Out nubs down the E column at (9,5), (9,6), (9,4) by routing key (the 74.1-14
 // centre-out seats, the maintainer's ruling 2026-10-04). The Source is 1x1 with a single Out at
@@ -182,8 +182,8 @@ const WIRE_TARGET_CELL = [10, 10] as const;
 /** An empty cell INSIDE the built content, used to deselect.
  *
  *  Inside deliberately. The camera is fit-to-content and re-fits as the board grows
- *  - 19-router-rules measured scale 1.11 on the empty board to 3.61 once its scene
- *  is built - so a far-away "obviously empty" cell drifts off the viewport by the
+ *  - measured at scale 1.11 on the empty board and 3.61 once leg 1's scene is
+ *  built - so a far-away "obviously empty" cell drifts off the viewport by the
  *  time the panel is open and the deselect click lands on nothing. (6,6) sits in the
  *  block between the Source and the Router, is empty on every leg's board, and stays
  *  in frame because the fit is computed to include the content on both sides of it. */
@@ -248,8 +248,7 @@ function required<K extends keyof WalkBoard>(key: K, setBy: string): NonNullable
 }
 
 // ---------------------------------------------------------------------------
-// Spec-local helpers, COPIED from 19-router-rules.spec.ts rather than imported:
-// they are spec-local there and not oracle exports.
+// Spec-local helpers, not oracle exports.
 // ---------------------------------------------------------------------------
 
 /** What the Router panel calls an output (phase 91, D-12, CHROME-13, UI-SPEC 8.6): `Output N`,
@@ -282,17 +281,11 @@ function offloadBeltFor(scene: SceneFacts, routerId: number, key: number) {
  * forever and never echoes; and the webhook front door answers 503 while the sim is not
  * Playing (Gate A). Toggling is idempotent when the sim is already advancing.
  *
- * DERIVED FROM `ensurePlaying` IN `19-router-rules.spec.ts`, NOT COPIED VERBATIM. Two named
- * divergences, both fixing defects the source copy still carries and both applied for
- * review finding WR-06:
- *   1. The source clicks UNCONDITIONALLY, so a 400ms sample window that happens to
- *      catch no tick advance on a HEALTHY host presses Pause on it. This copy presses
- *      only when the control offers Play.
- *   2. The source takes three samples but makes three clicks, so the click after the
- *      LAST sample is never read back and a resume achieved on it still throws. This
- *      copy re-reads once after the loop.
- * `19-router-rules.spec.ts` is outside this phase's scope and was left alone; it wants
- * the same two fixes.
+ * Two rules, both from review finding WR-06:
+ *   1. It presses only when the control offers Play, so a 400ms sample window that
+ *      happens to catch no tick advance on a HEALTHY host never presses Pause on it.
+ *   2. It re-reads once after the loop, so a resume achieved on the last click is read
+ *      back instead of throwing.
  *
  * THE ONE TIMED WAIT IN THIS FILE IS THE ONE INSIDE THIS HELPER, AND IT IS NOT A
  * SETTLE. It is a timed SAMPLE of the tick rate - the quantity being measured. The
@@ -370,8 +363,8 @@ async function attachToRunningBoard(page: Page): Promise<ReturnType<typeof watch
  * `Reset zoom to 100%` readout control.
  *
  * MEASURED, and this leg would not run without it. The camera is fit-to-CONTENT and
- * re-fits as the board grows: 19-router-rules measured scale 1.11 on an empty board
- * to 3.61 once leg 1's scene is built. At 3.61 the 1280x720 viewport sees about
+ * re-fits as the board grows: measured at scale 1.11 on an empty board and
+ * 3.61 once leg 1's scene is built. At 3.61 the 1280x720 viewport sees about
  * 11x6 cells around leg 1's content, so a cell three rows below it projects OUTSIDE
  * the viewport, `page.mouse` clicks nothing, and the placement never folds. That is
  * verbatim research Pitfall 3 and WINDOWS row 114, and it is what the first run of
@@ -1716,7 +1709,7 @@ test.describe('the walk: the done-test on ONE board, from EMPTY', () => {
   //   3. The machine inbox was unbounded, so a belt feeding a jammed machine drained
   //      into an invisible queue instead of bunching. Phase 71 paid that one before
   //      this phase started: `admit::MECHANICAL_INBOX_CAP = 16`, walked live by
-  //      `e2e-live/25-backpressure-cascade.spec.ts`.
+  //      `e2e-live/77-one-board-all-five.live.spec.ts` leg 3.
   //
   // The deletion was approved explicitly in plan 74-09 BEFORE it was taken, with
   // this leg's own live result as its evidence; the answer was `delete-it`.
@@ -2114,8 +2107,8 @@ test.describe('the walk: the done-test on ONE board, from EMPTY', () => {
     //    downstream belt with somewhere to go can NEVER be sampled at full capacity.
     //    The only way to read `items === capacity` here would be to block the
     //    downstream's head - and a blocked head cannot drain, which would make step 7
-    //    unprovable. This is the same shape `25-backpressure-cascade.spec.ts` records
-    //    as its own measured baseline: "seven of eight, gap-free, head EMPTY".
+    //    unprovable. A backpressure walk measured the same shape as its baseline:
+    //    "seven of eight, gap-free, head EMPTY".
     //
     //    So the assertion is the whole SIGNATURE of both belts, derived from their own
     //    tile counts and compared as one string. Neither half is the claim on its own:

@@ -6621,8 +6621,8 @@ describe('Persistent-arm placement machine (IX-01/03/05/06)', () => {
   it('a Place sent with no transport waits for nothing, and a verdict naming id 0 lands nothing (phase 88 review, IN-05)', () => {
     // The send seam returns 0 when there is no transport and nothing was sent. No pending
     // entry may be made for it: no waiting shimmer for a Place the host never received, and no
-    // entry under id 0 for a verdict naming id 0 to pair with (16-router-presets sends raw
-    // frames as id 0 so that their verdicts pair with nothing).
+    // entry under id 0 for a verdict naming id 0 to pair with (a raw frame sent as id 0 must
+    // get a verdict that pairs with nothing).
     rig = setupRigWith({ noTransport: true });
     const place = turnedDropAt(rig, 5, 5);
     expect(place, 'PRECONDITION: the Place was attempted').toBe(1);

@@ -1403,8 +1403,7 @@ const PAST_RESTORE_TICKS = 60;
 
 /**
  * The cables on the board as sorted ANCHOR-keyed endpoint keys (`8,8:1 -> 12,7:0`), the id
- * dropped (`28-undo-restores-the-cable.spec.ts`, `cableEnds`, keyed by place because the Load
- * and the Undo keyframe remint handles).
+ * dropped (keyed by place because the Load and the Undo keyframe remint handles).
  */
 function cableKeysByPlace(scene: SceneFacts): string[] {
   return scene.wires.map((w) => anchorKey(scene, w)).sort((a, b) => a.localeCompare(b));

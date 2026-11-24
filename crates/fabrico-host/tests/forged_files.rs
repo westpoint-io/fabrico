@@ -22,8 +22,9 @@
 //!   cell; the anchor, the ports and every other byte stay real. Opened, its Ctrl+Z must be
 //!   refused `UndoSpaceTaken` with the board unchanged and the step still on top of the
 //!   undo stack. With linear undo no ordinary gesture reaches that guard (anything placed
-//!   after a Delete is undone before it); this file is its only reach, and
-//!   `frontend/e2e-live/86-undo-space-taken.live.spec.ts` opens it on the real app.
+//!   after a Delete is undone before it); this file is its only reach. On the real app,
+//!   `frontend/e2e-live/88-refusal-sentences.live.spec.ts` leg 4 checks the same refusal
+//!   with its own `88-undo-does-not-fit.fab`.
 //!
 //! - `86-label-given-a-port.fab` (plan 86-07, D-08, WORK-09): a Source, a Sink and a label
 //!   placed from the palette, saved, then ONE forged `AddPort` record appended that gives the

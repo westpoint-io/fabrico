@@ -492,13 +492,11 @@ export async function rejectFlashCellsSeen(page: Page): Promise<Array<{ cx: numb
  * `textContent()` read has the live 4000 ms hold (`REFUSAL_HOLD_MS`) running underneath it, so a
  * poll that returns near the end of the window can be followed by an EMPTY read, and a plain
  * poll reports the region's last reading, which is empty once the hold runs out. The ladder is
- * 15 s on 100, 250 and 500 ms, on the region's id. `soft` makes a red a soft assertion, so the
- * board grades after it still run and name the rest (`86-undo-space-taken.live.spec.ts`).
+ * 15 s on 100, 250 and 500 ms, on the region's id.
  */
-export async function captureRefusalText(page: Page, message: string, opts: { soft?: boolean } = {}): Promise<string> {
+export async function captureRefusalText(page: Page, message: string): Promise<string> {
   let latched = '';
   await expect
-    .configure({ soft: opts.soft === true })
     .poll(
       async () => {
         const now = ((await page.locator('#fab-refusal').textContent()) ?? '').trim();
@@ -1220,17 +1218,11 @@ export async function waitForAppReady(page: Page): Promise<void> {
  * forever and never echoes; and the webhook front door answers 503 while the sim is not
  * Playing (Gate A). Toggling is idempotent when the sim is already advancing.
  *
- * DERIVED FROM `ensurePlaying` IN `19-router-rules.spec.ts`, NOT COPIED VERBATIM. Two named
- * divergences, both fixing defects the source copy still carries and both applied for
- * review finding WR-06:
- *   1. The source clicks UNCONDITIONALLY, so a 400ms sample window that happens to
- *      catch no tick advance on a HEALTHY host presses Pause on it. This copy presses
- *      only when the control offers Play.
- *   2. The source takes three samples but makes three clicks, so the click after the
- *      LAST sample is never read back and a resume achieved on it still throws. This
- *      copy re-reads once after the loop.
- * `19-router-rules.spec.ts` is outside this phase's scope and was left alone; it wants
- * the same two fixes.
+ * Two rules, both from review finding WR-06:
+ *   1. It presses only when the control offers Play, so a 400ms sample window that
+ *      happens to catch no tick advance on a HEALTHY host never presses Pause on it.
+ *   2. It re-reads once after the loop, so a resume achieved on the last click is read
+ *      back instead of throwing.
  *
  * THE ONE TIMED WAIT IN THIS FILE IS THE ONE INSIDE THIS HELPER, AND IT IS NOT A
  * SETTLE. It is a timed SAMPLE of the tick rate - the quantity being measured. The
@@ -1244,11 +1236,9 @@ export async function waitForAppReady(page: Page): Promise<void> {
  *
  * HOISTED HERE BY PLAN 77-01 (phase 77 D-03). The docblock above is the one this helper
  * carried in `24-one-board-all-six.spec.ts` (`:290-337`), copied whole; "this file" in it
- * means that spec, not this module. The helper has TWO origins, and both keep their own
- * copies untouched: `24-one-board-all-six.spec.ts`, whose body this is, and
- * `16-router-presets.spec.ts`, which carries the same shape. They are left as they are
- * because spec 24 is the v8.0 done-test (77 D-01), and an edit to either would move a
- * shipped walk for no gain. Its one timed 400 ms read is a SAMPLE of the
+ * means that spec, not this module. `24-one-board-all-six.spec.ts`, whose body this is,
+ * keeps its own copy untouched, because spec 24 is the v8.0 done-test (77 D-01) and an
+ * edit to it would move a shipped walk for no gain. Its one timed 400 ms read is a SAMPLE of the
  * tick rate, never a settle.
  *
  * WHAT IT CANNOT DO (77-01, measured against `sim_loop.rs`). It presses only when the
@@ -1966,15 +1956,15 @@ export async function resetToDemo(page: Page, expectedNodeCount = DEMO_NODE_COUN
   // placement folded" timeout in the NEXT spec rather than in the one that moved the
   // camera.
   //
-  // THE READING THAT SETTLED IT, taken by running `19-router-rules` then
-  // `20-wire-draw` in order and dumping the camera at the drop point:
+  // THE READING THAT SETTLED IT, taken by running a spec that built a Router on an
+  // empty board, then `20-wire-draw`, in order and dumping the camera at the drop point:
   //   cam={"x":-287.58,"y":-221.80,"scale":3.5784} drop={"x":2059.85,"y":866.04}
   //   viewport={"width":1280,"height":720}
   // against the same spec run ALONE:
   //   cam={"x":249.73,"y":249.45,"scale":1.1010} drop={"x":972.02,"y":584.17}
   // The poisoned drop point is 780px right and 146px below the viewport. Note the
   // DIRECTION: the camera is zoomed IN 3.58x, not zoomed out as row 114 guessed
-  // (19-router-rules works from an EMPTY board, so fit-to-content zooms hard).
+  // (the first spec worked from an EMPTY board, so fit-to-content zooms hard).
   //
   // `waitForCameraSettle` alone could never have caught it: it returns as soon as two
   // consecutive rounded zoom samples agree, and a camera that is not animating at all
@@ -2371,25 +2361,8 @@ export async function drawBeltThroughCells(
   await drawDockedRun(page, from, cells, to);
 }
 
-/**
- * `drawBeltThroughCells` for a run that starts at a FAULT port (plan 85-05, D-22): the
- * same press rule, the same authored-run contract and the same release on the
- * destination nub. A Fault port starts a docked draw exactly as an Out does
- * (`gestures.ts` `doorstepPressHit`, the ROLE term) when its medium is Mechanical; this
- * helper only drives the pointer, and the caller grades which ends docked.
- */
-export async function drawFaultBeltThroughCells(
-  page: Page,
-  from: PortFacts,
-  cells: readonly (readonly [number, number])[],
-  to: PortFacts,
-): Promise<void> {
-  expect(from.role, 'a fault belt TAIL starts at a Fault port').toBe(2);
-  await drawDockedRun(page, from, cells, to);
-}
-
-/** The shared body of the two docked-run helpers above: authored-run contract, press,
- *  walk, release on the destination nub anchor, disarm. */
+/** The body of `drawBeltThroughCells` above: authored-run contract, press, walk,
+ *  release on the destination nub anchor, disarm. */
 async function drawDockedRun(
   page: Page,
   from: PortFacts,
@@ -2463,9 +2436,8 @@ async function pressDoorstepAndWalk(
  * is readable from board state for as long as the assertion wants to look.
  *
  * WHY THERE IS EXACTLY ONE PRESS RULE (74.1-11, review WR-06). This helper used to be
- * two local copies, in `24-one-board-all-six.spec.ts` and `19-router-rules.spec.ts`,
- * and both had drifted back to pressing the source NUB ANCHOR, the hazard plan 74.1-04
- * fixed in `drawBeltThroughCells` (Pitfall 3): the anchor sits 0.5 world px inside the
+ * two local copies in two specs, and both had drifted back to pressing the source NUB
+ * ANCHOR, the hazard plan 74.1-04 fixed in `drawBeltThroughCells` (Pitfall 3): the anchor sits 0.5 world px inside the
  * doorstep tile, so at a camera scale under 1 a rounded screen point can land inside
  * the machine, a red press with no dock. Both specs passed only on whatever camera a
  * run landed on. Both copies are deleted; this helper presses through

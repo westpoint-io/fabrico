@@ -355,7 +355,7 @@ function urlRow(page: Page) {
   return page.locator('span.fab-field', { hasText: 'http://127.0.0.1:' });
 }
 
-/** POST once, the way 85-timer-source-refuses-webhook does, and return the status. */
+/** POST once and return the status. */
 async function postStatus(page: Page, url: string): Promise<number> {
   const resp = await page.request.post(url, { data: { hello: 8604 }, failOnStatusCode: false });
   return resp.status();

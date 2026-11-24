@@ -1699,7 +1699,7 @@ pub(crate) fn belt_settled(state: &GridState, id: NodeId) -> bool {
 /// so nothing a busy branch misses is lost without a trace. A Tee with no docked branch is
 /// never gated, as before. Since the ANY-blocked reading was forced by the demo board's
 /// acceptance walk slowing ONE Tee branch (ruling R-10, in [`outputs_blocked`]), the
-/// backpressure walk now slows both (`25-backpressure-cascade.spec.ts`, phase 87).
+/// backpressure walk of phase 87 slowed both.
 ///
 /// The Router does not get this for free and keeps the ANY-blocked gate: it sends each item
 /// down exactly one route, so a per-branch gate would turn a blocked route into a dead

@@ -72,7 +72,7 @@ const KIND_SOURCE = 0;
 /** Port role Out (oracle `PortFacts.role`). */
 const ROLE_OUT = 1;
 /** The state bytes (`fabrico-protocol` `state_tag`), transcribed, the values
- *  `25-backpressure-cascade.spec.ts` mirrors. */
+ *  `77-one-board-all-five.live.spec.ts` leg 3 mirrors. */
 const WORKING = 1;
 const BACKED_UP = 3;
 

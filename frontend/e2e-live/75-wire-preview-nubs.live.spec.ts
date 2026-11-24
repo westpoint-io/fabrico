@@ -46,7 +46,7 @@ import {
 // THE LEG
 // ---------------------------------------------------------------------------
 //
-// D-09's pair, the cells `75-cable-head-on.live.spec.ts` leg 1 uses: Route A at (10,14)
+// D-09's pair: Route A at (10,14)
 // turned once so its Out faces S, Route B at (16,10) with its In facing W. The hand
 // presses A's south nub off-centre, moves in sub-cell steps with a diagonal stretch, and
 // while it is held over B's west nub the corridor is read off the plot.
@@ -244,7 +244,7 @@ test.describe('CABLE-08 live: the wire drag preview runs nub to nub, read off th
     ).toBe(true);
     await expectRenderLoopAlive(page, 'after the release');
     const cells = (await readScene(page)).wires[0].path.map((c) => [c.cell_x, c.cell_y]);
-    // 75-01's literal for this pair (75-cable-head-on.live.spec.ts leg 1).
+    // 75-01's literal for this pair.
     expect(cells, `the landed cable's cells; drawn ${JSON.stringify(cells)}`).toEqual([
       [10, 14],
       [10, 15],

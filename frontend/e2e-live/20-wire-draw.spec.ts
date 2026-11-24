@@ -51,9 +51,8 @@ import {
 // row as a live false claim - nothing ever links a machine's OUTPUT port into a wire
 // (`tick.rs` creates only the one link, from the request's entry), so a Router
 // structurally cannot sit on a request path - and the `armAndPlaceAt` call here then
-// timed out at 90s waiting for a row that no longer exists. Neither this file nor
-// `16-router-presets.spec.ts` was in plan 72-13's `files_modified`; the scope was
-// widened rather than the red left standing.
+// timed out at 90s waiting for a row that no longer exists. This file was not in plan
+// 72-13's `files_modified`; the scope was widened rather than the red left standing.
 //
 // TWO ROUTES, AND ROUTE-TO-ROUTE IS THE LOAD-BEARING CHOICE. A hand-placed Route's
 // catalog arm declares an electrical In at index 0 and an electrical Out at index 1

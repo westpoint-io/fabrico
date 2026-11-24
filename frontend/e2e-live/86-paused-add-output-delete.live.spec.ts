@@ -273,7 +273,7 @@ async function settledEnds(page: Page, id: number, ctx: string): Promise<number>
 /** `RefusalMessage`'s sentence for `UnknownNode`, transcribed, not imported. Reworded by plan
  *  88-02 (D-03) to name no kind: a gone label or belt reads it too. */
 const NO_LONGER_THERE = 'That is no longer on the board.';
-/** The caller Route's electrical Out row control in the Ports region (`28-undo-restores-the-cable`). */
+/** The caller Route's electrical Out row control in the Ports region. */
 const DISCONNECT_CONTROL_NAME = 'Disconnect Output - Wire';
 
 /** The board with every id erased: each node by kind, anchor and cells, each belt by its tiles

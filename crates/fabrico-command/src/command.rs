@@ -555,7 +555,7 @@ fn router_preset_entry(medium: Medium) -> MachineCatalogEntry {
 /// ride belts (the Handler precedent). Seeded at the preset medium, the HTTP Router's
 /// fault nub was Electrical, which a belt refuses to dock and a wire cannot leave, so it
 /// was a nub nothing could attach to; plan 85-05 confirmed that on the real host before
-/// changing it (`16-router-presets.spec.ts`, the fault-nub leg).
+/// changing it.
 ///
 /// # ROUTE-06 zero-serialized-change (CONTEXT hard rule)
 /// The two palette presets — HTTP Router (`Medium::Electrical`) and Item Router

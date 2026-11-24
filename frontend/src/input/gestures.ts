@@ -816,9 +816,8 @@ export function routerPresetSeedCommands(
     // items ride belts. Seeded at the preset medium, the HTTP Router's fault nub was
     // Electrical: the Belt tool's doorstep press skips an Electrical port (the MEDIUM
     // term of `doorstepPressHit`) and the host refuses a belt docked on one, so it was
-    // a nub nothing could attach to, confirmed on the real host before this line moved
-    // (`e2e-live/16-router-presets.spec.ts`, the fault-nub leg). The Rust twin,
-    // `router_preset_ports`, makes the same choice.
+    // a nub nothing could attach to, confirmed on the real host before this line moved.
+    // The Rust twin, `router_preset_ports`, makes the same choice.
     const legMedium = leg.role === PORT_ROLE.FAULT ? MEDIUM_MECHANICAL : medium;
     out.push({ kind: 'AddPort', node: node.id, role: leg.role, side: leg.side, medium: legMedium });
   }
@@ -2448,8 +2447,8 @@ export function createGestureController(deps: GestureDeps): GestureController {
     // Place's verdict ends it. It is display-only and never reads as success.
     //
     // An id of 0 is nothing sent (no transport, phase 88 review IN-05): no verdict will answer
-    // it, so no entry waits and no shimmer marks it, and no verdict naming id 0 (a raw frame,
-    // 16-router-presets) can pair with one.
+    // it, so no entry waits and no shimmer marks it, and no verdict naming id 0 (a raw frame
+    // sent as id 0) can pair with one.
     if (gestureId !== 0) {
       const entry: PendingPlacement = {
         gestureId,

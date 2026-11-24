@@ -116,7 +116,7 @@ export function frameBudgetMs(frames: number, minMs = 0): number {
 /**
  * The slowest board clock a live grade is budgeted for, in sim ticks a second (review 84
  * WR-03). The host runs 60 a second at full speed; on a starved machine the page sees fewer.
- * The slowest measured: `75-reroute-mark` leg 1 at a 100% CPU quota (plan 84-11, `q100`, which
+ * The slowest measured: a reroute-mark grade after a turn at a 100% CPU quota (plan 84-11, `q100`, which
  * slows the host as well as the page) read the last mark 54 ticks after the key, 1905 ms of
  * wall time, 28.3 a second. The evening 2026-10-13 CI run read the same span at 65 ticks over 1135 ms. So 28.
  */
