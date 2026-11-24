@@ -43,13 +43,22 @@ export function liveCoverageOptions(label: string) {
     name: `live suite ${label}`,
     outputDir: `./coverage-live/${label}`,
     reports: ['v8-json', 'console-summary'],
-    // First matching pattern wins, so the exclusions come before the app source.
-    entryFilter: {
-      '**/node_modules/**': false,
-      '**/@vite/**': false,
-      '**/@react-refresh**': false,
-      '**/src/**': true,
+    // Keep only the app's own script modules as Vite serves them (`/src/....ts(x)`). That drops
+    // pre-bundled packages (`/node_modules/.vite/deps/`), `/@vite/client`, `/@react-refresh`, and
+    // the one-line wrappers Vite makes for imported assets (`belt.svg?import&raw`, fonts).
+    entryFilter: (entry: { url: string }) => {
+      const { pathname } = new URL(entry.url);
+      return pathname.startsWith('/src/') && /\.[jt]sx?$/.test(pathname);
     },
+    // Vite's inline source maps name each source by its bare file name (`App.tsx`), so a reading
+    // would key files by base name only. Rebuild the path from the served module's folder and drop
+    // the host and port: `src/chrome/App.tsx`.
+    sourcePath: (filePath: string, info: { distFile?: string }) => {
+      const full =
+        info.distFile && !filePath.includes('/') ? info.distFile.replace(/[^/]*$/, '') + filePath : filePath;
+      return full.replace(/^127\.0\.0\.1-\d+\//, '');
+    },
+    // First matching pattern wins, so the exclusion comes before the app source.
     sourceFilter: {
       '**/node_modules/**': false,
       '**/src/**': true,
