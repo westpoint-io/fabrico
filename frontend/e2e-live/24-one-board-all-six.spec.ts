@@ -16,6 +16,7 @@ import {
   drawBeltThroughCells,
   drawOffloadBelt,
   drawWireBetweenPorts,
+  expectRefusalStayedSilent,
   expectRenderLoopAlive,
   fillPanelField,
   loadDemoViaExamples,
@@ -101,6 +102,7 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 //   4. leg 4 - a machine disconnected and reconnected without reloading the scene
 //   5. leg 5 - the board saved, loaded, and read back
 //   6. leg 3 completed last: the joined run backs up at the junction and drains
+//      (it ends with a step that undoes the Disconnect with one Ctrl+Z)
 //
 // EVERY ONE OF THEM PASSES. Until plan 74-09 declaration 6 was an unconditional
 // `throw`: done-test leg 3's backlog half was not walkable on the shipped build, and
@@ -1705,7 +1707,8 @@ test.describe('the walk: the done-test on ONE board, from EMPTY', () => {
   //      catalog 1 - and the certified command path now accepts the Dock (LINK-01).
   //   2. No shipped gesture linked two belts (WINDOWS 140). Plan 74-05 shipped two:
   //      the end-handle drag (LINK-02) and the press-on-a-free-end draw (LINK-10).
-  //      Both are walked on the real host by `e2e-live/74-belt-run-joins.spec.ts`.
+  //      Both are walked on the real host by `e2e-live/74.1-corner-connects.live.spec.ts`
+  //      (the press on a free end) and `e2e-live/74.1-seam-corner.live.spec.ts` (the handle drag).
   //   3. The machine inbox was unbounded, so a belt feeding a jammed machine drained
   //      into an invisible queue instead of bunching. Phase 71 paid that one before
   //      this phase started: `admit::MECHANICAL_INBOX_CAP = 16`, walked live by
@@ -1988,7 +1991,7 @@ test.describe('the walk: the done-test on ONE board, from EMPTY', () => {
     //
     //    THE ORDER HERE IS FORCED AND IS NOT A PREFERENCE. Once the two are joined
     //    they are ONE RUN, and one Apply sets the pace on ALL of it (that is LINK-03,
-    //    walked in `74-belt-run-joins.spec.ts`) - so a slower downstream can only be
+    //    walked in `77-one-board-all-five.live.spec.ts` leg 2) - so a slower downstream can only be
     //    authored BEFORE the join. The fast end of the shipped scale is also the
     //    shipped default, so the difference has to be made by SLOWING the downstream.
     // -----------------------------------------------------------------------
@@ -2230,6 +2233,54 @@ test.describe('the walk: the done-test on ONE board, from EMPTY', () => {
     await expectRenderLoopAlive(page, 'after the Disconnect drained the downstream');
     errs.assertNone('the whole of leg 3 completed');
 
+    await test.step('Disconnect unmakes the junction from the downstream Inputs row, and one Ctrl+Z restores it', async () => {
+      // MOVE FOCUS OFF THE BUTTON FIRST. The app-wide LW-02 guard stands the canvas
+      // keybindings down, Ctrl+Z included, while a BUTTON holds focus, and the Disconnect
+      // click leaves focus there. The panel heading is a plain non-focusable element, so
+      // the selection survives the click.
+      //
+      // The refusal region is LATCHED across the whole window: an undo the host refused in
+      // words would otherwise pass every check below on a build where the sentence had
+      // already timed out.
+      await page.locator('#fab-config-heading').click();
+      await expectRefusalStayedSilent(page, 'Ctrl+Z after a belt Disconnect', async () => {
+        await page.keyboard.press('Control+z');
+        await pollScene(page, jamJunction, {
+          message: 'one Ctrl+Z put the belt-to-belt junction back, named from both sides',
+        }).toBe('1/1');
+      });
+      // The collar is drawn again. The upstream is resolved BY CELL: the undo arrived as a
+      // keyframe, which remints handles, so `upBelt.id` may name nothing now. The baseline
+      // is the pre-join paint (the Source plug), so this is a delta and not a bare presence.
+      await expect
+        .poll(
+          async () => {
+            const up = jamBeltAt(await readScene(page), JAM_UP_HEAD);
+            return up ? beltEndInstructionsOn(page, up.id) : -1;
+          },
+          {
+            timeout: addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), 'junction collar back poll'),
+            intervals: [100, 250, 500],
+            message: 'and the junction collar is drawn again on the upstream belt after the undo',
+          },
+        )
+        .toBeGreaterThan(collarBefore);
+      // An undo is a keyframe and `App.tsx` clears the selection on every keyframe
+      // (T-21-08), so the panel is closed now. What the user gets is: press undo, click the
+      // belt again, and the panel says the run is two belts once more.
+      await expect(
+        page.locator('#fab-config-heading'),
+        'the undo keyframe cleared the selection, so the panel is closed (shipped, T-21-08)',
+      ).toHaveCount(0);
+      await selectJamBelt(page, JAM_DOWN_TILE);
+      await expect(
+        page.locator('#fab-belt-run'),
+        'and re-opening the panel after the undo reads the 2-belt sentence again, by exact string',
+      ).toHaveText(RUN_TWO_COPY);
+      await expectRenderLoopAlive(page, 'after the undo restored the junction');
+      errs.assertNone('through the Ctrl+Z after the Disconnect');
+    });
+
     // -----------------------------------------------------------------------
     // RESTORE THE SHARED HOST, exactly as leg 5 does: this leg left a jammed board
     // behind a running Timer, and the live suite runs `workers: 1` against ONE
@@ -2237,7 +2288,7 @@ test.describe('the walk: the done-test on ONE board, from EMPTY', () => {
     //
     // DESELECT FIRST, and it is not tidying. MEASURED while writing this leg: the
     // config panel is a right-edge overlay and it is still open on the downstream belt
-    // after the Disconnect, and its heading INTERCEPTS THE POINTER on the `Examples`
+    // after the undo step re-selects it, and its heading INTERCEPTS THE POINTER on the `Examples`
     // control the restore drives - Playwright retried the click for the whole 90s test
     // budget and the leg failed on the restore rather than on anything it asserts.
     // -----------------------------------------------------------------------

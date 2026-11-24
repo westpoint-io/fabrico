@@ -720,8 +720,9 @@ export async function portNubInstructionsOn(page: Page, id: number): Promise<num
  * READ THE SCOPE BEFORE ASSERTING ON IT. This counts BOTH ends of the belt: a machine
  * dock plots a stem plus a role cap, a belt-to-belt junction plots the collar disc plus
  * its ring, and an UNDOCKED end plots nothing at all. So it isolates the collar only on
- * a board where the named belt's other end is free - which is exactly what
- * `74-belt-run-joins.spec.ts` builds, and why it builds it that way.
+ * a board where the named belt's other end is free. On a board where it is docked (the
+ * last leg of `24-one-board-all-six.spec.ts`), assert a change against a baseline read
+ * before the join.
  *
  * Delegates to `BeltLayer.endInstructionsOn`, which reads `ends.context.instructions
  * .length` off the Graphics. Two distinct named throws, as elsewhere in this file, so a

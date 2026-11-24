@@ -31,10 +31,8 @@ import {
 //
 // WHAT EVERY BELT-DRAW FIXTURE IN THIS REPOSITORY SHARED THAT A HAND DOES NOT: it
 // advances such that no sample is ever more than one cell from the head.
-// `oracle.ts`'s `drawBeltThroughCells` steps cell by cell. So does
-// `74-belt-run-joins.spec.ts`'s `drawBeltOnFloor`, so does `74-belt-join-press-on-end`'s
-// driver, so do the mock e2e drags. The shipped suites therefore CANNOT fail on any of
-// the three findings, and a fix verified against them is verified by a check that cannot
+// `oracle.ts`'s `drawBeltThroughCells` steps cell by cell, and so do the mock e2e drags.
+// The shipped suites therefore CANNOT fail on any of the three findings, and a fix verified against them is verified by a check that cannot
 // fail. Every leg here emits at least one MULTI-CELL sample for that reason, and the
 // elbow leg emits one that changes both cell axes at once.
 //

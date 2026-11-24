@@ -498,9 +498,8 @@ test.describe('CORNER-01 seam on the real host: the join is graded on the shippe
       return (a.docks ?? []).filter((d) => d.end === 'Head' && d.node === b.id).length;
     };
 
-    // THE GESTURE: select A on an interior tile, press its Head handle (the end tile centre,
-    // `74-belt-run-joins.spec.ts` joinByHandleDrag's rule), drop it on B's Tail with sub-cell
-    // samples. A handle drag adds no tile: only a Dock is sent (review CR-01).
+    // THE GESTURE: select A on an interior tile, press its Head handle (the end tile centre),
+    // drop it on B's Tail with sub-cell samples. A handle drag adds no tile: only a Dock is sent (review CR-01).
     const sel = await screenCellCentre(page, 8, 8);
     await clickAt(page, sel.x, sel.y);
     await expect(page.locator('#fab-belt-config'), 'clicking (8,8) selected belt A').toBeVisible({
@@ -530,7 +529,7 @@ test.describe('CORNER-01 seam on the real host: the join is graded on the shippe
     // ONE CTRL+Z. MEASURED at plan 74.1-09 on the real host: one Ctrl+Z after this gesture
     // undoes the Dock (the last edit), so A's Head dock is gone and both belts remain. Focus
     // is moved off any button first (the LW-02 guard stands canvas keys down while a button
-    // holds focus, `74-belt-run-joins.spec.ts`).
+    // holds focus).
     await page.locator('#fab-config-heading').click();
     await page.keyboard.press('Control+z');
     await pollScene(page, headDocksToB, { message: "one Ctrl+Z undid the Dock: A's Head names B no more" }).toBe(0);
