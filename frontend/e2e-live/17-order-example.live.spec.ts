@@ -432,195 +432,199 @@ test.describe('EX-02 SC1 live: a real order POSTed at the shipped example splits
   }) => {
     test.skip(bindFailure !== null, bindFailure ?? '');
 
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
+    await test.step(
+      'the shipped order scene turns one webhook POST into flow on both branches and exactly one captured /fulfillment POST',
+      async () => {
+        const errs = watchPageErrors(page);
+        await page.goto('/');
+        await waitForAppReady(page);
 
-    // (1) The scene, loaded the way a user loads it: the Examples popover.
-    // `loadExample` clicks the entry by its title, so this is also the read of the
-    // title a user sees: "(webhook in, HTTP out)", no email.
-    await loadExample(page, 'order_processing');
-    // Plan 91-10 (CHROME-15, UI-SPEC 5.4): the badge is read where it now lives, in the status strip.
-    await expect(
-      page.locator('header [data-fab-status-strip] [data-fab-scene-badge]'),
-      'the scene badge in the status strip names the loaded example',
-    ).toHaveText('Order processing');
+        // (1) The scene, loaded the way a user loads it: the Examples popover.
+        // `loadExample` clicks the entry by its title, so this is also the read of the
+        // title a user sees: "(webhook in, HTTP out)", no email.
+        await loadExample(page, 'order_processing');
+        // Plan 91-10 (CHROME-15, UI-SPEC 5.4): the badge is read where it now lives, in the status strip.
+        await expect(
+          page.locator('header [data-fab-status-strip] [data-fab-scene-badge]'),
+          'the scene badge in the status strip names the loaded example',
+        ).toHaveText('Order processing');
 
-    // (2) Resolve the topology this spec drives, off the live packet.
-    const scene = await readScene(page);
-    expect(scene.nodes, 'the shipped order scene carries its six machines').toHaveLength(6);
-    expect(scene.belts, 'the shipped order scene carries its five belts').toHaveLength(5);
-    const source = nodeAtAnchor(scene, AT.source[0], AT.source[1]);
-    const splitter = nodeAtAnchor(scene, AT.splitter[0], AT.splitter[1]);
-    const invoiceSink = nodeAtAnchor(scene, AT.invoiceSink[0], AT.invoiceSink[1]);
-    expect(source?.kind, 'the front door is a webhook SOURCE, not an Endpoint').toBe(KIND_SOURCE);
-    expect(splitter?.kind, 'the validate/split machine is a Factory').toBe(KIND_FACTORY);
-    expect(invoiceSink?.kind, 'the invoice corridor ends in a Sink').toBe(KIND_SINK);
+        // (2) Resolve the topology this spec drives, off the live packet.
+        const scene = await readScene(page);
+        expect(scene.nodes, 'the shipped order scene carries its six machines').toHaveLength(6);
+        expect(scene.belts, 'the shipped order scene carries its five belts').toHaveLength(5);
+        const source = nodeAtAnchor(scene, AT.source[0], AT.source[1]);
+        const splitter = nodeAtAnchor(scene, AT.splitter[0], AT.splitter[1]);
+        const invoiceSink = nodeAtAnchor(scene, AT.invoiceSink[0], AT.invoiceSink[1]);
+        expect(source?.kind, 'the front door is a webhook SOURCE, not an Endpoint').toBe(KIND_SOURCE);
+        expect(splitter?.kind, 'the validate/split machine is a Factory').toBe(KIND_FACTORY);
+        expect(invoiceSink?.kind, 'the invoice corridor ends in a Sink').toBe(KIND_SINK);
 
-    // The two BRANCH corridors, resolved as "the belts docked to the splitter's
-    // two Out ports" rather than by raw handle - the split is a property of the
-    // docks, so that is what identifies them.
-    const branchBelts = scene.belts.filter((b) =>
-      b.docks.some((d) => d.end === 'Tail' && d.node === splitter?.id),
+        // The two BRANCH corridors, resolved as "the belts docked to the splitter's
+        // two Out ports" rather than by raw handle - the split is a property of the
+        // docks, so that is what identifies them.
+        const branchBelts = scene.belts.filter((b) =>
+          b.docks.some((d) => d.end === 'Tail' && d.node === splitter?.id),
+        );
+        expect(
+          branchBelts.map((b) => b.id).sort(),
+          'the splitter feeds exactly two branch corridors',
+        ).toHaveLength(2);
+        // The invoice corridor's LAST belt: the one whose Head delivers into the Debug
+        // sink. Its drain is how "the item reached the sink" is observed.
+        const invoiceFeed = scene.belts.find((b) =>
+          b.docks.some((d) => d.end === 'Head' && d.node === invoiceSink?.id),
+        );
+        expect(invoiceFeed, 'a belt delivers into the invoice Debug sink').toBeDefined();
+
+        // (3) The door is only open on a running host.
+        await expectPlaying(page, 'before the order POST');
+
+        // (4) Latch belt flow BEFORE driving anything: an item crosses a corridor in a
+        // few hundred ms, which a Playwright-side poll can legitimately step over.
+        await startBeltFlowWatch(page);
+        const capturedBefore = captured.length;
+
+        // (5) THE REAL POST - the same body the Rust tracer uses, at the Source's own
+        // webhook URL, through the real loopback ingress. Nothing is injected.
+        await postOrderAt(page, (source as SceneFacts['nodes'][number]).id);
+
+        // (6) THE SPLIT, observed on the canvas model: BOTH branch corridors carried
+        // an item from the one order.
+        await expect
+          .poll(
+            async () => {
+              const flow = await readBeltFlowWatch(page);
+              return branchBelts.every((b) => flow.carried.includes(b.id));
+            },
+            {
+              timeout: 30_000,
+              intervals: [200, 250, 500],
+              message:
+                'one order split down BOTH branch corridors (each of the splitter\'s two Out belts carried an item)',
+            },
+          )
+          .toBe(true);
+
+        // (7) THE INVOICE HALF, read off the board: the invoice item traversed the
+        // sink-adjacent belt and DRAINED - and a belt's head empties only by delivery
+        // into its docked In port (a refused delivery backs up and never clears), so
+        // the item was TAKEN by the Debug sink.
+        await expect
+          .poll(
+            async () => {
+              const flow = await readBeltFlowWatch(page);
+              const id = (invoiceFeed as SceneFacts['belts'][number]).id;
+              return flow.carried.includes(id) && flow.drained.includes(id);
+            },
+            {
+              timeout: 30_000,
+              intervals: [200, 250, 500],
+              message:
+                'the invoice item reached the Debug sink: its feed belt carried an item and then drained into the sink',
+            },
+          )
+          .toBe(true);
+        await stopBeltFlowWatch(page);
+
+        // (8) THE REAL OUTBOUND ACTION, observed OFF the board: exactly one POST
+        // arrived at the listener bound on the scene's own sink URL.
+        await expect
+          .poll(() => captured.length, {
+            timeout: 30_000,
+            intervals: [100, 250, 500],
+            message: `the HTTP sink dispatched a real POST to the shipped ${HTTP_URL}`,
+          })
+          .toBe(capturedBefore + 1);
+        const post = captured[capturedBefore];
+        expect(post.method, 'the sink POSTs').toBe('POST');
+        expect(post.path, 'the sink POSTs the authored path').toBe(HTTP_PATH);
+        expect(post.body, 'the fulfillment body carries the order id').toContain('ord-1');
+        expect(
+          post.body,
+          'the fulfillment body is the prepare-fulfillment handler\'s emission',
+        ).toContain('ship');
+        expect(post.idempotencyKey, 'the dispatch carried its Idempotency-Key').not.toBe('');
+        // Settle briefly and re-check: a duplicate dispatch would land right after.
+        await expect
+          .poll(() => captured.length, {
+            timeout: 3_000,
+            intervals: [500],
+            message: 'exactly ONE outbound action per order (no duplicate dispatch follows)',
+          })
+          .toBe(capturedBefore + 1);
+        shippedPost = post;
+
+        // (9) THE INVOICE WAS DELIVERED, NOT FAULTED, on the board. By now the order has
+        // crossed both corridors and the HTTP dispatch has landed, so the invoice sink's
+        // own dispatch has long resolved: a Debug sink succeeds, so the sink settles
+        // IDLE. A failed dispatch would hold it FAULTED (the state the Email sink read
+        // on this host).
+        const invoiceSinkId = (invoiceSink as SceneFacts['nodes'][number]).id;
+        await pollScene(page, (s) => s.nodes.find((n) => n.id === invoiceSinkId)?.state, {
+          message: `the invoice Debug sink settles IDLE (${STATE_IDLE}) after its delivery, never FAULTED (${STATE_FAULTED})`,
+        }).toBe(STATE_IDLE);
+
+        await expectRenderLoopAlive(page, 'after the shipped order example loaded and ran one order');
+        errs.assertNone('the shipped order example loading and running one order');
+      },
     );
-    expect(
-      branchBelts.map((b) => b.id).sort(),
-      'the splitter feeds exactly two branch corridors',
-    ).toHaveLength(2);
-    // The invoice corridor's LAST belt: the one whose Head delivers into the Debug
-    // sink. Its drain is how "the item reached the sink" is observed.
-    const invoiceFeed = scene.belts.find((b) =>
-      b.docks.some((d) => d.end === 'Head' && d.node === invoiceSink?.id),
+
+    // The order scene is still loaded from the step above, so this step starts from it: Home
+    // frames the board again and an empty-cell click clears any selection first.
+    await test.step(
+      'the shipped example reads correctly in the panels: the Source offers its webhook URL and the splitter JS fits the editor without horizontal scroll',
+      async () => {
+        const errs = watchPageErrors(page);
+        await deselectAtFit(page);
+
+        // (1) The Source panel offers the copyable webhook URL row (CFG-03) - the row
+        // that tells a user where to POST the order this example is built around.
+        await selectMachineAt(page, AT.source[0], AT.source[1]);
+        const urlValue = page.locator('span.fab-field', { hasText: 'http://127.0.0.1:' });
+        await expect(urlValue, 'the Source panel shows its bound loopback webhook URL').toBeVisible({
+          timeout: 10_000,
+        });
+        await expect(urlValue).toContainText(/^http:\/\/127\.0\.0\.1:\d+\/hook\/src-/);
+        await deselectAtFit(page);
+
+        // (2) The splitter's inline handler renders in the editor, byte-verbatim.
+        await selectMachineAt(page, AT.splitter[0], AT.splitter[1]);
+        await expect(page.locator('.cm-content'), 'the Factory editor mounted').toBeVisible({
+          timeout: 10_000,
+        });
+
+        // (3) THE UI-SPEC LONG-TEXT MEASUREMENT (the one `unresolved` row of the
+        // 55-UI-SPEC considerations table). The config panel is `min(420px, 33vw)`, so
+        // its narrowest SUPPORTED width is 33vw at the app's 1024px floor (the width
+        // the toolbar overflow contract is measured at). Shrink to that floor and
+        // measure the editor's own scroll surface: `scrollWidth <= clientWidth` means
+        // no horizontal scrollbar - the inline JS wraps instead of running off. The
+        // subjective half ("does it read well") stays with the real-binary walk.
+        await page.setViewportSize({ width: 1024, height: 768 });
+        const metrics = await page.evaluate(() => {
+          const scroller = document.querySelector('.cm-scroller') as HTMLElement | null;
+          if (!scroller) return null;
+          const panel = scroller.closest('.fab-panel') as HTMLElement | null;
+          return {
+            scrollWidth: scroller.scrollWidth,
+            clientWidth: scroller.clientWidth,
+            panelWidth: panel ? panel.getBoundingClientRect().width : -1,
+          };
+        });
+        expect(metrics, 'the editor scroll surface is measurable').not.toBeNull();
+        const m = metrics as { scrollWidth: number; clientWidth: number; panelWidth: number };
+        expect(m.panelWidth, 'the panel really is at its narrowest supported width').toBeLessThan(420);
+        expect(
+          m.scrollWidth,
+          `the inline factory JS fits the editor with NO horizontal scroll at the panel's minimum width (scrollWidth ${m.scrollWidth} vs clientWidth ${m.clientWidth}, panel ${m.panelWidth}px)`,
+        ).toBeLessThanOrEqual(m.clientWidth);
+        await page.setViewportSize({ width: 1280, height: 720 });
+
+        await expectRenderLoopAlive(page, 'after the order example panels were read at both widths');
+        errs.assertNone('reading the order example panels at both widths');
+      },
     );
-    expect(invoiceFeed, 'a belt delivers into the invoice Debug sink').toBeDefined();
-
-    // (3) The door is only open on a running host.
-    await expectPlaying(page, 'before the order POST');
-
-    // (4) Latch belt flow BEFORE driving anything: an item crosses a corridor in a
-    // few hundred ms, which a Playwright-side poll can legitimately step over.
-    await startBeltFlowWatch(page);
-    const capturedBefore = captured.length;
-
-    // (5) THE REAL POST - the same body the Rust tracer uses, at the Source's own
-    // webhook URL, through the real loopback ingress. Nothing is injected.
-    await postOrderAt(page, (source as SceneFacts['nodes'][number]).id);
-
-    // (6) THE SPLIT, observed on the canvas model: BOTH branch corridors carried
-    // an item from the one order.
-    await expect
-      .poll(
-        async () => {
-          const flow = await readBeltFlowWatch(page);
-          return branchBelts.every((b) => flow.carried.includes(b.id));
-        },
-        {
-          timeout: 30_000,
-          intervals: [200, 250, 500],
-          message:
-            'one order split down BOTH branch corridors (each of the splitter\'s two Out belts carried an item)',
-        },
-      )
-      .toBe(true);
-
-    // (7) THE INVOICE HALF, read off the board: the invoice item traversed the
-    // sink-adjacent belt and DRAINED - and a belt's head empties only by delivery
-    // into its docked In port (a refused delivery backs up and never clears), so
-    // the item was TAKEN by the Debug sink.
-    await expect
-      .poll(
-        async () => {
-          const flow = await readBeltFlowWatch(page);
-          const id = (invoiceFeed as SceneFacts['belts'][number]).id;
-          return flow.carried.includes(id) && flow.drained.includes(id);
-        },
-        {
-          timeout: 30_000,
-          intervals: [200, 250, 500],
-          message:
-            'the invoice item reached the Debug sink: its feed belt carried an item and then drained into the sink',
-        },
-      )
-      .toBe(true);
-    await stopBeltFlowWatch(page);
-
-    // (8) THE REAL OUTBOUND ACTION, observed OFF the board: exactly one POST
-    // arrived at the listener bound on the scene's own sink URL.
-    await expect
-      .poll(() => captured.length, {
-        timeout: 30_000,
-        intervals: [100, 250, 500],
-        message: `the HTTP sink dispatched a real POST to the shipped ${HTTP_URL}`,
-      })
-      .toBe(capturedBefore + 1);
-    const post = captured[capturedBefore];
-    expect(post.method, 'the sink POSTs').toBe('POST');
-    expect(post.path, 'the sink POSTs the authored path').toBe(HTTP_PATH);
-    expect(post.body, 'the fulfillment body carries the order id').toContain('ord-1');
-    expect(
-      post.body,
-      'the fulfillment body is the prepare-fulfillment handler\'s emission',
-    ).toContain('ship');
-    expect(post.idempotencyKey, 'the dispatch carried its Idempotency-Key').not.toBe('');
-    // Settle briefly and re-check: a duplicate dispatch would land right after.
-    await expect
-      .poll(() => captured.length, {
-        timeout: 3_000,
-        intervals: [500],
-        message: 'exactly ONE outbound action per order (no duplicate dispatch follows)',
-      })
-      .toBe(capturedBefore + 1);
-    shippedPost = post;
-
-    // (9) THE INVOICE WAS DELIVERED, NOT FAULTED, on the board. By now the order has
-    // crossed both corridors and the HTTP dispatch has landed, so the invoice sink's
-    // own dispatch has long resolved: a Debug sink succeeds, so the sink settles
-    // IDLE. A failed dispatch would hold it FAULTED (the state the Email sink read
-    // on this host).
-    const invoiceSinkId = (invoiceSink as SceneFacts['nodes'][number]).id;
-    await pollScene(page, (s) => s.nodes.find((n) => n.id === invoiceSinkId)?.state, {
-      message: `the invoice Debug sink settles IDLE (${STATE_IDLE}) after its delivery, never FAULTED (${STATE_FAULTED})`,
-    }).toBe(STATE_IDLE);
-
-    await expectRenderLoopAlive(page, 'after the shipped order example loaded and ran one order');
-    errs.assertNone('the shipped order example loading and running one order');
-  });
-
-  test('the shipped example reads correctly in the panels: the Source offers its webhook URL and the splitter JS fits the editor without horizontal scroll', async ({
-    page,
-  }) => {
-    test.skip(bindFailure !== null, bindFailure ?? '');
-
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await loadExample(page, 'order_processing');
-
-    // (1) The Source panel offers the copyable webhook URL row (CFG-03) - the row
-    // that tells a user where to POST the order this example is built around.
-    await selectMachineAt(page, AT.source[0], AT.source[1]);
-    const urlValue = page.locator('span.fab-field', { hasText: 'http://127.0.0.1:' });
-    await expect(urlValue, 'the Source panel shows its bound loopback webhook URL').toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(urlValue).toContainText(/^http:\/\/127\.0\.0\.1:\d+\/hook\/src-/);
-    await deselectAtFit(page);
-
-    // (2) The splitter's inline handler renders in the editor, byte-verbatim.
-    await selectMachineAt(page, AT.splitter[0], AT.splitter[1]);
-    await expect(page.locator('.cm-content'), 'the Factory editor mounted').toBeVisible({
-      timeout: 10_000,
-    });
-
-    // (3) THE UI-SPEC LONG-TEXT MEASUREMENT (the one `unresolved` row of the
-    // 55-UI-SPEC considerations table). The config panel is `min(420px, 33vw)`, so
-    // its narrowest SUPPORTED width is 33vw at the app's 1024px floor (the width
-    // the toolbar overflow contract is measured at). Shrink to that floor and
-    // measure the editor's own scroll surface: `scrollWidth <= clientWidth` means
-    // no horizontal scrollbar - the inline JS wraps instead of running off. The
-    // subjective half ("does it read well") stays with the real-binary walk.
-    await page.setViewportSize({ width: 1024, height: 768 });
-    const metrics = await page.evaluate(() => {
-      const scroller = document.querySelector('.cm-scroller') as HTMLElement | null;
-      if (!scroller) return null;
-      const panel = scroller.closest('.fab-panel') as HTMLElement | null;
-      return {
-        scrollWidth: scroller.scrollWidth,
-        clientWidth: scroller.clientWidth,
-        panelWidth: panel ? panel.getBoundingClientRect().width : -1,
-      };
-    });
-    expect(metrics, 'the editor scroll surface is measurable').not.toBeNull();
-    const m = metrics as { scrollWidth: number; clientWidth: number; panelWidth: number };
-    expect(m.panelWidth, 'the panel really is at its narrowest supported width').toBeLessThan(420);
-    expect(
-      m.scrollWidth,
-      `the inline factory JS fits the editor with NO horizontal scroll at the panel's minimum width (scrollWidth ${m.scrollWidth} vs clientWidth ${m.clientWidth}, panel ${m.panelWidth}px)`,
-    ).toBeLessThanOrEqual(m.clientWidth);
-    await page.setViewportSize({ width: 1280, height: 720 });
-
-    await expectRenderLoopAlive(page, 'after the order example panels were read at both widths');
-    errs.assertNone('reading the order example panels at both widths');
   });
 });
 

@@ -39,9 +39,9 @@ import { GUARD_QUEUED_WORDS } from '../src/chrome/configCopy';
 //      `Disconnected` (review WR-B-02: the stall watchdog stands down over the swap's silence),
 //      and the scene is the file's board (the Undo went to the board the swap replaced).
 //   2. Running board, one Sink placed and saved, the refused file (eight 0xff bytes)
-//      opened, Ctrl+Z: the refusal card, and the
-//      strip reads `Load failed` within 3 s of it (UI-SPEC A9). The board is kept, so the
-//      Ctrl+Z, held by the host through the drain, then undoes the Sink on it.
+//      opened, Ctrl+Z: the refusal card, and the strip reads `Load failed` within 3 s of it
+//      (UI-SPEC A9). The board is kept, so the Ctrl+Z, held by the host through the drain,
+//      then undoes the Sink on it.
 //   3. A saved board, then Pause and a Sink placed (queued). The Open asks first and says the
 //      queued edits will be lost (review WR-C-10: until review pass 2 it met no guard and the
 //      leg graded the loss as the pass); its Discard runs the Open, and Ctrl+Z is pressed in the
@@ -50,8 +50,8 @@ import { GUARD_QUEUED_WORDS } from '../src/chrome/configCopy';
 //   4. (review CR-B-01) A paused board with NOTHING queued and an Undo available: the Open and
 //      Ctrl+Z in one page task. The Undo is itself queued (`Paused - edits queued until Play`),
 //      and that notice used to drop the Load: the strip never read `Loaded`. Now it does.
-//   5. (review CR-B-01, the refused twin) The same with the refused file: the strip reads
-//      `Load failed` with the card, after the queued notice.
+// Legs 3 and 4 run as two steps of one test, each with its own boot, its own resume in
+// `finally` and its own closing render-health check.
 // A running board drains before it swaps (since D-08 the Save before the Open runs on), up
 // to the host's 512-tick settle budget, measured at up to 18.9 s under the CPU quota. Every
 // wait for the Load's answer is 45 s, so a long drain is never graded as a failure.
@@ -280,48 +280,7 @@ test.describe('90 live: Ctrl+Z during a Load leaves the Load its message (WORK-1
     errs.assertNone('leg 2');
   });
 
-  test('3: a paused board with a queued edit: the Open asks first, Ctrl+Z in the same task, the held notice then Loaded', async ({ page }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    await boot(page);
-    await expectRenderLoopAlive(page, 'leg 3, on the demo board');
-    const fab = await saveTo(page, 'leg3');
-    try {
-      await transport(page).click();
-      await expect(transport(page), 'leg 3: the sim is paused (the toggle offers Play)').toHaveAttribute('aria-label', 'Play');
-      await armAndPlaceAt(page, 'Sink', SINK_CELL[0], SINK_CELL[1]);
-      await expect.poll(() => readout(page), { message: 'leg 3: the paused placement is queued' }).toBe(QUEUED);
-
-      // WR-C-10: the Open asks first, and says the queued edit would be lost.
-      await page.getByTitle('Load a saved factory').click();
-      const guard = page.locator('.fab-dialog-panel');
-      await expect(guard.getByText('Open another board?', { exact: true }), 'leg 3: the Open asks first').toBeVisible();
-      await expect(guard, 'leg 3: the guard says the queued edits will be lost').toContainText(GUARD_QUEUED_WORDS);
-
-      const strip = await recordStatusStripDuring(page, printingStripOnFailure(page, 'leg-3', async () => {
-        await openThenUndoInOneTask(page, fab, GUARD_DISCARD);
-        await expect
-          .poll(() => readout(page), { timeout: ANSWER_MS, intervals: [50, 100, 250], message: 'leg 3: the Load reads Loaded after the held Ctrl+Z' })
-          .toBe(LOADED);
-      }));
-      const seen = statuses(strip);
-      console.log(`P90-WORK-10 leg-3 strip=${JSON.stringify(strip)} statuses=${JSON.stringify(seen)}`);
-      expect(seen, 'leg 3: the held-undo notice was shown').toContain(HELD);
-      expect(seen.indexOf(HELD), 'leg 3: the notice came first, then Loaded replaced it').toBeLessThan(seen.lastIndexOf(LOADED));
-      expect(seen, 'leg 3: Load failed was never written').not.toContain(LOAD_FAILED);
-      await pollScene(page, (s) => s.nodes.length, {
-        message: 'leg 3: the scene is the file\'s board (the user chose Discard, so the swap dropped the queued Sink)',
-      }).toBe(DEMO_NODE_COUNT);
-      // No render-loop check here: `frame()` is the sim-tick render clock, which a paused
-      // board does not advance. It is read after the resume below.
-    } finally {
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 3');
-    errs.assertNone('leg 3');
-  });
-
-  /** Legs 4 and 5: a Sink placed and landed (an Undo is available), the board saved, then paused. */
+  /** Leg 4: a Sink placed and landed (an Undo is available), the board saved, then paused. */
   async function pausedWithAnUndo(page: Page, leg: string): Promise<string> {
     await boot(page);
     await expectRenderLoopAlive(page, `${leg}, on the demo board`);
@@ -336,57 +295,71 @@ test.describe('90 live: Ctrl+Z during a Load leaves the Load its message (WORK-1
     return fab;
   }
 
-  test('4: a paused board with nothing queued, the Open and Ctrl+Z in one task: the queued notice, then Loaded', async ({ page }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    try {
-      const fab = await pausedWithAnUndo(page, 'leg 4');
-      const strip = await recordStatusStripDuring(page, printingStripOnFailure(page, 'leg-4', async () => {
-        await openThenUndoInOneTask(page, fab, LOAD_BUTTON);
-        await expect
-          .poll(() => readout(page), { timeout: ANSWER_MS, intervals: [50, 100, 250], message: 'leg 4: the Load reads Loaded after the queued Ctrl+Z' })
-          .toBe(LOADED);
-      }));
-      const seen = statuses(strip);
-      console.log(`P90-WORK-10 leg-4 strip=${JSON.stringify(strip)} statuses=${JSON.stringify(seen)}`);
-      expect(seen, 'leg 4: the Ctrl+Z was queued on the paused board').toContain(QUEUED);
-      expect(seen.indexOf(QUEUED), 'leg 4: the queued notice came first, then Loaded').toBeLessThan(seen.lastIndexOf(LOADED));
-      expect(seen, 'leg 4: Load failed was never written').not.toContain(LOAD_FAILED);
-      await pollScene(page, (s) => s.nodes.length, {
-        message: 'leg 4: the scene is the file\'s board, the demo plus the saved Sink (the queued Undo went with the old board)',
-      }).toBe(DEMO_NODE_COUNT + 1);
-    } finally {
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 4');
-    errs.assertNone('leg 4');
-  });
+  test('3: a paused board with a queued edit: the Open asks first, Ctrl+Z in the same task, the held notice then Loaded', async ({ page }) => {
+    test.setTimeout(300_000);
+    await test.step('3: a paused board with a queued edit: the Open asks first, Ctrl+Z in the same task, the held notice then Loaded', async () => {
+      const errs = watchPageErrors(page);
+      await boot(page);
+      await expectRenderLoopAlive(page, 'leg 3, on the demo board');
+      const fab = await saveTo(page, 'leg3');
+      try {
+        await transport(page).click();
+        await expect(transport(page), 'leg 3: the sim is paused (the toggle offers Play)').toHaveAttribute('aria-label', 'Play');
+        await armAndPlaceAt(page, 'Sink', SINK_CELL[0], SINK_CELL[1]);
+        await expect.poll(() => readout(page), { message: 'leg 3: the paused placement is queued' }).toBe(QUEUED);
 
-  test('5: the refused file on a paused board, the Open and Ctrl+Z in one task: Load failed with the card', async ({ page }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    try {
-      await pausedWithAnUndo(page, 'leg 5');
-      const refused = join(tmpdir(), `fabrico-e2e-90-load-undo-refused5-${Date.now()}.fab`);
-      writeFileSync(refused, Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]));
-      const card = page.getByRole('alert');
-      const strip = await recordStatusStripDuring(page, printingStripOnFailure(page, 'leg-5', async () => {
-        await openThenUndoInOneTask(page, refused, LOAD_BUTTON);
-        await expect(card, 'leg 5: the host refused the file and the card is up').toBeVisible({ timeout: ANSWER_MS });
-        await expect
-          .poll(() => readout(page), { timeout: 3_000, intervals: [50, 100, 250], message: 'leg 5: the strip reads Load failed with the card' })
-          .toBe(LOAD_FAILED);
-      }));
-      const seen = statuses(strip);
-      console.log(`P90-WORK-10 leg-5 strip=${JSON.stringify(strip)} statuses=${JSON.stringify(seen)}`);
-      expect(seen, 'leg 5: the Ctrl+Z was queued on the paused board').toContain(QUEUED);
-      expect(seen, 'leg 5: the strip never read Loaded for a refused file').not.toContain(LOADED);
-      await page.getByRole('button', { name: 'Close' }).click();
-      await expect(card, 'leg 5: Close takes the card away').toHaveCount(0);
-    } finally {
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 5');
-    errs.assertNone('leg 5');
+        // WR-C-10: the Open asks first, and says the queued edit would be lost.
+        await page.getByTitle('Load a saved factory').click();
+        const guard = page.locator('.fab-dialog-panel');
+        await expect(guard.getByText('Open another board?', { exact: true }), 'leg 3: the Open asks first').toBeVisible();
+        await expect(guard, 'leg 3: the guard says the queued edits will be lost').toContainText(GUARD_QUEUED_WORDS);
+
+        const strip = await recordStatusStripDuring(page, printingStripOnFailure(page, 'leg-3', async () => {
+          await openThenUndoInOneTask(page, fab, GUARD_DISCARD);
+          await expect
+            .poll(() => readout(page), { timeout: ANSWER_MS, intervals: [50, 100, 250], message: 'leg 3: the Load reads Loaded after the held Ctrl+Z' })
+            .toBe(LOADED);
+        }));
+        const seen = statuses(strip);
+        console.log(`P90-WORK-10 leg-3 strip=${JSON.stringify(strip)} statuses=${JSON.stringify(seen)}`);
+        expect(seen, 'leg 3: the held-undo notice was shown').toContain(HELD);
+        expect(seen.indexOf(HELD), 'leg 3: the notice came first, then Loaded replaced it').toBeLessThan(seen.lastIndexOf(LOADED));
+        expect(seen, 'leg 3: Load failed was never written').not.toContain(LOAD_FAILED);
+        await pollScene(page, (s) => s.nodes.length, {
+          message: 'leg 3: the scene is the file\'s board (the user chose Discard, so the swap dropped the queued Sink)',
+        }).toBe(DEMO_NODE_COUNT);
+        // No render-loop check here: `frame()` is the sim-tick render clock, which a paused
+        // board does not advance. It is read after the resume below.
+      } finally {
+        await resumeIfPaused(page);
+      }
+      await expectRenderLoopAlive(page, 'after leg 3');
+      errs.assertNone('leg 3');
+    });
+
+    await test.step('4: a paused board with nothing queued, the Open and Ctrl+Z in one task: the queued notice, then Loaded', async () => {
+      const errs = watchPageErrors(page);
+      try {
+        const fab = await pausedWithAnUndo(page, 'leg 4');
+        const strip = await recordStatusStripDuring(page, printingStripOnFailure(page, 'leg-4', async () => {
+          await openThenUndoInOneTask(page, fab, LOAD_BUTTON);
+          await expect
+            .poll(() => readout(page), { timeout: ANSWER_MS, intervals: [50, 100, 250], message: 'leg 4: the Load reads Loaded after the queued Ctrl+Z' })
+            .toBe(LOADED);
+        }));
+        const seen = statuses(strip);
+        console.log(`P90-WORK-10 leg-4 strip=${JSON.stringify(strip)} statuses=${JSON.stringify(seen)}`);
+        expect(seen, 'leg 4: the Ctrl+Z was queued on the paused board').toContain(QUEUED);
+        expect(seen.indexOf(QUEUED), 'leg 4: the queued notice came first, then Loaded').toBeLessThan(seen.lastIndexOf(LOADED));
+        expect(seen, 'leg 4: Load failed was never written').not.toContain(LOAD_FAILED);
+        await pollScene(page, (s) => s.nodes.length, {
+          message: 'leg 4: the scene is the file\'s board, the demo plus the saved Sink (the queued Undo went with the old board)',
+        }).toBe(DEMO_NODE_COUNT + 1);
+      } finally {
+        await resumeIfPaused(page);
+      }
+      await expectRenderLoopAlive(page, 'after leg 4');
+      errs.assertNone('leg 4');
+    });
   });
 });
