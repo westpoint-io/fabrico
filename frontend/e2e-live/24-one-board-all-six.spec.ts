@@ -44,9 +44,9 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 // 24-one-board-all-six.spec.ts - THE WALK. It closes v8.0 milestone audit blocker B1.
 //
 // WHY THIS FILE EXISTS. The audit's finding is that every live spec in this suite
-// runs on a board carrying exactly ONE phase's feature. `19-router-rules`,
-// `20-wire-draw`, `21-endpoint-traffic`, `22-stranded-reconnect` and `23-belt-pace`
-// are one spec per feature and not one of them composes another's. The milestone
+// runs on a board carrying exactly ONE phase's feature: the Router rules, wire draw,
+// endpoint traffic, stranded reconnect and belt pace specs were one spec per feature,
+// and not one of them composed another's. The milestone
 // done-test describes a single board carrying FOUR features and it has never been
 // walked. This file walks it: the done-test's legs, IN ORDER, on ONE board, starting
 // from EMPTY.

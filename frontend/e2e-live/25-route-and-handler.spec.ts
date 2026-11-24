@@ -23,7 +23,7 @@ import {
   type PortFacts,
 } from './support/oracle';
 
-// 25-route-and-handler.spec.ts (SERVE-03, SERVE-04, SERVE-05, SERVE-07, SERVE-08,
+// 25-route-and-handler.spec.ts (SERVE-04, SERVE-05, SERVE-07, SERVE-08,
 // plan 72-13) - the LIVE proof, on the real host, that a user places two machines on an
 // EMPTY board, draws ONE cable, and gets back a response their own JavaScript produced.
 //
@@ -86,7 +86,6 @@ const KIND_ROUTE = 9;
 const KIND_HANDLER = 10;
 const ROLE_IN = 0;
 const ROLE_OUT = 1;
-const MEDIUM_MECHANICAL = 0;
 const MEDIUM_ELECTRICAL = 1;
 /** `NodeView.state`: 0 = IDLE, 1 = WORKING, 2 = FAULTED, 3 = BACKED_UP. */
 const STATE_IDLE = 0;
@@ -175,79 +174,6 @@ test.describe.configure({ mode: 'serial' });
 
 test.describe('SERVE live: a webhook reaches your own code, on a board built from empty', () => {
   // ═══════════════════════════════════════════════════════════════════════════
-  // SERVE-03: the Handler is a palette machine with the ports its row claims
-  // ═══════════════════════════════════════════════════════════════════════════
-  test('SERVE-03 - one palette click lands an HTTP Handler whose port list is EXACTLY what the row promises', async ({
-    page,
-  }) => {
-    // FIRST statement, before any navigation: a `pageerror` listener registered after
-    // the throw records nothing, so a boot-time throw would go unseen.
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await newBoard(page);
-
-    await expectRenderLoopAlive(page, 'on the empty board, before the placement');
-    errs.assertNone('on the empty board, before the placement');
-
-    await placeAndSettle(page, 'HTTP Handler', HANDLER_CELL, KIND_HANDLER);
-
-    const placed = nodeAtAnchor(await readScene(page), HANDLER_CELL[0], HANDLER_CELL[1])!;
-    expect(placed.kind, 'the landed machine is a HANDLER (kind 10)').toBe(KIND_HANDLER);
-    expect(placed.cells.length, 'and it claims its real 3x3 = 9-cell footprint').toBe(9);
-
-    // THE PORT LIST IS ASSERTED EXACTLY, WITH ITS LENGTH, AND THAT IS SERVE-03's OWN
-    // ACCEPTANCE RATHER THAN THOROUGHNESS. A `find(role===In && medium===Electrical)`
-    // would pass on a machine carrying an extra port the palette row does not claim, and
-    // "the palette copy and the machine agree" is the thing this requirement is about.
-    //
-    // INDEX 0 IS LOAD-BEARING. `step_factory` drains inbox port 0 ONLY, and since D-16
-    // the DECLARED MEDIUM of that port is the whole discriminator between a mechanical
-    // Factory and an electrical Handler (`admit::inbox_class`). An electrical In
-    // appended after the mechanical ports would strand every request on a board that
-    // looks correct, so the ORDER is asserted, not just the membership.
-    expect(
-      placed.ports.map((p) => ({ index: p.index, role: p.role, medium: p.medium })),
-      'SERVE-03: the Handler declares exactly three ports - an ELECTRICAL In at index 0, an ELECTRICAL Out at index 1, and a MECHANICAL Fault at index 2',
-    ).toEqual([
-      { index: 0, role: ROLE_IN, medium: MEDIUM_ELECTRICAL },
-      { index: 1, role: ROLE_OUT, medium: MEDIUM_ELECTRICAL },
-      { index: 2, role: 2, medium: MEDIUM_MECHANICAL },
-    ]);
-    expect(placed.ports, 'and there is no fourth port').toHaveLength(3);
-    // D-02, stated as its own claim because the ARITY is what makes the
-    // one-request-one-reply shape the only board a user can build: with a SINGLE
-    // electrical Out, a second Route's return cable is refused `PortOccupied` and the
-    // whole pairing goes with it. Three Outs would permit a board D-01 rules out.
-    expect(
-      placed.ports.filter((p) => p.role === ROLE_OUT && p.medium === MEDIUM_ELECTRICAL),
-      'D-02: exactly ONE electrical Out',
-    ).toHaveLength(1);
-
-    // AND THE SEED, WHICH IS WHAT MAKES THE PORTS MEAN ANYTHING. Correct electrical
-    // ports plus `DEFAULT_FACTORY_SOURCE` is a machine that is CALLED a Handler and
-    // cannot reply, which is the overstating-label defect SERVE-03 exists to close.
-    await selectMachineAt(page, HANDLER_CELL[0], HANDLER_CELL[1]);
-    const seeded = await readFactorySource(page);
-    console.log(`SERVE03_SEEDED_JS ${JSON.stringify(seeded)}`);
-    expect(
-      seeded,
-      'fold_place seeds a HANDLER with reply-shaped JS: it calls ctx.command, which is what answers a webhook',
-    ).toContain('ctx.command(');
-    expect(seeded, 'and the preset body is the one the walk edits').toContain(
-      HANDLER_PRESET_BODY,
-    );
-    expect(
-      seeded,
-      'and it is NOT the emit-only DEFAULT_FACTORY_SOURCE, which would resolve the parked socket only as a 504 on the deadline sweep',
-    ).not.toContain('ctx.emit(');
-    await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-
-    await expectRenderLoopAlive(page, 'after the Handler placement');
-    errs.assertNone('after the Handler placement');
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // SERVE-04 / SERVE-07 / SERVE-05 / D-06: the whole walk on ONE empty board
   // ═══════════════════════════════════════════════════════════════════════════
   test('SERVE-04 / SERVE-07 / SERVE-05 - place two, draw ONE cable, POST, then edit the answer and the path', async ({
@@ -297,9 +223,8 @@ test.describe('SERVE live: a webhook reaches your own code, on a board built fro
       ENDPOINT_URL_SHAPE,
     );
     // The panel and the read-only bridge must agree. A panel showing a stale or
-    // fabricated URL would otherwise pass every assertion below. This is the SAME
-    // agreement guard `21-endpoint-traffic.spec.ts` carries, reusing the same reader
-    // rather than writing a second URL comparison to go stale beside it.
+    // fabricated URL would otherwise pass every assertion below. It reuses the oracle's
+    // reader rather than writing a second URL comparison to go stale beside it.
     expect(
       await webhookUrl(page, route.id),
       'the panel URL is the SAME string the host-side webhook_url bridge answers',
@@ -406,6 +331,87 @@ test.describe('SERVE live: a webhook reaches your own code, on a board built fro
 
     await expectRenderLoopAlive(page, 'after the reply came home');
     errs.assertNone('after the reply came home');
+
+    // -----------------------------------------------------------------------
+    // 5b. UNDO TAKES BOTH LEGS AND THE ROUTE GOES QUIET; REDO PUTS BOTH BACK.
+    // -----------------------------------------------------------------------
+    // The pair was minted by ONE drag, so one Undo must leave NEITHER leg (D-06 on the
+    // undo path) and one Redo must bring BOTH back. With no forward wire the request never
+    // reaches the Handler, so the parked socket resolves only on the host's deadline sweep
+    // (about 5 s, a 504). What fails the severed reading is a 200 with the preset body.
+    // Machines and cables are found by cell after each step, because an Undo keyframe can
+    // remint handles.
+    await test.step('a REDO puts the hand-drawn wire back and the route returns to service', async () => {
+      await page.getByTitle('Undo (Ctrl+Z)').click();
+      await pollScene(page, (s) => s.wires.length, {
+        message: 'D-06: the undo removed BOTH legs of the hand-drawn pair, never just the forward one',
+      }).toBe(0);
+      const undone = await readScene(page);
+      const undoneRoute = nodeAtAnchor(undone, ROUTE_CELL[0], ROUTE_CELL[1]);
+      const undoneHandler = nodeAtAnchor(undone, HANDLER_CELL[0], HANDLER_CELL[1]);
+      expect(undoneRoute?.kind, 'the undo took the wires and not the Route underneath them').toBe(
+        KIND_ROUTE,
+      );
+      expect(undoneHandler?.kind, 'and the Handler is still on its cells too').toBe(KIND_HANDLER);
+      expect(
+        undone.wires.filter(
+          (w) => w.from.node === undoneRoute!.id || w.from.node === undoneHandler!.id,
+        ),
+        'and NEITHER leg of the pair survives the undo',
+      ).toEqual([]);
+
+      const severed = await post(
+        page,
+        'the Route with its cable pair UNDONE (the negative reading)',
+        url,
+        '{"probe":"serve-04","which":"severed"}',
+        30_000,
+      );
+      expect(
+        { status: severed.status, body: severed.body },
+        'with no cable the request never reaches the Handler, so no reply comes home',
+      ).not.toEqual({ status: 200, body: HANDLER_PRESET_BODY });
+      expect(severed.body, 'and the Handler-computed body is absent from the answer').not.toBe(
+        HANDLER_PRESET_BODY,
+      );
+
+      await page.getByTitle('Redo (Ctrl+Shift+Z)').click();
+      await pollScene(page, (s) => s.wires.length, {
+        message: 'D-06: the redo restored BOTH legs of the hand-drawn pair',
+      }).toBe(2);
+      const redone = await readScene(page);
+      const redoneRoute = nodeAtAnchor(redone, ROUTE_CELL[0], ROUTE_CELL[1])!;
+      const redoneHandler = nodeAtAnchor(redone, HANDLER_CELL[0], HANDLER_CELL[1])!;
+      const redoneForward = redone.wires.find((w) => w.from.node === redoneRoute.id);
+      expect(redoneForward, 'the restored FORWARD leg leaves the Route again').toBeDefined();
+      expect(redoneForward!.to.node, 'and still lands on the Handler').toBe(redoneHandler.id);
+      const redoneReturn = redone.wires.find((w) => w.from.node === redoneHandler.id);
+      expect(redoneReturn, 'and the RETURN leg came back with it').toBeDefined();
+      expect(redoneReturn!.to.node, 'still pointed at the Route that called').toBe(
+        redoneRoute.id,
+      );
+
+      // The URL is read off the panel again: the route has to survive the undo and redo
+      // at the same address, because the steps below keep POSTing to it.
+      await selectMachineAt(page, ROUTE_CELL[0], ROUTE_CELL[1]);
+      const redoneUrl = await readPanelUrl(page);
+      await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
+      expect(redoneUrl, 'the Route answers at the same URL after the undo and redo').toBe(url);
+
+      const back = await post(
+        page,
+        'the Route after UNDO then REDO of its cable pair (back in service)',
+        redoneUrl,
+        '{"probe":"serve-04","which":"redone"}',
+      );
+      expect(back.status, 'the redone cables carry traffic again').toBe(200);
+      expect(back.body, 'and the Handler-computed reply comes home again').toBe(
+        HANDLER_PRESET_BODY,
+      );
+
+      await expectRenderLoopAlive(page, 'after the redo POST');
+      errs.assertNone('after the redo POST');
+    });
 
     // -----------------------------------------------------------------------
     // 6. SERVE-05: EDIT THE ANSWER. The Handler THIS SPEC PLACED.

@@ -3286,9 +3286,9 @@ export async function pressedSegment(page: Page, group: string): Promise<string>
  * groups are the bound listener PORT and the route LABEL, which is `route-<n>` for a Route
  * the user has not touched and the user's own path once they have.
  *
- * PROMOTED HERE FROM `21-endpoint-traffic.spec.ts` BY PLAN 72-13, so the two live specs
- * that read a Route's URL read ONE shape and ONE reader. A second copy is a second thing
- * to go stale, which is the reason this module exists at all.
+ * Kept here so every live spec that reads a Route's URL reads ONE shape and ONE reader.
+ * A second copy is a second thing to go stale, which is the reason this module exists
+ * at all.
  */
 export const ENDPOINT_URL_SHAPE = /^http:\/\/127\.0\.0\.1:(\d+)\/endpoint\/(.+)$/;
 
@@ -3298,11 +3298,8 @@ export const ENDPOINT_URL_SHAPE = /^http:\/\/127\.0\.0\.1:(\d+)\/endpoint\/(.+)$
  * THE URL IS READ OFF THE PANEL, NEVER REBUILT FROM THE NODE ID. Reading it from the
  * shipped row is what makes a spec a test of the thing a user can actually do; a URL
  * rebuilt from the handle would prove only that the spec can do arithmetic. Pair it with
- * `webhookUrl(page, id)` and compare the two, exactly as `21-endpoint-traffic.spec.ts`
- * does: a panel showing a stale or fabricated URL passes every other assertion.
- *
- * PROMOTED HERE FROM `21-endpoint-traffic.spec.ts` BY PLAN 72-13 (see
- * `ENDPOINT_URL_SHAPE` above for why).
+ * `webhookUrl(page, id)` and compare the two, exactly as `25-route-and-handler.spec.ts`
+ * SERVE-04 does: a panel showing a stale or fabricated URL passes every other assertion.
  */
 export async function readPanelUrl(page: Page): Promise<string> {
   const urlValue = page.locator('span.fab-field', { hasText: 'http://127.0.0.1:' });

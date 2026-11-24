@@ -6,7 +6,7 @@
 //! Two INDEPENDENT producers derive a Route's address and they must agree:
 //! `project_routes` builds the key the front door looks up, and `webhook_url` builds the
 //! string the config panel offers to copy. Nothing in the core can see either of them.
-//! `21-endpoint-traffic.spec.ts:163-166` already asserts the pair agree in the running
+//! `25-route-and-handler.spec.ts` (SERVE-04) already asserts the pair agree in the running
 //! app; these tests assert it at the seam, where a failure names which producer drifted.
 //!
 //! # The one trap these tests are shaped around
