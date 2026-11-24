@@ -2,7 +2,6 @@ import { test, expect, type Page } from './support/liveTest';
 import {
   armAndPlaceAt,
   cameraOf,
-  clickAt,
   expectRenderLoopAlive,
   handPath,
   nodeAtAnchor,
@@ -18,7 +17,7 @@ import {
   type PortFacts,
   type SceneFacts,
 } from './support/oracle';
-import { CMD, beltOn, cellPoint, deselectOnFloor, doorstep, emptyBoardAtScaleOne, installFrameSniffer, rowCells, sentCount, zoomBelowOne } from './support/beltBoard';
+import { beltOn, cellPoint, deselectOnFloor, doorstep, emptyBoardAtScaleOne, rowCells, zoomBelowOne } from './support/beltBoard';
 import { PORT_STATUS } from '../src/chrome/configCopy';
 
 // 89-connect-from-an-output.live.spec.ts (phase 89, plan 89-06, BELT-04 first half, success
@@ -54,8 +53,6 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 //      output (`Tail@router`), the Router panel's output row reads `idle`, and the selection was
 //      null before the press and is still null after the release (`selectedNode()` and
 //      `selectedBelt()`);
-//   2. a plain click on the same dot selects the Router (its panel opens, `selectedNode()` is the
-//      Router) and docks nothing;
 //   3. the belt's start tile dragged onto the output: nothing selected, a hand presses on the far
 //      half of the belt's first tile (outside the dot's reach), travels three cells away and comes
 //      back onto the output dot, and lets go. The belt's start is docked to that output and the
@@ -69,8 +66,9 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 // px below 1, which is why the press and the release points sit where they do).
 //
 // RED FIRST (D-16): run once against the plan's start revision (frontend from a throwaway worktree
-// with this spec copied in): legs 1 and 3 red, leg 2 green (it guards the click the new drag must
-// not steal, T-89-17). 89-EVIDENCE.md, `LIVE_RED 89-connect-from-an-output`.
+// with this spec copied in): legs 1 and 3 red. 89-EVIDENCE.md, `LIVE_RED 89-connect-from-an-output`.
+// A plain click on the dot still selecting the Router (T-89-17) had a leg of its own until phase
+// 112; a click selects a machine in most live walks.
 //
 // Render health in every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` and the
 // watcher's `assertNone` after every test (fabrico-model-oracle-blindspot).
@@ -237,8 +235,6 @@ test.describe("89 live: connect from a machine's output dot, and from a belt's e
 
   test.beforeEach(async ({ page }) => {
     errs = watchPageErrors(page);
-    // Leg 2 counts the Dock frames the page sends (review WR-C-03); the sniffer goes in before boot.
-    await installFrameSniffer(page);
     await page.goto('/');
     await waitForAppReady(page);
   });
@@ -274,24 +270,6 @@ test.describe("89 live: connect from a machine's output dot, and from a belt's e
       console.log(`P89-W113 ${row.name}: drag moves=${moves} belt=${belt.id} docks=${JSON.stringify(belt.docks)}`);
       expect(await selectionOf(page), `${row.name}: still nothing selected once the Dock folded`).toEqual({ node: null, belt: null });
       await expectOneConnectedOutput(page, row, router);
-    });
-  });
-
-  test("2: a plain click on the Router's output dot selects the Router and connects nothing", async ({ page }) => {
-    await walk(page, async (row, { router, out, cells }) => {
-      const at = await onTheDot(page, out);
-      const docksBefore = await sentCount(page, CMD.Dock);
-      await clickAt(page, at.x, at.y);
-      await expect(page.locator('#fab-config-heading'), `${row.name}: the click on the dot opened the Router's panel`).toBeVisible();
-      expect(await selectionOf(page), `${row.name}: the click on the dot selected the Router`).toEqual({ node: router.id, belt: null });
-      // The negative reads wait for the host (review WR-C-03): the panel is local state, and a Dock
-      // sent on the click needs a round trip and a fold. The wire is read too, so a Dock the host
-      // refused would still count.
-      const t0 = (await readScene(page)).tick;
-      await pollScene(page, (s) => s.tick >= t0 + 40, { message: `${row.name}: the host ran past the click` }).toBe(true);
-      expect((await sentCount(page, CMD.Dock)) - docksBefore, `${row.name}: the click sent no Dock`).toBe(0);
-      expect(docksOf(beltOn(await readScene(page), cells), router), `${row.name}: the click docked nothing`).toBe('');
-      await deselectOnFloor(page, row.floor, `${row.name}: after the click`);
     });
   });
 

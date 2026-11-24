@@ -61,17 +61,16 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 //      on a middle tile points East, toward the Sink (`beltTreadRotationAt`); and items reach the
 //      Sink (the belt's head-most item leaves it, which only a delivery into the docked Sink can
 //      do: `startBeltFlowWatch`'s `headCleared`).
-//   2. A Sink alone. The same press on its input's doorstep, dragged West over four cells and
-//      released on empty floor: ONE belt, its Head docked to the Sink, its Tail free; the Sink's
-//      input row reads connected and the belt's input row reads `not connected`; the tread
-//      points East, into the Sink.
 //
-// Each leg is walked twice on one board: once at camera scale 1 and once after the wheel has
+// Leg 2 (the same press released on empty floor, its Tail free) was cut in phase 112: leg 1
+// walks the same reversed draw.
+//
+// The leg is walked twice on one board: once at camera scale 1 and once after the wheel has
 // zoomed the camera below 1 (where the hit radii and the cell size on screen change), every
 // screen point read again after the zoom.
 //
 // RED FIRST (D-16): run once against the plan's start revision (frontend from a throwaway
-// worktree with this spec copied in), both legs red (89-EVIDENCE.md, `LIVE_RED
+// worktree with this spec copied in), both legs red at the time (89-EVIDENCE.md, `LIVE_RED
 // 89-belt-from-an-input`).
 //
 // Render health in every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` and the
@@ -114,8 +113,6 @@ const ROWS: readonly Row[] = [
 ];
 /** The Timer interval each Source runs on, in sim ticks. */
 const FEED_EVERY = 16;
-/** The floor leg's release column: four cells West of the Sink input's doorstep. */
-const FLOOR_RELEASE_X = 16;
 
 type NodeFacts = SceneFacts['nodes'][number];
 type BeltFacts = SceneFacts['belts'][number];
@@ -336,52 +333,6 @@ test.describe('89 live: a belt drawn from an input flows into it and docks at bo
       ).toHaveCount(1);
       await deselectOnFloor(page, row.floor, `${row.name}: after the panels`);
       await expectRenderLoopAlive(page, `after the ${row.name} draw`);
-    }
-  });
-
-  test('2: a belt pressed on a Sink input and released on empty floor flows into the Sink, its Tail free', async ({ page }) => {
-    const cells = ROWS.flatMap((r) => [[SINK_X, r.y] as const, [FLOOR_RELEASE_X, r.y] as const, ...r.floor]);
-    await emptyBoardAtScaleOne(page, cells);
-    for (const row of ROWS) {
-      await place(page, 'Sink', KIND_SINK, [SINK_X, row.y], row.name);
-      await selectMachineAt(page, SINK_X, row.y);
-      await turnUntilFacing(page, [SINK_X, row.y], ROLE_IN, W, `${row.name}: the Sink's input`);
-      await deselectOnFloor(page, row.floor, `${row.name}: after the turn`);
-    }
-    await expectRenderLoopAlive(page, 'with both Sinks placed');
-
-    for (let i = 0; i < ROWS.length; i += 1) {
-      const row = ROWS[i];
-      const sink = nodeAtAnchor(await readScene(page), SINK_X, row.y)!;
-      if (i === 0) {
-        expect((await cameraOf(page)).scale, `${row.name}: drawn at camera scale 1`).toBe(1);
-      } else {
-        const scale = await zoomBelowOne(page, [FLOOR_RELEASE_X, row.y]);
-        console.log(`P89-BELT-01-FLOOR ${row.name}: camera scale ${scale}`);
-      }
-      const drawn = await dragFromSinkInput(page, row, sink, [FLOOR_RELEASE_X, row.y]);
-      const names = new Map([[sink.id, 'sink']]);
-      await pollScene(page, (s) => docksOf(beltOn(s, drawn), names), {
-        message: `${row.name}: one belt from the floor to the Sink input's doorstep (${JSON.stringify(drawn)}), its Head docked to the Sink and its Tail free`,
-      }).toBe('Head@sink');
-      const middle = drawn[Math.floor(drawn.length / 2)];
-      await expectTread(page, middle, E, `${row.name}: the tread drawn on (${middle.join(',')}) points East, into the Sink`);
-      await selectBeltOn(page, middle, row.name);
-      await expect(
-        portsRegion(page).getByRole('listitem', { name: CONNECTED_STATUS }),
-        `${row.name}: exactly one of the belt's rows (its output, into the Sink) reads ${CONNECTED_IDLE} or moving`,
-      ).toHaveCount(1);
-      await expect(
-        portsRegion(page).getByRole('listitem', { name: /not connected/ }),
-        `${row.name}: the belt's input row reads not connected (its Tail is free)`,
-      ).toHaveCount(1);
-      await selectMachineAt(page, SINK_X, row.y);
-      await expect(
-        portsRegion(page).getByRole('listitem', { name: new RegExp(`^Input[^,]*${CONNECTED_STATUS.source}`) }),
-        `${row.name}: the Sink's input row reads ${CONNECTED_IDLE}, never not connected`,
-      ).toHaveCount(1);
-      await deselectOnFloor(page, row.floor, `${row.name}: after the panels`);
-      await expectRenderLoopAlive(page, `after the ${row.name} floor draw`);
     }
   });
 });

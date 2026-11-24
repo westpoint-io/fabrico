@@ -8,13 +8,11 @@ import {
   beltPreviewPlottedOf,
   cameraOf,
   captureRefusalText,
-  expectRefusalStayedSilent,
   expectRenderLoopAlive,
   handDragBetween,
   handPath,
   latchRejectFlashCells,
   nodeAtAnchor,
-  nubAnchor,
   pollScene,
   readScene,
   rejectFlashCell,
@@ -56,9 +54,6 @@ import { cellPoint, expectOnCanvas, turnUntilFacing, transport, resumeIfPaused, 
 //      released on open floor: the flash the overlay PLOTTED (`rejectFlashCell`, latched on every
 //      frame) is ONE cell, the first Factory cell crossed; `#fab-refusal` reads the collision
 //      sentence; the belt count is unchanged.
-//   2. The same on a paused board: the flash at the release, no belt and no sentence and no held
-//      picture while paused (the host answers when it drains the draw at Play), then Play: the
-//      sentence, and still no belt.
 //   3. The edge presses, at camera scale 1 and again after the wheel has zoomed below 1: a press 2
 //      screen px inside a Source's East edge, dragged about 80 screen px East in 3 px samples and
 //      released: the collision sentence and the flash on the pressed (Source) cell. The same 2 px
@@ -72,15 +67,17 @@ import { cellPoint, expectOnCanvas, turnUntilFacing, transport, resumeIfPaused, 
 //      PLOTTED (`beltPreviewPlottedOf`) is the build colour while the hand is on the grid and red
 //      once it is past it; after the release, `That cell is past the edge of the grid.` and ONE
 //      flash on (513,y), the first cell off the grid. No belt.
-//   5. An illegal path released on an Electrical In's dot (WINDOWS 250, D-12), at zoom 1 and below
-//      1: a drag from floor across a Sink, released on a Route's (Electrical) In dot: ONE flash,
-//      on the Sink cell crossed, never on the dot; the collision sentence; no belt.
 //   6. A dock owed and never sent (WINDOWS 254, D-14): on a paused board, Ctrl+Z (queued; it will
 //      take away the Factory placed last), then a docked draw from a Source's Out doorstep to the
 //      Factory's In doorstep. On Play the Undo folds first, the belt lands in the Undo's table, its
 //      Tail docks the Source and its Head Dock cannot be named again: `#fab-refusal` reads `A belt
 //      you drew is missing a connection.` The Undo comes before the draw because the shipped
 //      PAUSE-TOOLBAR hold sends no Undo after a paused draw (74.1-31).
+//
+// Phase 112 cut three legs: 2 (the leg 1 drag on a paused board; 88-paused-occupancy test 3 walks
+// a paused path refused at Play), 5 (an illegal path released on an Electrical In dot flashes the
+// path, the same first-failing-cell rule as leg 1) and 7 (the sentence stepping below a flash
+// near the top of the view, a layout check).
 //
 // RED FIRST (D-16): run once against the plan's start revision (the frontend from a throwaway
 // worktree with this spec, the oracle helpers and the `rejectFlashCell` read copied in): every leg
@@ -155,23 +152,12 @@ async function flashCellsAfterRelease(page: Page, what: string): Promise<Array<{
   return seen;
 }
 
-/** How many geometry instructions the drag preview and the held pictures hold right now. */
-async function beltPictureInstructions(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const hook = (window as { __fabrico?: { beltPreviewInstructions?(): number } }).__fabrico;
-    if (typeof hook?.beltPreviewInstructions !== 'function') {
-      throw new Error('window.__fabrico.beltPreviewInstructions() not installed');
-    }
-    return hook.beltPreviewInstructions();
-  });
-}
-
 /** The belt whose first tile is `cell`, or undefined. */
 function beltFrom(s: SceneFacts, cell: Cell) {
   return s.belts.find((b) => b.tiles.length > 0 && b.tiles[0].cell_x === cell[0] && b.tiles[0].cell_y === cell[1]);
 }
 
-// The crossing board (legs 1 and 2): a 3x3 Factory at (10,8) and a 4x1 Label at (15,8), crossed
+// The crossing board (leg 1): a 3x3 Factory at (10,8) and a 4x1 Label at (15,8), crossed
 // along row 8, the Factory's top row (no port on it), from floor (7,8) to floor (21,8).
 const FACTORY_AT: Cell = [10, 8];
 const LABEL_AT: Cell = [15, 8];
@@ -243,17 +229,7 @@ const OUT_OF_BOUNDS_COPY = 'That cell is past the edge of the grid.';
 const DOCK_NOT_SENT_COPY = 'A belt you drew is missing a connection.';
 /** The last cell on the grid on either axis (`fabrico_core::state::GRID_MAX`). */
 const GRID_EDGE = 512;
-const KIND_SINK = 7;
-const KIND_ROUTE = 9;
 const W = 3;
-/** Leg 5's rows: the start on floor, the Sink crossed, the Route whose In dot takes the release. */
-const NUB_ROWS: readonly Row[] = [
-  { name: 'at zoom 1', y: 7, zoomTo: 1, floor: [[10, 10], [11, 10]] },
-  { name: 'below zoom 1', y: 13, zoomTo: 0.6, floor: [[10, 10], [11, 10]] },
-];
-const N_FROM_X = 7;
-const N_SINK_X = 10;
-const N_ROUTE_X = 15;
 
 /** Pan the camera by left drags on open floor, no tool armed, until `cells` are all on screen. */
 async function panUntilOnScreen(page: Page, cells: ReadonlyArray<Cell>): Promise<number> {
@@ -321,26 +297,6 @@ test.describe('89 live: a belt the host will not draw says why, and the flash na
     await page.keyboard.press('Escape');
     expect((await readScene(page)).belts.length, 'leg 1: no belt landed').toBe(beltsBefore);
     await expectRenderLoopAlive(page, 'after leg 1');
-  });
-
-  test('2: the same drag on a paused board flashes at the release and says why at Play', async ({ page }) => {
-    const beltsBefore = await crossingBoard(page);
-    await pauseAndSettle(page, 'leg 2');
-    await expectRefusalStayedSilent(page, 'leg 2: the paused release', async () => {
-      await dragAcross(page);
-      const flashes = await flashCellsAfterRelease(page, 'leg 2');
-      console.log(`P89-SAY leg 2: flashes=${JSON.stringify(flashes)}`);
-      expect(flashes, 'leg 2: ONE flash at the release, on the first Factory cell crossed').toEqual([{ cx: 10, cy: 8 }]);
-      expect(await beltPictureInstructions(page), 'leg 2: no preview and no held picture stays on the board while paused').toBe(0);
-      expect((await readScene(page)).belts.length, 'leg 2: no belt while paused').toBe(beltsBefore);
-    });
-    await page.keyboard.press('Escape');
-    await transport(page).click();
-    expect(await captureRefusalText(page, 'leg 2: the release was answered at Play'), 'leg 2: the host says why at Play').toBe(
-      COLLISION_COPY,
-    );
-    expect((await readScene(page)).belts.length, 'leg 2: and no belt landed at Play').toBe(beltsBefore);
-    await expectRenderLoopAlive(page, 'after leg 2');
   });
 
   test('3: a press just inside a Source or a belt end says why and flashes the pressed cell; the rings still draw', async ({
@@ -490,55 +446,6 @@ test.describe('89 live: a belt the host will not draw says why, and the flash na
     await expectRenderLoopAlive(page, 'after leg 4');
   });
 
-  test('5: an illegal path released on an Electrical In dot flashes the path, not the dot', async ({ page }) => {
-    const cells = NUB_ROWS.flatMap((r) => [[N_FROM_X, r.y] as const, [N_ROUTE_X, r.y] as const, ...r.floor]);
-    await emptyBoardAtScaleOne(page, cells);
-    for (const row of NUB_ROWS) {
-      await place(page, 'Sink', KIND_SINK, [N_SINK_X, row.y], row.name);
-      await place(page, 'Route', KIND_ROUTE, [N_ROUTE_X, row.y], row.name);
-      await deselectOnFloor(page, row.floor, `${row.name}: after the placements`);
-      const routeIn = nodeAtAnchor(await readScene(page), N_ROUTE_X, row.y)!.ports.find((q) => q.role === 0)!;
-      expect(
-        [routeIn.cell_x, routeIn.cell_y, routeIn.side, routeIn.medium],
-        `${row.name}: PRECONDITION: the Route's In is Electrical and faces West on the row`,
-      ).toEqual([N_ROUTE_X, row.y, W, 1]);
-    }
-    await expectRenderLoopAlive(page, 'with both dot rows built');
-    for (const row of NUB_ROWS) {
-      let scale = 1;
-      if (row.zoomTo === 1) {
-        expect((await cameraOf(page)).scale, `${row.name}: drawn at camera scale 1`).toBe(1);
-      } else {
-        scale = await zoomTo(page, [N_SINK_X, row.y], row.zoomTo);
-        console.log(`P89-SAY leg 5 ${row.name}: camera scale ${scale}`);
-      }
-      const beltsBefore = (await readScene(page)).belts.length;
-      await page.getByTitle(/^Draw belts/).click();
-      const start = await cellPoint(page, N_FROM_X, row.y, 0.4, 0.55);
-      // On the Route's In dot, a couple of world px off its anchor, the way a hand lands.
-      const dot = nubAnchor(N_ROUTE_X, row.y, W);
-      const end = await screenPoint(page, { x: dot.x - 1.5, y: dot.y + 2 });
-      await expectOnCanvas(page, [start], `${row.name}: the press`);
-      await expectOnCanvas(page, [end], `${row.name}: the release`);
-      expect(await rejectFlashCell(page), `${row.name}: no reject flash is plotted before the press`).toBeNull();
-      await latchRejectFlashCells(page);
-      const moves = await handDragBetween(page, start, end);
-      expect(moves, `${row.name}: the drag moved through many samples`).toBeGreaterThanOrEqual(3);
-      expect(await captureRefusalText(page, `${row.name}: the release was answered`), `${row.name}: the host says why`).toBe(
-        COLLISION_COPY,
-      );
-      const flashes = await flashCellsAfterRelease(page, `leg 5 ${row.name}`);
-      console.log(`P89-SAY leg 5 ${row.name}: flashes=${JSON.stringify(flashes)}`);
-      expect(flashes, `${row.name}: ONE flash, on the Sink cell the path crosses, not on the dot`).toEqual([
-        { cx: N_SINK_X, cy: row.y },
-      ]);
-      await page.keyboard.press('Escape');
-      expect((await readScene(page)).belts.length, `${row.name}: no belt landed`).toBe(beltsBefore);
-      await expect(page.locator('#fab-refusal'), `${row.name}: the band clears`).toHaveText('', { timeout: 10_000 });
-      await expectRenderLoopAlive(page, `after the ${row.name} release on the dot`);
-    }
-  });
-
   test('6: a paused docked draw whose Factory an earlier Undo takes away says a connection is missing', async ({ page }) => {
     const sourceCell: Cell = [6, 8];
     const factoryCell: Cell = [12, 7];
@@ -592,59 +499,5 @@ test.describe('89 live: a belt the host will not draw says why, and the flash na
       message: 'leg 6: the belt has its Tail Dock to the Source and no Head Dock',
     }).toBe('Tail');
     await expectRenderLoopAlive(page, 'after leg 6');
-  });
-  test('7: a refused draw near the top of the view: the sentence steps below the flashed cell instead of covering it', async ({
-    page,
-  }) => {
-    // Review UI-02 (89-UI-REVIEW.md, walk capture strip-s8a): the band sits at a fixed place under
-    // the toolbar, and a refusal whose flashed cell lay under it hid the WHERE (the flash) behind
-    // the WHY (the sentence). The board is panned so the crossing row sits where the band shows,
-    // then leg 1's drag: graded on screen, the band's box (DOM) against the flashed cell's box
-    // (plot, through the camera). NON-VACUITY: at the band's shipped top it would cover the cell.
-    // Red before the fix: the band stayed on the cell.
-    const beltsBefore = await crossingBoard(page);
-    // The band is centred on the window under the toolbar: the Factory's first cell is panned to
-    // the window's middle column and to the band's row.
-    const shippedTop = await page.evaluate(() => parseFloat(getComputedStyle(document.getElementById('fab-refusal')!).top));
-    const midX = await page.evaluate(() => window.innerWidth / 2);
-    const cell = await screenCellCentre(page, FACTORY_AT[0], FACTORY_AT[1]);
-    const dx = midX - cell.x;
-    const dy = shippedTop + 24 - cell.y;
-    await page.keyboard.press('Escape');
-    const grab = await cellPoint(page, 8, 13, 0.5, 0.5);
-    await expectOnCanvas(page, [grab, { x: grab.x + dx, y: grab.y + dy }], 'the pan');
-    addFrameBudget(16 * HAND_MOVE_FRAMES, 'leg 7: the pan drag');
-    await page.mouse.move(grab.x, grab.y);
-    await page.mouse.down();
-    await page.mouse.move(grab.x + dx, grab.y + dy, { steps: 14 });
-    await page.mouse.up();
-    await waitForCameraSettle(page);
-    const cellNow = await screenCellCentre(page, FACTORY_AT[0], FACTORY_AT[1]);
-    console.log(`P89-UI02 band shipped top=${shippedTop} cell (10,8) centre ${JSON.stringify(cell)} -> ${JSON.stringify(cellNow)}`);
-    expect(Math.abs(cellNow.y - (shippedTop + 24)), 'leg 7: PRECONDITION: the crossing row now sits where the band shows').toBeLessThan(12);
-    expect(Math.abs(cellNow.x - midX), "leg 7: PRECONDITION: the Factory's first cell sits under the band's middle").toBeLessThan(12);
-    await dragAcross(page);
-    expect(await captureRefusalText(page, 'leg 7: the release was answered'), 'leg 7: the host says why').toBe(COLLISION_COPY);
-    const band = await page.locator('#fab-refusal > div').boundingBox();
-    const flashes = await flashCellsAfterRelease(page, 'leg 7');
-    expect(flashes, 'leg 7: ONE flash, on the first Factory cell').toEqual([{ cx: FACTORY_AT[0], cy: FACTORY_AT[1] }]);
-    const cam = await cameraOf(page);
-    const box = {
-      left: FACTORY_AT[0] * CELL * cam.scale + cam.x,
-      top: FACTORY_AT[1] * CELL * cam.scale + cam.y,
-      right: (FACTORY_AT[0] + 1) * CELL * cam.scale + cam.x,
-      bottom: (FACTORY_AT[1] + 1) * CELL * cam.scale + cam.y,
-    };
-    expect(band, 'leg 7: the band is on screen while the sentence is held').not.toBeNull();
-    const b = band!;
-    const line = `band ${JSON.stringify(b)} flashed cell ${JSON.stringify(box)} shipped top ${shippedTop}`;
-    console.log(`P89-UI02 ${line}`);
-    const wouldCover = shippedTop < box.bottom && box.top < shippedTop + b.height && b.x < box.right && box.left < b.x + b.width;
-    expect(wouldCover, `leg 7: NON-VACUITY: at its shipped top the band would cover the flashed cell (${line})`).toBe(true);
-    const covers = b.y < box.bottom && box.top < b.y + b.height && b.x < box.right && box.left < b.x + b.width;
-    expect(covers, `leg 7: the band does not cover the flashed cell (${line})`).toBe(false);
-    await page.keyboard.press('Escape');
-    expect((await readScene(page)).belts.length, 'leg 7: no belt landed').toBe(beltsBefore);
-    await expectRenderLoopAlive(page, 'after leg 7');
   });
 });

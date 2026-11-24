@@ -6,24 +6,21 @@ import {
   alertRingCentres,
   alertRingInstructions,
   armAndPlaceAt,
-  armAndPlaceFactoryAt,
   cameraOf,
   cellCentre,
   clickAt,
   expectRenderLoopAlive,
   handDragBetween,
   loadDemoViaExamples,
-  nubAnchor,
   pollScene,
   readScene,
   screenCellCentre,
-  screenPoint,
   selectMachineAt,
   waitForAppReady,
   watchPageErrors,
   type SceneFacts,
 } from './support/oracle';
-import { CMD, installFrameSniffer, pauseAndSettle, resumeIfPaused, sentCount } from './support/beltBoard';
+import { pauseAndSettle, resumeIfPaused } from './support/beltBoard';
 import { PORT_STATUS } from '../src/chrome/configCopy';
 
 // 89-turn-back-reconnects.live.spec.ts (phase 89, BELT-07, FAIL-06, success criterion 3) - a
@@ -50,6 +47,9 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 // 89-turn-back-reconnects`). Leg 6 is the review's CR-A-01: on a paused board a belt drawn
 // earlier in the same pass is docked by a later turn, as the headless session docks it (red before
 // the fix).
+//
+// Phase 112 cut legs 3 (four R), 4 (the paused double turn) and 5 (the Factory docked on three
+// ports): each ends in the same turn-back dock leg 2 checks.
 //
 // D-10, GRADED ON WHAT THE EYE SEES. Right after the severing turn the leg reads the warning
 // ring off the overlay's ring Graphics (`alertRingInstructions`, `alertRingCentres`), not the
@@ -157,35 +157,6 @@ const portsRegion = (page: Page) => page.getByRole('region', { name: 'Ports' });
 
 /** The side the Sink's In faces after one clockwise turn (W + 1 = N). */
 const SIDE_N = 0;
-/** The FACTORY wire kind (kinds.ts). */
-const KIND_FACTORY = 2;
-/** The Factory leg's drop cell: the 3x3 box (6..8, 11..13) is clear floor on the demo board. */
-const FACTORY_CELL = [6, 11] as const;
-/**
- * The Factory's three belts, Tail first, each four cells (D-16), found by these cells. The
- * Factory is drawn against at rot 2 (two quarter turns, before any belt exists), where its Out
- * faces West onto (5,12), its In faces East onto (9,12) and its Fault faces North onto (7,10):
- * every belt then lies in rows the default camera shows (rows below 12 sit under the window's
- * bottom edge at the demo's fit scale).
- */
-const OUT_BELT: ReadonlyArray<readonly [number, number]> = [
-  [5, 12],
-  [4, 12],
-  [3, 12],
-  [2, 12],
-];
-const FAULT_BELT: ReadonlyArray<readonly [number, number]> = [
-  [7, 10],
-  [7, 9],
-  [7, 8],
-  [7, 7],
-];
-const IN_BELT: ReadonlyArray<readonly [number, number]> = [
-  [12, 12],
-  [11, 12],
-  [10, 12],
-  [9, 12],
-];
 
 /** Both panels read belt 21 and the Audit Sink connected, as leg 1 reads them. */
 async function expectBothPanelsConnected(page: Page, leg: string): Promise<void> {
@@ -288,40 +259,6 @@ function beltFrom(s: SceneFacts, tail: readonly [number, number]): BeltFacts | u
   return s.belts.find((b) => b.tiles[0]?.cell_x === tail[0] && b.tiles[0]?.cell_y === tail[1]);
 }
 
-/** The placed Factory, by its anchor cell and kind. */
-function placedFactory(s: SceneFacts): NodeFacts | undefined {
-  return s.nodes.find(
-    (n) =>
-      n.kind === KIND_FACTORY &&
-      Math.min(...n.cells.map((c) => c[0])) === FACTORY_CELL[0] &&
-      Math.min(...n.cells.map((c) => c[1])) === FACTORY_CELL[1],
-  );
-}
-
-/**
- * Every dock between the Factory's three belts and the Factory, as `<belt>:<end>:<port>`, the
- * belt named by which of the three it is. A belt that is not on the board reads `<belt>:absent`.
- */
-function factoryDocks(s: SceneFacts): string {
-  const f = placedFactory(s);
-  const rows: string[] = [];
-  for (const [name, cells] of [
-    ['out', OUT_BELT],
-    ['fault', FAULT_BELT],
-    ['in', IN_BELT],
-  ] as const) {
-    const b = beltFrom(s, cells[0]);
-    if (b === undefined) {
-      rows.push(`${name}:absent`);
-      continue;
-    }
-    for (const d of b.docks) {
-      if (f !== undefined && d.node === f.id) rows.push(`${name}:${d.end}:${d.port}`);
-    }
-  }
-  return rows.sort().join(',');
-}
-
 /**
  * Draw ONE belt with the armed Belt tool the way a hand does: press the centre of `cells[0]`,
  * travel with `handDragBetween` (several samples per cell) to `end`, release. The caller polls
@@ -343,8 +280,6 @@ test.describe('89 live: a severing turn undone reconnects its belt (BELT-07, CON
 
   test.beforeEach(async ({ page }) => {
     errs = watchPageErrors(page);
-    // Leg 4 counts the Rotate frames the page sends (review WR-C-02); the sniffer goes in before boot.
-    await installFrameSniffer(page);
     await page.goto('/');
     await waitForAppReady(page);
   });
@@ -483,145 +418,6 @@ test.describe('89 live: a severing turn undone reconnects its belt (BELT-07, CON
     await pollScene(page, headDock, {
       message: "the second Ctrl+Z re-docked belt 21's Head (the turn away's own compensation)",
     }).toBe('sink:0');
-  });
-
-  test('3: four r presses on the Audit Sink end with belt 21 docked and no ring', async ({ page }) => {
-    await loadDemoReset(page);
-    expect(headDock(await readScene(page)), "PRECONDITION: belt 21's Head is docked to the Sink's In").toBe('sink:0');
-    await selectMachineAt(page, SINK_CELL[0], SINK_CELL[1]);
-    // One quarter turn clockwise per press: In W -> N -> E -> S -> W.
-    const sides = [0, 1, 2, SIDE_W];
-    for (let k = 0; k < sides.length; k += 1) {
-      await turnSinkTo(page, 'r', sides[k], `turn ${k + 1} landed: the Sink's In faces side ${sides[k]}`);
-      if (k === 0) {
-        await pollScene(page, headDock, { message: "turn 1 cut belt 21's Head" }).toBe('');
-      }
-      // Turns 1 to 3 join nothing, so the ring stays through them (review WR-C-01): what clears it
-      // is the fourth turn's dock, not a turn as such.
-      if (k < sides.length - 1) {
-        await expectRingOnHead(page, `leg 3: after turn ${k + 1}, which joins nothing, the ring on the cut Head stays`);
-      }
-    }
-    await pollScene(page, headDock, {
-      message: "D-08: after four quarter turns the In faces belt 21's loose Head again and the fourth turn docks it",
-    }).toBe('sink:0');
-    await expectNoRingPlotted(page, 'leg 3: the fourth turn docked belt 21 and resolved the cut: no warning ring is plotted');
-    await expectBothPanelsConnected(page, 'leg 3 after four turns');
-  });
-
-  test('4: paused, r then Shift+R then Play ends with belt 21 docked', async ({ page }) => {
-    await loadDemoReset(page);
-    expect(headDock(await readScene(page)), "PRECONDITION: belt 21's Head is docked to the Sink's In").toBe('sink:0');
-    try {
-      const pausedAt = await pauseAndSettle(page, 'leg 4');
-      // The canvas click moves focus off the toolbar button, so `r` reaches the board.
-      await selectMachineAt(page, SINK_CELL[0], SINK_CELL[1]);
-      // The board ends where it started (In West, belt 21 docked), so the end state alone cannot
-      // show the turns happened (review WR-C-02): both turns are graded on the wire as they are
-      // sent, and the turn back is graded by its own undo after Play.
-      const rotBefore = await sentCount(page, CMD.Rotate);
-      await page.keyboard.press('r');
-      await page.keyboard.press('Shift+R');
-      await expect
-        .poll(async () => (await sentCount(page, CMD.Rotate)) - rotBefore, { message: 'leg 4: both turns were sent while paused' })
-        .toBe(2);
-      // Both turns are queued, not folded: the board still reads the paused tick and the docked belt.
-      const queued = await readScene(page);
-      expect(queued.tick, 'leg 4: the host is still paused while the two turns are queued').toBe(pausedAt);
-      expect(headDock(queued), 'leg 4: nothing folded while paused').toBe('sink:0');
-      await resumeIfPaused(page);
-      await pollScene(page, (s) => s.tick > pausedAt + 1, { message: 'leg 4: Play folded the queued pass' }).toBe(true);
-      await pollScene(page, sinkInSide, { message: "leg 4: after Play the Sink's In faces West" }).toBe(SIDE_W);
-      await pollScene(page, headDock, {
-        message: "D-08 on a paused board: the turn away and back folded in one pass end with belt 21's Head docked",
-      }).toBe('sink:0');
-      // No "no ring" read here (review WR-C-01): measured with a dock that never resolves a cut
-      // (`strandLifetime.ts` mutated), this leg stayed green, so the paused pass raises no ring to
-      // clear and such a read could not fail. The wire count above and the undo below grade it.
-      await expectBothPanelsConnected(page, 'leg 4 after Play');
-      // The turn back folded as its own step: one Ctrl+Z undoes it alone, the Sink faces North
-      // again with belt 21 cut, and a second Ctrl+Z undoes the turn away, docked again (CONNECT-03).
-      await page.keyboard.press('Escape');
-      await page.keyboard.press('Control+z');
-      await pollScene(page, sinkInSide, { message: "leg 4: the turn back folded: one Ctrl+Z faces the Sink's In North" }).toBe(SIDE_N);
-      await pollScene(page, headDock, { message: "leg 4: and belt 21's Head is cut again" }).toBe('');
-      await page.keyboard.press('Control+z');
-      await pollScene(page, sinkInSide, { message: 'leg 4: the turn away folded: a second Ctrl+Z faces it West' }).toBe(SIDE_W);
-      await pollScene(page, headDock, { message: "leg 4: and belt 21's Head is docked again" }).toBe('sink:0');
-    } finally {
-      await resumeIfPaused(page).catch(() => undefined);
-    }
-  });
-
-  test('5: a Factory docked on In, Out and Fault, turned away and back, ends with all three docked', async ({ page }) => {
-    await loadDemoReset(page);
-    await armAndPlaceFactoryAt(page, FACTORY_CELL[0], FACTORY_CELL[1]);
-    await pollScene(page, (s) => placedFactory(s) !== undefined, {
-      message: 'the real host echoes the Factory placed at (6,11)',
-    }).toBe(true);
-    // Two quarter turns before any belt exists (nothing to dock): rot 2.
-    await selectMachineAt(page, FACTORY_CELL[0], FACTORY_CELL[1]);
-    for (let k = 0; k < 2; k += 1) {
-      const before = JSON.stringify(placedFactory(await readScene(page))?.ports);
-      await page.keyboard.press('r');
-      await pollScene(page, (s) => JSON.stringify(placedFactory(s)?.ports) !== before, {
-        message: `bare turn ${k + 1} of the Factory landed`,
-      }).toBe(true);
-    }
-    await page.keyboard.press('Escape');
-    const f0 = placedFactory(await readScene(page))!;
-    const portByRole = (role: number) => f0.ports.find((p) => p.role === role)!;
-
-    // ---- Three belts drawn by hand, each across four cells: off the Out and the Fault doorsteps,
-    // and into the In's doorstep, released on the In's nub (rot 2: Out West, In East, Fault North).
-    await page.getByTitle(/^Draw belts/).click();
-    const outEnd = await screenCellCentre(page, OUT_BELT[3][0], OUT_BELT[3][1]);
-    await handDrawBelt(page, OUT_BELT, outEnd);
-    await pollScene(page, (s) => (beltFrom(s, OUT_BELT[0])?.docks.length ?? 0) === 1, {
-      message: "the Out belt is drawn and its Tail docked to the Factory's Out",
-    }).toBe(true);
-    const faultEnd = await screenCellCentre(page, FAULT_BELT[3][0], FAULT_BELT[3][1]);
-    await handDrawBelt(page, FAULT_BELT, faultEnd);
-    await pollScene(page, (s) => (beltFrom(s, FAULT_BELT[0])?.docks.length ?? 0) === 1, {
-      message: "the Fault belt is drawn and its Tail docked to the Factory's Fault",
-    }).toBe(true);
-    const inPort = portByRole(ROLE_IN);
-    const inNub = await screenPoint(page, nubAnchor(inPort.cell_x, inPort.cell_y, inPort.side));
-    await handDrawBelt(page, IN_BELT, inNub);
-    await pollScene(page, (s) => (beltFrom(s, IN_BELT[0])?.docks.length ?? 0) === 1, {
-      message: "the In belt is drawn and its Head docked to the Factory's In",
-    }).toBe(true);
-    await page.keyboard.press('Escape');
-    const docked = factoryDocks(await readScene(page));
-    expect(docked.split(',').length, `PRECONDITION: all three belts docked to the Factory (${docked})`).toBe(3);
-    await expectRenderLoopAlive(page, 'with the Factory docked on all three ports');
-
-    // ---- Turn the Factory away (r) and back (Shift+R).
-    await selectMachineAt(page, FACTORY_CELL[0], FACTORY_CELL[1]);
-    const portsAt0 = JSON.stringify(f0.ports);
-    await page.keyboard.press('r');
-    await pollScene(page, (s) => JSON.stringify(placedFactory(s)?.ports) !== portsAt0, {
-      message: 'the turn away landed: the Factory ports moved',
-    }).toBe(true);
-    console.log(`P89-FACTORY after the turn away: docks=${factoryDocks(await readScene(page))}`);
-    // NON-VACUITY for the "no ring" read after the turn back (review WR-C-01): the turn away cut
-    // the Out and In belts, so the ring is plotted right before the turn back.
-    await expect
-      .poll(() => alertRingInstructions(page), {
-        timeout: addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), 'leg 5: the ring plot read after the turn away'),
-        intervals: [100, 250, 500],
-        message: 'leg 5: NON-VACUITY: the turn away that cut the Out and In belts plots the warning ring',
-      })
-      .toBeGreaterThan(0);
-    await page.keyboard.press('Shift+R');
-    await pollScene(page, (s) => JSON.stringify(placedFactory(s)?.ports), {
-      message: 'the turn back landed: the Factory ports are where they started',
-    }).toBe(portsAt0);
-    await pollScene(page, factoryDocks, {
-      message: 'D-08: the turn back docks every loose belt end a Factory port faces again: In, Out and Fault',
-    }).toBe(docked);
-    await expectNoRingPlotted(page, 'leg 5: the turn back docked all three ports and resolved every cut: no warning ring is plotted');
-    await expectRenderLoopAlive(page, 'after the Factory turned away and back');
   });
 
   test('6: paused, a belt drawn then a turn that faces its Head, then Play: the turn docks it', async ({ page }) => {

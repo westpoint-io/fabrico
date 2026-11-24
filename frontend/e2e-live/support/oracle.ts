@@ -2837,46 +2837,6 @@ export async function dispatchPointer(
   }, ev);
 }
 
-/** One step of a touch sequence for {@link touchSequence}. */
-export type TouchStep =
-  | { type: 'start'; x: number; y: number }
-  | { type: 'move'; x: number; y: number }
-  | { type: 'end' };
-
-/**
- * Drive ONE touch point through the browser's own input pipeline (phase 89, plan 89-07,
- * BELT-08): a CDP session's `Input.dispatchTouchEvent` for each step, `touchStart`, `touchMove`
- * and `touchEnd`, so the page receives TRUSTED touch pointer events with their own pointer id, as
- * a second finger does. `between(i)`, when given, runs after step `i`, so a spec can move the
- * mouse while the finger is down. Budgeted as one hand move per step; the session is detached
- * afterwards.
- */
-export async function touchSequence(
-  page: Page,
-  steps: readonly TouchStep[],
-  between?: (i: number) => Promise<void>,
-  touchId = 7,
-): Promise<void> {
-  addFrameBudget((steps.length + 1) * HAND_MOVE_FRAMES, `touchSequence ${steps.length} steps`);
-  const cdp = await page.context().newCDPSession(page);
-  try {
-    for (let i = 0; i < steps.length; i += 1) {
-      const s = steps[i];
-      if (s.type === 'end') {
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      } else {
-        await cdp.send('Input.dispatchTouchEvent', {
-          type: s.type === 'start' ? 'touchStart' : 'touchMove',
-          touchPoints: [{ x: s.x, y: s.y, id: touchId }],
-        });
-      }
-      if (between) await between(i);
-    }
-  } finally {
-    await cdp.detach();
-  }
-}
-
 /**
  * Place ONE machine (or label) the way a HAND does (phase 76, SHAPE-10): click the palette
  * row `Place <kindName>` by its accessible name, travel from the palette edge to a point a

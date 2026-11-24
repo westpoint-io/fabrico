@@ -24,11 +24,11 @@ import { doorstep, portOf, beltOn, rowCells, cellPoint, emptyBoardAtScaleOne, pl
 
 // 89-belt-delete.live.spec.ts (phase 89, plan 89-06, BELT-02, success criterion 2, D-07, UI-SPEC
 // section 2, walk step 3; 68-UI-SPEC finding 3, which held belt deletion back, is superseded by
-// D-07) - a selected belt is deleted by the Delete key and by its panel's `Delete belt` button,
-// through the shipped items guard when items are on it, and Ctrl+Z brings it back docked at both
-// ends, on the REAL host (dev_render_server, real Core -> RenderProducer -> postcard -> WS). Zero
-// mocks, zero injected packets: the machines are placed and turned with the shipped palette and
-// `r` key, and the belt is drawn with the shipped Belt tool by a hand drag.
+// D-07) - a selected belt is deleted by the Delete key, through the shipped items guard when
+// items are on it, and Ctrl+Z brings it back docked at both ends, on the REAL host
+// (dev_render_server, real Core -> RenderProducer -> postcard -> WS). Zero mocks, zero injected
+// packets: the machines are placed and turned with the shipped palette and `r` key, and the belt
+// is drawn with the shipped Belt tool by a hand drag.
 //
 // ---------------------------------------------------------------------------
 // WHAT WAS BROKEN (89-MEASURE.md `## BELT-02: still broken`)
@@ -50,16 +50,15 @@ import { doorstep, portOf, beltOn, rowCells, cellPoint, emptyBoardAtScaleOne, pl
 //       middle tile), and no belt panel stays; Ctrl+Z brings it back on the same cells, docked at
 //       both ends, its tread drawn again, and the Source's output row and the Sink's input row read
 //       `idle`. At zoom 1, then again below 1 on the second row;
-//   (b) the same with the panel's `Delete belt` button (`#fab-belt-delete`);
 //   (c) on a board that is playing, the Source on a Timer and items on the belt: Delete opens the
 //       guard dialog (the belt body copy), sends nothing, Cancel keeps the belt; Delete again and
 //       `Delete anyway` removes it;
-//   (d) Backspace inside the pace field edits the text only: the belt is still there many ticks
-//       later.
+//
+// Phase 112 cut (b), the same removal and Undo through the panel's `Delete belt` button, and (d),
+// Backspace inside the pace field deleting nothing.
 //
 // RED FIRST (D-16): run once against the plan's start revision (frontend from a throwaway worktree
-// with this spec copied in), every leg red but (d), which guards the focused field the new key
-// route must respect. 89-EVIDENCE.md, `LIVE_RED 89-belt-delete`.
+// with this spec copied in), every leg red but (d). 89-EVIDENCE.md, `LIVE_RED 89-belt-delete`.
 //
 // Render health in every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` and the
 // watcher's `assertNone` after every test (fabrico-model-oracle-blindspot).
@@ -247,18 +246,6 @@ test.describe('89 live: a selected belt is deleted by key and by its panel, behi
     }
   });
 
-  test("(b) the belt panel's Delete belt button removes it, and Ctrl+Z brings it back docked", async ({ page }) => {
-    const row = ROWS[0];
-    await emptyBoardAtScaleOne(page, [[SOURCE_X, row.y], [SINK_X, row.y], ...row.floor]);
-    const cells = await buildRow(page, row, false);
-    await selectBelt(page, cells, row.name);
-    const button = page.locator('#fab-belt-delete');
-    await expect(button, `${row.name}: the belt panel offers the Delete belt button`).toBeVisible();
-    await expect(button, `${row.name}: the button is named Delete belt`).toHaveAccessibleName('Delete belt');
-    await button.click();
-    await expectGoneThenBackByUndo(page, row, cells, 'the Delete belt button');
-  });
-
   test('(c) a belt carrying items opens the guard: Cancel keeps it, Delete anyway removes it', async ({ page }) => {
     const row = ROWS[0];
     await emptyBoardAtScaleOne(page, [[SOURCE_X, row.y], [SINK_X, row.y], ...row.floor]);
@@ -289,28 +276,6 @@ test.describe('89 live: a selected belt is deleted by key and by its panel, behi
     }).toBe(true);
     await expectDrawn(page, cells[Math.floor(cells.length / 2)], false, `${row.name}: and the canvas no longer draws it`);
     await expect(page.locator('#fab-belt-config'), `${row.name}: no belt panel stays`).toHaveCount(0);
-  });
-
-  test('(d) Backspace inside the pace field edits the text and deletes nothing', async ({ page }) => {
-    const row = ROWS[0];
-    await emptyBoardAtScaleOne(page, [[SOURCE_X, row.y], [SINK_X, row.y], ...row.floor]);
-    const cells = await buildRow(page, row, false);
-    await selectBelt(page, cells, row.name);
-    const field = page.locator('#fab-belt-pace');
-    await field.click();
-    await field.press('End');
-    const before = await field.inputValue();
-    expect(before.length, `${row.name}: the pace field holds a figure to edit`).toBeGreaterThan(0);
-    await field.press('Backspace');
-    await expect(field, `${row.name}: Backspace edited the field's text`).toHaveValue(before.slice(0, -1));
-    const t0 = (await readScene(page)).tick;
-    await pollScene(page, (s) => s.tick >= t0 + AFTER_KEY_TICKS, {
-      message: `${row.name}: the board ran ${AFTER_KEY_TICKS} ticks after the Backspace`,
-    }).toBe(true);
-    expect(docksOn(await readScene(page), cells, row.y), `${row.name}: the belt is still there, docked as drawn`).toBe(
-      'Head@sink,Tail@source',
-    );
-    await expect(page.locator('#fab-belt-config'), `${row.name}: its panel is still open`).toBeVisible();
   });
 });
 

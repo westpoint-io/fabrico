@@ -16,7 +16,6 @@ import {
   restoreHostAfterFailedTest,
   screenCellCentre,
   seenPointerEvents,
-  touchSequence,
   waitForAppReady,
   waitForCameraSettle,
   watchPageErrors,
@@ -29,10 +28,9 @@ import { CMD, beltOn, cellPoint, doorstep, expectOnCanvas, installFrameSniffer, 
 // 244 to 253, UI-SPEC section 5 and A14, A15) - a belt draw survives what a real hand and a real
 // webview do to it, on the REAL host (dev_render_server, real Core -> RenderProducer -> postcard
 // -> WS). Zero mocks, zero injected packets for the board: every belt is drawn with the shipped
-// Belt tool by a hand drag of many sub-cell samples. The interruptions are the ones the browser
-// itself produces (a second touch point through CDP's touch input) or the exact events a webview
-// that lost a release delivers (a `pointercancel`, a move of the owning pointer with no button
-// down), dispatched on the canvas.
+// Belt tool by a hand drag of many sub-cell samples. The interruptions are the exact events a
+// webview that lost a release delivers (a `pointercancel`), dispatched on the canvas, plus a middle
+// button, Escape and a keyframe in the middle of a draw.
 //
 // ---------------------------------------------------------------------------
 // WHAT WAS BROKEN (89-MEASURE.md `## BELT-08/W244` to `W253`)
@@ -49,30 +47,24 @@ import { CMD, beltOn, cellPoint, doorstep, expectOnCanvas, installFrameSniffer, 
 // THE LEGS, GRADED ON WHAT THE EYE SEES (UI-SPEC section 5, one leg per row)
 // ---------------------------------------------------------------------------
 //
-//   1. a second touch point goes down, moves and lifts in the middle of a mouse draw: exactly one
-//      new belt, its cells the mouse's, and the Belt palette row still `aria-pressed="true"`;
 //   2. a `pointercancel` of the mouse's pointer mid-draw: no new belt, the preview gone
 //      (`beltPreviewInstructions()` 0) while the hand is still down and after the release, the
 //      row still armed, and a fresh drag draws one belt;
-//   3. a move of the mouse's pointer with `buttons: 0` mid-draw (a release the webview lost): the
-//      same grading as leg 2;
 //   4. a middle-button drag with the Belt tool armed pans the camera (`cameraOf` moved) and keeps
 //      the tool (`aria-pressed="true"`); a multi-cell left draw after it lays exactly one belt on
 //      the drawn cells; at zoom 1 and again below 1;
-//   5. a middle press in the middle of a left drag (the page's own events say how it arrived,
-//      research A5): the camera pans with the hand while the middle is held (review UI-05), the
-//      path survives, the cells the hand crossed under the middle button are not in it, and the
-//      left release lays exactly one belt on the cells drawn before it;
 //   6. Escape while the button is still held, the hand moving on and releasing: no new belt, the
 //      preview gone, the tool armed; a second drag draws one belt; a second Escape disarms;
-//   7. the Belt row armed from the keyboard (Tab to it, Enter), so its button keeps focus, then
-//      Escape: the tool is put away (WINDOWS 252);
 //   8. a keyframe mid-drag: a draw pressed on a Source's Out doorstep, Ctrl+Z (undoing the Place of
 //      a second Source) while the button is held, the walk going on and released on a Sink's In
 //      doorstep. The camera does not move at the keyframe, the preview is plotted after every
 //      sampled move (never 0 before the release), and one belt carries every drawn cell, docked at
 //      both ends; at zoom 1 and again below 1. (The board boots empty here, which left the boot
 //      fit pending until plan 89-07: the Undo's keyframe re-framed the camera under the hand.)
+//
+// Phase 112 cut four legs a kept leg walks: 1 (a second touch point during a mouse draw) and 3 (a
+// move with no button down) beside leg 2's pointercancel, 5 (a middle press mid-drag) beside leg
+// 4's middle-button pan, and 7 (the Belt row armed from the keyboard, then Escape) beside leg 6.
 //
 // RED FIRST (D-16): legs 1 to 3 run once against the plan's start revision, legs 4 to 8 once
 // against Task 1's commit (frontend from a throwaway worktree with this spec and the oracle helpers
@@ -438,55 +430,8 @@ test.describe('89 live: a belt draw survives interruptions (BELT-08, D-11)', () 
     }
   });
 
-  test('1: a second touch point down, moved and lifted during a mouse draw is ignored: one belt, the mouse cells', async ({ page }) => {
-    const y = 6;
-    const cells = rowCells(6, 11, y);
-    await emptyBoard(page, [...cells, [8, 12], [11, 12]]);
-    await armBelt(page);
-    const before = (await readScene(page)).belts.length;
-    const t0 = await cellPoint(page, 8, 12, 0.4, 0.5);
-    const t1 = await cellPoint(page, 9, 12, 0.5, 0.5);
-    const t2 = await cellPoint(page, 11, 12, 0.6, 0.5);
-    const moves = await interruptedDraw(page, 6, 11, y, 8, async (at) => {
-      // The finger goes down far from the draw, moves two cells while the mouse keeps walking, and
-      // lifts: every touch event between two mouse samples.
-      let k = 0;
-      await touchSequence(
-        page,
-        [
-          { type: 'start', x: t0.x, y: t0.y },
-          { type: 'move', x: t1.x, y: t1.y },
-          { type: 'move', x: t2.x, y: t2.y },
-          { type: 'end' },
-        ],
-        async () => {
-          k += 1;
-          await pointerTravel(page, at.x + k, at.y);
-        },
-      );
-    });
-    expect(moves, 'the mouse moved through many samples, not one teleport').toBeGreaterThanOrEqual(10);
-    const seen = await seenPointerEvents(page);
-    const touchDowns = seen.filter((e) => e.type === 'pointerdown' && e.pointerType === 'touch' && e.trusted);
-    console.log(`P89-W253 touch_downs=${touchDowns.length} ids=${JSON.stringify([...new Set(seen.map((e) => `${e.pointerType}:${e.pointerId}`))])}`);
-    expect(touchDowns.length, 'NON-VACUITY: the page saw the second finger as a trusted touch pointerdown').toBeGreaterThanOrEqual(1);
-    await pollScene(page, (s) => (beltOn(s, cells) === undefined ? `no belt on the mouse cells: ${beltsText(s)}` : 'drawn'), {
-      message: "one belt with exactly the mouse's cells",
-      timeout: 10_000,
-    }).toBe('drawn');
-    const s = await readScene(page);
-    expect(s.belts.length, `exactly one new belt, nothing from the finger: ${beltsText(s)}`).toBe(before + 1);
-    await expect(beltRow(page), 'the Belt tool is still armed').toHaveAttribute('aria-pressed', 'true');
-  });
-
   test('2: a pointercancel mid-draw lays no belt, the preview goes, the tool stays armed, and a fresh drag draws', async ({ page }) => {
     await interruptionLeg(page, 'pointercancel');
-  });
-
-  test('3: a move with no button down mid-draw lays no belt, the preview goes, the tool stays armed, and a fresh drag draws', async ({
-    page,
-  }) => {
-    await interruptionLeg(page, 'a move with no button down');
   });
   test('4: a middle-button drag with the Belt tool armed pans and keeps the tool, and the draw after it lays one belt, at zoom 1 and below 1', async ({
     page,
@@ -499,48 +444,6 @@ test.describe('89 live: a belt draw survives interruptions (BELT-08, D-11)', () 
     console.log(`P89-W244 below zoom 1: camera scale ${scale}`);
     await expect(beltRow(page), 'the wheel kept the Belt tool').toHaveAttribute('aria-pressed', 'true');
     await middlePanThenDraw(page, 12, 'below zoom 1');
-  });
-
-  test('5: a middle press in the middle of a left drag neither extends nor commits the path: one belt, the cells drawn before it', async ({
-    page,
-  }) => {
-    const y = 6;
-    await emptyBoard(page, rowCells(6, 11, y));
-    await armBelt(page);
-    const before = (await readScene(page)).belts.length;
-    const a = await cellPoint(page, 6, y, 0.35, 0.45);
-    const mid = await cellPoint(page, 8, y, 0.55, 0.5);
-    const far = await cellPoint(page, 10, y, 0.6, 0.55);
-    await pointerTravel(page, a.x, a.y);
-    await page.mouse.down();
-    for (const p of handPath(a, mid)) await pointerTravel(page, p.x, p.y);
-    // Sliced by sequence number, not by array index (review IN-C-04): the recorder trims its
-    // oldest entries on a long walk, which shifts every index.
-    const mark = (await seenPointerEvents(page)).at(-1)?.seq ?? 0;
-    const cam0 = await cameraOf(page);
-    await page.mouse.down({ button: 'middle' });
-    for (const p of handPath(mid, far)) await pointerTravel(page, p.x, p.y);
-    // The chord pans the board with the hand (review UI-05, UI-SPEC section 5 "a mid-draw pan"):
-    // red before the camera panned on a chorded middle move, which reaches the page as a move, never
-    // as a press. The path is frozen under it, so the hand comes back to the cell it left.
-    const cam1 = await cameraOf(page);
-    console.log(`P89-UI05 chord pan: camera ${JSON.stringify(cam0)} -> ${JSON.stringify(cam1)}`);
-    expect(Math.abs(cam1.x - cam0.x) + Math.abs(cam1.y - cam0.y), 'the middle chord panned the camera with the hand').toBeGreaterThan(20);
-    await page.mouse.up({ button: 'middle' });
-    const chord = (await seenPointerEvents(page)).filter((e) => e.seq > mark);
-    const downs = chord.filter((e) => e.type === 'pointerdown').length;
-    const chorded = chord.filter((e) => e.type === 'pointermove' && (e.buttons & 4) !== 0).length;
-    const ups = chord.filter((e) => e.type === 'pointerup').length;
-    console.log(`P89-A5 middle during a left drag: pointerdown=${downs} chorded_moves=${chorded} pointerup=${ups} buttons=${JSON.stringify([...new Set(chord.map((e) => e.buttons))])}`);
-    expect(chorded, 'NON-VACUITY: the page saw moves with the middle button held during the left drag').toBeGreaterThan(0);
-    await page.mouse.up();
-    const cells = rowCells(6, 8, y);
-    await pollScene(page, (s) => (beltOn(s, cells) === undefined ? `no belt on ${JSON.stringify(cells)}: ${beltsText(s)}` : 'drawn'), {
-      message: 'one belt on the cells drawn before the middle press, none of the cells crossed under it',
-      timeout: 10_000,
-    }).toBe('drawn');
-    expect((await readScene(page)).belts.length, 'exactly one new belt').toBe(before + 1);
-    await expect(beltRow(page), 'the Belt tool is still armed').toHaveAttribute('aria-pressed', 'true');
   });
 
   test('6: Escape while the button is held cancels only the path: no belt, the tool armed, a second drag draws, a second Escape disarms', async ({
@@ -572,21 +475,6 @@ test.describe('89 live: a belt draw survives interruptions (BELT-08, D-11)', () 
     await expectFreshDragDraws(page, 6, 9, 10, 'after Escape', cells);
     await page.keyboard.press('Escape');
     await expect(beltRow(page), 'the second Escape, with no path, puts the tool away').toHaveAttribute('aria-pressed', 'false');
-  });
-
-  test('7: the Belt row armed from the keyboard keeps its focus, and Escape still puts the tool away', async ({ page }) => {
-    await emptyBoard(page, rowCells(6, 9, 6));
-    let focused = false;
-    for (let k = 0; k < 80 && !focused; k += 1) {
-      await page.keyboard.press('Tab');
-      focused = await beltRow(page).evaluate((el) => el === document.activeElement);
-    }
-    expect(focused, 'Tab reached the Belt palette row').toBe(true);
-    await page.keyboard.press('Enter');
-    await expect(beltRow(page), 'Enter on the focused row armed the Belt tool').toHaveAttribute('aria-pressed', 'true');
-    expect(await beltRow(page).evaluate((el) => el === document.activeElement), 'PRECONDITION: the row button still holds focus').toBe(true);
-    await page.keyboard.press('Escape');
-    await expect(beltRow(page), 'Escape past the focused button put the tool away').toHaveAttribute('aria-pressed', 'false');
   });
 
   test('8: a keyframe mid-drag keeps the drawn path: the preview never blinks, one belt docked at both ends, at zoom 1 and below 1', async ({

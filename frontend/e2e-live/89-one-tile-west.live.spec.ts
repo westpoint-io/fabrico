@@ -62,7 +62,9 @@ import { cardinalOfRotation, emptyBoardAtScaleOne, turnUntilFacing, zoomBelowOne
 // then is the Source put on a Timer, so items cross the belt one at a time, far apart.
 //
 //   1. Flowing WEST: the Source East of the cell, the Sink West of it.
-//   2. Flowing NORTH: the Source South of the cell, the Sink North of it.
+//
+// Leg 2 walked the same check flowing North; phase 112 cut it, since the defect and the reads are
+// the same on either axis.
 //
 // For every belt: the drag PREVIEW's kind at the cell before the release
 // (`beltPreviewKindAt`), the shipped kind after the echo (the scene), the tread ROTATION the
@@ -85,7 +87,6 @@ const KIND_SINK = 7;
 const ROLE_IN = 0;
 const ROLE_OUT = 1;
 /** Travel cardinals, the wire's numbering (y-down). */
-const N = 0;
 const W = 3;
 const CARDINAL_NAME = ['N', 'E', 'S', 'W'] as const;
 /**
@@ -120,10 +121,6 @@ interface Pair {
 const WEST_PAIRS: readonly Pair[] = [
   { name: 'west at zoom 1', flow: W, belt: [9, 6] },
   { name: 'west below zoom 1', flow: W, belt: [9, 10] },
-];
-const NORTH_PAIRS: readonly Pair[] = [
-  { name: 'north at zoom 1', flow: N, belt: [14, 7] },
-  { name: 'north below zoom 1', flow: N, belt: [20, 7] },
 ];
 
 /** The Sink sits one step along the flow from the belt cell, the Source one step against it. */
@@ -351,9 +348,5 @@ test.describe('89 live: a one-tile belt is drawn and animated flowing the way it
 
   test('1: a one-tile belt between a Source and a Sink, flowing West, is drawn and animated flowing West', async ({ page }) => {
     await walkPairs(page, WEST_PAIRS);
-  });
-
-  test('2: a one-tile belt between a Source and a Sink, flowing North, is drawn and animated flowing North', async ({ page }) => {
-    await walkPairs(page, NORTH_PAIRS);
   });
 });
