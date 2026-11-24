@@ -52,6 +52,7 @@
     "@vitest/coverage-v8": "4.1.9",
     "fontkit": "2.0.4",
     "jsdom": "30.0.1",
+    "monocart-coverage-reports": "3.2.1",
     "typescript": "6.0.3",
     "vite": "8.1.0",
     "vitest": "4.1.9",

@@ -11,6 +11,9 @@ import { defineConfig, devices } from '@playwright/test';
 // so compilation never eats the readiness window below (Pitfall 3).
 export default defineConfig({
   testDir: './e2e-live',
+  // A local coverage reading (phase 112): the teardown writes the report only when
+  // FABRICO_LIVE_COVERAGE is set, and CI never sets it.
+  globalTeardown: process.env.FABRICO_LIVE_COVERAGE ? './e2e-live/support/liveCoverageTeardown.ts' : undefined,
   // Generous per-test timeout (review WR-02): the default 30s is thin against
   // waitForAppReady's up-to-30s budget plus 03's ~5s of mandatory real packet
   // accumulation on a cold CI runner. retries: 0 means a timeout IS a red

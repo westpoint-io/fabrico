@@ -38,6 +38,8 @@ crates/fabrico-app/gen/
 frontend/test-results/
 frontend/playwright-report/
 frontend/coverage/
+# The live suite coverage readings are local and hold absolute paths.
+frontend/coverage-live/
 # A Playwright blob report, if a local run writes one.
 frontend/blob-report/
 crates/fabrico-scenario/**/*.snap.new

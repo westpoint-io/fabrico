@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/liveTest';
 import { waitForChromeAndTick } from './support/oracle';
 
 // 12-welcome-card.spec.ts (ONB-01) - the first-run welcome-card gate.

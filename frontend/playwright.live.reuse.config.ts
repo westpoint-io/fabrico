@@ -12,6 +12,9 @@ const LIVE_TERMINAL = process.env.FABRICO_LIVE_TERMINAL === '1';
 // Chromium both work foreground; only Playwright-spawned servers do not.
 export default defineConfig({
   testDir: './e2e-live',
+  // A local coverage reading (phase 112): the teardown writes the report only when
+  // FABRICO_LIVE_COVERAGE is set, and CI never sets it.
+  globalTeardown: process.env.FABRICO_LIVE_COVERAGE ? './e2e-live/support/liveCoverageTeardown.ts' : undefined,
   timeout: 90_000,
   // A ceiling on the whole run (review 84 WR-06), so a wedged browser ends in a written report
   // instead of a runner killed at the CI job's limit: Playwright stops, marks what is left not
