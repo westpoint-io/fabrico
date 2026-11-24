@@ -47,7 +47,7 @@ describe('routeSceneLoad — the A3 dirty gate', () => {
 describe('SCENE_DISPLAY_NAME — the badge copy map', () => {
   it('maps the wire ids to the verbatim display names', () => {
     // 'Demo scene' must stay byte-identical to the shipped ONB-01 badge string
-    // (14-demo-badge's exact-match assertion depends on it).
+    // (the live toolbar spec, 91-toolbar.live.spec.ts, checks the badge by exact match).
     expect(SCENE_DISPLAY_NAME.demo_scene).toBe('Demo scene');
     expect(SCENE_DISPLAY_NAME.order_processing).toBe('Order processing');
     expect(SCENE_DISPLAY_NAME.advanced).toBe('Advanced pipeline');

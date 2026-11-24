@@ -9,8 +9,8 @@ import type { SceneWireId } from '../transport/transport.ts';
 
 /**
  * The scene badge display names (UI-SPEC Copywriting Contract, verbatim):
- * `Demo scene` stays byte-identical to the shipped ONB-01 badge string so the
- * 14-demo-badge exact-match assertion stays true by design.
+ * `Demo scene` stays byte-identical to the shipped ONB-01 badge string, because the
+ * live toolbar spec (91-toolbar.live.spec.ts) checks the badge text by exact match.
  */
 export type SceneDisplayName = 'Demo scene' | 'Order processing' | 'Advanced pipeline';
 
