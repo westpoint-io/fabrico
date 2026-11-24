@@ -64,7 +64,7 @@ import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frame
 //      (Pitfall 7: a board holding items never settles). A second Source and a Sink are placed
 //      for a docked draw that turns at once off the Source's Out. The draw is walked while the
 //      board plays and Pause lands just before the button comes up (Space on the focused
-//      toolbar toggle, as `74.1-paused-edits` leg 6 does since plan 84-13: a hand walking the
+//      toolbar toggle, as plan 84-13 first did for a paused example pick: a hand walking the
 //      run after Pause could outlast the host's whole drain budget at a slow frame rate), so the
 //      release is a paused draw on a host that has just begun its drain (the tick is asserted to
 //      advance across the release). The board is held paused until the tick stands at least

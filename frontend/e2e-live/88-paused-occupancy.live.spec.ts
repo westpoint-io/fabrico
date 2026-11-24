@@ -60,7 +60,7 @@ const COLLISION_COPY = 'That space is taken. Clear it or try elsewhere.';
 //      DrawBelt is still sent, with no claim, so the host refuses it in words on Play; until
 //      then no second frame was sent. Play: exactly one belt lands, the first, docked to the
 //      Source, and `#fab-refusal` reads the collision sentence for the second.
-//   2. A QUEUED DOCK. The review's board (`74.1-paused-edits` leg 7): belts A (1,5)-(3,5) east,
+//   2. A QUEUED DOCK. The board from review round 5 WR-02: belts A (1,5)-(3,5) east,
 //      D starting at (3,4) and E starting at (3,6), drawn while playing. Pause. D's Tail dragged
 //      onto A's Head (sent, queued; the drop ring over A's Head read accepting, the known-yes).
 //      Then E's Tail dragged onto A's Head: the drop ring over it is drawn passive and no resting
@@ -237,7 +237,7 @@ const LABEL_KIND = 11;
 /** The oracle's pause between two hand moves (oracle.ts keeps its own private). */
 const HAND_PAUSE_MS = 8;
 
-/** Leg 2's board, 74.1-paused-edits leg 7's: A east, D and E starting beside A's Head (3,5). */
+/** Leg 2's board, review round 5 WR-02's: A east, D and E starting beside A's Head (3,5). */
 const A_CELLS: readonly (readonly [number, number])[] = [
   [1, 5],
   [2, 5],

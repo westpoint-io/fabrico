@@ -14004,7 +14004,7 @@ describe('queued Docks, Places, label grows and Deletes on a paused board (plan 
   const ringAt = (pts: Array<{ x: number; y: number }>, p: Pt) => pts.some((q) => q.x === p.x && q.y === p.y);
   const lastGhostValid = (rig: Rig) => rig.overlay.ghostCalls[rig.overlay.ghostCalls.length - 1]?.valid ?? null;
 
-  // The review's board (74.1-paused-edits leg 7): A (1,5)-(3,5) east, its Head at (3,5); D's
+  // The board from review round 5 WR-02: A (1,5)-(3,5) east, its Head at (3,5); D's
   // Tail (3,4) just above A's Head and E's Tail (3,6) just below it.
   const A = 30;
   const D = 31;

@@ -1928,8 +1928,8 @@ export async function loadExample(
  * tick (frozen or playing), without a magic pre-wait threshold.
  *
  * A YOUNG BOARD OF ANOTHER SHAPE (plan 84-11). The tick drop alone cannot see a swap from a
- * board that has run fewer ticks than the demo's genesis restarts at: `74.1-paused-edits` leg
- * 6 loads the order example and resets straight after, and on two pinned cores the example
+ * board that has run fewer ticks than the demo's genesis restarts at: a paused-edit test that
+ * loaded the order example and reset straight after hit it: on two pinned cores the example
  * read tick 46 at the click while the demo restarted at 50, so the poll never saw `tick < 46`
  * and ran out with the demo on screen (the live suite's pass of plan 84-11; the same red at a
  * 100% CPU quota in its reproduction). When the board before the click is not the demo's shape,
