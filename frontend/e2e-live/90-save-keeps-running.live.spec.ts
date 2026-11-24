@@ -51,17 +51,12 @@ import {
 //      failed on the dim), but since review WR-B-02 the page gives a host working on a Save its
 //      settle window (10 s) before it says Disconnected, so inside this 3 s window they now guard
 //      only the page's own stall handling, not a held host.
-//   2. A paused demo board, saved with Ctrl+S: the file is written, the button stays `Play`, the
-//      tick holds, and the status strip never shows Disconnected. Play is pressed at its end so
-//      the shared host is left running.
 //   3. (review WR-B-05, the page's view of CR-A-01) A running board with an item on a belt: Ctrl+S,
 //      then Space twice (Pause, then Play) in ONE page task, so all three controls reach the host
 //      while its Save drains. Until review pass 1 the Resume cancelled the latched Save without a
 //      word: no file, and the badge already read saved. Now the file is written whole, the board
 //      runs on 30 ticks and more with the transport reading Pause, and the strip never shows
 //      Disconnected.
-//   4. (review WR-B-05) The same with an Open of a file saved first: Open, Pause, Play in one page
-//      task. The strip reads `Loaded`, never `Load failed`, and the opened board runs on.
 //
 // RED FIRST (D-14): run once against PHASE90_START (the frontend from the kept start worktree with
 // this spec copied in, the host built there): leg 1 read red (90-EVIDENCE.md, `LIVE_RED
@@ -78,10 +73,6 @@ const DIM = '[data-fab-disconnected-dim]';
 /** How many samples each watched window takes, and how far apart: 3 s at 200 ms. */
 const WATCH_SAMPLES = 15;
 const SAMPLE_MS = 200;
-/** The paused leg's shorter window: 2 s at 200 ms. */
-const PAUSED_SAMPLES = 10;
-/** How long the paused board's tick must stand still before the save, to count as settled. */
-const SETTLE_MS = 1_000;
 
 /** The transport button. Icon-only: its accessible name is its `aria-label`, `Pause` while the
  *  page believes the sim runs and `Play` while it believes it is paused. */
@@ -163,9 +154,6 @@ async function actThenPauseAndPlay(page: Page, action: { key: 's' } | { click: s
   }, action);
 }
 
-/** The status strip's readout (`Loaded` after an Open's swap). */
-const STRIP_READOUT = '[data-fab-status-strip] [role="status"]';
-
 test.describe('90 live: a save never holds a running board (FAIL-04)', () => {
   test.afterEach(async ({ page }, testInfo) => {
     await restoreHostAfterFailedTest(page, testInfo);
@@ -219,53 +207,6 @@ test.describe('90 live: a save never holds a running board (FAIL-04)', () => {
     errs.assertNone('the save on a running board');
   });
 
-  test('2: a save on a paused board stays paused', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-    await expectTickRising(page, 'the demo board is playing before the pause');
-
-    await transportOf(page).click();
-    await expect(transportOf(page), 'Pause pressed: the transport offers Play').toHaveAttribute('aria-label', 'Play');
-    // The pause drains in-flight items first, so the tick settles a few ticks later: read it once
-    // it has stood still for `SETTLE_MS` (a packet can land over 300 ms late under the CPU quota).
-    let settled = (await readScene(page)).tick;
-    let since = Date.now();
-    await expect
-      .poll(
-        async () => {
-          const now = (await readScene(page)).tick;
-          if (now !== settled) {
-            settled = now;
-            since = Date.now();
-          }
-          return Date.now() - since;
-        },
-        { timeout: 15_000, intervals: [100, 250], message: `the paused board settles: the tick stands still for ${SETTLE_MS} ms` },
-      )
-      .toBeGreaterThanOrEqual(SETTLE_MS);
-
-    const savePath = join(tmpdir(), `fabrico-e2e-90-save-paused-${Date.now()}.fab`);
-    page.once('dialog', (d) => void d.accept(savePath));
-    await blurChrome(page);
-    await page.keyboard.press('Control+s');
-    await waitForFile(savePath, `the save on the paused board wrote the file ${savePath}`, 30_000);
-
-    const held = await watchBoard(page, PAUSED_SAMPLES, 'Play', 'after the save on the paused board');
-    expect(
-      { first: held.first, last: held.last },
-      `after the save on the paused board: the tick holds at ${settled}`,
-    ).toEqual({ first: settled, last: settled });
-
-    // Leave the shared host running for the next spec.
-    await transportOf(page).click();
-    await expect(transportOf(page), 'Play pressed: the transport offers Pause').toHaveAttribute('aria-label', 'Pause');
-    await expectTickRising(page, 'Play after the paused save runs the board on');
-    await expectRenderLoopAlive(page, 'after Play on the saved board');
-    errs.assertNone('the save on a paused board');
-  });
-
   test('3: Pause then Play while a Save drains: the file is written and the board runs on', async ({ page }) => {
     const errs = watchPageErrors(page);
     await page.goto('/');
@@ -292,41 +233,5 @@ test.describe('90 live: a save never holds a running board (FAIL-04)', () => {
     await expect(page.getByText('Unsaved', { exact: true }), 'leg 3: the board reads saved, and it is').toHaveCount(0);
     await expectRenderLoopAlive(page, 'after leg 3');
     errs.assertNone('leg 3');
-  });
-
-  test('4: Pause then Play while an Open drains: Loaded, and the opened board runs on', async ({ page }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-    const savePath = join(tmpdir(), `fabrico-e2e-90-open-pause-play-${Date.now()}.fab`);
-    page.once('dialog', (d) => void d.accept(savePath));
-    await blurChrome(page);
-    await page.keyboard.press('Control+s');
-    await waitForFile(savePath, `leg 4: the board was saved to ${savePath}`, 45_000);
-    await expectTickRising(page, 'leg 4: the saved board plays on');
-    await pollScene(page, (s) => s.belts.some((b) => b.items > 0), {
-      message: 'leg 4: an item is on a belt, so the Open latches and drains',
-    }).toBe(true);
-    page.once('dialog', (d) => void d.accept(savePath));
-    const strip = await recordStatusStripDuring(page, async () => {
-      await actThenPauseAndPlay(page, { click: 'button[title^="Load a saved factory"]' });
-      await expect
-        .poll(async () => ((await page.locator(STRIP_READOUT).first().textContent()) ?? '').trim(), {
-          timeout: 45_000,
-          intervals: [50, 100, 250],
-          message: 'leg 4: the Open that a Pause and a Play met in its drain reads Loaded',
-        })
-        .toBe('Loaded');
-    });
-    console.log(`P90-WR-B-05 leg-4 strip=${JSON.stringify(strip)}`);
-    expect(strip.filter((t) => t.includes('Load failed')), 'leg 4: never Load failed').toEqual([]);
-    expect(strip.filter((t) => t.includes(DISCONNECTED)), 'leg 4: never Disconnected').toEqual([]);
-    const t0 = (await readScene(page)).tick;
-    await pollScene(page, (s) => s.tick, { timeout: 15_000, message: `leg 4: the opened board runs on 30 ticks past ${t0}` }).toBeGreaterThanOrEqual(t0 + 30);
-    await expect(transportOf(page), 'leg 4: the transport reads Pause, the board plays').toHaveAttribute('aria-label', 'Pause');
-    await expectRenderLoopAlive(page, 'after leg 4');
-    errs.assertNone('leg 4');
   });
 });

@@ -511,12 +511,11 @@ fn no_variant_produced_from_a_load_leaks_the_path() {
 
 #[test]
 fn the_clause_the_live_spec_pins_is_actually_what_a_malformed_load_says() {
-    // `frontend/e2e-live/29-load-refused-card.spec.ts` pins the exact clause
-    // `postcard decode failed`, on ruling R-16 route (a): a clause from a span this
-    // plan's reword does not touch, so the live assertion could genuinely have been red.
-    // THIS test is what stops the two drifting apart. Reword `Malformed` and the live
-    // spec would start passing for the wrong reason (or failing for a reason nobody
-    // could locate from the frontend); this reddens in the same commit.
+    // The refusal card shows this host sentence for an undecodable file, and the
+    // clause `postcard decode failed` is the part of it chosen on ruling R-16 route (a):
+    // a clause from a span this plan's reword does not touch. No live spec reads the
+    // exact clause any more, so THIS test is what keeps the wording stable. Reword
+    // `Malformed` and this reddens in the same commit.
     let dir = known_temp_dir();
     let work = known_temp_dir();
     let path = dir.path().join("garbage.fab");
@@ -527,8 +526,8 @@ fn the_clause_the_live_spec_pins_is_actually_what_a_malformed_load_says() {
     assert_eq!(variant_name(&err), "Malformed");
     assert!(
         err.to_string().contains("postcard decode failed"),
-        "the live spec 29-load-refused-card pins this exact clause; it must survive every \
-         reword of this arm.\n  got: {err}"
+        "the refusal card shows this exact clause; it must survive every reword of this \
+         arm.\n  got: {err}"
     );
 }
 

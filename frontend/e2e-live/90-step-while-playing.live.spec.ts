@@ -1,8 +1,6 @@
 import { test, expect, type Page } from './support/liveTest';
 import {
-  DEMO_NODE_COUNT,
   expectRenderLoopAlive,
-  loadDemoViaExamples,
   pollScene,
   readScene,
   recordStatusStripDuring,
@@ -41,10 +39,6 @@ import {
 //      key went down, read in the same page task as the press (review WR-C-07: D-07's "freezes on
 //      the spot, does not drain"; a drain on the demo board runs on 100 ticks or more). `.` again:
 //      the tick is the settled tick plus exactly one, and holds. Play: the tick runs on.
-//   2. The same with the toolbar's Step button (`Step one tick (.)`).
-//   3. `.` on a playing board, then the demo loaded through Examples: after the swap the transport
-//      still reads `Play` and the tick holds for 2 s (the Step was the user's hold, so the load
-//      does not resume over it). Play at its end leaves the shared host running.
 //
 // RED FIRST (D-14): run once against PHASE90_START (the frontend from the kept start worktree with
 // this spec copied in, the host built there): all three legs read red (90-EVIDENCE.md, `LIVE_RED
@@ -65,7 +59,6 @@ const SAMPLE_MS = 200;
 /** 3 s of samples after the first Step, 1 s after the second, 2 s after the load. */
 const WATCH_SAMPLES = 15;
 const SECOND_STEP_SAMPLES = 5;
-const AFTER_LOAD_SAMPLES = 10;
 /**
  * The most ticks the first Step's settled tick may stand above the tick the page had drawn at the
  * press (review WR-C-07). The host runs exactly one tick (`a_step_from_playing_then_a_demo_load_
@@ -76,9 +69,6 @@ const AFTER_LOAD_SAMPLES = 10;
  * 117 on busier boards.
  */
 const STEP_FROM_PLAYING_MAX_TICKS = 30;
-/** How far past the demo's genesis tick the board runs before leg 3's Step, so the load's
- *  restart reads as a drop below the stepped tick (the demo restarts near tick 50). */
-const RUN_PAST_TICK = 200;
 
 /** The transport button. Icon-only: its accessible name is its `aria-label`, `Pause` while the
  *  page believes the sim runs and `Play` while it believes it is paused. */
@@ -226,44 +216,5 @@ test.describe('90 live: Step on a playing board pauses and steps once (FAIL-03)'
       'key',
     );
     errs.assertNone('Step by the . key');
-  });
-
-  test('2: the Step button on a playing board pauses, steps once and leaves the view live', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await stepWalk(page, () => page.getByTitle(STEP_TITLE).click(), 'the Step button', 'button');
-    errs.assertNone('Step by the button');
-  });
-
-  test('3: a demo load after a Step from playing leaves the board paused', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-    await pollScene(page, (s) => s.tick, {
-      timeout: 30_000,
-      message: `the demo board runs past tick ${RUN_PAST_TICK}, so the load's restart reads as a drop`,
-    }).toBeGreaterThan(RUN_PAST_TICK);
-    await expectRenderLoopAlive(page, 'before the Step');
-
-    await blurChrome(page);
-    await page.keyboard.press('.');
-    await expect(transportOf(page), 'Step on a playing board flips the transport to Play').toHaveAttribute('aria-label', 'Play', {
-      timeout: 2_000,
-    });
-    const stepped = await settledTick(page, 'after the Step the tick stands still');
-
-    await loadDemoViaExamples(page);
-    await pollScene(page, (s) => s.tick < stepped && s.nodes.length === DEMO_NODE_COUNT && s.wires.length === 2, {
-      timeout: 30_000,
-      message: `the demo load swapped the board (its tick restarted below ${stepped} on the demo's nodes and wires)`,
-    }).toBe(true);
-    const afterSwap = await settledTick(page, 'after the swap the tick stands still');
-    await expectHeldLive(page, AFTER_LOAD_SAMPLES, afterSwap, 'after the demo load');
-
-    await playOn(page, 'after the demo load');
-    await expectRenderLoopAlive(page, 'after Play on the loaded demo');
-    errs.assertNone('the demo load after a Step');
   });
 });

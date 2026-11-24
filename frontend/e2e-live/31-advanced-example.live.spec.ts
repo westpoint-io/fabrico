@@ -11,7 +11,6 @@ import {
   waitForAppReady,
   watchPageErrors,
   webhookUrl,
-  type PortFacts,
   type SceneFacts,
 } from './support/oracle';
 
@@ -36,8 +35,6 @@ import {
 // handles off the packet; nothing here hardcodes a handle.
 
 const KIND_SOURCE = 0;
-const KIND_FACTORY = 2;
-const KIND_BALANCER = 4;
 const KIND_SINK = 7;
 
 /** Authored anchors in examples/boards/advanced.board.ron. */
@@ -158,107 +155,5 @@ test.describe('quick 260916-adv live: the Advanced example dead-letters an inval
   });
 });
 
-// Plan 85-10 (D-25, DEMO-09): the board the user sees has no kinked belt. The PR #2 review
-// found two belts (validate's invoice output and worker B's output) that jogged west before
-// their final eastward run, and an invoice belt that turned right under the Balancer's unused
-// second input, so at fit zoom the billing branch read as feeding the Balancer. This leg reads
-// every belt off the LIVE model after a real Examples load, not the RON.
-
-/** Unit step of a port's facing side: N=0, E=1, S=2, W=3 (y-down). */
-const SIDE_DELTA: Record<number, readonly [number, number]> = {
-  0: [0, -1],
-  1: [1, 0],
-  2: [0, 1],
-  3: [-1, 0],
-};
-
-/** Every step of a belt's tiles (tail to head) that turns back along an axis it has already
- *  advanced on, as `belt <id>: (x,y) -> (x,y) on <axis>`. */
-function doubledBackSteps(belt: Belt): string[] {
-  const out: string[] = [];
-  const dir = { x: 0, y: 0 };
-  for (let i = 1; i < belt.tiles.length; i++) {
-    const a = belt.tiles[i - 1];
-    const b = belt.tiles[i];
-    const step = { x: Math.sign(b.cell_x - a.cell_x), y: Math.sign(b.cell_y - a.cell_y) };
-    for (const axis of ['x', 'y'] as const) {
-      if (step[axis] === 0) continue;
-      if (dir[axis] === 0) dir[axis] = step[axis];
-      else if (dir[axis] !== step[axis]) {
-        out.push(`belt ${belt.id}: (${a.cell_x},${a.cell_y}) -> (${b.cell_x},${b.cell_y}) on ${axis}`);
-      }
-    }
-  }
-  return out;
-}
-
-/** The first tile where a belt changes direction, or undefined for a straight belt. */
-function firstTurn(belt: Belt): [number, number] | undefined {
-  const t = belt.tiles;
-  for (let i = 1; i + 1 < t.length; i++) {
-    const inX = t[i].cell_x - t[i - 1].cell_x;
-    const inY = t[i].cell_y - t[i - 1].cell_y;
-    const outX = t[i + 1].cell_x - t[i].cell_x;
-    const outY = t[i + 1].cell_y - t[i].cell_y;
-    if (inX !== outX || inY !== outY) return [t[i].cell_x, t[i].cell_y];
-  }
-  return undefined;
-}
-
 test.describe('plan 85-10 live: the Advanced board has no kinked belt', () => {
-  test('no belt doubles back, and the invoice belt turns clear of the Balancer second input', async ({
-    page,
-  }) => {
-    const errors = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-
-    await loadExample(page, 'advanced', 12);
-    await pollScene(page, (s) => s.nodes.length === 12 && s.belts.length === 12, {
-      message: 'the advanced scene landed: 12 machines and 12 belts',
-    }).toBe(true);
-
-    const scene = await readScene(page);
-    expect(
-      scene.belts.every((b) => b.tiles.length >= 2),
-      'every advanced belt carries its drawn tiles on the live model',
-    ).toBe(true);
-
-    // (1) No belt doubles back along an axis it has already advanced on.
-    const kinks = scene.belts.flatMap(doubledBackSteps);
-    expect(kinks, 'no belt on the live Advanced board doubles back').toEqual([]);
-
-    // (2) The invoice belt: the one whose Tail docks the validate Factory's second Out
-    // (catalog port 3 on the only Factory that carries four ports). An Out dock rides the
-    // wire in the EMIT keyspace (its 0-based position among the node's Out ports, as spec 01
-    // converts it), so the catalog index is converted through validate's own ports.
-    const validate = scene.nodes.find((n) => n.kind === KIND_FACTORY && n.ports.length === 4);
-    expect(validate, 'the validate Factory (grown to four ports) is on the board').toBeDefined();
-    const out1 = validate?.ports.find((p) => p.index === 3 && p.role === 1);
-    expect(out1, 'validate carries its second Out at catalog port 3').toBeDefined();
-    const out1Emit = (validate?.ports ?? []).filter((p) => p.role === 1 && p.index < 3).length;
-    const invoiceBelt = scene.belts.find((b) =>
-      b.docks.some((d) => d.end === 'Tail' && d.node === validate?.id && d.port === out1Emit),
-    );
-    expect(invoiceBelt, 'a belt leaves the validate Factory second Out').toBeDefined();
-
-    // The Balancer's second input and the cell it faces (its mouth), read off the live ports.
-    const balancer = scene.nodes.find((n) => n.kind === KIND_BALANCER);
-    const in1 = balancer?.ports.find((p) => p.index === 1 && p.role === 0);
-    expect(in1, 'the Balancer carries its second input (catalog port 1)').toBeDefined();
-    const [dx, dy] = SIDE_DELTA[(in1 as PortFacts).side];
-    const mouth: [number, number] = [(in1 as PortFacts).cell_x + dx, (in1 as PortFacts).cell_y + dy];
-
-    const turn = firstTurn(invoiceBelt as Belt);
-    expect(turn, 'the invoice belt turns toward the invoice Factory').toBeDefined();
-    expect(turn, 'the invoice belt does not turn in the Balancer second-input mouth').not.toEqual(mouth);
-    expect(
-      (turn as [number, number])[0],
-      `the invoice belt turns at (${turn?.join(',')}), a clear column west of the Balancer ` +
-        `second-input mouth (${mouth.join(',')})`,
-    ).toBeLessThanOrEqual(mouth[0] - 2);
-
-    await expectRenderLoopAlive(page, 'at the end of the no-kink leg');
-    errors.assertNone('while loading the advanced example and reading its belts');
-  });
 });

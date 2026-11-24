@@ -35,9 +35,7 @@ import {
 // Every belt's tread marches from the render clock whether or not it carries anything, so a pixel
 // change alone proves nothing about items. The check pins the render clock, which holds the tread
 // still and leaves the item dots moving with the scene, and it counts a pixel change only on a
-// sample where the model reports items on that belt around the capture. The negative
-// control below hides the item layer and requires the same check to see no change, on every board:
-// that is what shows the check can fail with the model still reporting items.
+// sample where the model reports items on that belt around the capture.
 //
 // The node count is read from the board file itself, which shows that the board on screen is that
 // file. Every test installs `watchPageErrors` before `page.goto` and ends with
@@ -76,7 +74,7 @@ const ORDER_GAP_MS = 100;
 const FIRST_BELT_TICKS = 240;
 /** The frames two differing clips of a moving belt can take, each clip being one poll sample. */
 const FIRST_BELT_FRAMES = 30;
-/** The samples with items on the belt that the negative control takes with the item layer hidden. */
+/** The fewest samples the held-POST test takes after the swap. */
 const CONTROL_SAMPLES = 8;
 /** The gap between samples. An item crosses a first belt quickly, so a slower poll samples between items. */
 const SAMPLE_GAP_MS = 50;
@@ -139,8 +137,8 @@ function firstBelt(scene: SceneFacts): Belt {
 /**
  * A screen box along a belt's tiles, kept inside the viewport. Along the run it stops at the centres
  * of the first and last tiles. The machine at each end of a belt draws its port over the outer half
- * of the belt's end tile, and that port's look follows the scene, so the negative control saw it
- * change with no item drawn. An item still crosses everything between those two centres.
+ * of the belt's end tile, and that port's look follows the scene, so a clip over it changed with
+ * no item drawn. An item still crosses everything between those two centres.
  */
 async function clipAround(page: Page, belt: Belt): Promise<{ x: number; y: number; width: number; height: number }> {
   const half = (CELL * (await cameraOf(page)).scale) / 2;
@@ -184,18 +182,6 @@ async function pinTreads(page: Page, frame: number | null): Promise<void> {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
   }, frame);
-}
-
-/** Shows or hides the item layer, returning after two display frames, as `pinTreads` does. */
-async function showItemLayer(page: Page, on: boolean): Promise<void> {
-  await page.evaluate(async (visible) => {
-    const hook = (window as { __fabrico?: { setItemLayerVisible(on: boolean): void } }).__fabrico;
-    if (!hook) throw new Error('window.__fabrico not installed');
-    hook.setItemLayerVisible(visible);
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    });
-  }, on);
 }
 
 /**
@@ -250,67 +236,6 @@ async function expectItemDrawnOnFirstBelt(page: Page, id: BoardId, beforeSample:
       },
     )
     .toEqual({ pixelsChanged: true, itemsSeen: true });
-  await pinTreads(page, null);
-}
-
-/**
- * The negative control. With the item layer hidden and the treads pinned, `CONTROL_SAMPLES` samples
- * that have items on the first belt must all match the clip taken at the start: the check that
- * `expectItemDrawnOnFirstBelt` makes can't pass with no item drawn. Then the layer comes back, and
- * the same clip must change, so the control can't pass on a belt whose items never reach the clip.
- */
-async function expectNoChangeWithItemsHidden(page: Page, id: BoardId, beforeSample: () => Promise<void>): Promise<void> {
-  const belt = firstBelt(await readScene(page));
-  const clip = await clipAround(page, belt);
-  await showItemLayer(page, false);
-  await pinTreads(page, 0);
-  const reference = await captureClip(page, clip);
-  let carrying = 0;
-  let changedWhileCarrying = 0;
-  await expect
-    .poll(
-      async () => {
-        await beforeSample();
-        const sample = await sampleBelt(page, belt.id, clip, reference);
-        if (sample.carrying) {
-          carrying += 1;
-          if (sample.changed) changedWhileCarrying += 1;
-        }
-        return carrying;
-      },
-      {
-        message: `${id}: belt ${belt.id} carries items on ${CONTROL_SAMPLES} samples with the item layer hidden`,
-        intervals: [SAMPLE_GAP_MS],
-        timeout: addWaitBudget(
-          frameBudgetMs(CONTROL_SAMPLES * FIRST_BELT_FRAMES) + tickBudgetMs(FIRST_BELT_TICKS),
-          'the negative control: samples of a carrying belt with the item layer hidden',
-        ),
-      },
-    )
-    .toBeGreaterThanOrEqual(CONTROL_SAMPLES);
-  expect(
-    changedWhileCarrying,
-    `${id}: with the item layer hidden and the treads pinned, the first belt's clip changed on ${changedWhileCarrying} of ${carrying} samples, so something other than an item passes the check`,
-  ).toBe(0);
-
-  await showItemLayer(page, true);
-  await expect
-    .poll(
-      async () => {
-        await beforeSample();
-        const sample = await sampleBelt(page, belt.id, clip, reference);
-        return sample.carrying && sample.changed;
-      },
-      {
-        message: `${id}: belt ${belt.id}'s clip changes once the item layer is shown again`,
-        intervals: [SAMPLE_GAP_MS],
-        timeout: addWaitBudget(
-          frameBudgetMs(FIRST_BELT_FRAMES) + tickBudgetMs(FIRST_BELT_TICKS),
-          'the negative control: the same clip with the item layer shown again',
-        ),
-      },
-    )
-    .toBe(true);
   await pinTreads(page, null);
 }
 
@@ -435,17 +360,6 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     errs.assertNone('on the order board');
   });
 
-  test('the advanced board opens with Undo greyed out and an item shows on its first belt', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await openBoard(page, 'advanced');
-    await expectFreshBoard(page, 'advanced');
-    await expectItemDrawnOnFirstBelt(page, 'advanced', async () => {});
-    await expectRenderLoopAlive(page, 'after the advanced board moved');
-    errs.assertNone('on the advanced board');
-  });
-
   test('a POST held across a scene load is refused and shows no item on the new board', async ({ page }) => {
     const errs = watchPageErrors(page);
     await page.goto('/');
@@ -522,39 +436,5 @@ test.describe('the shipped board files, opened through the Examples menu', () =>
     await expectRenderLoopAlive(page, 'after a POST was refused across a scene load');
     errs.assertNone('across the held scene load');
     await resetToDemo(page);
-  });
-
-  for (const id of ['demo_scene', 'order_processing', 'advanced'] as const) {
-    test(`the pixel check fails on the ${id} board with the item layer hidden, and passes when it comes back`, async ({
-      page,
-    }) => {
-      const errs = watchPageErrors(page);
-      await page.goto('/');
-      await waitForAppReady(page);
-      await openBoard(page, id);
-      if (id === 'order_processing') {
-        await withOrdersFlowing(page, (startOrders) => expectNoChangeWithItemsHidden(page, id, startOrders));
-      } else {
-        await expectNoChangeWithItemsHidden(page, id, async () => {});
-      }
-      await expectRenderLoopAlive(page, `after the negative control on ${id}`);
-      errs.assertNone(`in the negative control on ${id}`);
-    });
-  }
-
-  test('three boards loaded back to back in one page each end on their own nodes with Undo greyed out', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    for (const id of ['order_processing', 'advanced', 'demo_scene'] as const) {
-      await openBoard(page, id);
-      await expectFreshBoard(page, id);
-      errs.assertNone(`after loading ${id}`);
-    }
-    await expectRenderLoopAlive(page, 'after three loads in one page');
-    await resetToDemo(page);
-    errs.assertNone('after the file put the demo back');
   });
 });

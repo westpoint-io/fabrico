@@ -38,8 +38,8 @@ import { GUARD_QUEUED_WORDS } from '../src/chrome/configCopy';
 //      again, Ctrl+Z at once: `Loading…` then `Loaded`, never `Load failed` and never
 //      `Disconnected` (review WR-B-02: the stall watchdog stands down over the swap's silence),
 //      and the scene is the file's board (the Undo went to the board the swap replaced).
-//   2. Running board, one Sink placed and saved, the refused file (eight 0xff bytes, as
-//      29-load-refused-card.spec.ts writes it) opened, Ctrl+Z: the refusal card, and the
+//   2. Running board, one Sink placed and saved, the refused file (eight 0xff bytes)
+//      opened, Ctrl+Z: the refusal card, and the
 //      strip reads `Load failed` within 3 s of it (UI-SPEC A9). The board is kept, so the
 //      Ctrl+Z, held by the host through the drain, then undoes the Sink on it.
 //   3. A saved board, then Pause and a Sink placed (queued). The Open asks first and says the
@@ -57,7 +57,7 @@ import { GUARD_QUEUED_WORDS } from '../src/chrome/configCopy';
 // wait for the Load's answer is 45 s, so a long drain is never graded as a failure.
 //
 // Focus: clicking Load leaves focus on the button and LW-02 stands the canvas keys down, so
-// each Ctrl+Z follows a click on empty floor (30-post-load-undo.spec.ts, BLUR_CELL).
+// each Ctrl+Z follows a click on empty floor (BLUR_CELL).
 // MODEL FIRST, THEN RENDER HEALTH: `watchPageErrors` before `goto`, `expectRenderLoopAlive`
 // after each phase, `assertNone` at the end.
 
@@ -72,7 +72,7 @@ const QUEUED = 'Paused - edits queued until Play';
 const DISCONNECTED = 'Disconnected';
 /** The budget for a Load's answer: the host's longest drain under the CPU quota, with room. */
 const ANSWER_MS = 45_000;
-/** A free cell well clear of the demo (30-post-load-undo.spec.ts). */
+/** A free cell well clear of the demo. */
 const SINK_CELL: [number, number] = [10, 12];
 /** An empty cell clicked only to take focus off a toolbar button. */
 const BLUR_CELL: [number, number] = [2, 14];

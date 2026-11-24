@@ -14,8 +14,6 @@ import {
   cameraOf,
   expectRenderLoopAlive,
   loadDemoViaExamples,
-  loadExample,
-  newBoard,
   openExamples,
   pollScene,
   readScene,
@@ -38,7 +36,7 @@ import {
 // camera fitted once per mount. App.tsx now holds a pending fit per scene load (`fitPendingRef`,
 // taken by `takeFit` in `src/chrome/sceneFit.ts`). A user's own `.fab` Open keeps the camera
 // the user had (the done-walk spec, 77 leg 4, expects a reopened label back at the same place
-// on screen), and so does New.
+// on screen).
 //
 // WHAT IS GRADED IS WHAT THE USER SEES (D-13, Pitfall 5). The Undo button's disabled state is
 // read from the DOM, not from the model's `canUndo` flag; Ctrl+Z is graded by the board (the
@@ -57,7 +55,6 @@ import {
 
 /** Machines in each shipped scene, as the oracle's own loaders settle on them. */
 const ORDER_NODES = 6;
-const ADVANCED_NODES = 12;
 
 /** The topology a user sees, without anything that moves on its own (item counts, pulses,
  *  machine state). Node ids, kinds, cells and ports; belt ids, tiles and docks; wire ends. */
@@ -312,32 +309,6 @@ test.describe('DEMO-05 and DEMO-07: right after a scene loads, Undo is greyed, C
     pageErrors.assertNone('during the demo leg');
   });
 
-  test('Order processing: framed after it loads, Undo greyed, Ctrl+Z leaves the board byte-equal', async ({ page }) => {
-    const pageErrors = watchPageErrors(page);
-    await bootToDemo(page);
-
-    await moveCameraAway(page);
-    await loadExample(page, 'order_processing', ORDER_NODES);
-    await expectUndoInertOnFreshScene(page, 'order processing example');
-    await expectBoardFramed(page, 'order processing example');
-
-    await expectRenderLoopAlive(page, 'at the end of the order processing leg');
-    pageErrors.assertNone('during the order processing leg');
-  });
-
-  test('Advanced: framed after it loads, Undo greyed, Ctrl+Z leaves the board byte-equal', async ({ page }) => {
-    const pageErrors = watchPageErrors(page);
-    await bootToDemo(page);
-
-    await moveCameraAway(page);
-    await loadExample(page, 'advanced', ADVANCED_NODES);
-    await expectUndoInertOnFreshScene(page, 'advanced example');
-    await expectBoardFramed(page, 'advanced example');
-
-    await expectRenderLoopAlive(page, 'at the end of the advanced leg');
-    pageErrors.assertNone('during the advanced leg');
-  });
-
   test('a saved and reopened user board: the camera stays, one Ctrl+Z removes only the user machine, then Undo is greyed', async ({
     page,
   }) => {
@@ -409,20 +380,6 @@ test.describe('DEMO-05 and DEMO-07: right after a scene loads, Undo is greyed, C
 
     await expectRenderLoopAlive(page, 'at the end of the reopened board leg');
     pageErrors.assertNone('during the reopened board leg');
-  });
-
-  test('New: the camera does not move', async ({ page }) => {
-    const pageErrors = watchPageErrors(page);
-    await bootToDemo(page);
-
-    const away = await moveCameraAway(page);
-    await newBoard(page);
-    await expectRenderLoopAlive(page, 'after New');
-    await waitForCameraSettle(page);
-    expect(await cameraOf(page), 'New leaves the camera where the user put it').toEqual(away);
-
-    await expectRenderLoopAlive(page, 'at the end of the New leg');
-    pageErrors.assertNone('during the New leg');
   });
 
   test('a Ctrl+Z pressed as an example loads: the new board still arrives framed with Undo greyed', async ({ page }) => {

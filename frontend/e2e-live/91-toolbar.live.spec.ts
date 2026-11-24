@@ -127,7 +127,7 @@ function overlap(a: { left: number; top: number; right: number; bottom: number }
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-/** An empty cell on the demo board, for the one edit that makes it unsaved (as 90-tab-title). */
+/** An empty cell on the demo board, for the one edit that makes it unsaved. */
 const DIRTY_CELL: readonly [number, number] = [10, 12];
 
 /** Fonts settled, so a text width read is the shipped face's. */

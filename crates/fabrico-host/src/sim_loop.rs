@@ -5132,9 +5132,9 @@ mod tests {
         );
     }
 
-    /// 73-07 (deviation Rule 1): a reopened board is never a dead board. Found by
-    /// `frontend/e2e-live/30-post-load-undo.spec.ts`, whose render-health assertion reddened
-    /// on a Pixi frame index frozen at 19 after "save, then open the file again".
+    /// 73-07 (deviation Rule 1): a reopened board is never a dead board. Found by a live
+    /// render-health check that reddened on a Pixi frame index frozen at 19 after "save, then
+    /// open the file again".
     ///
     /// # Reached through real commands since the phase 90 review (WR-A-04)
     /// This test was `a_file_load_after_a_save_drain_resumes_the_sim`, and after D-08 it
