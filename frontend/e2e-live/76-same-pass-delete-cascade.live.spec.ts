@@ -29,19 +29,18 @@ import {
 // `probe_c1` to `probe_c7` in `crates/fabrico-host/tests/delete_undo_probes.rs`.
 //
 // ---------------------------------------------------------------------------
-// THE LEGS (both on the demo board, the real dev_render_server, zero mocks)
+// THE LEG (on the demo board, the real dev_render_server, zero mocks)
 // ---------------------------------------------------------------------------
 //
 //   1. R then Delete. Paused, the Sink at (5,8) (fed by the belt on (5,5) to (5,7)) is
 //      selected, R turns it (the turn releases the belt's dock) and Delete removes it.
 //      Play, then Ctrl+Z. ONE belt holds (5,6), the Sink is back at (5,8) and drawn,
 //      the belt count is the demo's, and the board saves and opens again ("Loaded").
-//   2. Two machines that share a belt. Paused, the Factory at (4,2) (whose fault port
-//      feeds the same belt) and the Sink at (5,8) are deleted. Play, then Ctrl+Z twice.
-//      Same checks.
+//      The second shape of the defect, two machines that share a belt deleted in one pass,
+//      is pinned by `probe_c3`.
 //
 // RED WITHOUT THE PRUNE (dev_render_server built from the probes' red commit):
-// both legs failed at "ONE belt holds (5,6), not a second drawn over it", Expected 1,
+// this leg and a two-machine leg both failed at "ONE belt holds (5,6), not a second drawn over it", Expected 1,
 // Received 2, so neither reached the Save. The Rust probes show that board failing to
 // load `CellCollision`. Recorded in 76-12-SUMMARY.md, refuter round.
 //
@@ -175,46 +174,5 @@ test.describe('76-12 refuter round live: a Delete queued behind an edit of the s
     }
     await expectRenderLoopAlive(page, 'after leg 1');
     errs.assertNone('leg 1');
-  });
-
-  test('leg 2: paused, Delete the Factory at (4,2) and the Sink at (5,8) that share a belt, Play, Ctrl+Z twice', async ({
-    page,
-  }) => {
-    test.setTimeout(150_000);
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page, DEMO_NODE_COUNT);
-    await resumeIfPaused(page);
-    const demoBelts = (await readScene(page)).belts.length;
-    await expectRenderLoopAlive(page, 'leg 2, before the gestures');
-    try {
-      await pauseAndSettle(page, 'leg 2');
-      await selectMachineAt(page, 4, 2);
-      await page.keyboard.press('Delete');
-      await clickFloor(page);
-      await selectMachineAt(page, 5, 8);
-      await page.keyboard.press('Delete');
-      await expect(statusReadout(page), 'leg 2: the paused Deletes are queued').toHaveText(QUEUED_COPY);
-      await resumeIfPaused(page);
-      await pollScene(page, (s) => nodeAtAnchor(s, 5, 8) === undefined && nodeAtAnchor(s, 4, 2) === undefined && beltsOn(s, 5, 6) === 0, {
-        message: 'leg 2: Play folds the pass: both machines and their shared belt are gone',
-      }).toBe(true);
-
-      await clickFloor(page);
-      await page.keyboard.press('Control+z');
-      await pollScene(page, (s) => nodeAtAnchor(s, 5, 8)?.kind ?? null, {
-        message: 'leg 2: the first Ctrl+Z brings the Sink back',
-      }).toBe(SINK_KIND);
-      await page.keyboard.press('Control+z');
-      await pollScene(page, (s) => nodeAtAnchor(s, 4, 2) !== undefined, {
-        message: 'leg 2: the second Ctrl+Z brings the Factory back',
-      }).toBe(true);
-      await expectWholeBoard(page, 'leg 2', demoBelts);
-    } finally {
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 2');
-    errs.assertNone('leg 2');
   });
 });

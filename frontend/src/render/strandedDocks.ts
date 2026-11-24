@@ -216,8 +216,8 @@ function lostDocks(
  *    exists for, so it is NOT to be retired.
  *
  * 3. WHAT PROVES IT IS LIVE, unlike in 67-07: the live leg
- *    `frontend/e2e-live/74.1-port-edit-rings.live.spec.ts` drives remove, undo and redo
- *    on the real host through the shipped `App.tsx` packet path and reads the rings off
+ *    `frontend/e2e-live/74.1-port-edit-rings.live.spec.ts` drives a turn, its undo and its
+ *    redo on the real host through the shipped `App.tsx` packet path and reads the rings off
  *    the ring Graphics (`alertRingCentres`); it was red before this widening (no ring
  *    after the redo). The unit cases in `strandedDocks.test.ts` prove the gates' logic.
  *    `frontend/e2e-live/05-undo-strand-ring.spec.ts` still asserts only scene facts (an

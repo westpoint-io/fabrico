@@ -11,8 +11,8 @@
 // 74.1-27 it fires on the REDO of a port removal and of a stranding Rotate.
 //
 // The cases below prove its LOGIC against constructed packets. What proves it is LIVE
-// is `frontend/e2e-live/74.1-port-edit-rings.live.spec.ts`, which drives remove, undo
-// and redo on the real host through the shipped packet path and reads the rings off
+// is `frontend/e2e-live/74.1-port-edit-rings.live.spec.ts`, which drives a turn, its undo
+// and its redo on the real host through the shipped packet path and reads the rings off
 // the ring Graphics; it was red before the widening.
 //
 // FIXTURE CHANGE in 74.1-27 (inputs, not verdicts): every keyframe case in the

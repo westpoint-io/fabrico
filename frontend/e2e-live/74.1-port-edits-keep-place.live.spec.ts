@@ -41,8 +41,8 @@ import {
 // the catalog box; the slots are 1, 2, 0), so neither press grows anything, and WR-01 needs
 // growth. A leg that stopped after the first add would pass on the old build too. Leg 1
 // therefore presses `+ Add output` until the fourth output, which grows the box, and grades
-// every press. Leg 2 sets up three outputs at two turns and grades the growing press with a
-// belt on the In and on all three Outs.
+// every press. The same rule at two turns is no longer walked here; the Rust test
+// port_edits_keep_place.rs pins the growth arithmetic.
 //
 // WHAT A HAND SEES, AND WHAT IS GRADED. Every belt stays docked, each docked end tile is its
 // nub's facing cell, no belt tile moves, every In and Out nub keeps its cell, and the box and
@@ -52,8 +52,8 @@ import {
 // doorstep tile and the pointer moves in sub-cell samples (memory: fixtures that teleport one
 // clean cell per event hid four gesture defects in phase 74).
 //
-// RED FIRST. Both legs were run against servers built at plan 74.1-16's start revision
-// and failed on their growing press there; leg 1's first press was green there, as
+// RED FIRST. Leg 1 was run against a server built at plan 74.1-16's start revision and
+// failed on its growing press there; its first press was green there, as
 // the slot arithmetic above predicts. The verdicts are recorded in 74.1-17-SUMMARY.md.
 //
 // RUN TARGET: the live suite (`playwright.live.reuse.config.ts`, servers started by the
@@ -69,12 +69,10 @@ const ROLE_OUT = 1;
 const ROLE_FAULT = 2;
 /** The routed `FAULT_PORT` sentinel a Fault dock is keyed on (`u16::MAX`). */
 const FAULT_PORT = 65535;
-/** The empty-board drop cells, one per leg. Every press and release point is checked on the
- *  canvas. Measured at 1280x800, scale 1: the canvas is clear for x in 0..15 and y in 0..13
- *  while a machine is selected (the config panel covers x >= 16), so leg 2, whose In belt runs
- *  east, drops one cell further west than leg 1. */
+/** The empty-board drop cell. Every press and release point is checked on the canvas.
+ *  Measured at 1280x800, scale 1: the canvas is clear for x in 0..15 and y in 0..13 while a
+ *  machine is selected (the config panel covers x >= 16). */
 const LEG1_CELL = [10, 8] as const;
-const LEG2_CELL = [9, 8] as const;
 /** An empty cell on the canvas, clicked to deselect before a belt is drawn, so neither the
  *  panel nor a hover control near the last click sits over a press point. */
 const EMPTY_CELL = [1, 1] as const;
@@ -475,56 +473,5 @@ test.describe('CORNER-06 live: + Add output on a turned Factory keeps every belt
 
     await expectRenderLoopAlive(page, 'after leg 1');
     errs.assertNone('through leg 1');
-  });
-
-  test('leg 2, two turns, three outputs: the fourth output grows the box, keeps every In and Out belt, moves the Fault one cell out, and one Ctrl+Z restores the box and the anchor', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await turnedFactory(page, LEG2_CELL, 2);
-
-    // Two adds that fit, so the Factory has three outputs on its 3-tall box.
-    for (const n of [2, 3]) {
-      await pressAddOutput(page, n - 1, `the set-up add to ${n} outputs`);
-    }
-    const f = theFactory(await readScene(page));
-    expect(boxOf(f).rot0, 'measured: three outputs fit the 3x3 catalog box').toEqual([3, 3]);
-
-    // A belt into the In and a belt out of each of the three outputs. No belt on the Fault:
-    // a growing add over a fault belt is refused (a separate pin, port_edits_keep_place.rs).
-    await deselectViaEmptyCell(page, EMPTY_CELL[0], EMPTY_CELL[1]);
-    await drawInBelt(page, f.ports.find((p) => p.role === ROLE_IN) as PortFacts, 4);
-    for (const o of f.ports.filter((p) => p.role === ROLE_OUT)) {
-      await drawOutBelt(page, o, 3);
-    }
-    const b3 = capture(await readScene(page));
-    expect(b3.turn, 'measured: turned twice').toBe(2);
-    expect(b3.docks, 'measured: the In and all three outputs are docked').toHaveLength(4);
-    expect(b3.docks.filter((d) => d.startsWith('Tail:')), 'measured: three output belts').toHaveLength(3);
-
-    // THE GROWING PRESS.
-    await selectTheFactory(page);
-    await pressAddOutput(page, 3, 'the growing press (fourth output, two turns)');
-    const g = await readScene(page);
-    expectEveryBeltHeld(g, b3, 'after the growing press (fourth output, two turns)');
-    const fg = theFactory(g);
-    expect(boxOf(fg).rot0, 'the growing press grew the box to 3 wide, 4 tall').toEqual([3, 4]);
-    // The Fault sits on the rot-0 south row, which the growth pushes one cell further out
-    // along the Fault's own facing.
-    const faultSide = (fg.ports.find((p) => p.role === ROLE_FAULT) as PortFacts).side;
-    const [fx, fy] = sideStep(faultSide);
-    expect(faultCell(fg), 'the Fault nub is one cell further out').toEqual([b3.fault[0] + fx, b3.fault[1] + fy]);
-
-    // ONE Ctrl+Z restores the box and the anchor cell.
-    await undoOnce(page, 3, 'the growing press');
-    const ug = await readScene(page);
-    expectEveryBeltHeld(ug, b3, 'after the Ctrl+Z of the growing press (two turns)');
-    expect(boxOf(theFactory(ug)).anchor, 'the Ctrl+Z puts the anchor back').toEqual(b3.box.anchor);
-    expect(boxOf(theFactory(ug)), 'the Ctrl+Z restores the 3-tall box exactly').toEqual(b3.box);
-    expect(ioNubs(theFactory(ug)), 'the Ctrl+Z leaves every In/Out nub as before').toEqual(b3.io);
-    expect(faultCell(theFactory(ug)), 'the Ctrl+Z puts the Fault nub back').toEqual(b3.fault);
-
-    await expectRenderLoopAlive(page, 'after leg 2');
-    errs.assertNone('through leg 2');
   });
 });
