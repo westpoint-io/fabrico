@@ -49,11 +49,10 @@ import {
 //      killed the draw, and this spec passed throughout. Measured on the real host
 //      2026-09-09 and fixed by plan 74-13. The gap is now covered by
 //      `src/input/gestures.test.ts` ("a sub-cell sample inside the pressed tile does not
-//      break the draw") and by `e2e-live/74-belt-join-press-on-end.live.spec.ts` ("THE
-//      GESTURE AS A HAND DRIVES IT"), whose teleporting twin is this spec's live
-//      counterpart. This spec is deliberately UNCHANGED otherwise: its value is that the
-//      teleporting path's emitted bytes did not move, which is the frame-level half of
-//      that discriminator. Its green has never meant the gesture works for a hand and
+//      break the draw") and by `e2e-live/74.1-corner-connects.live.spec.ts` ("A CORNER
+//      OUT OF A BELT END"), which presses past a belt end with sub-cell samples. This
+//      spec is deliberately UNCHANGED otherwise: its value is that the teleporting
+//      path's emitted bytes did not move. Its green has never meant the gesture works for a hand and
 //      this entry exists so no later reader reads it that way.
 //
 // No pixel assertion, for the reason 74-UI-SPEC 1.4 gives: D-07 means the resting board

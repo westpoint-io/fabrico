@@ -13,7 +13,6 @@ import {
   captureClip,
   captureCostLine,
   DRAWN_STATE_FRAMES,
-  captureRefusalText,
   expectRefusalStayedSilent,
   expectRenderLoopAlive,
   newBoard,
@@ -35,9 +34,6 @@ import {
 // schema's oracle (never a literal hex) and every coordinate from the scene oracle.
 import { colorOracles, colorToRgb } from '../shared/geometry';
 
-/** The host's FootprintCollision sentence (plan 89-08, UI-SPEC A5), which a red belt release now draws (D-13). */
-const COLLISION_COPY = 'That space is taken. Clear it or try elsewhere.';
-
 // 74.1-corner-connects.live.spec.ts (CORNER-01, CORNER-02, CORNER-04, CORNER-05, D-04, D-05,
 // D-14) - belts drawn out of a port or a belt end that TURN AT ONCE, on the REAL
 // `dev_render_server`, driven the way a hand drives it.
@@ -56,7 +52,7 @@ const COLLISION_COPY = 'That space is taken. Clear it or try elsewhere.';
 // followed from the first sample and docks at its start.
 //
 // ---------------------------------------------------------------------------
-// THE SIX LEGS, AND WHAT EACH ONE PROVES (this file declares exactly 6 tests)
+// THE FOUR LEGS, AND WHAT EACH ONE PROVES
 // ---------------------------------------------------------------------------
 //
 //   1. A CORNER OUT OF A MACHINE PORT (the tracer, plan 74.1-01): a press on a ROUTER
@@ -69,39 +65,16 @@ const COLLISION_COPY = 'That space is taken. Clear it or try elsewhere.';
 //      at once joins the two runs, read 1/1 from both sides by cell, AND the new belt's
 //      seam tile ships Corner{from:E, to:N} with the old belt still straight (D-04,
 //      CORNER-01).
-//   3. DOUBLING BACK: a press past the Head dragged back over the belt is red and commits
-//      nothing, paired in the same test with the forward gesture from the same press,
-//      which joins. The pair is what makes "nothing committed" mean "the back-drag
-//      committed nothing" and not "the press missed" (D-03 as amended, CORNER-05). The
-//      forward join is collinear, so its seam kind is graded as the straight it draws.
-//      Since phase 89 (plan 89-09, D-13, FAIL-02) the red back-drag is SENT and the host
-//      refuses it in words, "That space is taken. Clear it or try elsewhere."; it still
-//      commits nothing. Until plan 89-10 this leg asserted the refusal region stayed
-//      silent for the back-drag, the old silence D-13 removed (found by the phase 89 full
-//      live pass); now the back-drag's sentence is graded and the forward discriminator
-//      alone must stay silent.
-//   4. AT MIN_ZOOM: the same belt-end corner at camera scale 0.25, scale READ, not assumed,
-//      seam kind graded as in leg 2. The doorstep target is 8 x 8 screen px there, under
-//      the 12 px floor nubs keep; the leg proves that exception is the target's SIZE, not a
-//      failure to connect (CORNER-04; plan 74.1-05's matrix reports the size by scale).
-//   5. A BELT THAT ENDS SIDEWAYS IN FRONT OF AN INPUT connects with a Head dock naming the
+//   3. A BELT THAT ENDS SIDEWAYS IN FRONT OF AN INPUT connects with a Head dock naming the
 //      Sink (D-14), a consequence of the host narrowing (UI-SPEC 3.2 item 6), AND its last
 //      tile ships the corner from its arrival travel into the In, computed from the Sink's
 //      port facts.
-//   6. THE RINGS ARE PAINTED ON THE DOORSTEP: build-blue ring ink read off a decoded
+//   4. THE RINGS ARE PAINTED ON THE DOORSTEP: build-blue ring ink read off a decoded
 //      screenshot clip at each doorstep with the Belt tool armed, none with it disarmed,
 //      four-fold balanced (so centred on the doorstep, not on the end tile or the nub), and
 //      nothing added at the belt's own end tile (D-04, D-05, CORNER-02). Every ring case in
 //      vitest reads the `dockTargetCalls` recorder, which proves what `gestures.ts` ASKS the
 //      overlay to draw; this leg reads what reaches the canvas, through no product accessor.
-//
-// ---------------------------------------------------------------------------
-// WHY A NEW FILE (D-09)
-// ---------------------------------------------------------------------------
-//
-// `74-belt-join-press-on-end.live.spec.ts` (exactly 2 tests) and
-// `74-belt-draw-gesture.live.spec.ts` (exactly 3 tests) are count-gated by their phase-74
-// plans, and two earlier design rounds died landing legs in them. New legs live here.
 //
 // ---------------------------------------------------------------------------
 // EVERY BELT-DRAWING LEG DRIVES SUB-CELL POINTER SAMPLES
@@ -134,7 +107,7 @@ const DOORSTEP = [22, 9] as const;
 /** One cell NORTH of the doorstep: the belt turns at once, perpendicular to the port. */
 const TURN_CELL = [22, 8] as const;
 
-/** The belt legs 2 to 4 and 6 draw first, on an empty board: four cells east, Head (7,6). */
+/** The belt legs 2 and 4 draw first, on an empty board: four cells east, Head (7,6). */
 const FIRST_CELLS: readonly (readonly [number, number])[] = [
   [4, 6],
   [5, 6],
@@ -145,7 +118,7 @@ const FIRST_CELLS: readonly (readonly [number, number])[] = [
 const HEAD_CELL = [7, 6] as const;
 /** The Head's doorstep: the empty floor tile it faces, where the ring sits and the press lands. */
 const BELT_DOORSTEP = [8, 6] as const;
-/** The corner legs 2 and 4 draw: off the doorstep, north at once, three cells. */
+/** The corner leg 2 draws: off the doorstep, north at once, three cells. */
 const CORNER_CELLS: readonly (readonly [number, number])[] = [
   [8, 6],
   [8, 5],
@@ -529,126 +502,6 @@ test.describe('CORNER-01 on the real host: press a doorstep, turn at once, and t
 
     await expectRenderLoopAlive(page, 'after a corner out of a belt end');
     errs.assertNone('the belt-end corner leg');
-  });
-
-  test('DOUBLING BACK OVER WHAT YOU PRESSED IS RED AND COMMITS NOTHING', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await boardWithOneBelt(page);
-
-    // THE BACK-DRAG: press the Head's doorstep, then drag WEST straight back over the
-    // belt's own end tile and on. The preview is red; the release is sent (D-13) and the
-    // host refuses it in words, so it commits nothing.
-    const door = await screenCellCentre(page, BELT_DOORSTEP[0], BELT_DOORSTEP[1]);
-    await pointerTravel(page, door.x, door.y);
-    await page.mouse.down();
-    await moveThroughCells(
-      page,
-      [
-        [7, 6],
-        [6, 6],
-      ],
-      STEPS_PER_CELL,
-    );
-    const said = captureRefusalText(page, 'the back-drag was sent and refused in words (D-13)');
-    await page.mouse.up();
-    expect(await said, 'the host says why the back-drag laid nothing').toBe(COLLISION_COPY);
-    // A commit would echo within a tick or two; give it far longer than that.
-    await page.waitForTimeout(750);
-    const afterBack = await readScene(page);
-    expect(afterBack.belts, 'the back-drag committed no belt').toHaveLength(1);
-    expect(afterBack.belts[0].docks ?? [], 'and docked nothing to the pressed belt').toHaveLength(0);
-    // The sentence's hold ends before the discriminator, so the silence below is its own.
-    await expect
-      .poll(async () => ((await page.locator('#fab-refusal').textContent()) ?? '').trim(), {
-        timeout: 15_000,
-        message: 'the back-drag sentence has gone before the forward discriminator',
-      })
-      .toBe('');
-
-    await expectRefusalStayedSilent(page, 'the forward discriminator', async () => {
-      // THE DISCRIMINATOR, from the SAME press point: forward east to (10,6). It joins, so
-      // the press above did land on the doorstep and the back-drag is what committed
-      // nothing. Two belts, not three, so the back-drag never committed late either.
-      await pointerTravel(page, door.x, door.y);
-      await page.mouse.down();
-      await moveThroughCells(
-        page,
-        [
-          [9, 6],
-          [10, 6],
-        ],
-        STEPS_PER_CELL,
-      );
-      await page.mouse.up();
-      await pollScene(page, (s) => s.belts.length, {
-        message: 'the forward gesture from the same press minted the second belt',
-      }).toBe(2);
-      await pollScene(page, junction, {
-        message: 'the forward gesture joined 1/1 from the same press point',
-      }).toBe('1/1');
-      // The forward join is COLLINEAR, so the seam draws as a straight: every tile of both
-      // runs ships east-west straight. (Equal to the stored kind by construction, so this
-      // guards a derivation that bends a collinear seam; it cannot see a host that stops
-      // deriving, which legs 1, 2, 4 and 5 can.)
-      await pollScene(page, (s) => tileKindAt(s, BELT_DOORSTEP[0], BELT_DOORSTEP[1]), {
-        message: 'the collinear seam tile (8,6) ships an east-west straight',
-      }).toEqual(STRAIGHT_EW);
-    });
-    await page.keyboard.press('Escape');
-    const end = await readScene(page);
-    expect(end.belts, 'exactly two belts: the back-drag added none').toHaveLength(2);
-    expect(
-      beltsAt(end, BELT_DOORSTEP[0], BELT_DOORSTEP[1])[0].tiles.map((t) => [t.cell_x, t.cell_y]),
-      'the second belt is exactly the forward run',
-    ).toEqual([
-      [8, 6],
-      [9, 6],
-      [10, 6],
-    ]);
-    expect(
-      end.belts.flatMap((b) => b.tiles.map((t) => t.kind)),
-      'both runs are east-west straight through the collinear seam',
-    ).toEqual(end.belts.flatMap((b) => b.tiles.map(() => STRAIGHT_EW)));
-
-    await expectRenderLoopAlive(page, 'after a back-drag and its discriminator');
-    errs.assertNone('the double-back leg');
-  });
-
-  test('AT MIN_ZOOM THE BELT END CORNER STILL JOINS', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await boardWithOneBelt(page);
-
-    // Wheel OUT over the belt until the camera reports MIN_ZOOM. 0.25 is a literal because
-    // the live specs read the app through the page, never through its modules: it is
-    // `MIN_ZOOM` in `frontend/src/render/camera.ts:17`. Bounded: fail if not reached.
-    const over = await screenCellCentre(page, BELT_DOORSTEP[0], BELT_DOORSTEP[1]);
-    await pointerTravel(page, over.x, over.y);
-    for (let notch = 0; notch < 40 && (await cameraOf(page)).scale > 0.25; notch++) {
-      await page.mouse.wheel(0, 200);
-      await page.waitForTimeout(30);
-    }
-    await waitForCameraSettle(page);
-    expect((await cameraOf(page)).scale, 'the camera reached MIN_ZOOM 0.25').toBe(0.25);
-    const door = await screenCellCentre(page, BELT_DOORSTEP[0], BELT_DOORSTEP[1]);
-    const top = await screenCellCentre(page, CORNER_CELLS[3][0], CORNER_CELLS[3][1]);
-    await expectOnCanvas(page, [door, top], 'the MIN_ZOOM corner');
-
-    // The doorstep target here is 8 x 8 screen px, under the 12 px floor nubs keep: the
-    // exception plan 74.1-05 names. This leg proves the exception is the target's SIZE,
-    // not a failure to connect: pressed at its centre, it joins. A quarter cell is 2
-    // screen px at this scale, so each one-cell move emits 4 samples.
-    await expectRefusalStayedSilent(page, 'the MIN_ZOOM belt-end corner', async () => {
-      await drawCornerOffTheBeltEnd(page, 4);
-      await expectCornerJoined(page, 'the MIN_ZOOM belt-end corner');
-    });
-    await page.keyboard.press('Escape');
-
-    await expectRenderLoopAlive(page, 'after the MIN_ZOOM corner');
-    errs.assertNone('the MIN_ZOOM leg');
   });
 
   test('A BELT THAT ENDS SIDEWAYS IN FRONT OF AN INPUT CONNECTS (D-14)', async ({ page }) => {

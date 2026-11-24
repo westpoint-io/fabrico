@@ -1177,8 +1177,7 @@ function beltAt(scene: SceneFacts, cell: readonly [number, number]) {
 }
 
 /**
- * The leg 2 junction read from BOTH sides and resolved BY CELL
- * (`74-belt-join-press-on-end.live.spec.ts`, `junction`, on this leg's cells): `'1/1'` is
+ * The leg 2 junction read from BOTH sides and resolved BY CELL: `'1/1'` is
  * joined (the upstream Head names the downstream, the downstream Tail names the upstream),
  * `'0/0'` is two abutting runs, `'MISSING'` is fewer than two belts.
  */
@@ -2393,9 +2392,9 @@ test('leg 2 - a belt from a Source and a second from its end nub read as one run
   ).toEqual([false, false, false, false]);
   await expectRenderLoopAlive(page, 'leg 2 after the first belt');
 
-  // 4. THE SECOND BELT, BY PRESSING THE FIRST BELT'S END: spec 74's hand-driven gesture
-  // (`74-belt-join-press-on-end.live.spec.ts`, `pressEndAndDrawOn` with the sub-cell sample),
-  // on this leg's cells. `drawOffloadBelt` ended with Escape, which disarms the Belt tool, so
+  // 4. THE SECOND BELT, BY PRESSING THE FIRST BELT'S END: the hand-driven gesture with a
+  // sub-cell sample (`74.1-corner-connects.live.spec.ts` drives it with a turn), on this
+  // leg's cells. `drawOffloadBelt` ended with Escape, which disarms the Belt tool, so
   // it is re-armed. The sub-cell offset is in WORLD px applied to a SCREEN point, so the
   // camera scale is read, not assumed.
   await resetZoomToActualSize(page);

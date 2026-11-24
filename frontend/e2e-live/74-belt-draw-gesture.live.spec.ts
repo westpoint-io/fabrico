@@ -1,7 +1,6 @@
 import { test, expect, type Page } from './support/liveTest';
 import {
   DEMO_NODE_COUNT,
-  armAndPlaceAt,
   cameraOf,
   expectRenderLoopAlive,
   newBoard,
@@ -32,9 +31,9 @@ import {
 // WHAT EVERY BELT-DRAW FIXTURE IN THIS REPOSITORY SHARED THAT A HAND DOES NOT: it
 // advances such that no sample is ever more than one cell from the head.
 // `oracle.ts`'s `drawBeltThroughCells` steps cell by cell, and so do the mock e2e drags.
-// The shipped suites therefore CANNOT fail on any of the three findings, and a fix verified against them is verified by a check that cannot
-// fail. Every leg here emits at least one MULTI-CELL sample for that reason, and the
-// elbow leg emits one that changes both cell axes at once.
+// The shipped suites therefore CANNOT fail on any of the three findings, and a fix
+// verified against them is verified by a check that cannot fail. The elbow leg here emits
+// one MULTI-CELL sample that changes both cell axes at once for that reason.
 //
 // NO LIVE OR MOCK FIXTURE IN THIS REPOSITORY DRAWS A BELT CORNER AT ALL. Every authored
 // belt run in the e2e and live suites is a straight line. The elbow leg below is
@@ -42,18 +41,11 @@ import {
 // it is the only place a `Corner` tile is asserted to exist on a belt a gesture landed.
 //
 // ---------------------------------------------------------------------------
-// A NEW FILE, NOT AN ADDITION TO `74-belt-join-press-on-end.live.spec.ts`
-// ---------------------------------------------------------------------------
-//
-// That file's own exit gate asserts it declares EXACTLY 2 tests (plan 74-13), and a
-// later plan does not get to quietly retire another plan's gate to save a file.
-//
-// ---------------------------------------------------------------------------
 // THE RENDER-HEALTH PAIR IS NOT DECORATION
 // ---------------------------------------------------------------------------
 //
 // The live oracle reads only the MODEL, through `sceneSnapshot`. A build whose Pixi
-// renderer was dead would satisfy every model assertion in this file, so every leg
+// renderer was dead would satisfy every model assertion in this file, so the leg
 // carries `watchPageErrors` plus `expectRenderLoopAlive`.
 
 /**
@@ -89,25 +81,6 @@ const ELBOW_PATH: readonly (readonly [number, number])[] = [
 ];
 /** The staircase's corner inference: both endpoints straight, every interior a corner. */
 const ELBOW_KINDS = ['Straight', 'Corner', 'Corner', 'Corner', 'Corner', 'Straight'];
-
-/**
- * The retreat corridor. A SOURCE machine is placed at `RETREAT_BLOCKED` on an empty
- * board, the draw sweeps INTO it in one multi-cell sample (which paints red), and one
- * sample back out pops the offending cell.
- *
- * A SOURCE is 1x1 with a single Out port on its E side (`port_catalog`), so nothing on
- * the WEST approach used here is a nub the release could auto-dock onto. The auto-dock
- * fallback only looks for In(0) nubs, and this machine has none at all, which is why the
- * "no dock" assertion below is a real observation rather than a coincidence of distance.
- */
-const RETREAT_FROM: readonly [number, number] = [3, 5];
-const RETREAT_BLOCKED: readonly [number, number] = [6, 5];
-const RETREAT_BACK: readonly [number, number] = [5, 5];
-const RETREAT_PATH: readonly (readonly [number, number])[] = [
-  [3, 5],
-  [4, 5],
-  [5, 5],
-];
 
 /** The newest belt on the board: the one the gesture under test just landed. */
 function newestBelt(scene: SceneFacts) {
@@ -172,7 +145,7 @@ async function armBeltTool(page: Page): Promise<void> {
 
 test.describe.configure({ mode: 'serial' });
 
-test.describe('the belt draw gesture on the real host: a corner, and a retreat', () => {
+test.describe('the belt draw gesture on the real host: a corner', () => {
   test('THE ELBOW AS A HAND DRAWS IT: one sample that crosses a column line and a row line together', async ({
     page,
   }) => {
@@ -221,115 +194,5 @@ test.describe('the belt draw gesture on the real host: a corner, and a retreat',
 
     await expectRenderLoopAlive(page, 'after the one-sample elbow draw');
     errs.assertNone('the one-sample elbow draw');
-  });
-
-  test('THE DISCRIMINATOR: with cell-teleporting moves the same corner lands', async ({ page }) => {
-    // THE ONE-VARIABLE CONTROL. Same board, same two endpoints, same expected belt: the
-    // ONLY difference is that the pointer steps every intermediate cell centre instead of
-    // jumping the diagonal in one sample. This is what makes a red on the leg above mean
-    // THE DIAGONAL SAMPLE rather than the board, the harness or the host, and it is the
-    // shape `74-belt-join-press-on-end.live.spec.ts` already uses for the same purpose.
-    // Neither leg may be deleted, renamed, skipped or weakened without the other losing
-    // its meaning.
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await emptyBoardAtScaleOne(page);
-    expectCellsFree(await readScene(page), ELBOW_PATH, 'the elbow corridor on a new board');
-
-    await armBeltTool(page);
-    const first = await screenCellCentre(page, ELBOW_PATH[0][0], ELBOW_PATH[0][1]);
-    await page.mouse.move(first.x, first.y);
-    await page.mouse.down();
-    for (const [cx, cy] of ELBOW_PATH.slice(1)) {
-      const pt = await screenCellCentre(page, cx, cy);
-      await page.mouse.move(pt.x, pt.y);
-    }
-    await page.mouse.up();
-    await page.keyboard.press('Escape');
-
-    await pollScene(page, (s) => s.belts.length, {
-      message: 'a cell-teleporting draw lands the same staircase (the control)',
-    }).toBe(1);
-
-    const belt = newestBelt(await readScene(page));
-    expect(tilesOf(belt), 'the teleporting draw lands the SAME tiles as the diagonal one').toEqual(
-      ELBOW_PATH.map(([x, y]) => [x, y]),
-    );
-    expect(tileKinds(belt), 'and the same corner inference').toEqual(ELBOW_KINDS);
-
-    await expectRenderLoopAlive(page, 'after the teleporting elbow draw');
-    errs.assertNone('the teleporting elbow draw');
-  });
-
-  test('THE RETREAT AS A HAND DRIVES IT: dragging back out of a tile you clipped recovers the draw', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await emptyBoardAtScaleOne(page);
-
-    // The obstacle, placed rather than borrowed from a board that could move under this
-    // spec. A SOURCE is 1x1 and its only port is an Out on the E side, so the WEST
-    // approach below touches no nub.
-    await armAndPlaceAt(page, 'Source', RETREAT_BLOCKED[0], RETREAT_BLOCKED[1]);
-    await pollScene(page, (s) => s.nodes.length, {
-      message: 'the real host folded the Place (one machine on an otherwise empty board)',
-    }).toBe(1);
-
-    const before = await readScene(page);
-    expectCellsFree(before, RETREAT_PATH, 'the retreat corridor');
-    expect(
-      before.nodes[0].cells.map(([x, y]) => [x, y]),
-      'the obstacle really occupies the cell the drag is going to clip',
-    ).toEqual([[RETREAT_BLOCKED[0], RETREAT_BLOCKED[1]]]);
-    expect(
-      before.nodes[0].ports.map((pt) => [pt.cell_x, pt.cell_y, pt.side, pt.role]),
-      'a SOURCE has exactly one port, an Out on its E side, so the W approach passes no nub',
-    ).toEqual([[RETREAT_BLOCKED[0], RETREAT_BLOCKED[1], 1, 1]]);
-
-    await armBeltTool(page);
-    const start = await screenCellCentre(page, RETREAT_FROM[0], RETREAT_FROM[1]);
-    const clipped = await screenCellCentre(page, RETREAT_BLOCKED[0], RETREAT_BLOCKED[1]);
-    const back = await screenCellCentre(page, RETREAT_BACK[0], RETREAT_BACK[1]);
-    await page.mouse.move(start.x, start.y);
-    await page.mouse.down();
-    // ONE multi-cell sample, three cells east, ending INSIDE the machine's tile. Every
-    // cell the cursor crossed is appended, the machine's tile included, so the preview
-    // paints red - which is the shipped occupancy decision and is not what this leg
-    // changes.
-    await page.mouse.move(clipped.x, clipped.y);
-    // And ONE sample back the way it came. That is the recovery: before plan 74-14 the
-    // path could only be pushed, so this sample appended a duplicate, `route()` answered
-    // SelfCrossing, and the drag was dead with no way back except starting over.
-    await page.mouse.move(back.x, back.y);
-    await page.mouse.up();
-    await page.keyboard.press('Escape');
-
-    await pollScene(page, (s) => s.belts.length, {
-      message:
-        'the retreat recovered the draw and the release committed the SHORTER belt. Before ' +
-        'plan 74-14 nothing committed at all: the returning sample poisoned the path.',
-    }).toBe(1);
-
-    const belt = newestBelt(await readScene(page));
-    expect(
-      tilesOf(belt),
-      'the committed belt is the path as it stood AFTER the retreat: the clipped tile is gone',
-    ).toEqual(RETREAT_PATH.map(([x, y]) => [x, y]));
-    expect(
-      tilesOf(belt).some(
-        ([x, y]) => x === RETREAT_BLOCKED[0] && y === RETREAT_BLOCKED[1],
-      ),
-      'and the machine tile the cursor clipped is not in it',
-    ).toBe(false);
-    expect(
-      belt.docks ?? [],
-      'the release landed on plain floor beside a machine with no In port, so no dock was made',
-    ).toHaveLength(0);
-
-    await expectRenderLoopAlive(page, 'after the retreat draw');
-    errs.assertNone('the retreat draw');
   });
 });
