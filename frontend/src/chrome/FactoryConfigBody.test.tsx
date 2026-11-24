@@ -14,7 +14,7 @@ import {
 // dirty on programmatic push, construct-once attach) are DOM-FREE: we drive the
 // `FactoryEditorController` around a fake `EditorViewLike` backed by a REAL
 // `EditorState` built from the REAL extension set. The live mount + keystroke +
-// Apply is proven in the 12-config-apply e2e:live gate (the v5.0 live-oracle
+// Apply is proven in the 86-delete-undo-config e2e:live spec (the v5.0 live-oracle
 // lesson) — vitest here is necessary, not sufficient.
 
 /**

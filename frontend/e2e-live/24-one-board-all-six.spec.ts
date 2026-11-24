@@ -380,9 +380,8 @@ async function attachToRunningBoard(page: Page): Promise<ReturnType<typeof watch
  * `CameraCluster.tsx:68` documents the control as "Reset zoom to 100%, keeping the
  * viewport-centre world point fixed", so at scale 1 the viewport sees +/-20 cells
  * horizontally and +/-11 vertically around leg 1's content - which covers every cell
- * this file addresses. It is a SHIPPED control driven by a real click
- * (`07-zoom-readout.spec.ts:101` drives the same one), it emits no command, and it
- * changes nothing in the model.
+ * this file addresses. It is a SHIPPED control driven by a real click, it emits no
+ * command, and it changes nothing in the model.
  */
 async function resetZoomToActualSize(page: Page): Promise<void> {
   await page.getByTitle('Reset zoom to 100%').click();

@@ -61,8 +61,11 @@ export default defineConfig({
     // unconditional "Copied"; it awaits the write and shows `Copy failed` when the
     // write rejects. Headless Chromium denies `clipboard-write` by default, so
     // `writeText` rejected with NotAllowedError, the button showed `Copy failed` for
-    // its 1.5s hold and returned to `Copy`, and `12-config-apply.spec.ts` waited 5s
-    // for a `Copied` that correctly never came.
+    // its 1.5s hold and returned to `Copy`, and the live config-apply check waited 5s
+    // for a `Copied` that correctly never came. That check was cut; the live spec
+    // that applies config on this host is now `86-delete-undo-config.live.spec.ts`,
+    // which looks for the Copy button but never presses it. The grant stays so any live
+    // Copy press tests the app's copy path.
     //
     // Granting the permission is the right fix and NOT a loosened assertion: the spec
     // is about the app's copy path, and denying the browser capability under it tests

@@ -582,7 +582,7 @@ describe('ConfigPanelView — loading then prefill (loading_then_prefill)', () =
     const tree = ConfigPanelView(baseView({ config: FACTORY_CFG }));
     // 39-08: the Factory body is now the uncontrolled CodeMirror widget (a real
     // EditorView needs a DOM, so the node env asserts the element + its seed prop;
-    // the live mount/edit/Apply is proven in the 12-config-apply e2e:live gate).
+    // the live mount/edit/Apply is proven in the 86-delete-undo-config e2e:live spec).
     const editors = findAll(tree, (el) => el.type === FactoryConfigBody);
     expect(editors).toHaveLength(1);
     expect(editors[0].props.initialSource).toBe(FACTORY_CFG.source);

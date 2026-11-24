@@ -46,7 +46,10 @@ export default defineConfig({
     // and the button honestly reads `Copy failed`. The grant was NOT mirrored here,
     // and THIS is the config a restricted shell actually runs (the blocking one spawns
     // its own servers and is killed at signal 16), so the fix was landing where it could
-    // not be observed: 47/48 with 12-config-apply red. Measured 2026-08-02. Any
+    // not be observed: the live config-apply check stayed red. Measured 2026-08-02.
+    // That check was cut; the live spec that applies config on this host is now
+    // `86-delete-undo-config.live.spec.ts`, which looks for the Copy button but never
+    // presses it, and the grant stays here as it does there. Any
     // future `use:` change to the blocking config belongs here too - that is the
     // whole contract of this file.
     permissions: ['clipboard-write'],

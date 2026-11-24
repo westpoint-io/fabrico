@@ -66,7 +66,7 @@ import {
 // are not asserted here by design (CONTEXT: feel judged live in Chrome; the
 // scene oracle is the style-independent probe).
 //
-// Drive rules (inherited from 02-round-trip / 04-canredo, locked): page.mouse +
+// Drive rules (this file's own, locked): page.mouse +
 // getByTitle ONLY (real hit-testing). Every wait polls a SPECIFIC model change
 // via pollScene; fixed sleeps are banned.
 

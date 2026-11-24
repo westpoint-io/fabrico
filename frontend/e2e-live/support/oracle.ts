@@ -1015,8 +1015,7 @@ export async function cameraOf(page: Page): Promise<CameraSnapshot> {
  * Wait until the fit-to-scene camera animation SETTLES: the rounded zoom percent
  * (Math.round(scale*100)) is stable across two consecutive samples. The wider
  * request/response-wire demo boots with a longer fit animation (~100% -> ~35%),
- * during which a single pre-settle camera read races the ~10Hz zoom readout
- * (NAV-02 / 07-zoom-readout: the boot readout is asserted once, unpolled). This is
+ * during which a single pre-settle camera read races the ~10Hz zoom readout. This is
  * best-effort HARDENING, never an assertion: it is bounded by `timeoutMs` and
  * never throws, so it can only add latency, never redden the shared-host suite.
  *

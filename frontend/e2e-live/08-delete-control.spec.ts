@@ -86,7 +86,7 @@ async function expectedControlTopLeft(
 test.describe('IX-04 live: the delete control appears, tracks the camera, and deletes via the guard', () => {
   test.beforeAll(async ({ browser }) => {
     // Known baseline: reset to the demo via the shipped Load-demo CTA (the
-    // same falsifiable reset 02-round-trip uses) so rows 11+ are known-empty to
+    // same falsifiable reset 05-undo-strand-ring uses) so rows 11+ are known-empty to
     // place a clean, item-free factory into.
     const context = await browser.newContext({ baseURL: 'http://127.0.0.1:5173' });
     const page = await context.newPage();

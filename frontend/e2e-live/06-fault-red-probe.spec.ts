@@ -84,8 +84,8 @@ import {
 // palette panel (left ~210px, whose fill is ramp[2]). The demo FACTORY's Fault
 // nub at world (176,160.5) lands BEHIND the palette panel and cannot be read
 // (this is exactly the "wrong location" the old carry-in fell into). Placing a
-// fresh FACTORY in a CLEAR grid region via the shipped palette drag (the proven
-// 04-canredo recipe) puts a role-2 Fault nub where it is actually composited.
+// fresh FACTORY in a CLEAR grid region via the shipped palette drag puts a
+// role-2 Fault nub where it is actually composited.
 // Under the 29-04 boot-fit the camera is NO LONGER identity, so both the drop
 // point and the nub sample are routed through the live camera (screenCellCentre
 // / screenPoint read window.__fabrico.camera()); the role-driven skin contract
@@ -98,7 +98,7 @@ import {
 // production-inert (null default). It is READ-adjacent: it stills render motion
 // so the screenshot is a stable single frame; it never mutates sim state.
 //
-// Drive rules (LOCKED, inherited from 02-round-trip / 04-canredo): page.mouse +
+// Drive rules (LOCKED, the same as 05-undo-strand-ring): page.mouse +
 // getByTitle to ISSUE; page.evaluate for READS/render-pin ONLY (never to issue a
 // command); every wait is a pollScene predicate with a message; NO fixed sleeps;
 // ZERO mocks (runs against the real dev_render_server).
@@ -134,7 +134,7 @@ function hexToRgb(color: number): { r: number; g: number; b: number } {
 
 /**
  * Reset the SHARED live host to the known demo baseline via the shipped
- * Load-demo CTA (the 04-canredo genesis-swap reset). dev_render_server persists
+ * Load-demo CTA (a genesis-swap reset). dev_render_server persists
  * scene state across tests, so this clears any factory a prior run placed - the
  * probe drop cell is free every run and placement is deterministic. LoadDemo
  * restarts the sim tick, so polling for the tick dropping below the pre-click
@@ -150,9 +150,8 @@ async function loadDemoReset(page: Page): Promise<void> {
 }
 
 /**
- * Place a fresh FACTORY via the shipped palette drag (the proven 04-canredo
- * recipe): press the palette Factory tile at its bbox centre, drag onto the clear
- * drop cell, release. Polls until the real host echoes a SECOND kind-2 node, then
+ * Place a fresh FACTORY via the shipped palette drag: press the palette Factory
+ * tile at its bbox centre, drag onto the clear drop cell, release. Polls until the real host echoes a SECOND kind-2 node, then
  * returns the placed node's id (diffed from the pre-place kind-2 id set, never a
  * hardcoded handle).
  */
