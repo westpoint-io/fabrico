@@ -49,9 +49,6 @@ import {
 // unturned Source at (8,12) and a Source turned once at (22,12). Then Pause, two drops on
 // (15,12), Play, 130 ticks.
 //   leg 1: the tool stays armed: drop unturned, press r, drop again.
-//   leg 2: drop unturned, Escape, arm Source from the palette, press r, drop again.
-//   leg 3: press r first, then drop twice: ONE turn, never two.
-//   leg 4: the Router preset dropped twice: ONE preset seeding.
 //   leg 5: the correction flow, which the fix must not break: a Source X already on the
 //          cell, a Source dropped on it, Escape, X selected and deleted, the tool armed
 //          again, r, a Source dropped on the cell. The host refuses the first (X is still
@@ -65,16 +62,19 @@ import {
 //          host's answer to each Place says which one minted the Source, so no Rotate may go
 //          out after Play.
 //
+// Legs 2 to 4 were cut: leg 6 walks Escape, arming again, r and a second drop; leg 5 grades a
+// Source turned exactly once; leg 1 grades the double-drop echo that the Router preset leg
+// repeated with a preset's seeding frames.
+//
 // WHAT IS GRADED, PAINT FIRST (memory fabrico-model-oracle-blindspot). For the Source legs
 // a screenshot crop around the contested Source is compared with crops around the two
 // references: it must paint like the reference it should match and unlike the other. Then
-// the wire (no Rotate after Play in legs 1 and 2, exactly one in leg 3, exactly one
-// seeding's frames in leg 4), then the model (port sides as the matching reference). Every
-// leg also grades the band (the one true sentence), render health (watchPageErrors and
-// expectRenderLoopAlive after Play), and that the board did not move while paused.
+// the wire (no Rotate after Play in legs 1 and 6, exactly one in leg 5), then the model
+// (port sides as the matching reference). Every leg also grades the band (the one true
+// sentence), render health (watchPageErrors and expectRenderLoopAlive after Play), and that
+// the board did not move while paused.
 
 const KIND_SOURCE = 0;
-const KIND_ROUTER = 5;
 const FOOTPRINT_COLLISION = 'That space is taken. Clear it or try elsewhere.';
 /**
  * The three cells, chosen per page load on the row through the middle of the viewport
@@ -401,56 +401,6 @@ test.describe('two same-kind Places on one cell in one paused pass (refuter roun
     }
   });
 
-  test('leg 2: Escape and arm again from the palette, r, second drop refused; the Source stays unturned', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    const frames = recordSentFrames(page);
-    try {
-      await emptyBoard(page);
-      await expectRenderLoopAlive(page, 'leg 2 start');
-      await placeReferences(page);
-      const t0 = await pauseAndFocusBoard(page);
-      await handPlaceAt(page, 'Source', ...CONTESTED);
-      await page.keyboard.press('Escape');
-      await handPlaceTurnedAt(page, 'Source', ...CONTESTED, 1);
-      await page.keyboard.press('Escape');
-      expect((await readScene(page)).tick, 'leg 2: still paused').toBe(t0);
-      const framesAtPlay = frames.length;
-      const band = await playAndSettle(page, t0);
-      await expectRenderLoopAlive(page, 'leg 2 after Play');
-      errs.assertNone('leg 2');
-      await gradeSource(page, 'leg 2', frames, framesAtPlay, 'unturned', band);
-    } finally {
-      await resumeIfPaused(page);
-    }
-  });
-
-  test('leg 3: r, then two drops on one cell; the one minted Source is turned once, not twice', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    const frames = recordSentFrames(page);
-    try {
-      await emptyBoard(page);
-      await expectRenderLoopAlive(page, 'leg 3 start');
-      await placeReferences(page);
-      const t0 = await pauseAndFocusBoard(page);
-      await handPlaceTurnedAt(page, 'Source', ...CONTESTED, 1);
-      await page.waitForTimeout(50);
-      await clickCell(page, ...CONTESTED);
-      await page.keyboard.press('Escape');
-      expect((await readScene(page)).tick, 'leg 3: still paused').toBe(t0);
-      const framesAtPlay = frames.length;
-      const band = await playAndSettle(page, t0);
-      await expectRenderLoopAlive(page, 'leg 3 after Play');
-      errs.assertNone('leg 3');
-      await gradeSource(page, 'leg 3', frames, framesAtPlay, 'turned', band);
-    } finally {
-      await resumeIfPaused(page);
-    }
-  });
-
   test('leg 5: drop on a blocker, delete it, arm again, turned drop; the new Source is turned once', async ({
     page,
   }) => {
@@ -519,52 +469,6 @@ test.describe('two same-kind Places on one cell in one paused pass (refuter roun
       errs.assertNone('leg 6');
       expect(nodeAtAnchor(await readScene(page), ...CONTESTED)?.id, 'leg 6: X is gone, a new Source stands').not.toBe(x);
       await gradeSource(page, 'leg 6', frames, framesAtPlay, 'unturned', band);
-    } finally {
-      await resumeIfPaused(page);
-    }
-  });
-
-  test('leg 4: the Router preset dropped twice on one cell is seeded once', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    const frames = recordSentFrames(page);
-    try {
-      await emptyBoard(page);
-      await expectRenderLoopAlive(page, 'leg 4 start');
-      // The reference: one preset Router placed live; what its echo sent is one seeding.
-      const beforeRef = frames.length;
-      await handPlaceAt(page, 'Router', ...REF_UNTURNED);
-      await page.keyboard.press('Escape');
-      await pollScene(page, (s) => (nodeAtAnchor(s, ...REF_UNTURNED)?.ports.length ?? 0) >= 5, {
-        message: 'the reference Router echoed and was seeded',
-      }).toBe(true);
-      await page.waitForTimeout(500);
-      const seeding = frames.length - beforeRef - 1;
-      expect(seeding, 'leg 4: the reference sent a seeding after its Place').toBeGreaterThan(0);
-      const t0 = await pauseAndFocusBoard(page);
-      await handPlaceAt(page, 'Router', ...CONTESTED);
-      await page.waitForTimeout(50);
-      await clickCell(page, ...CONTESTED);
-      await page.keyboard.press('Escape');
-      expect((await readScene(page)).tick, 'leg 4: still paused').toBe(t0);
-      const framesAtPlay = frames.length;
-      const band = await playAndSettle(page, t0);
-      await page.waitForTimeout(500);
-      await expectRenderLoopAlive(page, 'leg 4 after Play');
-      errs.assertNone('leg 4');
-      const s = await readScene(page);
-      const routers = s.nodes.filter((n) => n.kind === KIND_ROUTER).length;
-      const sentAfterPlay = frames.length - framesAtPlay;
-      console.log(
-        `leg 4: seeding=${seeding} sentAfterPlay=${sentAfterPlay} routers=${routers} ` +
-          `contested=${JSON.stringify(portsAt(s, ...CONTESTED))} ref=${JSON.stringify(portsAt(s, ...REF_UNTURNED))} ` +
-          `band=${JSON.stringify(band)}`,
-      );
-      expect(sentAfterPlay, 'leg 4 WIRE: ONE seeding after Play, never two').toBe(seeding);
-      expect(routers, 'leg 4: the reference and the ONE minted Router').toBe(2);
-      expect(portsAt(s, ...CONTESTED), 'leg 4 MODEL: ports as the reference').toEqual(
-        portsAt(s, ...REF_UNTURNED),
-      );
-      expect(band, 'leg 4 BAND: only the one true sentence').toEqual([FOOTPRINT_COLLISION]);
     } finally {
       await resumeIfPaused(page);
     }

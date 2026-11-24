@@ -2066,8 +2066,8 @@ export function createGestureController(deps: GestureDeps): GestureController {
    * tick's packet before its accepts), as the echo watcher always did: the Docks go out from
    * a frame that draws the minted belt, so the held picture hands over to the drawn belt in
    * that frame (74.1-26), and the frames between the belt and its Dock's echo, which the
-   * predicted seam draws, still exist on a slow page (`74.1-release-and-undo` leg 5 grades
-   * them). Landing here, between frames, sent the Docks up to a frame sooner and let a page
+   * predicted seam draws, still exist on a slow page (`74.1-release-and-undo` leg 4 grades
+   * them on a belt-end join). Landing here, between frames, sent the Docks up to a frame sooner and let a page
    * at the CPU quota draw no frame of the belt before its Dock folded.
    */
   const onBeltVerdict = (f: BeltFollowUp, v: GestureVerdict): void => {

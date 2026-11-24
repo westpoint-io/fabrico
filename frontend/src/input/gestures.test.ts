@@ -5042,7 +5042,8 @@ describe('Port-to-port draw + auto-dock + nub hover (CTRL-02 / D-09 / D-10)', ()
     // Plan 88-06: the host writes a tick's packet before its accepts, so the belt is usually in
     // the scene when the accept arrives. The Docks still go out from the next frame, as the
     // echo watcher always sent them, so a frame draws the minted belt (with its predicted
-    // seam) before its Dock can fold; `74.1-release-and-undo` leg 5 grades that frame live.
+    // seam) before its Dock can fold; `74.1-release-and-undo` leg 4 grades that window live on a
+    // belt-end join.
     rig = setupRigWith({ cellsFromWorld: true }, source(), sink());
     dragPortToPort(rig);
     rig.scene.belts.set(42, echoBelt(42, portToPortCells));

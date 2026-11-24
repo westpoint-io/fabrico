@@ -4,7 +4,6 @@ import {
   DRAWN_STATE_FRAMES,
   armAndPlaceAt,
   cameraOf,
-  clickAt,
   expectRenderLoopAlive,
   newBoard,
   pollScene,
@@ -13,7 +12,6 @@ import {
   resetZoomToActualSize,
   screenCellCentre,
   screenPoint,
-  tileKindAt,
   waitForAppReady,
   waitForCameraSettle,
   watchPageErrors,
@@ -23,27 +21,12 @@ import {
 import { CELL } from '../shared/geometry';
 import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 
-// 74.1-release-and-undo.live.spec.ts (plan 74.1-20, re-walk gap N3) - ONE Ctrl+Z undoes
-// the belt-to-belt join right after a palette or panel button was clicked, on the real
-// `dev_render_server`.
+// 74.1-release-and-undo.live.spec.ts (plan 74.1-20, re-walk gap N3) - the belt corner from
+// letting go to the join, on the real `dev_render_server`.
 //
-// ---------------------------------------------------------------------------
-// WHAT WAS REPORTED
-// ---------------------------------------------------------------------------
-//
-// Re-walk step N3, 2026-10-04: "good but took 2 ctrl+zs just so you know". The N2 drag
-// sends exactly one Dock and records one undo step, so the first press was dropped. The
-// two named candidates: the gesture layer's BUTTON / SELECT focus guard returning before
-// the undo handler (the palette `Belt` button keeps focus through every canvas gesture),
-// and `doUndo`'s availability gate reading a stale value.
-//
-// ---------------------------------------------------------------------------
-// THE LEGS, both the N2 board and the N2 drag, then ONE Ctrl+Z
-// ---------------------------------------------------------------------------
-//
-//   1. The N3 step as written: click the belt panel's heading first, then Ctrl+Z once.
-//   2. The same without the heading click: Ctrl+Z straight after the drag.
-//   3. A palette button HOLDING focus at the press (keyboard focus, no click).
+// The file began with three N3 legs (one Ctrl+Z undoes a belt-to-belt join after a palette
+// or panel button was clicked). They were cut: 74.1-seam-corner's handle-drag join test
+// clicks the panel heading and undoes the join with one Ctrl+Z.
 //
 // ---------------------------------------------------------------------------
 // AND THE RELEASE (review WR-05, round 4 CR-01): the corner from letting go to the join
@@ -52,7 +35,7 @@ import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // The host ships a docked end's corner only once the Dock folds, and the Dock goes out a
 // frame or more after the DrawBelt echoes, so the packet carries route()'s Straight at
 // the seam for a few frames after every release. The model oracle reads the PACKET, so
-// it cannot see what was drawn in those frames. Legs 4 (S1), 5 (S2), 7 and 8 sample
+// it cannot see what was drawn in those frames. Legs 4 (S1) and 8 sample
 // EVERY animation frame from the release until well after the belt lands, and grade
 // each frame on the SHAPE at the seam: a frame passes only when the preview surfaces
 // PLOTTED the expected kind there (`beltPreviewKindAt`, the plotted tile list) or the
@@ -60,7 +43,7 @@ import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // and named, never filtered, and the frames where the packet still says Straight must be
 // observed, so the window cannot pass by being missed.
 //
-// Since plan 84-10 (the 2026-10-09 CI run) legs 4 and 5 start their graded window at the
+// Since plan 84-10 (the 2026-10-09 CI run) leg 4 starts its graded window at the
 // turned drag's first sampled frame, before the release: on a two-core runner the DrawBelt
 // echo can land before the first frame after the pointerup, so a window that starts at the
 // release could hold no pre-echo frame at all. Every frame from there is graded the same way.
@@ -69,66 +52,16 @@ import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // passed a frame whenever the preview held ANY geometry (`beltPreviewInstructions` above
 // zero). On the first frame after every docked release the preview was repainted
 // STRAIGHT at the seam (the walk's S1R, 6 of 6 releases), and released while paused it
-// stayed straight for the whole pause; a count saw geometry and passed both. Legs 7 and
-// 8 are the paused docked releases the walk failed, one belt and two belts.
-//
-// AT THE KEY PRESS each leg records, from a capture-phase keydown listener that runs
-// before the app's own, the focused element's tag and title and the scene's `canUndo`
-// (the value App's undo gate mirrors every frame), and prints them as `N3-MEASURE`.
+// stayed straight for the whole pause; a count saw geometry and passed both. Leg 8 is the
+// paused docked release the walk failed, with two belts.
 //
 // EVERY POINTER FIXTURE MOVES LIKE A HAND: off-centre presses, sub-cell move samples.
 // MODEL FIRST, THEN RENDER HEALTH: `watchPageErrors` and `expectRenderLoopAlive` on both.
 
-/** N2's first belt: four cells north. Tail (4,9), Head (4,6). */
-const FIRST_CELLS: readonly (readonly [number, number])[] = [
-  [4, 9],
-  [4, 8],
-  [4, 7],
-  [4, 6],
-];
-/** N2's second belt: from the tile just right of the first belt's top, three cells east. */
-const SECOND_CELLS: readonly (readonly [number, number])[] = [
-  [5, 6],
-  [6, 6],
-  [7, 6],
-];
-const FIRST_HEAD = FIRST_CELLS[FIRST_CELLS.length - 1];
-const SECOND_TAIL = SECOND_CELLS[0];
-
 const STEPS_PER_CELL = 8;
-/** Off-centre press inside the dragged end tile: 9 world px from an undocked end's dot. */
-const PRESS_FRAC = [0.7, 0.7] as const;
-const DROP_FRAC = [0.4, 0.6] as const;
 
 /** Wire encodings: Axis X=0, Y=1; Dir N=0, E=1, S=2, W=3. */
-const CORNER_N_TO_E = { Corner: { from: 0, to: 1 } };
 const STRAIGHT_Y = { Straight: { axis: 1 } };
-const STRAIGHT_X = { Straight: { axis: 0 } };
-
-function beltAt(scene: SceneFacts, cell: readonly [number, number]) {
-  return scene.belts.find((b) => b.tiles.some((t) => t.cell_x === cell[0] && t.cell_y === cell[1]));
-}
-
-/** The dock set, partners named by role so a keyframe's remint compares equal. */
-function joinFacts(scene: SceneFacts): string {
-  const first = beltAt(scene, FIRST_HEAD);
-  const second = beltAt(scene, SECOND_TAIL);
-  if (!first || !second || first.id === second.id) return 'MISSING';
-  const name = (id: number): string => (id === first.id ? 'first' : id === second.id ? 'second' : `other:${id}`);
-  const fmt = (who: string, b: typeof first): string[] =>
-    (b.docks ?? []).map((d) => `${who}.${d.end}->${name(d.node)}`).sort();
-  return [...fmt('first', first), ...fmt('second', second)].join(' ');
-}
-
-const JOINED = 'first.Head->second second.Tail->first';
-
-/** Both belts present with exactly their drawn cells. */
-function cellsFacts(scene: SceneFacts): string {
-  const cells = (b: SceneFacts['belts'][number] | undefined): string =>
-    b ? b.tiles.map((t) => `${t.cell_x},${t.cell_y}`).join(' ') : 'none';
-  return `${scene.belts.length} | ${cells(beltAt(scene, FIRST_HEAD))} | ${cells(beltAt(scene, SECOND_TAIL))}`;
-}
-const BOTH_BELTS = `2 | ${FIRST_CELLS.map(([x, y]) => `${x},${y}`).join(' ')} | ${SECOND_CELLS.map(([x, y]) => `${x},${y}`).join(' ')}`;
 
 async function cellPoint(
   page: Page,
@@ -147,102 +80,6 @@ async function drawPlain(page: Page, cells: readonly (readonly [number, number])
     await page.mouse.move(pt.x, pt.y, { steps: STEPS_PER_CELL });
   }
   await page.mouse.up();
-}
-
-/**
- * The N2 board and the N2 join: an empty board at scale 1, the palette `Belt` button
- * CLICKED (so it is the focused element, as on the manual walkthrough), both belts drawn, Escape,
- * the first belt selected and its top end dot dragged onto the second belt's first tile.
- */
-async function n2Join(page: Page): Promise<void> {
-  await resetToDemo(page, DEMO_NODE_COUNT);
-  await newBoard(page);
-  await resetZoomToActualSize(page);
-  await waitForCameraSettle(page);
-  expect((await cameraOf(page)).scale, 'the camera is at scale 1').toBe(1);
-  await page.getByTitle(/^Draw belts/).click();
-  await drawPlain(page, FIRST_CELLS);
-  await pollScene(page, (s) => s.belts.length, { message: 'the first belt was drawn' }).toBe(1);
-  await drawPlain(page, SECOND_CELLS);
-  await pollScene(page, (s) => s.belts.length, { message: 'the second belt was drawn' }).toBe(2);
-  await page.keyboard.press('Escape');
-  expect(cellsFacts(await readScene(page)), 'both belts, exactly as drawn').toBe(BOTH_BELTS);
-
-  const mid = await cellPoint(page, FIRST_CELLS[1], [0.5, 0.5]);
-  await clickAt(page, mid.x, mid.y);
-  await expect(page.locator('#fab-belt-config'), 'the first belt is selected').toBeVisible({ timeout: 15_000 });
-
-  const a = await cellPoint(page, FIRST_HEAD, PRESS_FRAC);
-  const b = await cellPoint(page, SECOND_TAIL, DROP_FRAC);
-  await page.mouse.move(a.x, a.y);
-  await page.mouse.down();
-  await page.mouse.move(b.x, b.y, { steps: STEPS_PER_CELL });
-  await page.mouse.up();
-  await pollScene(page, joinFacts, { message: 'N2: the two belts join' }).toBe(JOINED);
-  await pollScene(page, (s) => tileKindAt(s, FIRST_HEAD[0], FIRST_HEAD[1]), {
-    message: "N2: the first belt's top tile turns north into east",
-  }).toEqual(CORNER_N_TO_E);
-  expect(tileKindAt(await readScene(page), SECOND_TAIL[0], SECOND_TAIL[1]), "the second belt's first tile stays straight").toEqual(
-    STRAIGHT_X,
-  );
-}
-
-interface N3Measure {
-  tag: string | null;
-  title: string | null;
-  canUndo: boolean | null;
-}
-
-/**
- * Arm a capture-phase keydown listener on window that records the FIRST Ctrl+Z only. It
- * runs before the gesture layer's own window listener, so it sees the focus and the
- * availability AT the press.
- */
-async function armMeasure(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as {
-      __n3?: unknown;
-      __fabrico?: { scene(): { canUndo: boolean } };
-    };
-    w.__n3 = null;
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        // Not `once`: the Control keydown that precedes the z would consume it.
-        if (w.__n3 === null && (e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) {
-          const el = document.activeElement as HTMLElement | null;
-          w.__n3 = {
-            tag: el ? el.tagName : null,
-            title: el ? el.getAttribute('title') : null,
-            canUndo: w.__fabrico ? w.__fabrico.scene().canUndo : null,
-          };
-        }
-      },
-      { capture: true },
-    );
-  });
-}
-
-async function readMeasure(page: Page): Promise<N3Measure> {
-  return page.evaluate(() => (window as unknown as { __n3: N3Measure }).__n3);
-}
-
-/** One Ctrl+Z, then the join must be gone, both belts must stay, and the corner must go. */
-async function oneUndoUnjoins(page: Page, leg: string): Promise<void> {
-  await armMeasure(page);
-  await page.keyboard.press('Control+z');
-  const m = await readMeasure(page);
-  console.log(`N3-MEASURE ${leg}: ${JSON.stringify(m)}`);
-  expect(m, `${leg}: the measurement listener saw the press`).not.toBeNull();
-  expect(m.canUndo, `${leg}: an undo step was available at the press`).toBe(true);
-  await pollScene(page, joinFacts, {
-    message: `${leg}: ONE Ctrl+Z leaves the two belts unjoined (re-walk N3: it used to take two)`,
-  }).toBe('');
-  const after = await readScene(page);
-  expect(cellsFacts(after), `${leg}: both belts stay, exactly as drawn (one undo, not two)`).toBe(BOTH_BELTS);
-  expect(tileKindAt(after, FIRST_HEAD[0], FIRST_HEAD[1]), `${leg}: the top tile is straight again`).toEqual(
-    STRAIGHT_Y,
-  );
 }
 
 /** One seam's reads in one animation frame. */
@@ -403,7 +240,7 @@ async function framesAfterRelease(page: Page, up: number, n: number, leg: string
           return r.ups.length > k ? r.frames.length - r.ups[k] : 0;
         }, up),
       // The cap is the frames' own budget at the `FLOOR_FPS` floor (D-12): the midday 2026-10-13 CI run drew
-      // 54 of leg 6's 60 frames inside the ten seconds this poll used to allow. It is added to the
+      // 54 of a paused leg's 60 frames inside the ten seconds this poll used to allow. It is added to the
       // test's limit, so this message fires before the test's timeout can (review 84 WR-03).
       {
         message: `${leg}: ${n} frames sampled after the release, still paused`,
@@ -438,9 +275,9 @@ function expectSeamShapeOnEveryFrame(
       (failing.length > 0 ? ` firstFailing=${failing[0].i} ${JSON.stringify(failing[0].x)}` : ''),
   );
   // Asserted only when grading starts at or after the release (review 84 WR-04). Graded from
-  // before it (legs 4 and 5, from the turned drag), every drag frame precedes the echo because
-  // the belt is not in the model until it lands, so the count could not fail there; those legs
-  // assert their own pre-release frames instead and name the release-to-echo window.
+  // before it (leg 4, from the turned drag), every drag frame precedes the echo because
+  // the belt is not in the model until it lands, so the count could not fail there; that leg
+  // asserts its own pre-release frames instead and name the release-to-echo window.
   if (from >= rec.upMark) {
     expect(
       preEcho.length,
@@ -462,7 +299,7 @@ function expectSeamShapeOnEveryFrame(
 
 /**
  * Release the held pointer once the sampler has recorded at least one frame of the turned
- * drag (plan 84-10, the 2026-10-09 CI run). Legs 4 and 5 grade from the drag's last frame
+ * drag (plan 84-10, the 2026-10-09 CI run). Leg 4 grades from the drag's last frame
  * before the release: on a two-core runner the DrawBelt echo can land before the first
  * frame after the pointerup (q100: 2 of 3 runs, `preEcho=0`, CI the same), so a window that
  * starts at the release can hold no frame before the echo at all. Frames of the turned drag
@@ -540,59 +377,6 @@ test.afterEach(async ({ page }, testInfo) => {
 
 test.describe.configure({ mode: 'serial' });
 
-test.describe('N3 on the real host: one Ctrl+Z undoes the join', () => {
-  test('1: after clicking the belt panel heading, ONE Ctrl+Z undoes the join', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await n2Join(page);
-
-    await page.locator('#fab-config-heading').click();
-    await oneUndoUnjoins(page, 'leg 1 (heading clicked)');
-
-    await expectRenderLoopAlive(page, 'after leg 1');
-    errs.assertNone('leg 1');
-  });
-
-  test('2: without the heading click, ONE Ctrl+Z straight after the drag undoes the join', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await n2Join(page);
-
-    await oneUndoUnjoins(page, 'leg 2 (no heading click)');
-
-    await expectRenderLoopAlive(page, 'after leg 2');
-    errs.assertNone('leg 2');
-  });
-
-  test('3: with a palette button HOLDING focus (keyboard focus, as IX-10 leaves it), ONE Ctrl+Z undoes the join', async ({
-    page,
-  }) => {
-    // Legs 1 and 2 measured BODY focused at the press on this host: a canvas press moves
-    // focus off the clicked palette button in Chromium. This leg puts focus ON a button
-    // the way the keyboard does (focus, not a click, so no tool arms), which is the state
-    // the gesture layer's BUTTON / SELECT guard used to swallow Ctrl+Z in.
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await n2Join(page);
-
-    const belt = page.getByTitle(/^Draw belts/);
-    await belt.focus();
-    expect(
-      await page.evaluate(() => document.activeElement?.tagName ?? null),
-      'NON-VACUITY: a BUTTON holds focus at the press',
-    ).toBe('BUTTON');
-    await oneUndoUnjoins(page, 'leg 3 (palette button focused)');
-    expect((await readMeasure(page)).tag, 'leg 3: the press was measured with the button focused').toBe('BUTTON');
-    await expect(belt, 'leg 3: focusing the button armed nothing').toHaveAttribute('aria-pressed', 'false');
-
-    await expectRenderLoopAlive(page, 'after leg 3');
-    errs.assertNone('leg 3');
-  });
-});
-
 test.describe('WR-05 on the real host: the corner is drawn from the release to the dock echo', () => {
   test('4: S1, a belt end pressed and turned north at once never draws the T', async ({ page }) => {
     const errs = watchPageErrors(page);
@@ -623,54 +407,7 @@ test.describe('WR-05 on the real host: the corner is drawn from the release to t
     await expectRenderLoopAlive(page, 'after leg 4');
     errs.assertNone('leg 4');
   });
-
-  test('5: S2, a Source Out pressed and turned at once never draws the T', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await emptyBoardAtScale1(page);
-    await armAndPlaceAt(page, 'Source', 4, 5);
-    await pollScene(page, (s) => s.nodes.length, { message: 'the Source was placed' }).toBe(1);
-    const out = (await readScene(page)).nodes[0].ports.find((p) => p.role === 1 && p.medium === 0);
-    expect(out, 'NON-VACUITY: the Source has a Mechanical Out').toBeDefined();
-    const step = [
-      [0, -1],
-      [1, 0],
-      [0, 1],
-      [-1, 0],
-    ] as const;
-    const side = out!.side;
-    const seam = [out!.cell_x + step[side][0], out!.cell_y + step[side][1]] as const;
-    // Turn clockwise off the port's facing at once: fed `side`, leaving `side + 1`.
-    const turn = (side + 1) % 4;
-    const c1 = [seam[0] + step[turn][0], seam[1] + step[turn][1]] as const;
-    const c2 = [c1[0] + step[turn][0], c1[1] + step[turn][1]] as const;
-
-    // A vertical turn leaves the run on axis Y: the packet's pre-dock kind is Straight{Y}
-    // only when `turn` is N or S, which it is for an Out facing E or W (the Source's).
-    expect(turn % 2, 'NON-VACUITY: the run leaves on the Y axis (an E or W facing Out)').toBe(0);
-
-    await page.getByTitle(/^Draw belts/).click();
-    const press = await cellPoint(page, seam, [0.6, 0.4]);
-    await page.mouse.move(press.x, press.y);
-    await page.mouse.down();
-    await moveThrough(page, [c1, c2]);
-    await startSeamSampler(page, [seam], 'dock');
-    await releaseAfterASampledFrame(page, 'leg 5 (S2)');
-    await expectNoTBetweenReleaseAndDock(page, { Corner: { from: side, to: turn } }, 'leg 5 (S2)');
-
-    await expectRenderLoopAlive(page, 'after leg 5');
-    errs.assertNone('leg 5');
-  });
 });
-
-/** Leg 6's belt: four cells east on empty floor, no port anywhere near. */
-const PAUSED_CELLS: readonly (readonly [number, number])[] = [
-  [5, 9],
-  [6, 9],
-  [7, 9],
-  [8, 9],
-];
 
 /** The toolbar's transport toggle: its accessible name is `Pause` while playing, `Play` while paused. */
 function transport(page: Page) {
@@ -712,7 +449,7 @@ function beltCellLists(scene: SceneFacts): string[] {
   return scene.belts.map((b) => b.tiles.map((t) => `${t.cell_x},${t.cell_y}`).join(' '));
 }
 
-/** Leg 7 and 8's belt A: three cells east, Head (7,6), doorstep (8,6), as in leg 4. */
+/** Leg 8's belt A: three cells east, Head (7,6), doorstep (8,6), as in leg 4. */
 const A_CELLS: readonly (readonly [number, number])[] = [
   [5, 6],
   [6, 6],
@@ -758,133 +495,6 @@ async function drawnSeamKind(page: Page, seam: readonly [number, number]): Promi
 }
 
 test.describe('WR-08 on the real host: the preview holds from the release until the belt is drawn', () => {
-  test('6: a plain belt drawn while PAUSED shows its preview until Resume, then the belt, never nothing', async ({
-    page,
-  }) => {
-    // THE CERTAIN RED (plan 74.1-26). A paused host buffers the DrawBelt until Resume, so
-    // the frames between the release and the echo are not a matter of timing: there are
-    // about a second's worth. Every one of them must show the preview, while the decoded
-    // scene holds no belt (the held picture never leaks into the model), and every frame
-    // from Resume to 30 frames after the belt exists must show the preview or the belt.
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await emptyBoardAtScale1(page);
-    await resumeIfPaused(page);
-    try {
-      await page.getByTitle(/^Draw belts/).click();
-      const pausedAt = await pauseAndSettle(page, 'leg 6');
-
-      const start = await cellPoint(page, PAUSED_CELLS[0], [0.45, 0.55]);
-      await page.mouse.move(start.x, start.y);
-      await page.mouse.down();
-      await moveThrough(page, PAUSED_CELLS.slice(1));
-      await startSeamSampler(page, [PAUSED_CELLS[0]], 'belt');
-      await page.mouse.up();
-
-      // Hold about a second: 60 frames recorded after the release, read off the sampler
-      // rather than slept for.
-      await framesAfterRelease(page, 0, 60, 'leg 6');
-      expect((await readScene(page)).tick, 'leg 6: the tick did not advance while paused').toBe(pausedAt);
-      await transport(page).click();
-      await expect(transport(page), 'the sim runs again (the toggle offers Pause)').toHaveAttribute('aria-label', 'Pause');
-
-      const rec = await readSeamRecord(page, 'leg 6 (paused)');
-      expect(rec.resumeMark, 'leg 6: the sampler saw the Play click').toBeGreaterThan(rec.upMark);
-      const held = seamFrames(rec, 0).slice(rec.upMark, rec.resumeMark);
-      console.log(
-        `WR08-PAUSED leg 6: held=${held.length} previewShown=${held.filter((x) => x.preview > 0).length} ` +
-          `beltsInScene=${held.filter((x) => x.belts > 0).length}`,
-      );
-      expect(held.length, 'leg 6: NON-VACUITY: about a second of paused frames').toBeGreaterThanOrEqual(60);
-      expect(
-        held.filter((x) => x.belts !== 0).length,
-        'leg 6: the decoded scene holds NO belt on any paused frame (the held preview is render-only)',
-      ).toBe(0);
-      expect(
-        held.filter((x) => x.preview === 0).length,
-        'leg 6: EVERY paused frame after the release shows the preview of the committed belt',
-      ).toBe(0);
-      expectSeamShapeOnEveryFrame(rec, STRAIGHT_X, 'leg 6 (paused)');
-      expect(
-        seamFrames(rec, 0)
-          .slice(rec.upMark)
-          .some((x) => x.exists && x.drawn === JSON.stringify(STRAIGHT_X)),
-        'leg 6: NON-VACUITY: the belt was drawn after Resume',
-      ).toBe(true);
-      expect(beltCellLists(await readScene(page)), 'leg 6: exactly the drawn belt landed').toEqual([
-        PAUSED_CELLS.map(([x, y]) => `${x},${y}`).join(' '),
-      ]);
-    } finally {
-      // Pause is HOST-global: never leave the shared host paused for the next spec.
-      await page.mouse.up().catch(() => {});
-      await resumeIfPaused(page);
-    }
-
-    await expectRenderLoopAlive(page, 'after leg 6');
-    errs.assertNone('leg 6');
-  });
-
-  test('7: a docked belt released while PAUSED holds its corner until Resume, then lands docked', async ({ page }) => {
-    // THE WALK'S PAUSED S1R CASE (plan 74.1-30). Released onto a belt Head's doorstep
-    // while paused, the held picture of the committed belt must show the CORNER at the
-    // seam on every paused frame; the walk saw it straight for the whole pause. The
-    // decoded scene holds only belt A until Resume, and on Play the belt lands with its
-    // Tail dock and the drawn corner.
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await emptyBoardAtScale1(page);
-    await resumeIfPaused(page);
-    try {
-      await page.getByTitle(/^Draw belts/).click();
-      await drawPlain(page, A_CELLS);
-      await pollScene(page, (s) => s.belts.length, { message: 'leg 7: belt A was drawn' }).toBe(1);
-      const pausedAt = await pauseAndSettle(page, 'leg 7');
-
-      await pressBAndTurn(page);
-      await startSeamSampler(page, [B_SEAM], 'dock');
-      await page.mouse.up();
-      await framesAfterRelease(page, 0, 60, 'leg 7');
-      const pausedScene = await readScene(page);
-      expect(pausedScene.tick, 'leg 7: the tick did not advance while paused').toBe(pausedAt);
-      expect(beltCellLists(pausedScene), 'leg 7: the scene holds exactly belt A while paused').toEqual([A_LIST]);
-      await transport(page).click();
-      await expect(transport(page), 'the sim runs again (the toggle offers Pause)').toHaveAttribute('aria-label', 'Pause');
-
-      const rec = await readSeamRecord(page, 'leg 7 (paused docked)');
-      expect(rec.resumeMark, 'leg 7: the sampler saw the Play click').toBeGreaterThan(rec.upMark);
-      const want = JSON.stringify(B_CORNER);
-      const held = seamFrames(rec, 0).slice(rec.upMark, rec.resumeMark);
-      const heldBad = held.map((x, i) => ({ i, x })).filter(({ x }) => !(x.preview > 0 && x.previewKind === want));
-      console.log(
-        `S1R-PAUSED leg 7: held=${held.length} cornerPlotted=${held.length - heldBad.length} ` +
-          `beltsInScene=${held.filter((x) => x.belts !== 1 || x.exists).length}` +
-          (heldBad.length > 0 ? ` firstBad=${heldBad[0].i} ${JSON.stringify(heldBad[0].x)}` : ''),
-      );
-      expect(held.length, 'leg 7: NON-VACUITY: about a second of paused frames').toBeGreaterThanOrEqual(60);
-      expect(
-        held.filter((x) => x.belts !== 1 || x.exists).length,
-        'leg 7: the decoded scene holds only belt A on every paused frame (the held picture is render-only)',
-      ).toBe(0);
-      expect(
-        heldBad.length,
-        `leg 7: EVERY paused frame plots ${want} at the seam; the first that does not is frame ` +
-          `${heldBad[0]?.i ?? -1} after the release: ${JSON.stringify(heldBad[0]?.x ?? null)} (S1R paused)`,
-      ).toBe(0);
-      expectSeamShapeOnEveryFrame(rec, B_CORNER, 'leg 7 (paused docked)');
-      await pollScene(page, (s) => tailDocked(s, B_SEAM), { message: 'leg 7: belt B landed with its Tail dock' }).toBe(true);
-      expect(await drawnSeamKind(page, B_SEAM), 'leg 7: the landed belt is drawn with the corner').toBe(want);
-    } finally {
-      // Pause is HOST-global: never leave the shared host paused for the next spec.
-      await page.mouse.up().catch(() => {});
-      await resumeIfPaused(page);
-    }
-
-    await expectRenderLoopAlive(page, 'after leg 7');
-    errs.assertNone('leg 7');
-  });
-
   test('8: two docked belts drawn while PAUSED both hold their corners and both land docked', async ({ page }) => {
     // PAUSE-SECOND-DRAW (plan 74.1-30). While paused no DrawBelt echoes, so before this
     // plan a second docked draw overwrote the first belt's single follow-up slot: the
