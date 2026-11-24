@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './support/liveTest';
-import { addFrameBudget } from '../e2e/support/frameSampler';
+import { startFrameSampler, waitForFramesAtFloor } from '../e2e/support/frameSampler';
 import {
   beltPreviewPlottedOf,
   cameraOf,
@@ -7,14 +7,12 @@ import {
   clickAt,
   expectRenderLoopAlive,
   ghostPlottedOf,
-  HAND_MOVE_FRAMES,
-  handPath,
   handPlaceAt,
-  labelResizePreviewOf,
   targetRingsPlotted,
   newBoard,
   nodeAtAnchor,
   outwardStep,
+  pendingShimmerInstructions,
   pointerTravel,
   pollScene,
   readScene,
@@ -70,20 +68,22 @@ const COLLISION_COPY = 'That space is taken. Clear it or try elsewhere.';
 //      (8,8) is drawn red, beside a build ghost over free floor; a belt path through (8,8) is
 //      drawn as not allowed and, since plan 89-09 (D-13), still sent, so the host refuses it in
 //      words on Play. Play: one Source, no belt, and the collision sentence.
-//   4. A QUEUED LABEL GROW, AND A PLACE UNDER A LABEL'S OUTLINE. A Label placed at (10,5),
-//      4 by 1. Pause. The label grown to 6 by 1 and applied (sent, queued): the Source ghost
-//      over (15,5), a cell the grow takes, is drawn red beside a build ghost over (15,6).
-//      Then a Source placed at (10,7) (sent, queued) and the label's depth raised in its panel,
-//      not applied: at 4 by 2 the outline is drawn fitting, at 4 by 3, over the queued Source,
-//      it is drawn not fitting. Play: the label is 6 by 1 and the Source stands at (10,7).
+//      Test 3 then runs a second step, the refused Place's shimmer (plan 88-05, FAIL-07, D-10):
+//      a fresh empty board, a Source placed on the cell nearest the middle of the view, Pause,
+//      and a second Source dropped on the same cell. The Place waits with its "waiting" shimmer
+//      drawn. Play: the refusal comes back, the red flash was drawn at the drop, and the shimmer
+//      is gone within `FEW_FRAMES` frames of the sentence. Until plan 88-05 the shimmer stayed
+//      about 6 s beside the sentence. A label grow queued on a paused board takes its cells by
+//      the same claims store; test 3's queued Place stands for it.
 //
 // WHAT IS GRADED IS WHAT IS DRAWN (memory fabrico-model-oracle-blindspot): the drag preview's
 // and the ghost's colours are read back off their Graphics (`window.__fabrico.beltPreviewPlotted`
-// and `ghostPlotted`, plan 88-07), the drop rings off theirs (`targetRingsPlotted`) and the label
-// outline off its own (`labelResizePreview`), each beside a reading of the same surface known to
-// say yes; the frames sent are read off the socket by a header-stripped sniffer. Render health in every test:
-// `watchPageErrors` before `goto`, `expectRenderLoopAlive` on a ticking board after Play, and
-// the watcher's `assertNone`.
+// and `ghostPlotted`, plan 88-07), the drop rings off theirs (`targetRingsPlotted`), and the reject
+// flash and shimmer off theirs (`rejectFlashInstructions`, `pendingInstructions`, read on every
+// frame), each beside a reading of the same surface known to say yes; the frames sent are read
+// off the socket by a header-stripped sniffer. Render health in every step: `watchPageErrors`
+// before `goto`, `expectRenderLoopAlive` on a ticking board after Play, and the watcher's
+// `assertNone`.
 //
 // Pause is HOST-global: each leg presses Play again in a `finally`, and a failed test restores
 // the shared host (`restoreHostAfterFailedTest`). Every pointer fixture moves like a hand:
@@ -233,9 +233,6 @@ async function previewPlotted(page: Page, what: string): Promise<{ color: number
 
 /** `REFUSAL_COPY.BeltEndTaken`, transcribed, not imported. */
 const BELT_END_TAKEN_COPY = 'That belt end is already joined. Use a free end.';
-const LABEL_KIND = 11;
-/** The oracle's pause between two hand moves (oracle.ts keeps its own private). */
-const HAND_PAUSE_MS = 8;
 
 /** Leg 2's board, review round 5 WR-02's: A east, D and E starting beside A's Head (3,5). */
 const A_CELLS: readonly (readonly [number, number])[] = [
@@ -262,13 +259,6 @@ const LEG3_PATH: readonly (readonly [number, number])[] = [
   [8, 8],
   [9, 8],
 ];
-/** Leg 4: the label's anchor, a cell its queued grow takes, the free cell below, the queued Source. */
-const LEG4_LABEL: readonly [number, number] = [10, 5];
-const LEG4_GROWN: readonly [number, number] = [15, 5];
-const LEG4_FREE: readonly [number, number] = [15, 6];
-const LEG4_Z: readonly [number, number] = [10, 7];
-/** An empty cell clicked to close a panel. */
-const FLOOR_CELL: readonly [number, number] = [4, 10];
 
 /** The belt with a tile on `cell`, or undefined. */
 function beltOn(scene: SceneFacts, cell: readonly [number, number]) {
@@ -344,25 +334,6 @@ async function dropRingPlotted(page: Page, what: string): Promise<{ x: number; y
   return last!;
 }
 
-/**
- * Arm `kindName` from the palette and walk its ghost like a hand to cell `cell` (the palette
- * row to the cell, `handPath`'s stretches), without pressing.
- */
-async function armAndHover(page: Page, kindName: string, cell: readonly [number, number]): Promise<void> {
-  const row = page.getByRole('button', { name: `Place ${kindName}`, exact: true });
-  await row.click();
-  const box = await row.boundingBox();
-  expect(box, `the "Place ${kindName}" palette row has a box`).not.toBeNull();
-  const centre = await screenCellCentre(page, cell[0], cell[1]);
-  const start = { x: box!.x + box!.width + 4, y: box!.y + box!.height / 2 };
-  const path = [start, ...handPath(start, { x: centre.x + 5, y: centre.y - 4 })];
-  addFrameBudget(path.length * HAND_MOVE_FRAMES, `armAndHover ${kindName} ${path.length} moves`);
-  for (const p of path) {
-    await page.mouse.move(p.x, p.y);
-    await page.waitForTimeout(HAND_PAUSE_MS);
-  }
-}
-
 /** Walk the armed ghost to cell `cell` in sub-cell steps. */
 async function hoverCell(page: Page, cell: readonly [number, number]): Promise<void> {
   const at = await screenCellCentre(page, cell[0], cell[1]);
@@ -386,20 +357,86 @@ async function ghostAt(page: Page, cell: readonly [number, number], what: string
   return last!;
 }
 
-/** The label outline's stroke colour as plotted, polled until the outline is the `h`-cell-deep box. */
-async function outlineColour(page: Page, h: number, what: string): Promise<number> {
-  let last = -1;
-  await expect
-    .poll(
-      async () => {
-        const o = await labelResizePreviewOf(page);
-        last = o?.stroke?.color ?? -1;
-        return o?.rect?.h === h * CELL - 8 && last !== -1;
-      },
-      { message: `${what}: the label outline is drawn ${h} cells deep` },
-    )
-    .toBe(true);
-  return last;
+/**
+ * The flash part's frames from the sentence's first drawn frame within which the shimmer must be
+ * gone. The shimmer is cleared in the same call that hands the band its sentence, and React draws
+ * the sentence on its next commit, so on a fixed build the count is 0; 3 allows for the band and
+ * the overlay landing on different frames.
+ */
+const FEW_FRAMES = 3;
+/**
+ * The frames graded after the sentence first shows. Before plan 88-05 the shimmer stayed for 120
+ * ticks, about 6 s at the 20 ticks a second phase 87 measured under the CPU quota, which is far
+ * more than these frames at any rate the page draws, so a shimmer that outlives the refusal is
+ * seen on them.
+ */
+const AFTER_REFUSAL_FRAMES = 30;
+
+/** The flash part's cell, the one nearest the middle of the view (set by `emptyBoardAtMiddleCell`). */
+let CELL_AT: [number, number] = [0, 0];
+
+/** An empty board at zoom 1 in a 1280 by 800 view, and the cell nearest its middle, checked to be canvas. */
+async function emptyBoardAtMiddleCell(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await waitForAppReady(page);
+  await newBoard(page);
+  await resetZoomToActualSize(page);
+  await waitForCameraSettle(page);
+  expect((await cameraOf(page)).scale, 'zoom 1').toBe(1);
+  const a = await screenCellCentre(page, 0, 0);
+  const b = await screenCellCentre(page, 1, 1);
+  CELL_AT = [Math.max(2, Math.round((640 - a.x) / (b.x - a.x))), Math.max(2, Math.round((400 - a.y) / (b.y - a.y)))];
+  const m = await screenCellCentre(page, ...CELL_AT);
+  const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName ?? 'NONE', m);
+  expect(under, `the cell (${CELL_AT}) is on the canvas`).toBe('CANVAS');
+  console.log(`CELL ${CELL_AT} screen=${Math.round(m.x)},${Math.round(m.y)}`);
+}
+
+/** The blocker: a Source placed by hand on the cell, echoed, the tool put down. */
+async function placeBlocker(page: Page): Promise<void> {
+  await handPlaceAt(page, 'Source', ...CELL_AT);
+  await page.keyboard.press('Escape');
+  await pollScene(page, (s) => !!nodeAtAnchor(s, ...CELL_AT), { message: 'the blocker echoed' }).toBe(true);
+}
+
+interface FlashTallies extends Record<string, number> {
+  /** Frames on which the reject flash Graphics held geometry. */
+  flashFrames: number;
+  /** Frames before the sentence first showed on which the shimmer Graphics held geometry. */
+  shimmerBefore: number;
+  /** Frames from the sentence's first drawn frame on, that one included. */
+  afterRefusal: number;
+  /** Frames past the first `few` after the sentence on which the shimmer still held geometry. */
+  lateShimmer: number;
+  /** The most shimmer instructions seen after the sentence, on any frame. */
+  shimmerAfterMax: number;
+}
+
+/** Start the per-frame read of the reject flash, the shimmer and the band under `window[key]`. */
+async function startFlashSampler(page: Page, key: string): Promise<void> {
+  await startFrameSampler<FlashTallies, { sentence: string; few: number }>(
+    page,
+    key,
+    { minMs: 300, frames: 5, tallyAtLeast: { key: 'afterRefusal', frames: AFTER_REFUSAL_FRAMES } },
+    { flashFrames: 0, shimmerBefore: 0, afterRefusal: 0, lateShimmer: 0, shimmerAfterMax: 0 },
+    (t, a) => {
+      const hook = (window as unknown as {
+        __fabrico: { rejectFlashInstructions(): number; pendingInstructions(): number };
+      }).__fabrico;
+      if (hook.rejectFlashInstructions() > 0) t.flashFrames++;
+      const shimmer = hook.pendingInstructions();
+      const shows = (document.getElementById('fab-refusal')?.textContent ?? '').trim() === a.sentence;
+      if (t.afterRefusal === 0 && !shows) {
+        if (shimmer > 0) t.shimmerBefore++;
+        return;
+      }
+      t.afterRefusal++;
+      if (shimmer > t.shimmerAfterMax) t.shimmerAfterMax = shimmer;
+      if (t.afterRefusal > a.few && shimmer > 0) t.lateShimmer++;
+    },
+    { sentence: COLLISION_COPY, few: FEW_FRAMES },
+  );
 }
 
 test.afterEach(async ({ page }, testInfo) => {
@@ -543,140 +580,92 @@ test.describe('BELT-06 on the real host: queued gestures are taken on a paused b
   test('3: a pending Place takes its cell: the ghost over it is red and a belt path through it is refused at Play', async ({
     page,
   }) => {
-    const errs = watchPageErrors(page);
-    await installFrameSniffer(page);
-    await emptyBoardAtScaleOne(page);
-    try {
-      await expectOnScreen(page, 'leg 3', [LEG3_X, LEG3_FREE, ...LEG3_PATH]);
-      await pauseAndSettle(page, 'leg 3');
-      const placesBefore = await sentCount(page, CMD.Place);
-      const drawsBefore = await sentCount(page, CMD.DrawBelt);
-      await handPlaceAt(page, 'Source', ...LEG3_X);
-      await expect.poll(() => sentCount(page, CMD.Place), { message: 'leg 3: the Place was sent' }).toBe(placesBefore + 1);
-      // The tool stays armed (IX-06): the ghost is re-shown at the cursor, over the queued Place.
-      await hoverCell(page, LEG3_FREE);
-      const free = await ghostAt(page, LEG3_FREE, 'leg 3, free floor');
-      await hoverCell(page, LEG3_X);
-      const over = await ghostAt(page, LEG3_X, 'leg 3, the queued cell');
-      console.log(`OCCUPANCY leg 3 ghost: free=${JSON.stringify(free)} overQueued=${JSON.stringify(over)}`);
-      expect(free.valid, 'leg 3: NON-VACUITY: the ghost over free floor is drawn build').toBe(true);
-      expect(over.valid, 'leg 3: the ghost over the queued Place is drawn red').toBe(false);
-      expect(over.color, 'leg 3: in a colour other than the free ghost\'s').not.toBe(free.color);
-      await page.keyboard.press('Escape');
+    // Two parts with no limit of their own, 90 s each.
+    test.setTimeout(180_000);
+    await test.step('3: a pending Place takes its cell: the ghost over it is red and a belt path through it is refused at Play', async () => {
+      const errs = watchPageErrors(page);
+      await installFrameSniffer(page);
+      await emptyBoardAtScaleOne(page);
+      try {
+        await expectOnScreen(page, 'leg 3', [LEG3_X, LEG3_FREE, ...LEG3_PATH]);
+        await pauseAndSettle(page, 'leg 3');
+        const placesBefore = await sentCount(page, CMD.Place);
+        const drawsBefore = await sentCount(page, CMD.DrawBelt);
+        await handPlaceAt(page, 'Source', ...LEG3_X);
+        await expect.poll(() => sentCount(page, CMD.Place), { message: 'leg 3: the Place was sent' }).toBe(placesBefore + 1);
+        // The tool stays armed (IX-06): the ghost is re-shown at the cursor, over the queued Place.
+        await hoverCell(page, LEG3_FREE);
+        const free = await ghostAt(page, LEG3_FREE, 'leg 3, free floor');
+        await hoverCell(page, LEG3_X);
+        const over = await ghostAt(page, LEG3_X, 'leg 3, the queued cell');
+        console.log(`OCCUPANCY leg 3 ghost: free=${JSON.stringify(free)} overQueued=${JSON.stringify(over)}`);
+        expect(free.valid, 'leg 3: NON-VACUITY: the ghost over free floor is drawn build').toBe(true);
+        expect(over.valid, 'leg 3: the ghost over the queued Place is drawn red').toBe(false);
+        expect(over.color, 'leg 3: in a colour other than the free ghost\'s').not.toBe(free.color);
+        await page.keyboard.press('Escape');
 
-      await page.getByTitle(/^Draw belts/).click();
-      await pressAndWalk(page, LEG3_PATH);
-      const path = await previewPlotted(page, 'leg 3, the path');
-      console.log(`OCCUPANCY leg 3 path preview: ${JSON.stringify(path)}`);
-      expect(path.valid, 'leg 3: the belt path through the queued Place is drawn as not allowed').toBe(false);
-      await page.mouse.up();
-      await page.keyboard.press('Escape');
-      const draws = (await sentCount(page, CMD.DrawBelt)) - drawsBefore;
-      console.log(`OCCUPANCY leg 3 DrawBelt frames sent while paused: ${draws}`);
-      // Since plan 89-09 (D-13): the red path is sent, so the host says why at Play.
-      expect(draws, 'leg 3: and is sent, so the host can refuse it in words').toBe(1);
+        await page.getByTitle(/^Draw belts/).click();
+        await pressAndWalk(page, LEG3_PATH);
+        const path = await previewPlotted(page, 'leg 3, the path');
+        console.log(`OCCUPANCY leg 3 path preview: ${JSON.stringify(path)}`);
+        expect(path.valid, 'leg 3: the belt path through the queued Place is drawn as not allowed').toBe(false);
+        await page.mouse.up();
+        await page.keyboard.press('Escape');
+        const draws = (await sentCount(page, CMD.DrawBelt)) - drawsBefore;
+        console.log(`OCCUPANCY leg 3 DrawBelt frames sent while paused: ${draws}`);
+        // Since plan 89-09 (D-13): the red path is sent, so the host says why at Play.
+        expect(draws, 'leg 3: and is sent, so the host can refuse it in words').toBe(1);
 
-      const said = captureRefusalText(page, 'leg 3: the path was refused at Play');
-      await playFor(page, 'leg 3', 30);
-      expect(await said, 'leg 3: the host says the cell is taken').toBe(COLLISION_COPY);
-      await pollScene(page, (s) => nodeAtAnchor(s, ...LEG3_X)?.kind ?? null, { message: 'leg 3: the Source landed' }).toBe(
-        SOURCE_KIND,
-      );
-      const after = await readScene(page);
-      expect(after.nodes.length, 'leg 3: exactly one machine').toBe(1);
-      expect(after.belts, 'leg 3: no belt').toEqual([]);
-    } finally {
-      await page.mouse.up().catch(() => {});
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 3');
-    errs.assertNone('leg 3');
-  });
+        const said = captureRefusalText(page, 'leg 3: the path was refused at Play');
+        await playFor(page, 'leg 3', 30);
+        expect(await said, 'leg 3: the host says the cell is taken').toBe(COLLISION_COPY);
+        await pollScene(page, (s) => nodeAtAnchor(s, ...LEG3_X)?.kind ?? null, { message: 'leg 3: the Source landed' }).toBe(
+          SOURCE_KIND,
+        );
+        const after = await readScene(page);
+        expect(after.nodes.length, 'leg 3: exactly one machine').toBe(1);
+        expect(after.belts, 'leg 3: no belt').toEqual([]);
+      } finally {
+        await page.mouse.up().catch(() => {});
+        await resumeIfPaused(page);
+      }
+      await expectRenderLoopAlive(page, 'after leg 3');
+      errs.assertNone('leg 3');
+    });
 
-  test('4: a queued label grow takes its new cells, and a queued Place makes a label outline over it not fit', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await installFrameSniffer(page);
-    await emptyBoardAtScaleOne(page);
-    try {
-      await expectOnScreen(page, 'leg 4', [LEG4_LABEL, LEG4_GROWN, LEG4_FREE, LEG4_Z, FLOOR_CELL]);
-      await handPlaceAt(page, 'Label', ...LEG4_LABEL);
-      await pollScene(page, (s) => nodeAtAnchor(s, ...LEG4_LABEL)?.kind ?? null, {
-        message: 'leg 4: the label landed',
-      }).toBe(LABEL_KIND);
-      // Wait for the tool to let go and the panel to open (plan 84-10's reason), then close it.
-      await expect(page.locator('#fab-label-width'), 'leg 4: the placed label\'s panel opened, reading 4').toHaveText('4');
-      await expect(
-        page.getByRole('button', { name: 'Place Label', exact: true }),
-        'leg 4: the Label tool let go after one placement',
-      ).toHaveAttribute('aria-pressed', 'false');
-      await clickCell(page, FLOOR_CELL);
-      await expect(page.locator('#fab-label-width'), 'leg 4: the floor click closed the panel').toHaveCount(0);
-      const label = nodeAtAnchor(await readScene(page), ...LEG4_LABEL)!;
-      expect(label.cells.length, 'leg 4: MEASURED, the label is 4 by 1').toBe(4);
-
-      await pauseAndSettle(page, 'leg 4');
-      const configuresBefore = await sentCount(page, CMD.Configure);
-      await clickCell(page, [LEG4_LABEL[0] + 1, LEG4_LABEL[1]]);
-      await expect(page.locator('#fab-label-width'), 'leg 4: the label panel is open, reading 4').toHaveText('4');
-      const wider = page.getByRole('button', { name: 'Increase width', exact: true });
-      await wider.click();
-      await wider.click();
-      await expect(page.locator('#fab-label-width'), 'leg 4: the width readout').toHaveText('6');
-      await page.getByRole('button', { name: 'Apply', exact: true }).click();
-      await expect.poll(() => sentCount(page, CMD.Configure), { message: 'leg 4: the grow was sent' }).toBe(
-        configuresBefore + 1,
-      );
-      await clickCell(page, FLOOR_CELL);
-      await expect(page.locator('#fab-label-width'), 'leg 4: the floor click closed the panel').toHaveCount(0);
-
-      // PART A: the Source ghost over a cell the queued grow takes.
-      await armAndHover(page, 'Source', LEG4_FREE);
-      const free = await ghostAt(page, LEG4_FREE, 'leg 4, below the grow');
-      await hoverCell(page, LEG4_GROWN);
-      const grown = await ghostAt(page, LEG4_GROWN, 'leg 4, over the grow');
-      console.log(`OCCUPANCY leg 4 ghost: free=${JSON.stringify(free)} overGrow=${JSON.stringify(grown)}`);
-      expect(free.valid, 'leg 4: NON-VACUITY: the ghost below the grow is drawn build').toBe(true);
-      expect(grown.valid, 'leg 4: the ghost over a cell the queued grow takes is drawn red').toBe(false);
-      await page.keyboard.press('Escape');
-
-      // PART B: a Source queued at Z, then the label's depth raised over Z in its panel.
-      const placesBefore = await sentCount(page, CMD.Place);
-      await handPlaceAt(page, 'Source', ...LEG4_Z);
-      await expect.poll(() => sentCount(page, CMD.Place), { message: 'leg 4: the Place at Z was sent' }).toBe(
-        placesBefore + 1,
-      );
-      await page.keyboard.press('Escape');
-      await clickCell(page, [LEG4_LABEL[0] + 1, LEG4_LABEL[1]]);
-      await expect(page.locator('#fab-label-width'), 'leg 4: the panel reads the committed 4').toHaveText('4');
-      const deeper = page.getByRole('button', { name: 'Increase depth', exact: true });
-      await deeper.click();
-      const fits = await outlineColour(page, 2, 'leg 4, 4 by 2');
-      await deeper.click();
-      const over = await outlineColour(page, 3, 'leg 4, 4 by 3');
-      const finalOutline = await labelResizePreviewOf(page);
-      console.log(`OCCUPANCY leg 4 outline: fits=${fits} overZ=${over} rect=${JSON.stringify(finalOutline?.rect ?? null)}`);
-      expect(over, 'leg 4: the outline over the queued Place is drawn in another colour than the fitting one').not.toBe(
-        fits,
-      );
-      await clickCell(page, FLOOR_CELL);
-      await expect(page.locator('#fab-label-width'), 'leg 4: the panel closed, nothing applied').toHaveCount(0);
-      expect(await sentCount(page, CMD.Configure), 'leg 4: the depth was never applied').toBe(configuresBefore + 1);
-
-      await playFor(page, 'leg 4', 30);
-      await pollScene(page, (s) => nodeAtAnchor(s, ...LEG4_LABEL)?.cells.length ?? 0, {
-        message: 'leg 4: the label is 6 by 1 after Play',
-      }).toBe(6);
-      await pollScene(page, (s) => nodeAtAnchor(s, ...LEG4_Z)?.kind ?? null, { message: 'leg 4: the Source landed at Z' }).toBe(
-        SOURCE_KIND,
-      );
-      expect((await readScene(page)).nodes.length, 'leg 4: the label and the one Source').toBe(2);
-    } finally {
-      await page.mouse.up().catch(() => {});
-      await resumeIfPaused(page);
-    }
-    await expectRenderLoopAlive(page, 'after leg 4');
-    errs.assertNone('leg 4');
+    await test.step('leg 2: paused board, the same drop waits with its shimmer, then Play: the shimmer goes with the refusal', async () => {
+      const errs = watchPageErrors(page);
+      try {
+        await emptyBoardAtMiddleCell(page);
+        await expectRenderLoopAlive(page, 'flash leg start');
+        await placeBlocker(page);
+        const t0 = await pauseAndSettle(page, 'flash leg');
+        await startFlashSampler(page, '__flashOnly2');
+        await handPlaceAt(page, 'Source', ...CELL_AT);
+        await page.keyboard.press('Escape');
+        expect((await readScene(page)).tick, 'flash leg: still paused').toBe(t0);
+        const waiting = await pendingShimmerInstructions(page);
+        expect(waiting, 'flash leg: the waiting shimmer is drawn while the Place is queued').toBeGreaterThan(0);
+        await transport(page).click();
+        await expect(transport(page)).toHaveAttribute('aria-label', 'Pause');
+        const sample = await waitForFramesAtFloor<FlashTallies>(page, '__flashOnly2');
+        const t = sample.tallies;
+        const shimmerNow = await pendingShimmerInstructions(page);
+        console.log(`flash leg: ${JSON.stringify(t)} frames=${sample.frames} waiting=${waiting} shimmerNow=${shimmerNow}`);
+        expect(t.flashFrames, 'flash leg: the red flash was drawn at the drop').toBeGreaterThan(0);
+        expect(t.shimmerBefore, 'flash leg: the shimmer was drawn while the Place waited').toBeGreaterThan(0);
+        expect(t.afterRefusal, 'flash leg: the band showed the refusal sentence after Play').toBeGreaterThanOrEqual(
+          AFTER_REFUSAL_FRAMES,
+        );
+        expect(t.lateShimmer, `flash leg: no shimmer drawn ${FEW_FRAMES} frames after the sentence`).toBe(0);
+        expect(shimmerNow, 'flash leg: and none now').toBe(0);
+        const s = await readScene(page);
+        expect(s.nodes.filter((n) => n.kind === SOURCE_KIND).length, 'flash leg: the one blocker, nothing minted').toBe(1);
+        await expectRenderLoopAlive(page, 'flash leg after Play');
+        errs.assertNone('flash leg');
+      } finally {
+        await resumeIfPaused(page);
+      }
+    });
   });
 });
