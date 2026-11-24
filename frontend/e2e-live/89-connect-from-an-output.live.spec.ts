@@ -61,6 +61,9 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 //      lifted with the left still held (the chorded shape a mouse sends), then the left released
 //      on the belt's first tile. Nothing docks and nothing is selected.
 //
+// Legs 4 and 3 run in one test: on each row leg 4's cancel leaves the belt loose with nothing
+// selected, and leg 3 starts from there as a second step, after a render-health check.
+//
 // Each leg is walked on two rows of one board: at camera scale 1, then after the wheel has zoomed
 // the camera below 1, every screen point read again after the zoom (the dot's reach grows in world
 // px below 1, which is why the press and the release points sit where they do).
@@ -274,6 +277,8 @@ test.describe("89 live: connect from a machine's output dot, and from a belt's e
   });
 
   test("4: the right button pressed mid output-dot drag, the left still held, cancels it and connects nothing", async ({ page }) => {
+    // Two parts with no limit of their own, 90 s each.
+    test.setTimeout(180_000);
     // Review CR-B-01 (UI-SPEC A14). A real mouse reports the right press as a chorded move, never
     // as a down: measured in this Chromium (`P89-CHORD`, 89-REVIEW-DISPOSITION.md), the press is
     // `pointermove` buttons 3 and the release `pointermove` buttons 1, and Chromium then drops the
@@ -283,46 +288,49 @@ test.describe("89 live: connect from a machine's output dot, and from a belt's e
     // drag wears is gone before the right button lifts. Red before the fix: still `grabbing`.
     const cursor = (): Promise<string> => page.evaluate(() => document.querySelector('canvas')?.style.cursor ?? 'no canvas');
     await walk(page, async (row, { router, out, cells }) => {
-      const start = await onTheDot(page, out);
-      const end = await cellPoint(page, cells[0][0], cells[0][1], 0.8, 0.45);
-      const path = [...handPath(start, await detour(page, row)), ...handPath(await detour(page, row), end)];
-      await pointerTravel(page, start.x, start.y);
-      await page.mouse.down();
-      for (const q of path) await pointerTravel(page, q.x, q.y);
-      expect(path.length, `${row.name}: the hand moved through many samples`).toBeGreaterThanOrEqual(10);
-      expect(await cursor(), `${row.name}: NON-VACUITY: the output-dot drag is in flight (cursor grabbing)`).toBe('grabbing');
-      await page.mouse.down({ button: 'right' });
-      await expect
-        .poll(cursor, { message: `${row.name}: the right press ended the drag: the grabbing cursor is gone before the right lifts` })
-        .not.toBe('grabbing');
-      await page.mouse.up({ button: 'right' });
-      await pointerTravel(page, end.x + 1, end.y);
-      await page.mouse.up();
-      // The host runs past the release before the negative read (a Dock sent on it needs a round
-      // trip and a fold).
-      const t0 = (await readScene(page)).tick;
-      await pollScene(page, (s) => s.tick >= t0 + 40, { message: `${row.name}: the host ran past the release` }).toBe(true);
-      expect(docksOf(beltOn(await readScene(page), cells), router), `${row.name}: the cancelled drag docked nothing`).toBe('');
-      expect(await selectionOf(page), `${row.name}: and selected nothing`).toEqual({ node: null, belt: null });
-    });
-  });
-
-  test("3: a loose belt's first tile dragged onto the Router's output connects them, with nothing selected", async ({ page }) => {
-    await walk(page, async (row, { router, out, cells }) => {
-      expect(await selectionOf(page), `${row.name}: nothing is selected before the press`).toEqual({ node: null, belt: null });
-      // The far half of the belt's first tile: inside that end tile, out of the output dot's reach.
-      const start = await cellPoint(page, cells[0][0], cells[0][1], 0.8, 0.55);
-      const end = await onTheDot(page, out);
-      const moves = await handDragVia(page, start, await detour(page, row), end);
-      expect(moves, `${row.name}: the hand moved through many samples, not one teleport`).toBeGreaterThanOrEqual(10);
-      await pollScene(page, (s) => docksOf(beltOn(s, cells), router), {
-        message: `${row.name}: the dragged belt start (its Tail) is docked to the Router's output`,
-      }).toBe('Tail@router');
-      expect(await selectionOf(page), `${row.name}: the selection did not change: still nothing selected`).toEqual({
-        node: null,
-        belt: null,
+      await test.step('4: the right button pressed mid output-dot drag, the left still held, cancels it and connects nothing', async () => {
+        const start = await onTheDot(page, out);
+        const end = await cellPoint(page, cells[0][0], cells[0][1], 0.8, 0.45);
+        const path = [...handPath(start, await detour(page, row)), ...handPath(await detour(page, row), end)];
+        await pointerTravel(page, start.x, start.y);
+        await page.mouse.down();
+        for (const q of path) await pointerTravel(page, q.x, q.y);
+        expect(path.length, `${row.name}: the hand moved through many samples`).toBeGreaterThanOrEqual(10);
+        expect(await cursor(), `${row.name}: NON-VACUITY: the output-dot drag is in flight (cursor grabbing)`).toBe('grabbing');
+        await page.mouse.down({ button: 'right' });
+        await expect
+          .poll(cursor, { message: `${row.name}: the right press ended the drag: the grabbing cursor is gone before the right lifts` })
+          .not.toBe('grabbing');
+        await page.mouse.up({ button: 'right' });
+        await pointerTravel(page, end.x + 1, end.y);
+        await page.mouse.up();
+        // The host runs past the release before the negative read (a Dock sent on it needs a round
+        // trip and a fold).
+        const t0 = (await readScene(page)).tick;
+        await pollScene(page, (s) => s.tick >= t0 + 40, { message: `${row.name}: the host ran past the release` }).toBe(true);
+        expect(docksOf(beltOn(await readScene(page), cells), router), `${row.name}: the cancelled drag docked nothing`).toBe('');
+        expect(await selectionOf(page), `${row.name}: and selected nothing`).toEqual({ node: null, belt: null });
       });
-      await expectOneConnectedOutput(page, row, router);
+      await expectRenderLoopAlive(page, `${row.name}: between the right-press cancel and the belt-start drag`);
+      errs.assertNone(`${row.name}: the right-press cancel`);
+      // The cancel leaves the belt loose with nothing selected, where the belt-start drag starts.
+      await test.step("3: a loose belt's first tile dragged onto the Router's output connects them, with nothing selected", async () => {
+        expect(docksOf(beltOn(await readScene(page), cells), router), `${row.name}: PRECONDITION: the belt is still loose`).toBe('');
+        expect(await selectionOf(page), `${row.name}: nothing is selected before the press`).toEqual({ node: null, belt: null });
+        // The far half of the belt's first tile: inside that end tile, out of the output dot's reach.
+        const start = await cellPoint(page, cells[0][0], cells[0][1], 0.8, 0.55);
+        const end = await onTheDot(page, out);
+        const moves = await handDragVia(page, start, await detour(page, row), end);
+        expect(moves, `${row.name}: the hand moved through many samples, not one teleport`).toBeGreaterThanOrEqual(10);
+        await pollScene(page, (s) => docksOf(beltOn(s, cells), router), {
+          message: `${row.name}: the dragged belt start (its Tail) is docked to the Router's output`,
+        }).toBe('Tail@router');
+        expect(await selectionOf(page), `${row.name}: the selection did not change: still nothing selected`).toEqual({
+          node: null,
+          belt: null,
+        });
+        await expectOneConnectedOutput(page, row, router);
+      });
     });
   });
 });

@@ -67,7 +67,8 @@ import { cardinalOfRotation, doorstep, portOf, beltOn, rowCells, cellPoint, empt
 // `startBeltFlowWatch`'s `headCleared`).
 //
 // Each leg is walked on two rows of one board: at camera scale 1, then after the wheel has zoomed
-// the camera below 1, every screen point read again after the zoom.
+// the camera below 1, every screen point read again after the zoom. The two legs run as steps of
+// one test, each on its own board, with a render-health check between them.
 //
 // RED FIRST (D-16): run once against the plan's start revision (frontend from a throwaway
 // worktree with this spec copied in), both legs red (89-EVIDENCE.md, `LIVE_RED
@@ -296,15 +297,20 @@ test.describe("89 live: a belt draw finished on another belt's start docks to it
   });
 
   test("1: released on another belt's first tile, the new belt's Head docks that belt's Tail", async ({ page }) => {
-    // Inside B's first tile, off-centre: inside its Tail end's hit radius.
-    await walk(page, (_row, b) => [b[0], 0.6]);
-  });
+    // Two parts with no limit of their own, 90 s each. Each walk builds its own board.
+    test.setTimeout(180_000);
+    await test.step("1: released on another belt's first tile, the new belt's Head docks that belt's Tail", async () => {
+      // Inside B's first tile, off-centre: inside its Tail end's hit radius.
+      await walk(page, (_row, b) => [b[0], 0.6]);
+    });
+    await stopBeltFlowWatch(page);
+    await expectRenderLoopAlive(page, 'at the end of leg 1');
+    errs.assertNone('leg 1 of the finish-on-a-belt-start walk');
 
-  test("2: released one cell short of another belt's first tile, the new belt's Head docks that belt's Tail", async ({
-    page,
-  }) => {
-    // Inside the cell before B's first tile, just past its centre: out of B's Tail radius, so the
-    // auto-dock takes it.
-    await walk(page, (row, b) => [[b[0][0] - 1, row.y] as const, 0.55]);
+    await test.step("2: released one cell short of another belt's first tile, the new belt's Head docks that belt's Tail", async () => {
+      // Inside the cell before B's first tile, just past its centre: out of B's Tail radius, so the
+      // auto-dock takes it.
+      await walk(page, (row, b) => [[b[0][0] - 1, row.y] as const, 0.55]);
+    });
   });
 });

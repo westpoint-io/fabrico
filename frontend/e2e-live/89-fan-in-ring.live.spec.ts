@@ -61,8 +61,9 @@ import { emptyBoardAtScaleOne, expectOnCanvas, portOf, sideOf, turnUntilFacing, 
 // from the Tail cell into a Sink whose In faces West. The press on the Tail cell docks the Tail to
 // one Source; the other is docked by selecting the belt and dragging its Tail end handle onto that
 // Source's Out nub, by hand through a waypoint (the shipped dock-drag). Both Sources then run on a
-// Timer. Each test builds two fan-ins: the first walked at camera scale 1, the second after the
-// wheel has zoomed the camera below 1 (D-16).
+// Timer. The test builds two fan-ins: the first walked at camera scale 1, the second after the
+// wheel has zoomed the camera below 1 (D-16). On each fan-in leg 1 runs, then leg 2 as a second
+// step from where leg 1 leaves it (both upstreams docked, no ring), after a render-health check.
 //
 //   1. Cut and turn back: A turned away (`r`). The ring is PLOTTED (`alertRingInstructions`) with
 //      a centre on the Tail end tile and one on A's Out nub (`alertRingCentres`, world px); B's
@@ -440,10 +441,21 @@ test.describe('89 live: cutting one upstream of a fan-in shows the warning ring 
   test('1: a Source turned off a fan-in rings its cut while the other keeps feeding, keeps the ring when turned back, and the ring is gone once it is docked again', async ({
     page,
   }) => {
-    await walkBoth(page, walkCutAndTurnBack);
-  });
-
-  test('2: the redo of a turn that cut one upstream of a fan-in rings again', async ({ page }) => {
-    await walkBoth(page, walkCutUndoRedo);
+    // Two parts with no limit of their own, 90 s each.
+    test.setTimeout(180_000);
+    await walkBoth(page, async (p, f) => {
+      await test.step('1: a Source turned off a fan-in rings its cut while the other keeps feeding, keeps the ring when turned back, and the ring is gone once it is docked again', async () => {
+        await walkCutAndTurnBack(p, f);
+      });
+      await expectRenderLoopAlive(p, `${f.name}: between the turn-back walk and the undo-redo walk`);
+      errs.assertNone(`${f.name}: the turn-back walk`);
+      // The turn-back walk ends with A re-docked and no ring: the undo-redo walk's start.
+      await test.step('2: the redo of a turn that cut one upstream of a fan-in rings again', async () => {
+        const start = await readScene(p);
+        expect(docksOf(start, f), `${f.name}: PRECONDITION: the fan-in is whole`).toBe(BOTH_DOCKED);
+        expect(sideOf(start, sourceA(f), ROLE_OUT), `${f.name}: PRECONDITION: Source A's Out faces East`).toBe(SIDE_E);
+        await walkCutUndoRedo(p, f);
+      });
+    });
   });
 });
