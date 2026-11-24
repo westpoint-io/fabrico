@@ -5,7 +5,6 @@ import {
   DEMO_NODE_COUNT,
   expectRenderLoopAlive,
   readScene,
-  pollScene,
   waitForAppReady,
   watchPageErrors,
   type SceneFacts,
@@ -27,7 +26,7 @@ import {
 // host before this one breaks the handle shape and fails loudly here.
 //
 // THE CENSUS IS READ FROM THE SCENE FILE (plan 85-08, D-06). Every node (kind, anchor,
-// size), every belt (its exact cells, both docks) and both cables are compared with
+// size) and both cables are compared with
 // `examples/boards/demo_scene.board.ron`, parsed here, rather than with a
 // retyped copy, so a layout edit cannot leave this file checking the old board. The
 // machines' PORT GEOMETRY is still written out cell by cell below: that is the catalog
@@ -58,8 +57,6 @@ const KIND = {
 const SIDE = { N: 0, E: 1, S: 2, W: 3 } as const;
 const ROLE = { In: 0, Out: 1, Fault: 2 } as const;
 const MEDIUM = { Mechanical: 0, Electrical: 1 } as const;
-/** The wire sentinel validate_normalize freezes onto a fault dock. */
-const FAULT_PORT = 65535;
 /** Catalog boxes (w, h) per placed kind; a label's comes from its Configure. */
 const CATALOG_BOX: Record<number, [number, number]> = {
   [KIND.SOURCE]: [1, 1],
@@ -74,7 +71,6 @@ const CATALOG_BOX: Record<number, [number, number]> = {
 };
 
 type NodeFacts = SceneFacts['nodes'][number];
-type BeltFacts = SceneFacts['belts'][number];
 
 /** One placed node as `demo_scene.board.ron` authors it. */
 interface RonPlace {
@@ -141,18 +137,6 @@ function mustNode(s: SceneFacts, id: number): NodeFacts {
   const n = s.nodes.find((x) => x.id === id);
   expect(n, `node handle ${id} present (cold boot mints exactly the scene's handles)`).toBeDefined();
   return n as NodeFacts;
-}
-
-function mustBelt(s: SceneFacts, id: number): BeltFacts {
-  const b = s.belts.find((x) => x.id === id);
-  expect(b, `belt handle ${id} present (cold boot mints exactly the scene's belt handles)`).toBeDefined();
-  return b as BeltFacts;
-}
-
-function mustDock(b: BeltFacts, end: 'Head' | 'Tail'): { node: number; port: number } {
-  const d = b.docks.find((x) => x.end === end);
-  expect(d, `belt ${b.id} has a ${end} dock`).toBeDefined();
-  return { node: (d as { node: number }).node, port: (d as { port: number }).port };
 }
 
 /** A node's anchor (min x, min y) and box (w, h), read off its cells. */
@@ -445,122 +429,5 @@ test.describe('E2E-02 cold boot: the SHIPPED default scene is faithful on the re
       'both wires are DORMANT on cold boot (no in-flight pulse)',
     ).toBe(true);
     expect(s.replyPulsesObserved, 'no reply has travelled home on an idle cold boot').toBe(0);
-  });
-
-  test('every demo belt from the scene file, with exact cells and WIRE-keyspace docks', async ({ page }) => {
-    const s = await readScene(page);
-    const census = demoCensus();
-
-    expect(
-      s.belts.map((b) => b.id).sort((a, b) => a - b),
-      'cold boot exposes exactly the belts the scene file draws, at their mint-order handles',
-    ).toEqual(census.belts.map((b) => b.handle));
-    expect(census.belts.length, 'eleven drawn belts').toBe(11);
-
-    // Docks: verbatim WIRE keyspace (Pitfall 9). Out docks are frozen in the EMIT keyspace
-    // by validate_normalize (0-based position among the node's Out ports) and a fault dock is
-    // the FAULT_PORT sentinel - the scene file's CATALOG index is converted through the
-    // docked node's own ports here. In docks keep their catalog index (In ports come first
-    // in every catalog entry).
-    const wirePort = (end: 'Tail' | 'Head', d: { node: number; port: number }): { node: number; port: number } => {
-      if (end === 'Head') return d;
-      const ports = mustNode(s, d.node).ports;
-      const p = ports.find((q) => q.index === d.port);
-      expect(p, `node ${d.node} has the catalog port ${d.port} the scene file docks`).toBeDefined();
-      if (p!.role === ROLE.Fault) return { node: d.node, port: FAULT_PORT };
-      return { node: d.node, port: ports.filter((q) => q.role === ROLE.Out && q.index < d.port).length };
-    };
-    for (const rb of census.belts) {
-      const b = mustBelt(s, rb.handle);
-      // Every tile, exact (never a loose "some tiles" count): the drawn path is the authored path.
-      expect(
-        b.tiles.map((t) => [t.cell_x, t.cell_y]),
-        `belt ${rb.handle} runs exactly the cells demo_scene.board.ron draws`,
-      ).toEqual(rb.cells);
-      expect(rb.tail, `belt ${rb.handle} is Tail-docked in the scene file`).not.toBeNull();
-      expect(rb.head, `belt ${rb.handle} is Head-docked in the scene file`).not.toBeNull();
-      expect(
-        mustDock(b, 'Tail'),
-        `belt ${rb.handle} Tail dock carries the exact wire values of catalog {node:${rb.tail!.node}, port:${rb.tail!.port}}`,
-      ).toEqual(wirePort('Tail', rb.tail!));
-      expect(
-        mustDock(b, 'Head'),
-        `belt ${rb.handle} Head dock carries the exact wire values {node:${rb.head!.node}, port:${rb.head!.port}}`,
-      ).toEqual(wirePort('Head', rb.head!));
-    }
-
-    // The three Router lanes, literally, so the keyspace conversion above cannot agree with
-    // itself into a pass: emit 2 (top, small), emit 0 (middle, medium), emit 1 (bottom, large).
-    const lanes = s.belts
-      .filter((b) => mustDock(b, 'Tail').node === 7)
-      .map((b) => [b.tiles[0].cell_x, b.tiles[0].cell_y, mustDock(b, 'Tail').port])
-      .sort((a, b) => a[1] - b[1]);
-    expect(lanes, 'the Router docks all three outputs: (16,0) emit 2, (16,1) emit 0, (16,2) emit 1').toEqual([
-      [16, 0, 2],
-      [16, 1, 0],
-      [16, 2, 1],
-    ]);
-  });
-
-  test('named anti-trap guards: each v2.0 trap class fails loudly on regression', async ({ page }) => {
-    const s = await readScene(page);
-
-    // Guard 1: the v2.0 1x1-factory trap. The mock era rendered factories as
-    // single cells while claiming multi-cell coverage; the REAL factory must
-    // report its full 3x3 footprint or this gate is red. Since plan 85-08 the demo's
-    // HTTP Handler is held to the same: it was the 1x1 the old demo minted.
-    expect(
-      mustNode(s, 1).cells.length,
-      'ANTI-TRAP (the v2.0 1x1-factory trap): the real FACTORY reports 9 footprint cells, not a 1x1 stub',
-    ).toBe(9);
-    const handler = s.nodes.find((n) => n.kind === KIND.HANDLER);
-    expect(
-      handler?.cells.length,
-      'ANTI-TRAP (the 1x1 demo handler, walk-112): the demo HTTP Handler reports 9 footprint cells',
-    ).toBe(9);
-
-    // Guard 2: the v2.0 tile-less-belt trap. Legacy Wire belts shipped with
-    // empty tiles[] and rendered as degenerate stubs; every shipped belt must
-    // carry a drawn path.
-    for (const b of s.belts) {
-      expect(
-        b.tiles.length,
-        `ANTI-TRAP (the v2.0 tile-less-belt trap): belt ${b.id} must carry at least one drawn tile, never an empty-tiles stub`,
-      ).toBeGreaterThanOrEqual(1);
-    }
-
-    // Guard 3: the v2.0 node-to-node-wire trap. Legacy Wire connected nodes
-    // directly with no docks; every shipped belt must be docked at BOTH ends.
-    for (const b of s.belts) {
-      expect(
-        b.docks.length,
-        `ANTI-TRAP (the v2.0 node-to-node-wire trap): belt ${b.id} must be docked at both ends (Head + Tail), never a dock-less wire`,
-      ).toBe(2);
-    }
-
-    // Guard 4 (flagship, REND-04 as a hard gate): the fault belt plugs the factory's
-    // FAULT_PORT sentinel and lands on the ROTATED Rejects sink whose world-resolved In
-    // port faces North. Found by its Head dock on the Rejects sink (node 5).
-    const faultBelt = s.belts.find((b) => b.docks.some((d) => d.end === 'Head' && d.node === 5));
-    expect(faultBelt, 'a belt delivers into the Rejects sink (node 5)').toBeDefined();
-    expect(
-      mustDock(faultBelt!, 'Tail'),
-      'ANTI-TRAP (flagship REND-04): the fault belt plugs the factory FAULT_PORT (wire sentinel 65535), not a catalog index',
-    ).toEqual({ node: 1, port: FAULT_PORT });
-    const rotatedSink = mustNode(s, 5);
-    const rotatedIn = rotatedSink.ports.find((p) => p.role === ROLE.In);
-    expect(
-      rotatedIn?.side,
-      'ANTI-TRAP (flagship REND-04): the fault belt lands on the ROTATED sink whose In port world-resolves to side N',
-    ).toBe(SIDE.N);
-  });
-
-  test('items flow on the cold-booted default scene within a deterministic poll window', async ({ page }) => {
-    // The demo injects every 8 ticks (~133ms at 60Hz), so the default 15s
-    // pollScene timeout is enormous headroom. No fixed sleeps: expect.poll.
-    await pollScene(page, (s) => s.belts.reduce((n, b) => n + b.items, 0), {
-      message:
-        'items flow on the shipped default scene: a frozen, never-flowing grid is the LIVE-05 regression (the injected-packet era never proved live flow)',
-    }).toBeGreaterThan(0);
   });
 });

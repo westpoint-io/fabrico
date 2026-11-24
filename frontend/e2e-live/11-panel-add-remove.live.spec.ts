@@ -1,7 +1,4 @@
 import { test, expect, type Locator, type Page } from './support/liveTest';
-import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   DRAWN_STATE_FRAMES,
   alertRingCentres,
@@ -31,43 +28,23 @@ import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // RenderProducer -> postcard -> WS). Zero mocks, zero injected packets: every
 // port this spec asserts on was minted by the real host's certified AddPort fold.
 //
-// The three things the mock suite CANNOT prove, proven here:
+// Three tests are left here, each resetting the shared host at its start:
 //
-//   1. A `+ Add output` click really grows the machine on the host, and the new
-//      row appears from the NEXT real render packet.
-//   2. That add is ONE host action: Ctrl+Z removes it and Ctrl+Shift+Z restores
-//      it, with the real command layer's undo cursor - not a frontend illusion.
-//   3. The added output SURVIVES a real Save -> New -> Load round-trip of the
-//      `.fab` edit_log (the fold is re-derived from the log, not from a cached
-//      frontend value).
+//   1. a PAUSED host HOLDS a port edit: two clicks add exactly ONE port, and the latch
+//      releases on the real fold (CR-01);
+//   2. PLACE a machine, Ctrl+Z, and THAT machine goes - asserted as a set difference
+//      over the whole board, because a bare node COUNT passes while one machine is
+//      swapped for another, which is what the phase 51 defect did;
+//   3. UNDO-06: walk steps 4 to 6 on the board `73-WALK-BOARD.md` names - a FRESH
+//      Factory at (6,11) with two Outs and a belt on each. Remove the first output,
+//      watch exactly ONE belt let go while the other stays on its own output, then
+//      press Ctrl+Z once and get both back.
 //
-// ...plus the index-shift case against the real host: a belt docked to a LATER
-// Out leaves the EARLIER Out's remove OFFERED while that earlier Out is itself
-// UNCONNECTED. Until 73-08 that pairing proved the renumber hazard was BLOCKED;
-// since 73-06 the fold performs the renumber correctly, so it now proves the
-// removal is offered and emits.
-//
-// ...and, since 73-08, the whole UNDO-06 leg: walk steps 4 to 6 on the board
-// `73-WALK-BOARD.md` names - a FRESH Factory at (6,11) with two Outs and a belt
-// on each. Remove the first output, watch exactly ONE belt let go while the other
-// stays on its own output, then press Ctrl+Z once and get both back.
-//
-// PHASE-51 GAP CLOSURE (51-06). The four tests above shipped covering ADD only,
-// and that hole is exactly how a broken half of the feature passed every gate:
-// the phase verifier found that on the DEFAULT demo board, a gated-safe REMOVE
-// followed by Ctrl+Z restored nothing and spent the undo step, and that one
-// Ctrl+Z after a Place left the placed machine standing while silently deleting
-// one of the demo's caller and handler nodes. Both were pre-existing command-layer defects that this
-// phase's controls made user-reachable; both were fixed in 51-04
-// (live-authoritative undo captures) and bounded in 51-05 (inverse refusal
-// guards). The last two tests in this file are the arms that were missing - the
-// user-layer proof, on the board the app boots into:
-//
-//   4. REMOVE an output, Ctrl+Z, and the output COMES BACK (ROADMAP SC2's remove
-//      half); Ctrl+Shift+Z removes it again.
-//   5. PLACE a machine, Ctrl+Z, and THAT machine goes - asserted as a set
-//      difference over the whole board, because a bare node COUNT passes while
-//      one machine is swapped for another, which is precisely what the defect did.
+// The add, Save -> New -> Load, index-shift and demo-board remove-and-undo tests that
+// used to sit here were cut. 74.1-port-edits-keep-place.live.spec.ts adds outputs with
+// docked belts and undoes in one step, 24-one-board-all-six.spec.ts leg 5 saves and
+// loads a board and compares its topology, and UNDO-06 above is the superset of the
+// remove-and-undo cases.
 //
 // SCOPE, stated because overstating it is what produced this gap: these arms
 // prove the LIVE session. Undo of an action that predates a save, on a project
@@ -78,7 +55,7 @@ import { addWaitBudget, frameBudgetMs } from '../e2e/support/frameSampler';
 // `crates/fabrico-host/tests/undo_on_demo_board.rs`.
 //
 // Suite budget: ONE spec file (the ~11-spec dev_render_server stall ceiling sits
-// at this boundary, STATE.md), now six tests, each resetting the shared mutable
+// at this boundary, STATE.md), now three tests, each resetting the shared mutable
 // host at its START per the workers:1 discipline. Deliberately NOT a second spec
 // file, for that reason.
 
@@ -128,16 +105,6 @@ function factoryOf(scene: SceneFacts, id?: number): NodeFacts {
 /** How many Out (role 1) ports the factory currently has, live. */
 function outCount(scene: SceneFacts, id?: number): number {
   return factoryOf(scene, id).ports.filter((p) => p.role === ROLE_OUT).length;
-}
-
-/** Every belt dock naming `id`, as sorted `end:port` strings - the LINK set,
- *  independent of where the ports happen to sit on the grid. */
-function docksNaming(scene: SceneFacts, id: number): string[] {
-  return scene.belts
-    .flatMap((b) => b.docks)
-    .filter((d) => d.node === id)
-    .map((d) => `${d.end}:${d.port}`)
-    .sort();
 }
 
 /** One belt as the scene oracle reports it. */
@@ -210,28 +177,6 @@ function nodeKey(node: NodeFacts): string {
 /** Every machine on the board as a sorted list of handle-free identities. */
 function nodeKeys(scene: SceneFacts): string[] {
   return scene.nodes.map(nodeKey).sort();
-}
-
-/** The factory seated at anchor (ax, ay), re-resolved from the live scene. */
-function factoryAtAnchor(scene: SceneFacts, ax: number, ay: number): NodeFacts | undefined {
-  return scene.nodes.find((n) => {
-    if (n.kind !== KIND_FACTORY) return false;
-    const [x, y] = anchorOf(n);
-    return x === ax && y === ay;
-  });
-}
-
-/** Out-port count of the factory at (ax, ay); -1 when it is not on the board. */
-function outsAtAnchor(scene: SceneFacts, ax: number, ay: number): number {
-  const node = factoryAtAnchor(scene, ax, ay);
-  return node ? node.ports.filter((p) => p.role === ROLE_OUT).length : -1;
-}
-
-/** The CURRENT dense handle of the factory at (ax, ay) - read fresh, never cached. */
-async function handleAtAnchor(page: Page, ax: number, ay: number): Promise<number> {
-  const node = factoryAtAnchor(await readScene(page), ax, ay);
-  expect(node, `a factory is seated at anchor (${ax},${ay})`).toBeDefined();
-  return (node as NodeFacts).id;
 }
 
 /**
@@ -321,42 +266,6 @@ function dockTouches(scene: SceneFacts, id: number): DockTouch[] {
   return out.sort((a, b) => a.dock.localeCompare(b.dock));
 }
 
-/** The factory's ORIGINAL nubs (the first `n` catalog indices) by index, as cells. */
-function originalNubs(scene: SceneFacts, n: number): string[] {
-  return factoryOf(scene)
-    .ports.filter((p) => p.index < n)
-    .map((p) => `${p.index}:${p.role}@${p.cell_x},${p.cell_y}`);
-}
-
-/**
- * The four things a hand sees, unchanged from the shipped board: the same dock set,
- * each dock's port facing its belt's end tile, the original nubs on their cells, and
- * each docked end tile's shipped kind. The factory is re-resolved from the scene,
- * because a keyframe re-mints handles.
- */
-function expectBoardUnmoved(
-  scene: SceneFacts,
-  linksBefore: string[],
-  nubsBefore: string[],
-  touchBefore: DockTouch[],
-  ctx: string,
-): void {
-  const id = factoryOf(scene).id;
-  expect(docksNaming(scene, id), `${ctx}: every belt is still docked to the factory`).toEqual(linksBefore);
-  const touch = dockTouches(scene, id);
-  expect(touch.length, `${ctx}: every dock is read`).toBe(linksBefore.length);
-  for (const t of touch) {
-    expect(t.facing, `${ctx}: the ${t.dock} belt's end tile is its nub's facing cell`).toEqual(t.end);
-  }
-  expect(originalNubs(scene, nubsBefore.length), `${ctx}: the original nubs keep their cells`).toEqual(
-    nubsBefore,
-  );
-  expect(
-    touch.map((t) => [t.dock, t.belt, t.kind]),
-    `${ctx}: each docked end tile keeps its shipped kind`,
-  ).toEqual(touchBefore.map((t) => [t.dock, t.belt, t.kind]));
-}
-
 // ---------------------------------------------------------------------------
 // Panel locators (the SHIPPED accessible names - no test-only attributes)
 // ---------------------------------------------------------------------------
@@ -398,271 +307,6 @@ async function expectDockedOutputNote(page: Page, n: number): Promise<void> {
 }
 
 test.describe('PANEL-03 live: add AND remove outputs on the real host', () => {
-  test('a "+ Add output" click grows the machine on the host and moves no belt off its nub, and Ctrl+Z / Ctrl+Shift+Z is ONE step', async ({
-    page,
-  }) => {
-    // RE-AUTHORED IN 74.1-14 as a NAMED CHANGED OUTCOME (the maintainer's ruling of 2026-10-04,
-    // "Edits keep middle layout"). Under 74.1-12 this leg asserted that the add moved
-    // every nub and released every belt on the catalog-layout demo factory, and that
-    // the undo re-docked the links while the nubs stayed moved. Since 74.1-14 a port
-    // edit seats ports centre-out from the CATALOG box, so the add moves no existing
-    // nub and lets go of no belt, and the undo leaves every nub where it shipped. What
-    // the user looks at is graded here: which belts are docked, whether each docked
-    // belt's end tile is its nub's facing cell, where the three original nubs sit, and
-    // the shipped kind of each docked end tile (a corner stays a corner).
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-    await expectRenderLoopAlive(page, 'on the shipped demo board before the add');
-
-    const scene0 = await readScene(page);
-    const before = outCount(scene0);
-    expect(before, 'the demo factory starts with at least one Out').toBeGreaterThan(0);
-    // The demo factory is WIRED (In, Out and Fault all carry belts) - the case a hand
-    // meets on the board the app boots into.
-    const factoryId = factoryOf(scene0).id;
-    const linksBefore = docksNaming(scene0, factoryId);
-    expect(linksBefore.length, 'the demo factory is wired up before the add').toBeGreaterThan(0);
-    const cellsBefore = portCells(scene0);
-    const nubsBefore = originalNubs(scene0, factoryOf(scene0).ports.length);
-    const touchBefore = dockTouches(scene0, factoryId);
-    expect(touchBefore.length, 'measured: every demo factory dock is read').toBe(linksBefore.length);
-    for (const t of touchBefore) {
-      expect(t.facing, `on the shipped board, the ${t.dock} belt touches its nub`).toEqual(t.end);
-    }
-
-    await selectFactory(page);
-    await expect(outRows(page), 'the panel lists the live Out ports').toHaveCount(before);
-
-    // (1) ADD - the REAL host applies the certified AddPort fold and re-emits the
-    // grown node. Nothing here is injected: the assertion is on the scene oracle
-    // reading the packet the core produced.
-    await addOutput(page).click();
-    await pollScene(page, (s) => outCount(s), {
-      message: 'the real host folded the AddPort: the factory grew an Out port',
-    }).toBe(before + 1);
-    // ...and the new row appears from that packet, with no re-selection: an
-    // AddPort echo is a DIFF packet, so the panel stays mounted through it.
-    await expect(outRows(page), 'the new Out row appears from the real packet').toHaveCount(
-      before + 1,
-    );
-
-    // (1b) WHAT THE ADD DOES TO THE ALREADY-DOCKED BELTS (74.1-14): nothing.
-    const afterAdd = await readScene(page);
-    expectBoardUnmoved(afterAdd, linksBefore, nubsBefore, touchBefore, 'after the add');
-    await expectRenderLoopAlive(page, 'after the add');
-
-    // (2) UNDO - one Ctrl+Z reverses the WHOLE add (one command = one action =
-    // one undo step, command.rs:1098-1101). The undo emits a full keyframe, which
-    // by design clears the ephemeral selection (WR-01), so the panel unmounts and
-    // is re-selected below rather than asserted through the keyframe.
-    await blurControls(page);
-    await page.keyboard.press('Control+z');
-    await pollScene(page, (s) => outCount(s), {
-      message: 'a single Ctrl+Z reverses the whole AddPort on the real host',
-    }).toBe(before);
-    await selectFactory(page);
-    await expect(outRows(page), 'the added row is gone after the real undo').toHaveCount(before);
-    // ...and after the one step every nub is where it shipped and every belt is docked
-    // and touching it: the residual 74.1-12 recorded (links back, nubs moved) is gone.
-    const afterUndo = await readScene(page);
-    expectBoardUnmoved(afterUndo, linksBefore, nubsBefore, touchBefore, 'after the undo');
-    expect(portCells(afterUndo), 'one Ctrl+Z leaves every nub on its shipped cell').toBe(cellsBefore);
-    await expectRenderLoopAlive(page, 'after the undo');
-
-    // (3) REDO - and one Ctrl+Shift+Z brings it back, again in a single step.
-    await page.keyboard.press('Control+Shift+z');
-    await pollScene(page, (s) => outCount(s), {
-      message: 'a single Ctrl+Shift+Z re-applies the whole AddPort on the real host',
-    }).toBe(before + 1);
-    await selectFactory(page);
-    await expect(outRows(page), 'the added row is back after the real redo').toHaveCount(
-      before + 1,
-    );
-    await expectRenderLoopAlive(page, 'after the redo');
-    errs.assertNone('through the add, the undo and the redo');
-  });
-
-  test('the added output SURVIVES a real Save -> New -> Load round-trip of the .fab edit_log', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-
-    const before = outCount(await readScene(page));
-    await selectFactory(page);
-    await addOutput(page).click();
-    await pollScene(page, (s) => outCount(s), {
-      message: 'the AddPort folded before the save',
-    }).toBe(before + 1);
-
-    // Deselect before driving the TOOLBAR: the config panel is a top-right
-    // overlay that covers part of the header strip, so its own heading would
-    // intercept the Save click while it is mounted. Blur first - the LW-02 guard
-    // stands Escape down too while a button holds focus.
-    await blurControls(page);
-    await page.keyboard.press('Escape');
-    await expect(
-      page.getByRole('heading', { name: 'Factory', exact: true }),
-      'the panel unmounts on deselect, clearing the toolbar',
-    ).toBeHidden({ timeout: 10_000 });
-
-    // (1) SAVE the real project file (the host writes it at quiescence). The dev
-    // path raises a browser prompt for the path - the same control 09-save-load
-    // drives.
-    const savePath = join(tmpdir(), `fabrico-e2e-addport-${Date.now()}.fab`);
-    page.once('dialog', (d) => d.accept(savePath));
-    await page.getByTitle('Save (Ctrl+S) - Shift for Save As').click();
-    await expect
-      .poll(() => existsSync(savePath), {
-        timeout: 30_000,
-        intervals: [200, 500, 1000],
-        message: 'the host wrote the .fab project file (a real artifact on disk)',
-      })
-      .toBe(true);
-
-    // (2) NEW - wipe to a genuinely empty board, so a surviving port after the
-    // load cannot possibly be a leftover of the pre-save state.
-    await page.getByTitle('New board (Ctrl+N)').click();
-    await pollScene(page, (s) => s.nodes.length, {
-      message: 'New swapped in a truly empty grid before the load',
-    }).toBe(0);
-
-    // (3) LOAD it back: the added Out is re-derived by REPLAYING the edit_log
-    // through the certified fold, not restored from any frontend memory.
-    page.once('dialog', (d) => d.accept(savePath));
-    await page.getByTitle('Load a saved factory').click();
-    await pollScene(page, (s) => (s.nodes.length > 0 ? outCount(s) : -1), {
-      message: 'the loaded factory still carries the added Out (the edit_log round-tripped it)',
-    }).toBe(before + 1);
-
-    // ...and the panel reads it back off the loaded scene.
-    await selectFactory(page);
-    await expect(outRows(page), 'the added Out row is present after the load').toHaveCount(
-      before + 1,
-    );
-
-    await expectRenderLoopAlive(page, 'at the end of the save, new and load round trip');
-    errs.assertNone('the save, new and load round trip');
-  });
-
-  test('a belt docked to a LATER Out leaves the EARLIER (unconnected) Out\'s remove OFFERED - the index-shift case, against the real host (73-08)', async ({
-    page,
-  }) => {
-    await tallViewport(page);
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-
-    // A FRESH, fully undocked factory: the positive control matters as much as
-    // the block. On the demo factory the first Out already has a belt, so a
-    // disabled remove there would prove nothing about the renumber hazard.
-    const beforeIds = new Set(
-      (await readScene(page)).nodes.filter((n) => n.kind === KIND_FACTORY).map((n) => n.id),
-    );
-    await armAndPlaceFactoryAt(page, PLACE_CELL[0], PLACE_CELL[1]);
-    await pollScene(page, (s) => s.nodes.filter((n) => n.kind === KIND_FACTORY).length, {
-      message: 'the real host echoes the placed factory',
-    }).toBe(beforeIds.size + 1);
-    // Identify it by DIFFING the kind-2 handles (the 05-undo-strand-ring idiom):
-    // the drop cell is where the pointer went, not necessarily the anchor the
-    // host seats the 3x3 footprint at.
-    const placed = (await readScene(page)).nodes.find(
-      (n) => n.kind === KIND_FACTORY && !beforeIds.has(n.id),
-    );
-    expect(placed, 'the freshly placed factory is found by diffing kind-2 handles').toBeDefined();
-    const placedId = (placed as NodeFacts).id;
-
-    // POSITIVE CONTROL: an undocked Out on an undocked machine IS removable.
-    await selectFactory(page, placedId);
-    await expect(
-      removeOutput(page, 1),
-      'a clean Out on a clean machine is offered for removal',
-    ).toBeEnabled();
-
-    // Grow a SECOND Out, so there is an earlier/later pair to renumber.
-    await addOutput(page).click();
-    await pollScene(page, (s) => outCount(s, placedId), {
-      message: 'the fresh factory grew a second Out',
-    }).toBe(2);
-    await expect(removeOutput(page, 1), 'both Outs are still clean').toBeEnabled();
-    await expect(removeOutput(page, 2)).toBeEnabled();
-
-    // Dock a real belt to the SECOND Out: arm the belt tool and start the draw ON
-    // that Out's nub (the shipped port-to-port draw seeds a Tail dock), then run
-    // two cells east and release. The host mints the belt + the Tail link.
-    const secondOut = factoryOf(await readScene(page), placedId).ports.filter(
-      (p) => p.role === ROLE_OUT,
-    )[1];
-    const nub = await screenPoint(page, nubAnchor(secondOut.cell_x, secondOut.cell_y, secondOut.side));
-    // The draw seeds at the cell the port FEEDS (port cell + 1 east for an E-side
-    // Out), so the release cell is two beyond it - a straight, empty run.
-    const release = await screenCellCentre(page, secondOut.cell_x + 3, secondOut.cell_y);
-    // Prefix-matched, not exact: this Belt tool title is user-facing COPY that
-    // doubles as a SELECTOR, so an exact match makes every copy edit a
-    // five-spec breakage (52-05). `Draw belts` stays unique in the palette.
-    await page.getByTitle(/^Draw belts/).click();
-    await page.mouse.move(nub.x, nub.y);
-    await page.mouse.down();
-    await page.mouse.move(release.x, release.y, { steps: 6 });
-    await page.mouse.up();
-
-    // The dock the HOST recorded: a Tail dock naming this node with Out ROUTING
-    // key 1 (the second role-1 port). This is the real link, read off the packet.
-    await pollScene(
-      page,
-      (s) =>
-        s.belts.some((b) =>
-          b.docks.some((d) => d.end === 'Tail' && d.node === placedId && d.port === 1),
-        ),
-      { message: 'the real host docked the drawn belt to the SECOND Out (routing key 1)' },
-    ).toBe(true);
-
-    // THE INDEX-SHIFT CASE, live, and 73-08 INVERTED WHAT IT ASSERTS. The FIRST
-    // Out is completely unconnected; removing it shifts the second Out down a
-    // routing key. Until this phase the panel refused to offer that, because
-    // `fold_remove_port` re-seated positionally and touched no links, so the
-    // second belt silently started draining a different output.
-    //
-    // UNDO-04 and UNDO-05 closed it in the core: the fold re-keys every surviving
-    // dock and re-points `routes` and `default`, so the later belt stays on its OWN
-    // output. Both rows are therefore offered, and neither carries a reason.
-    //
-    // WHAT WENT WITH THE GATE, recorded rather than silently dropped. This block
-    // used to pin the exact `later-dock` sentence, and carried a 2026-08-30 note
-    // from plan 67-07 about the copy sweep that missed `frontend/e2e-live` and
-    // reddened the live gate at a phase exit. That lesson is not this phase's to
-    // re-learn: the sweep is now a zero-hit grep over all three directories in
-    // 73-08's own verify arms. The sentence itself no longer exists.
-    await selectFactory(page, placedId);
-    const rows = outRows(page);
-    await expect(rows).toHaveCount(2);
-    await expect(rows.first(), 'the earlier Out carries no belt of its own').toContainText(
-      'not connected',
-    );
-    await expect(
-      removeOutput(page, 1),
-      'the earlier Out is OFFERED against the REAL host (73-08)',
-    ).toBeEnabled();
-    expect(
-      await removeOutput(page, 1).getAttribute('aria-describedby'),
-      'and carries no reason element: absence, not a reworded sentence',
-    ).toBeNull();
-
-    // ...and so is the docked Out, which is the `own-dock` half. Since phase 91 (D-12,
-    // UI-SPEC 8.4) its row says what the press costs, the only row that does: its belt
-    // is released with the output.
-    await expect(rows.nth(1)).not.toContainText('not connected');
-    await expect(removeOutput(page, 2), 'the DOCKED Out is offered too').toBeEnabled();
-    await expectDockedOutputNote(page, 2);
-
-    await expectRenderLoopAlive(page, 'at the end of the index-shift case');
-    errs.assertNone('the index-shift case');
-  });
 
   test('a PAUSED host HOLDS the edit: two clicks add exactly ONE port, and the latch releases on the real fold (CR-01)', async ({
     page,
@@ -817,96 +461,6 @@ test.describe('PANEL-03 live: add AND remove outputs on the real host', () => {
   // that log on a throwaway genesis core. An empty-board arm here would be worth
   // nothing, and the demo board stays the board these arms run on.
   // -------------------------------------------------------------------------
-
-  test('removing an output and pressing Ctrl+Z BRINGS IT BACK on the default demo board (ROADMAP SC2)', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-
-    // A FRESH factory ON the demo board: fresh because a just-placed machine
-    // carries no docked belts, so the Out it grows is provably dock-safe and the
-    // remove control is genuinely ENABLED (on the demo factory the gate would
-    // block it and this arm would prove nothing about undo). This is the exact
-    // sequence the phase verifier ran 4x against this same server:
-    // place -> + Add output -> remove that Out -> Ctrl+Z -> Ctrl+Shift+Z.
-    const factoriesBefore = new Set(
-      (await readScene(page)).nodes.filter((n) => n.kind === KIND_FACTORY).map((n) => n.id),
-    );
-    await armAndPlaceFactoryAt(page, PLACE_CELL[0], PLACE_CELL[1]);
-    await pollScene(page, (s) => s.nodes.filter((n) => n.kind === KIND_FACTORY).length, {
-      message: 'the real host echoes the placed factory onto the demo board',
-    }).toBe(factoriesBefore.size + 1);
-    const placed = (await readScene(page)).nodes.find(
-      (n) => n.kind === KIND_FACTORY && !factoriesBefore.has(n.id),
-    );
-    expect(placed, 'the freshly placed factory is found by diffing kind-2 handles').toBeDefined();
-    // From here the factory is tracked by ANCHOR, not by handle: the undo and the
-    // redo below each emit a full keyframe, and a keyframe re-mints dense render
-    // handles. The anchor survives both the keyframes and the footprint growth an
-    // AddPort causes.
-    const [ax, ay] = anchorOf(placed as NodeFacts);
-
-    const placedOuts = outsAtAnchor(await readScene(page), ax, ay);
-    expect(placedOuts, 'a fresh factory boots with at least one Out').toBeGreaterThan(0);
-
-    await selectFactory(page, await handleAtAnchor(page, ax, ay));
-    await expect(outRows(page), 'the panel lists the fresh factory Out ports').toHaveCount(
-      placedOuts,
-    );
-
-    // (1) ADD - grow a second Out through the real certified AddPort fold, so the
-    // remove below is a remove of a port THIS TEST minted on the real host.
-    await addOutput(page).click();
-    await pollScene(page, (s) => outsAtAnchor(s, ax, ay), {
-      message: 'the real host folded the AddPort on the fresh factory',
-    }).toBe(placedOuts + 1);
-    const afterAdd = placedOuts + 1;
-    await expect(outRows(page), 'the added Out row arrived on a real packet').toHaveCount(afterAdd);
-
-    // (2) REMOVE that Out. Both Outs are undocked, so the safety gate offers it -
-    // asserted, because a DISABLED control would make the rest of this test a
-    // silent no-op rather than a failure.
-    await expect(
-      removeOutput(page, afterAdd),
-      'the freshly added, undocked Out is offered for removal',
-    ).toBeEnabled();
-    await removeOutput(page, afterAdd).click();
-    await pollScene(page, (s) => outsAtAnchor(s, ax, ay), {
-      message: 'the real host folded the RemovePort: the Out is gone',
-    }).toBe(placedOuts);
-    await expect(outRows(page), 'the removed row left the panel').toHaveCount(placedOuts);
-
-    // (3) THE ASSERTION THAT WAS FALSE. Before 51-04 this poll timed out with the
-    // Out count still at `placedOuts`: the undo cursor moved, the inverse group
-    // was emitted with its restoring AddPort silently absent, and the port was
-    // gone for good. Fixed by live-authoritative undo captures
-    // (`live_removed_ports`), pinned Rust-side by
-    // undo_on_demo_board.rs#remove_undo_restores_the_port_on_the_demo_board.
-    await blurControls(page);
-    await page.keyboard.press('Control+z');
-    await pollScene(page, (s) => outsAtAnchor(s, ax, ay), {
-      message:
-        'a single Ctrl+Z RESTORES the removed Out on the default demo board (ROADMAP SC2, the half that was broken)',
-    }).toBe(afterAdd);
-    await selectFactory(page, await handleAtAnchor(page, ax, ay));
-    await expect(outRows(page), 'the restored Out row is back in the panel').toHaveCount(afterAdd);
-
-    // (4) ...and ONE Ctrl+Shift+Z removes it again - one step in each direction.
-    await page.keyboard.press('Control+Shift+z');
-    await pollScene(page, (s) => outsAtAnchor(s, ax, ay), {
-      message: 'a single Ctrl+Shift+Z re-applies the whole RemovePort on the real host',
-    }).toBe(placedOuts);
-    await selectFactory(page, await handleAtAnchor(page, ax, ay));
-    await expect(outRows(page), 'the Out is removed again after the real redo').toHaveCount(
-      placedOuts,
-    );
-
-    await expectRenderLoopAlive(page, 'at the end of the remove and undo walk');
-    errs.assertNone('the remove and undo walk');
-  });
 
   test('placing a machine and pressing Ctrl+Z removes THAT machine, and every other machine survives', async ({
     page,

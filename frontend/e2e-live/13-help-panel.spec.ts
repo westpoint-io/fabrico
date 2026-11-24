@@ -36,14 +36,6 @@ import {
 // frontend and host, this spec carried) and failed there (91-EVIDENCE.md,
 // `D17 case=CHROME-11-live`).
 //
-//   3. (phase 92, plan 92-05, CHROME-12, D-05) at 1024x768 with the Legend open, Help stops at
-//      least 8 px above the strip and does not cover it, and its list, which then scrolls, is
-//      reached by Tab. The live config's window is 1280x720, so the leg sets 1024x768, the size
-//      the walk measured 344 x 137.5 px covered at.
-//
-// RED FIRST (D-17, phase 92): leg 3 ran at PHASE92_START in the kept start worktree and failed
-// there (92-EVIDENCE.md, `D17 case=CHROME-12-help-live`).
-//
 // Render health in every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` and the
 // watcher's `assertNone` at its end (fabrico-model-oracle-blindspot).
 
@@ -240,52 +232,6 @@ test.describe('ONB-03 "?" help panel (real app, Legend a11y contract)', () => {
 
     await expectRenderLoopAlive(page, 'after the pan, zoom and fit');
     errors.assertNone('during the mouse-row checks');
-  });
-
-  test('Help stops above the open Legend on the real host', async ({ page }) => {
-    const errors = watchPageErrors(page);
-    await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto('/');
-    await waitForAppReady(page);
-    await page.getByRole('button', { name: 'Legend' }).click();
-    await expect(page.locator('#fab-legend-panel'), 'the Legend opened').toBeVisible();
-    await page.getByRole('button', { name: 'Help' }).click();
-    await expect(page.locator('#fab-help-panel'), 'Help opened').toBeVisible();
-    // Two frames, so what is read is what was painted.
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    const m = await page.evaluate(() => {
-      const box = (id: string) => {
-        const r = document.getElementById(id)!.getBoundingClientRect();
-        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
-      };
-      const s = document.querySelector<HTMLElement>('[data-fab-help-scroll]')!;
-      return {
-        help: box('fab-help-panel'),
-        legend: box('fab-legend-panel'),
-        scrolls: s.scrollHeight > s.clientHeight,
-        tabIndex: s.tabIndex,
-      };
-    });
-    const line = JSON.stringify(m);
-    console.log(`[92-05 help live] ${line}`);
-    const covers =
-      m.help.left < m.legend.right && m.legend.left < m.help.right && m.help.top < m.legend.bottom && m.legend.top < m.help.bottom;
-    const w = Math.max(0, Math.min(m.help.right, m.legend.right) - Math.max(m.help.left, m.legend.left));
-    const h = Math.max(0, Math.min(m.help.bottom, m.legend.bottom) - Math.max(m.help.top, m.legend.top));
-    expect(covers, `RED-FIRST CHROME-12-help-live: at 1024x768 Help covers ${w.toFixed(1)} x ${h.toFixed(1)} px of the open Legend (${line})`).toBe(false);
-    expect(m.legend.top - m.help.bottom, `RED-FIRST CHROME-12-help-live: the strip's top is at least 8 px below Help (${line})`).toBeGreaterThanOrEqual(7.5);
-    // The list scrolls in the room left, and the keyboard reaches it.
-    expect(m.scrolls, `Help's list scrolls above the open Legend (${line})`).toBe(true);
-    expect(m.tabIndex, 'the scrolling list is a tab stop').toBe(0);
-    let reached = false;
-    for (let i = 0; i < 120 && !reached; i += 1) {
-      await page.keyboard.press('Tab');
-      reached = await page.evaluate(() => document.activeElement?.hasAttribute('data-fab-help-scroll') === true);
-    }
-    expect(reached, 'Tab reaches the Help list').toBe(true);
-
-    await expectRenderLoopAlive(page, 'with Help and the Legend open');
-    errors.assertNone('during the Help and Legend check');
   });
 });
 

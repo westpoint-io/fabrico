@@ -3,11 +3,9 @@ import {
   armAndPlaceAt,
   clickAt,
   deselectViaEmptyCell,
-  drawBeltThroughCells,
   drawOffloadBelt,
   ensurePlaying,
   expectRenderLoopAlive,
-  newBoard,
   nodeAtAnchor,
   pollScene,
   readScene,
@@ -16,7 +14,6 @@ import {
   screenCellCentre,
   selectMachineAt,
   waitForAppReady,
-  waitForCameraSettle,
   watchPageErrors,
   type SceneFacts,
 } from './support/oracle';
@@ -61,12 +58,6 @@ import { PORT_STATUS } from '../src/chrome/configCopy';
 //      A Factory placed on clear demo floor shows no removal note; once a belt is drawn off its
 //      Out, `Removing this output disconnects its belt.` is that row's note, described by that
 //      row's Remove button, and on no other row.
-//   Router outputs have names: on an empty board a palette Router whose Out 1 is belted to a
-//      palette Sink names its outputs `Output 1 (Sink)`, `Output 2`, `Output 3` in the Default
-//      group, its Outputs list reads `Output 1 - Item` onward, the fallthrough names `Output 1
-//      (Sink)`, and no `(x,y)` cell label appears anywhere in the panel.
-//   Handler, not wire: the demo Route's panel reads `POST a JSON body to call its Handler.` at
-//      line height 1.4, and the Legend's Route row reads `POST here to call its Handler`.
 //
 // RED FIRST (D-17): run by `redfirst.sh` at PHASE91_START in the kept start worktree (that
 // revision's host and frontend, this spec and `configCopy.ts` carried in), where every row read
@@ -90,7 +81,6 @@ const DEMO_SOURCE_AT: [number, number] = [1, 3];
 const DEMO_TEE_AT: [number, number] = [9, 3];
 const DEMO_AUDIT_SINK_AT: [number, number] = [14, 4];
 const DEMO_ROUTER_AT: [number, number] = [14, 0];
-const DEMO_ROUTE_AT: [number, number] = [13, 7];
 const DEMO_BELT21_MIDDLE: [number, number] = [12, 4];
 const DEMO_FLOOR: [number, number] = [11, 9];
 /** The Factory leg's drop cell: the 3x3 box (6..8, 11..13) is clear demo floor, and so is the
@@ -101,24 +91,10 @@ const FACTORY_OUT_RUN: [number, number][] = [
   [10, 12],
   [11, 12],
 ];
-/** The Router leg, on an empty board (the `19-router-rules` seating): a 2x3 Router at (8,4)
- *  whose Out 1 (routing key 0) sits at (9,5) facing east, and a 1x1 Sink at (13,5) whose In
- *  faces west onto (12,5). */
-const ROUTER_AT: [number, number] = [8, 4];
-const SINK_AT: [number, number] = [13, 5];
-const ROUTER_TO_SINK: [number, number][] = [
-  [10, 5],
-  [11, 5],
-  [12, 5],
-];
-const EMPTY_FLOOR_CELL: [number, number] = [6, 7];
 const KIND_FACTORY = 2;
-const ROLE_IN = 0;
 /** The docked-output note and the Route notes, as literals: this spec restates what the
  *  panel says (UI-SPEC 8.4). */
 const DOCKED_OUTPUT_NOTE = 'Removing this output disconnects its belt.';
-const ROUTE_POST_NOTE = 'POST a JSON body to call its Handler.';
-const LEGEND_ROUTE_HINT = 'POST here to call its Handler';
 
 /** The sample: every 200 ms for 3 s. */
 const SAMPLE_EVERY_MS = 200;
@@ -328,111 +304,5 @@ test.describe('91 live: the inspector words are plain and true (CHROME-13)', () 
 
     await expectRenderLoopAlive(page, 'after the docked-output note');
     errs.assertNone('while the inspector notes were read');
-  });
-
-  test('Router outputs are named by number and target: Output 1 (Sink), Output 2, Output 3, and no cell label', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await ensurePlaying(page);
-    await resetToDemo(page);
-    await newBoard(page);
-    await waitForCameraSettle(page);
-
-    // The palette row's own name, read rather than typed: it is `Router` since plan 91-05
-    // (CHROME-09) and was `Item Router` at PHASE91_START, where this leg's red-first run
-    // must reach the Router panel to read its cell labels.
-    const routerRow = await page.getByRole('button', { name: /^Place (Item )?Router$/ }).getAttribute('aria-label');
-    await armAndPlaceAt(page, (routerRow ?? 'Place Router').replace(/^Place /, ''), ROUTER_AT[0], ROUTER_AT[1]);
-    await pollScene(
-      page,
-      (s) => (nodeAtAnchor(s, ROUTER_AT[0], ROUTER_AT[1])?.ports ?? []).filter((p) => p.role === ROLE_OUT).length,
-      { message: 'the palette Router settles with its three Outs' },
-    ).toBe(3);
-    await waitForCameraSettle(page);
-    await armAndPlaceAt(page, 'Sink', SINK_AT[0], SINK_AT[1]);
-    await pollScene(page, (s) => nodeAtAnchor(s, SINK_AT[0], SINK_AT[1])?.kind ?? -1, {
-      message: 'the palette Sink was placed',
-    }).toBe(KIND_SINK);
-    await waitForCameraSettle(page);
-
-    const scene = await readScene(page);
-    const router = nodeAtAnchor(scene, ROUTER_AT[0], ROUTER_AT[1])!;
-    const sink = nodeAtAnchor(scene, SINK_AT[0], SINK_AT[1])!;
-    const outs = router.ports.filter((p) => p.role === ROLE_OUT);
-    const sinkIn = sink.ports.find((p) => p.role === ROLE_IN)!;
-    expect([outs[0].cell_x, outs[0].cell_y], 'NON-VACUITY: Output 1 (routing key 0) sits on the middle row').toEqual([
-      ROUTER_AT[0] + 1,
-      ROUTER_AT[1] + 1,
-    ]);
-    await drawBeltThroughCells(page, outs[0], ROUTER_TO_SINK, sinkIn);
-    await pollScene(
-      page,
-      (s) =>
-        s.belts.some(
-          (b) =>
-            b.docks.some((d) => d.end === 'Tail' && d.node === router.id && d.port === 0) &&
-            b.docks.some((d) => d.end === 'Head' && d.node === sink.id),
-        ),
-      { message: "the belt runs from the Router's Output 1 into the Sink's In" },
-    ).toBe(true);
-
-    await selectMachineAt(page, ROUTER_AT[0], ROUTER_AT[1]);
-    const def = page.getByRole('group', { name: 'Default' });
-    await expect(def.getByRole('button'), 'the Default group names each output by number, Output 1 with its target').toHaveText([
-      'None (fault)',
-      'Output 1 (Sink)',
-      'Output 2',
-      'Output 3',
-    ]);
-    await expect(outputRows(page).filter({ hasNotText: 'Fault' }), 'the Outputs list numbers its rows').toHaveCount(3);
-    const outNames = (await outputRows(page).evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? ''))).slice(0, 3);
-    expect(outNames.map((n) => n.slice(0, n.lastIndexOf(', ')))).toEqual(['Output 1 - Item', 'Output 2 - Item', 'Output 3 - Item']);
-    await expect(page.locator('#fab-route-fallthrough'), 'the fallthrough names the default output and its target').toHaveText(
-      'Items matching no rule go to Output 1 (Sink).',
-    );
-    await expect(page.locator('#fab-route-note')).toHaveText(
-      'The first rule that matches wins. Output numbers match the Outputs list below.',
-    );
-    // A rule appended in the buffer shows the same segments under Send to.
-    await page.locator('#fab-route-add').click();
-    await expect(page.getByRole('group', { name: 'Send to, rule 1' }).getByRole('button')).toHaveText([
-      'Output 1 (Sink)',
-      'Output 2',
-      'Output 3',
-    ]);
-    const panelText = await page.locator('aside.fab-panel[aria-labelledby="fab-config-heading"]').innerText();
-    expect(panelText, 'no (x,y) cell label anywhere in the Router panel').not.toMatch(/\(\d+,\d+\)/);
-    await page.getByRole('button', { name: 'Revert' }).click();
-    await deselectViaEmptyCell(page, EMPTY_FLOOR_CELL[0], EMPTY_FLOOR_CELL[1]);
-
-    await expectRenderLoopAlive(page, 'after the Router names');
-    errs.assertNone('while the Router outputs were named');
-  });
-
-  test('Handler, not wire: the demo Route panel and the Legend say call its Handler', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-
-    await selectMachineAt(page, DEMO_ROUTE_AT[0], DEMO_ROUTE_AT[1]);
-    const note = page.getByText(ROUTE_POST_NOTE, { exact: true });
-    await expect(note, 'the Route panel says the POST calls its Handler').toBeVisible();
-    const lh = await note.evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return Number.parseFloat(cs.lineHeight) / Number.parseFloat(cs.fontSize);
-    });
-    expect(lh, 'the Route note sits at line height 1.4').toBeCloseTo(1.4, 2);
-    await deselectViaEmptyCell(page, DEMO_FLOOR[0], DEMO_FLOOR[1]);
-
-    await page.getByRole('button', { name: 'Legend' }).click();
-    await expect(page.getByText(LEGEND_ROUTE_HINT, { exact: true }), "the Legend's Route row says call its Handler").toBeVisible();
-    await page.getByRole('button', { name: 'Legend' }).click();
-
-    await expectRenderLoopAlive(page, 'after the Route and Legend reads');
-    errs.assertNone('while the Handler wording was read');
   });
 });

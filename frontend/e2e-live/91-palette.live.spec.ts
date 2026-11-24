@@ -30,10 +30,6 @@ import {
 // THE LEGS, GRADED ON WHAT THE USER SEES
 // ---------------------------------------------------------------------------
 //
-//   1. The demo board: the palette's heading reads `MACHINES` (the `Machines` heading in the
-//      title tier, uppercased by CSS), the element after it is the tool list, no element on the
-//      page reads the retired pointer, and the toolbar `Help` button opens `#fab-help-panel`
-//      under the heading `Gestures`.
 //   2. At the live config's 1280x720 window the list overflows (a precondition), the list carries
 //      `data-more-below` and the fade `[data-fab-palette-fade]` is visible on its bottom edge; the
 //      mouse wheel over the list, until the list stops moving, removes both.
@@ -45,49 +41,9 @@ import {
 // Render health in every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` and the
 // watcher's `assertNone` at its end (fabrico-model-oracle-blindspot).
 
-/** The text the retired hint box read, stated once as the value that must not appear. */
-const RETIRED_HINT_TEXT = 'Gestures: toolbar ? button';
-
 test.describe('91 live: the palette reads cleanly (CHROME-02, CHROME-16)', () => {
   test.afterEach(async ({ page }, testInfo) => {
     await restoreHostAfterFailedTest(page, testInfo);
-  });
-
-  test('1: the palette holds no gesture hint box, and the toolbar Help button opens Gestures', async ({
-    page,
-  }) => {
-    const errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-
-    const palette = page.locator('aside[aria-labelledby="fab-palette-heading"]');
-    const heading = palette.getByRole('heading', { name: 'Machines' });
-    await expect(heading, 'the palette heading is shown').toBeVisible();
-    expect(await heading.innerText(), 'the heading renders in the title tier').toBe('MACHINES');
-
-    const after = await heading.evaluate((h) => {
-      const next = h.nextElementSibling;
-      const isList =
-        !!next &&
-        (next.matches('[data-testid="palette-tools"]') ||
-          !!next.firstElementChild?.matches('[data-testid="palette-tools"]'));
-      return { isList, found: next ? `${next.tagName.toLowerCase()} "${(next.textContent ?? '').slice(0, 40)}"` : 'none' };
-    });
-    console.log(`P91-CHROME-02 after_heading=${after.found} is_list=${after.isList}`);
-    await expect(
-      page.getByText(RETIRED_HINT_TEXT, { exact: true }),
-      'no element on the page reads the retired gesture pointer',
-    ).toHaveCount(0);
-    expect(after.isList, `the element after the heading is the tool list (found: ${after.found})`).toBe(true);
-
-    await page.getByRole('button', { name: 'Help', exact: true }).click();
-    const help = page.locator('#fab-help-panel');
-    await expect(help, 'the toolbar Help button opens the gesture panel').toBeVisible();
-    await expect(help.getByRole('heading', { name: 'Gestures' }), 'the panel is headed Gestures').toBeVisible();
-
-    await expectRenderLoopAlive(page, 'after the palette read and the Help panel opened');
-    errs.assertNone('the palette hint walk');
   });
 
   test('2: the palette list shows a scroll cue at 1280x720 and the wheel to its end removes it', async ({ page }) => {

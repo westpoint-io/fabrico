@@ -15,8 +15,6 @@ import {
   loadDemoViaExamples,
   waitForAppReady,
   cameraOf,
-  screenPoint,
-  armAndPlaceFactoryAt,
   watchPageErrors,
   expectRenderLoopAlive,
   type SceneFacts,
@@ -40,11 +38,16 @@ import {
   CELL,
   cellCentreX,
   cellCentreY,
-  colorOracles,
-  nubAnchor,
-  rampOracles,
 } from '../shared/geometry';
 
+// WHAT IS LEFT IN THIS FILE. One test: SLOT-04 in the BELT-07 describe, which checks that
+// trailing interpolation keeps the render loop alive and error-free while item dots move.
+// The Fault-nub pixel probe and the two item-dot pixel probes this file was written for were
+// cut: 92-red-means-faulted.live.spec.ts reads the fault nub's neutral grey by pixel, and
+// 93-boards-load.live.spec.ts shows an item drawn on the demo's first belt. The history below
+// still explains the machinery SLOT-04 uses (the lane strip, the clock pin, the chrome-clear
+// bounds and the demo reset).
+//
 // 06-fault-red-probe.spec.ts (GATE-03 / RENDER-04) - a checked-in SECONDARY live
 // pixel probe proving the FACTORY Fault OUTPUT-NUB renders HONESTLY: a freshly
 // placed, NON-faulted FACTORY paints its role-2 Fault nub DIM/OUTLINE
@@ -103,35 +106,6 @@ import {
 // command); every wait is a pollScene predicate with a message; NO fixed sleeps;
 // ZERO mocks (runs against the real dev_render_server).
 
-/** FACTORY wire kind (mirrored from kinds.ts / 01-default-scene). */
-const KIND_FACTORY = 2;
-/** Port role Fault (In=0, Out=1, Fault=2) - PortFacts.role keyspace. */
-const ROLE_FAULT = 2;
-/**
- * The drop cell for the probe FACTORY: a verified-empty cell. The demo's belt
- * machinery all sits on rows 0..5 (SOURCE (1,3) through the MERGE (22,2) 2x2 and
- * the terminal SINK (26,2), with the long-branch SINK at (22,5) since the EX-03
- * re-space); below that live only the demo's caller and handler pair (on row 6 when
- * plan 85-07 measured it) and the fault SINK at (5,8). So the probe's 3x3 footprint at
- * cols 6..8 / rows 8..10 is clear, and stays clear after the re-space (which
- * moved the long-branch sink one row SOUTH, from (22,4) to (22,5) - nowhere near
- * this drop). The drop screen point is
- * routed through the live camera (screenCellCentre), so under the 29-04 boot-fit
- * it lands wherever this cell is now composited - and this row keeps the factory's
- * SOUTH-facing Fault nub fully on-screen and clear of the chrome (the demo is
- * centred by boot-fit; row 8 sits just below it in the mid-viewport). The old
- * (20,12) was chosen for the IDENTITY boot camera ("near viewport centre" then);
- * under boot-fit's zoom that far cell's downward nub scrolled off the viewport
- * bottom, so its 1x1 screenshot clip fell outside the image - the exact Pitfall 4
- * the camera-aware oracle corrects.
- */
-const PROBE_DROP = [6, 8] as const;
-
-/** Decode a 0xRRGGBB numeric color to 8-bit { r, g, b } via shifts (inline, numeric). */
-function hexToRgb(color: number): { r: number; g: number; b: number } {
-  return { r: (color >> 16) & 0xff, g: (color >> 8) & 0xff, b: color & 0xff };
-}
-
 /**
  * Reset the SHARED live host to the known demo baseline via the shipped
  * Load-demo CTA (a genesis-swap reset). dev_render_server persists
@@ -148,122 +122,6 @@ async function loadDemoReset(page: Page): Promise<void> {
       'the LoadDemo genesis swap folded (sim tick restarted below the pre-click tick) onto the demo baseline',
   }).toBe(true);
 }
-
-/**
- * Place a fresh FACTORY via the shipped palette drag: press the palette Factory
- * tile at its bbox centre, drag onto the clear drop cell, release. Polls until the real host echoes a SECOND kind-2 node, then
- * returns the placed node's id (diffed from the pre-place kind-2 id set, never a
- * hardcoded handle).
- */
-async function placeFactory(page: Page): Promise<number> {
-  const beforeIds = new Set(
-    (await readScene(page)).nodes.filter((n) => n.kind === KIND_FACTORY).map((n) => n.id),
-  );
-  // Arm-then-click (30-05): arm the Factory tool, click the drop cell, disarm.
-  await armAndPlaceFactoryAt(page, PROBE_DROP[0], PROBE_DROP[1]);
-
-  await pollScene(page, (s) => s.nodes.filter((n) => n.kind === KIND_FACTORY).length, {
-    message: 'the real host echoes the placed FACTORY (kind-2 node count grows by one)',
-  }).toBe(beforeIds.size + 1);
-
-  const placed = (await readScene(page)).nodes.find(
-    (n) => n.kind === KIND_FACTORY && !beforeIds.has(n.id),
-  );
-  expect(placed, 'the placed factory is found by diffing pre/post kind-2 ids').toBeDefined();
-  return placed!.id;
-}
-
-test.describe('RENDER-04: the idle FACTORY Fault OUTPUT-NUB renders DIM ramp[3], not stuck-red (LIVE pixel probe, real host)', () => {
-  // RENDER HEALTH (plan 85-07, the model-oracle blind spot). The pixel probe below pins
-  // the render clock, so a dead ticker would not show in its one sample; the watcher is
-  // installed BEFORE `page.goto`, and after the test the pin is released and the loop is
-  // asserted alive, the BELT-07 describe's shape (`expectHealthyAfterProbe`).
-  let errs: ReturnType<typeof watchPageErrors>;
-
-  test.beforeEach(async ({ page }) => {
-    errs = watchPageErrors(page);
-    await page.goto('/');
-    await waitForAppReady(page);
-  });
-
-  test.afterEach(async ({ page }) => {
-    await page.evaluate(() => {
-      const hook = (window as { __fabrico?: { pinClock(n: number | null): void } }).__fabrico;
-      hook?.pinClock(null);
-    });
-    await expectRenderLoopAlive(page, 'after the Fault-nub pixel probe, with the clock pin released');
-    errs.assertNone('the Fault-nub pixel probe');
-  });
-
-  test('the idle role-2 Fault nub center pixel exactly equals the dim ramp[3] (rampOracles.locked[3])', async ({ page }) => {
-    // --- Arrange: clean demo baseline (resets the shared host), then a
-    // FACTORY placed in a chrome-clear region (see header). ---
-    await loadDemoReset(page);
-    const placedId = await placeFactory(page);
-
-    // --- Read the fault port location off the style-independent scene oracle. ---
-    const factory = (await readScene(page)).nodes.find((n) => n.id === placedId);
-    expect(factory, 'the placed FACTORY is present in the scene oracle').toBeDefined();
-    const faultPort = factory!.ports.find((p) => p.role === ROLE_FAULT);
-    expect(faultPort, 'the FACTORY exposes a role-2 Fault port').toBeDefined();
-
-    // --- Freeze render motion: pin the render clock (READ-adjacent, sim-inert). ---
-    await page.evaluate(() => {
-      const hook = (window as { __fabrico?: { pinClock(n: number | null): void } }).__fabrico;
-      if (!hook) throw new Error('window.__fabrico not installed');
-      hook.pinClock(0);
-    });
-
-    // --- Compute the nub center from the ORACLE-read port facts (never baked). ---
-    // The world nub point is routed through the live camera (screenPoint); under
-    // the identity boot camera it is world*1 + 0, and with deviceScaleFactor 1
-    // (playwright.live.config Desktop Chrome) a world CSS point maps 1:1 to a
-    // device pixel after rounding. When the boot camera moves (29-04) this
-    // samples the nub's transformed screen position instead.
-    const anchor = nubAnchor(faultPort!.cell_x, faultPort!.cell_y, faultPort!.side);
-    const screen = await screenPoint(page, anchor);
-    const x = Math.round(screen.x);
-    const y = Math.round(screen.y);
-
-    // Guard: the computed nub must be clear of the chrome overlays (top toolbar /
-    // left palette), else we would sample panel fill, not the nub (the carry-in
-    // failure mode). The drop cell is chosen clear; this makes any regression read.
-    expect(x, 'the Fault nub is clear of the left palette panel (x > 210)').toBeGreaterThan(210);
-    expect(y, 'the Fault nub is clear of the top toolbar (y > 95)').toBeGreaterThan(95);
-
-    // Guard (WR-03): the sample MUST lie inside the live viewport. The chrome
-    // guards above are lower bounds; under the 29-04 boot-fit a future demo-layout
-    // or fit-tuning change could scroll the SOUTH-facing nub off the viewport
-    // bottom/right, and page.mouse.move / page.screenshot({clip}) would then sample
-    // a stray off-viewport pixel instead of the nub. Assert 0 <= x < width and
-    // 0 <= y < height so such a regression fails loudly here rather than matching
-    // (or mismatching) garbage in the pixel probe below.
-    const vp = page.viewportSize();
-    expect(vp, 'the live page reports a viewport size for the bounds guard').not.toBeNull();
-    expect(x, 'the Fault nub sample is within the viewport left/right bounds').toBeGreaterThanOrEqual(0);
-    expect(x, 'the Fault nub sample is within the viewport width').toBeLessThan(vp!.width);
-    expect(y, 'the Fault nub sample is within the viewport top/bottom bounds').toBeGreaterThanOrEqual(0);
-    expect(y, 'the Fault nub sample is within the viewport height').toBeLessThan(vp!.height);
-
-    // --- Sample a 1x1 device-pixel clip at the nub center and decode it. ---
-    const clip = await captureClip(page, { x, y, width: 1, height: 1 });
-    const png = PNG.sync.read(clip);
-    const i = ((png.width * 0 + 0) << 2); // device pixel (0,0) of the 1x1 clip
-    const sampled = { r: png.data[i], g: png.data[i + 1], b: png.data[i + 2] };
-
-    // --- Assert: exact match against the skin-schema DIM step (RENDER-04). ---
-    // The freshly placed FACTORY is NOT faulted, so its role-2 Fault nub reads the
-    // dim ramp[3], not fault red. Antialias is OFF as of Phase 25's final
-    // canvas-reskin step, so the center pixel is exact (no blend). The message names
-    // rampOracles.locked[3] so a skin drift reads clearly. The always-red premise is
-    // retired; the live-FAULTED colour is covered by machines.test.ts + the FEEL kit.
-    const expected = hexToRgb(rampOracles.locked[3]);
-    expect(
-      sampled,
-      `the idle Fault nub center at screen (${x},${y}) must render the dim ramp[3] rampOracles.locked[3] (${expected.r},${expected.g},${expected.b}), not stuck fault-red`,
-    ).toEqual(expected);
-  });
-});
 
 // ===========================================================================
 // BELT-07 / VEC-01 (plan 61-05): the item dot on the LIVE Chromium path.
@@ -308,37 +166,6 @@ test.describe('RENDER-04: the idle FACTORY Fault OUTPUT-NUB renders DIM ramp[3],
 // axis 5) and a halo would need its own signed supersession. So this gate can only
 // catch the conversion making it WORSE.
 
-/** WCAG relative luminance of an 8-bit sRGB triple. Pure; no product import. */
-function relativeLuminance(px: { r: number; g: number; b: number }): number {
-  const lin = (c: number): number => {
-    const s = c / 255;
-    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin(px.r) + 0.7152 * lin(px.g) + 0.0722 * lin(px.b);
-}
-
-/** WCAG contrast ratio between two sampled pixels, lighter over darker. */
-function contrastRatio(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): number {
-  const la = relativeLuminance(a);
-  const lb = relativeLuminance(b);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
-/**
- * The INHERITED dot-against-tread greyscale separation, as an EXECUTABLE literal
- * rather than prose. The item accent over the belt's own tread ink is a 1.11-to-1
- * contrast, and it was that before this plan touched anything.
- */
-const INHERITED_SEPARATION = 1.11;
-
-/**
- * The floor's tolerance, STATED with its reason: 1.11 is a two-decimal rounding of a
- * separation that computes to 1.1096 from the skin schema, so a floor at exactly 1.11
- * would fail on the rounding rather than on a regression. 0.01 is the width of that
- * rounding and nothing more - it is NOT slack for the conversion to spend.
- */
-const SEPARATION_TOLERANCE = 0.01;
-
 /**
  * The belt tread mark is only drawn at full detail above the layer's LOD cut
  * (`belts.ts LOD_MIN_TREAD_PX` = 24 device px per tile). The demo boots fitted at
@@ -351,7 +178,7 @@ const SEPARATION_TOLERANCE = 0.01;
  */
 const LOD_MIN_TREAD_PX = 24;
 
-/** Chrome-clear bounds, mirroring the guards the Fault-nub probe above already uses. */
+/** Chrome-clear bounds: the top toolbar is about 95 px tall and the left palette about 210 px wide. */
 const CHROME_CLEAR_X = 210;
 const CHROME_CLEAR_Y = 95;
 
@@ -420,7 +247,7 @@ async function zoomToFullBeltDetail(page: Page): Promise<number> {
  * so a machine in a neighbouring row cannot enter the sample.
  *
  * Only HORIZONTAL runs are considered, and only tiles whose whole cell clears the
- * chrome and sits inside the viewport - the same two guards the Fault-nub probe uses,
+ * chrome and sits inside the viewport - the two guards the cut Fault-nub probe used,
  * for the same reason: sampling panel fill instead of the board is the carry-in
  * failure mode this file was rewritten to avoid.
  */
@@ -568,173 +395,6 @@ test.describe('BELT-07 / VEC-01 (LIVE pixel probe, real host): the item dot rend
     pageErrors = watchPageErrors(page);
     await page.goto('/');
     await waitForAppReady(page);
-  });
-
-  /**
-   * FREEZE THE FRAME FOR A PIXEL PROBE: pin the render clock AND pin trailing item
-   * interpolation OFF (plan 62-05, the D-10 toggle audit).
-   *
-   * WHY THE SECOND PIN EXISTS, AND WHY IT IS A PIN RATHER THAN AN ASSUMPTION. Under a
-   * trailing lerp the interpolation parameter is `(renderClock + LAG_TICKS - <the tick
-   * the previous slots were observed at>) / ticks_per_slot` (the `+ LAG_TICKS` is
-   * 62-INTERP-FIX: without it the clock's ceiling and that origin are the same number
-   * and the parameter is pinned at 0 on every frame, which is what shipped in 62-05).
-   * It does not change this pin's arithmetic by anything that matters:
-   * `pinClock(0)` holds the render clock at
-   * zero while the SIM KEEPS ADVANCING (the pin is display-only), so that parameter is a
-   * large NEGATIVE which the clamp turns into 0 - and the layer then draws every dot at
-   * its PREVIOUS slot. That is a real, ONE-SLOT-PITCH along-flow displacement of the
-   * exact thing these two cases sample.
-   *
-   * MEASURED rather than reasoned (plan 62-05, task 3):
-   *   - the displacement is EXACTLY one slot pitch: 8.000 world px along a straight tile
-   *     and 6.283185 through a bend, and 0 for a blocked dot whose slot did not change.
-   *     Pinned as exact arc lengths (36 vs 44 on a 2-tile straight) in
-   *     `frontend/src/render/layers/items.test.ts`.
-   *   - ON SCREEN, with the toggle forced ON (mutation P1, run against the real
-   *     `dev_render_server`), both cases below still PASS: the item accent is still the
-   *     warmest pixel in the lane, 19 and 38 core pixels were composited on two runs,
-   *     and the dot-versus-tread contrast measured 1.1096 to 1 against a floor of 1.10.
-   *     The lane strip spans the INTERIOR tiles of a >= 5-tile run (>= 3 tiles = 96
-   *     world px), so a one-slot-pitch shift cannot carry a dot out of it.
-   *
-   * SO THE TOLERANCE IS NOT THE ISSUE, AND THE PIN IS STILL THE RIGHT ANSWER. These are
-   * COLOUR probes: they assert which ink is warmest in a lane strip and how it contrasts
-   * with the tread. Neither has a positional claim for a tolerance to widen. Pinning the
-   * toggle makes them independent of a D-10 decision that has not been taken yet - the
-   * default is OFF today, and if the wave-5 sitting ships it ON these two cases must not
-   * silently change what they sample. It also costs nothing: the pin writes the same
-   * render-side boolean the default already holds.
-   */
-  async function pinFrameForProbe(page: Page): Promise<void> {
-    await page.evaluate(() => {
-      const hook = (
-        window as {
-          __fabrico?: { pinClock(n: number | null): void; setItemInterpolation(on: boolean): void };
-        }
-      ).__fabrico;
-      if (!hook) throw new Error('window.__fabrico not installed');
-      hook.pinClock(0);
-      hook.setItemInterpolation(false);
-    });
-  }
-
-  /** Release the clock pin, then assert the loop is genuinely still advancing. */
-  async function expectHealthyAfterProbe(
-    page: Page,
-    context: string,
-  ): Promise<void> {
-    await page.evaluate(() => {
-      const hook = (window as { __fabrico?: { pinClock(n: number | null): void } }).__fabrico;
-      hook?.pinClock(null);
-    });
-    await expectRenderLoopAlive(page, context);
-    pageErrors.assertNone(context);
-  }
-
-  test('an item dot is VISIBLE on a live belt lane, in the skin-schema item accent', async ({
-    page,
-  }) => {
-    // THE SILENT-EMPTY BACKSTOP for the plan 61-05 representation change. A texture
-    // route that produced a zero-extent or never-uploaded dot would pass every node
-    // assertion about bindings, buckets and geometry and render NOTHING. Only a real
-    // rasteriser can say otherwise, and this is the only place in the tree that has one.
-    await loadDemoReset(page);
-    await zoomToFullBeltDetail(page);
-    await pinFrameForProbe(page);
-
-    // The sim keeps advancing under a pinned RENDER clock (pinClock is display-only),
-    // so which slots are occupied moves between the oracle read and the shutter. Poll
-    // the whole read-screenshot-decode cycle rather than racing it - no fixed sleeps.
-    let last: LaneSample = { dot: null, tread: null, corePixels: 0, treadPixels: 0 };
-    let strip: LaneStrip | null = null;
-    // SPLIT (plan 84-18, D-12): the lane shows a dot only once the model has carried an item onto
-    // it, a count of ticks the Rust demo seed holds and this spec cannot read. That wait is the
-    // model's, under the old literal; the capture poll after it is derived from its frames.
-    const target = await laneStripOf(page, await readScene(page));
-    await pollScene(page, (s) => itemOnStrip(s, target), {
-      timeout: 30_000,
-      message: `the model carries an item onto the sampled lane of belt ${target.beltId}`,
-    }).toBe(true);
-    await expect
-      .poll(
-        async () => {
-          const scene = await readScene(page);
-          strip = await laneStripOf(page, scene);
-          last = await sampleLane(page, strip);
-          return last.corePixels;
-        },
-        {
-          message:
-            'at least one item dot is composited on the sampled belt lane (a never-uploaded or ' +
-            'zero-extent dot texture renders nothing and would read 0 here)',
-          timeout: addWaitBudget(frameBudgetMs(CAPTURE_POLL_TRIES * CAPTURE_FRAMES + DRAWN_STATE_FRAMES), 'lane dot poll: two tries of one clip capture'),
-        },
-      )
-      .toBeGreaterThan(0);
-
-    // The warmest pixel in the lane is the dot's core, and it is EXACTLY the item
-    // accent: full opacity, right ink, no blend. A dot drawn at partial alpha or in a
-    // stale ink would still be the warmest pixel and would fail right here.
-    const expected = hexToRgb(colorOracles.itemHalo);
-    expect(
-      last.dot,
-      `the warmest pixel in belt ${strip!.beltId}'s lane must be the item accent ` +
-        `colorOracles.itemHalo (${expected.r},${expected.g},${expected.b}) at full opacity`,
-    ).toEqual(expected);
-
-    await expectHealthyAfterProbe(page, 'after the live item-dot lane probe');
-  });
-
-  test('the dot-against-tread greyscale separation is at least the inherited 1.11 to 1', async ({
-    page,
-  }) => {
-    await loadDemoReset(page);
-    await zoomToFullBeltDetail(page);
-    await pinFrameForProbe(page);
-
-    let last: LaneSample = { dot: null, tread: null, corePixels: 0, treadPixels: 0 };
-    // SPLIT (plan 84-18, D-12): the lane shows a dot only once the model has carried an item onto
-    // it, a count of ticks the Rust demo seed holds and this spec cannot read. That wait is the
-    // model's, under the old literal; the capture poll after it is derived from its frames.
-    const target = await laneStripOf(page, await readScene(page));
-    await pollScene(page, (s) => itemOnStrip(s, target), {
-      timeout: 30_000,
-      message: `the model carries an item onto the sampled lane of belt ${target.beltId}`,
-    }).toBe(true);
-    await expect
-      .poll(
-        async () => {
-          const scene = await readScene(page);
-          last = await sampleLane(page, await laneStripOf(page, scene));
-          return last.corePixels;
-        },
-        {
-          message: 'an item dot and the belt tread are both present in the sampled lane',
-          timeout: addWaitBudget(frameBudgetMs(CAPTURE_POLL_TRIES * CAPTURE_FRAMES + DRAWN_STATE_FRAMES), 'lane dot and tread poll: two tries of one clip capture'),
-        },
-      )
-      .toBeGreaterThan(0);
-
-    // Both sample points are the SKIN SCHEMA's own values, read off the live canvas
-    // rather than assumed - which is what makes the ratio below a measurement.
-    expect(last.dot, 'the dot sample is the item accent').toEqual(hexToRgb(colorOracles.itemHalo));
-    expect(
-      last.tread,
-      'the brightest cool pixel in the lane is the belt tread ink rampOracles.locked[4]',
-    ).toEqual(hexToRgb(rampOracles.locked[4]));
-
-    // ONE-SIDED: this plan must not make the separation worse, and it is not licensed
-    // to make it better (the dot is a locked cell; a halo needs its own supersession).
-    const measured = contrastRatio(last.dot!, last.tread!);
-    expect(
-      measured,
-      `the item dot reads ${measured.toFixed(4)} to 1 against the belt tread beneath it; the ` +
-        `INHERITED separation is ${INHERITED_SEPARATION} to 1 and the vector conversion must ` +
-        `not reduce it`,
-    ).toBeGreaterThanOrEqual(INHERITED_SEPARATION - SEPARATION_TOLERANCE);
-
-    await expectHealthyAfterProbe(page, 'after the live dot-versus-tread separation probe');
   });
 
   test('SLOT-04: the TRAILING-INTERPOLATION path keeps the render loop ALIVE and error-free while item dots are MOVING', async ({

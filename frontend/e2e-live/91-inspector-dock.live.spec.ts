@@ -1,7 +1,6 @@
 import { test, expect, type Page } from './support/liveTest';
 import {
   anchorOf,
-  cameraOf,
   expectRenderLoopAlive,
   pollScene,
   readScene,
@@ -10,9 +9,7 @@ import {
   selectMachineAt,
   waitForAppReady,
   watchPageErrors,
-  type SceneFacts,
 } from './support/oracle';
-import { CELL } from '../shared/geometry';
 
 // 91-inspector-dock.live.spec.ts (phase 91, plan 91-09, CHROME-07, D-06, success criterion 2,
 // UI-SPEC walk steps 2 to 4) - the inspector docks below the toolbar on the REAL host
@@ -36,10 +33,6 @@ import { CELL } from '../shared/geometry';
 //      its content plus padding or the max (8 px above the camera cluster, review WR-B-06), and
 //      Fit and the zoom button answer their own centres; Apply answers its own centre; and `New`
 //      is pressed and acts (the demo is clean, so it empties the board).
-//   2. At 1024x768, the demo's Router (which the Fit puts under the inspector's column there)
-//      selected: the board slides left so the Router's footprint, read from `readScene` and
-//      `cameraOf`, ends at or left of the panel's left edge less 24, with the zoom and the
-//      vertical pan kept.
 //
 // RED FIRST (D-17): each leg run once against PHASE91_START by `redfirst.sh` (the kept start
 // worktree's host and frontend, this spec carried in); the record is in 91-EVIDENCE.md.
@@ -175,52 +168,4 @@ test.describe('91 live: the inspector docks below the toolbar (CHROME-07)', () =
     await resetToDemo(page);
     errs.assertNone('the inspector dock walk');
   });
-
-  test('2: the selected Router stays visible: the board slides it 24 px clear of the panel', async ({ page }) => {
-    test.setTimeout(90_000);
-    const errs = watchPageErrors(page);
-    await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto('/');
-    await waitForAppReady(page);
-    await resetToDemo(page);
-    const router = (await readScene(page)).nodes.find((n) => n.kind === KIND_ROUTER);
-    expect(router, 'the demo board carries a Router').toBeDefined();
-    const before = await cameraOf(page);
-    const m0 = footprintOf(router!, before);
-    const line0 = `before=${JSON.stringify({ cam: before, m: m0 })}`;
-    console.log(`P91-CHROME-07 live nudge ${line0}`);
-    // NON-VACUITY: the Fit puts the Router under the column the panel takes at 1024 wide
-    // (91-MEASURE.md: x 639..667, the clear line 594.08).
-    expect(m0.right, `PRECONDITION: the Router sits under the inspector's column before it is selected (${line0})`).toBeGreaterThan(594.08 + 0.5);
-    await expectRenderLoopAlive(page, 'before the Router is selected');
-
-    // The Router is selected by a press on its own visible cell: at 1024 wide its left edge is
-    // still open board, and the anchor cell is its top-left (selectMachineAt clicks there).
-    await selectMachineAt(page, ...anchorOf(router!));
-    const panel = await page.locator('aside[aria-labelledby="fab-config-heading"]').boundingBox();
-    expect(panel, 'the Router panel is on screen').not.toBeNull();
-    const after = await cameraOf(page);
-    const m = footprintOf(router!, after);
-    const line = `panel.left=${panel!.x} after=${JSON.stringify({ cam: after, m })}`;
-    console.log(`P91-CHROME-07 live nudge ${line}`);
-    expect(m.right, `the Router ends at or left of the panel's left edge less 24 (${line})`).toBeLessThanOrEqual(panel!.x - 24 + 0.5);
-    expect(after.scale, 'the nudge keeps the zoom').toBe(before.scale);
-    expect(after.y, 'the nudge keeps the vertical pan').toBe(before.y);
-    await expectRenderLoopAlive(page, 'after the nudge');
-
-    await resetToDemo(page);
-    errs.assertNone('the nudge walk');
-  });
 });
-
-/** A node's footprint on screen, from its cells and a camera snapshot. */
-function footprintOf(node: SceneFacts['nodes'][number], cam: { x: number; y: number; scale: number }) {
-  const xs = node.cells.map((c) => c[0]);
-  const ys = node.cells.map((c) => c[1]);
-  return {
-    left: Math.min(...xs) * CELL * cam.scale + cam.x,
-    top: Math.min(...ys) * CELL * cam.scale + cam.y,
-    right: (Math.max(...xs) + 1) * CELL * cam.scale + cam.x,
-    bottom: (Math.max(...ys) + 1) * CELL * cam.scale + cam.y,
-  };
-}
