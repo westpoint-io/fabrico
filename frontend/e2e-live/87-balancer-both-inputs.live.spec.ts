@@ -132,8 +132,7 @@ const SETTLE_TICKS = 2 * OUTLET_0.length * SLOTS_PER_TILE * TICKS_PER_SLOT;
 type NodeFacts = SceneFacts['nodes'][number];
 type BeltFacts = SceneFacts['belts'][number];
 
-/** An empty, playing board at camera scale 1, every cell this spec uses on the open canvas
- *  (the `87-source-backed-up` shape). */
+/** An empty, playing board at camera scale 1, every cell this spec uses on the open canvas. */
 async function emptyBoardAtScaleOne(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');

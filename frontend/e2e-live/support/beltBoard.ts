@@ -129,8 +129,7 @@ export async function pauseAndSettle(page: Page, what: string): Promise<number> 
 
 /**
  * An empty, playing board at camera scale 1, every named cell on the open canvas. The page is
- * opened again on the empty board so it boots at its identity camera, whatever ran before (the
- * `87-source-backed-up` shape).
+ * opened again on the empty board so it boots at its identity camera, whatever ran before.
  */
 export async function emptyBoardAtScaleOne(page: Page, cells: ReadonlyArray<Cell>): Promise<void> {
   await newBoard(page);

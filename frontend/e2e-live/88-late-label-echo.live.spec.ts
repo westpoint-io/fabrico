@@ -82,8 +82,8 @@ const RUN_ON_TICKS = 30;
 /** The ticks a single echo is allowed to take on a playing board, for the derived budgets. */
 const ECHO_TICKS = 120;
 /** How many times slower than `FLOOR_TPS` a board may tick and still be graded: phase 87 measured
- *  about 20 ticks a second under the CPU quota (`87-source-backed-up.live.spec.ts`), under the
- *  floor's 28, so every tick budget below is this many times the ticks it waits for. */
+ *  about 20 ticks a second under the CPU quota, under the floor's 28, so every tick budget below
+ *  is this many times the ticks it waits for. */
 const SLOW_BOARD = 3;
 
 function transport(page: Page) {

@@ -90,11 +90,12 @@ import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frame
 // `window.__fabrico.beltPreviewKindAt` (the kind the held-picture surface plotted at the seam)
 // and `beltDrawnKindsOf` (the kind the belts layer drew), never the model alone; the docks are
 // read off the model AND off the end marks' Graphics (`beltEndInstructionsOn`). Render health in
-// every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` on a ticking board after
+// every leg: `watchPageErrors` before `goto`, `expectRenderLoopAlive` on a ticking board after
 // Play, and the watcher's `assertNone`.
 //
-// Pause is HOST-global: each leg presses Play again in a `finally`, and a failed test restores
-// the shared host (`restoreHostAfterFailedTest`).
+// The two legs run as two steps of one test, each on its own empty board. Pause is HOST-global:
+// each leg presses Play again in a `finally`, and a failed test restores the shared host
+// (`restoreHostAfterFailedTest`).
 //
 // RED FIRST (88-EVIDENCE.md `## Plan 88-06`): served from the plan's start revision, leg 1 read
 // red: the held corner went missing mid-drain and the belt landed with no dock.
@@ -506,217 +507,217 @@ test.describe('a belt drawn just after Pause keeps its dock (BELT-05, D-06, D-07
   test('leg 1: a docked belt drawn just after Pause keeps its corner through the drain and docks on Play', async ({
     page,
   }) => {
-    test.setTimeout(180_000);
-    const errs = watchPageErrors(page);
-    try {
-      await emptyBoard(page);
-      await expectRenderLoopAlive(page, 'leg 1 start');
+    // The two legs' own limits, 180 s and 240 s, summed.
+    test.setTimeout(420_000);
+    await test.step('leg 1: a docked belt drawn just after Pause keeps its corner through the drain and docks on Play', async () => {
+      const errs = watchPageErrors(page);
+      try {
+        await emptyBoard(page);
+        await expectRenderLoopAlive(page, 'leg 1 start');
 
-      // THE BACKLOG (Pitfall 7): a Timer Source into a belt with a free head, until items rest.
-      await handPlaceAt(page, 'Source', ...BACKLOG_SOURCE);
-      await page.keyboard.press('Escape');
-      await pollScene(page, (s) => machineAt(s, BACKLOG_SOURCE, SOURCE_KIND) !== undefined, {
-        message: 'leg 1: the backlog Source landed',
-      }).toBe(true);
-      const backlogOut = portOf(machineAt(await readScene(page), BACKLOG_SOURCE, SOURCE_KIND)!, 1);
-      await selectMachineAt(page, ...BACKLOG_SOURCE);
-      await pressSegment(page, 'Trigger', 'Timer');
-      await fillPanelField(page, 'fab-timer-interval', BACKLOG_INTERVAL);
-      await applyConfig(page);
-      await deselectViaEmptyCell(page, ...EMPTY_CELL);
-      await drawOffloadBelt(page, backlogOut, BACKLOG_CELLS);
-      await pollScene(page, (s) => (beltFrom(s, BACKLOG_CELLS[0])?.occupiedSlots ?? []).length >= SLOTS_PER_TILE, {
-        message: 'leg 1: the backlog belt landed and items rest at its free head',
-      }).toBe(true);
-      const backlog = beltFrom(await readScene(page), BACKLOG_CELLS[0])!;
-      expect(backlog.docks.map((d) => d.end), 'leg 1: NON-VACUITY: the backlog belt docks its Tail only').toEqual([
-        'Tail',
-      ]);
-      await expect
-        .poll(() => beltEndInstructionsOn(page, backlog.id), {
-          message: 'leg 1: the backlog belt draws its one dock',
-          timeout: addWaitBudget(frameBudgetMs(8), 'leg 1: the backlog end marks are drawn'),
-        })
-        .toBeGreaterThan(0);
-      const oneDockEnds = await beltEndInstructionsOn(page, backlog.id);
+        // THE BACKLOG (Pitfall 7): a Timer Source into a belt with a free head, until items rest.
+        await handPlaceAt(page, 'Source', ...BACKLOG_SOURCE);
+        await page.keyboard.press('Escape');
+        await pollScene(page, (s) => machineAt(s, BACKLOG_SOURCE, SOURCE_KIND) !== undefined, {
+          message: 'leg 1: the backlog Source landed',
+        }).toBe(true);
+        const backlogOut = portOf(machineAt(await readScene(page), BACKLOG_SOURCE, SOURCE_KIND)!, 1);
+        await selectMachineAt(page, ...BACKLOG_SOURCE);
+        await pressSegment(page, 'Trigger', 'Timer');
+        await fillPanelField(page, 'fab-timer-interval', BACKLOG_INTERVAL);
+        await applyConfig(page);
+        await deselectViaEmptyCell(page, ...EMPTY_CELL);
+        await drawOffloadBelt(page, backlogOut, BACKLOG_CELLS);
+        await pollScene(page, (s) => (beltFrom(s, BACKLOG_CELLS[0])?.occupiedSlots ?? []).length >= SLOTS_PER_TILE, {
+          message: 'leg 1: the backlog belt landed and items rest at its free head',
+        }).toBe(true);
+        const backlog = beltFrom(await readScene(page), BACKLOG_CELLS[0])!;
+        expect(backlog.docks.map((d) => d.end), 'leg 1: NON-VACUITY: the backlog belt docks its Tail only').toEqual([
+          'Tail',
+        ]);
+        await expect
+          .poll(() => beltEndInstructionsOn(page, backlog.id), {
+            message: 'leg 1: the backlog belt draws its one dock',
+            timeout: addWaitBudget(frameBudgetMs(8), 'leg 1: the backlog end marks are drawn'),
+          })
+          .toBeGreaterThan(0);
+        const oneDockEnds = await beltEndInstructionsOn(page, backlog.id);
 
-      const { out, inPort } = await placePair(page, 'leg 1');
+        const { out, inPort } = await placePair(page, 'leg 1');
 
-      // THE DOCKED DRAW, Pause just before the release: the drain has just begun.
-      await startDrainSampler(page, '__drain1', 2);
-      await drawDockedPausingBeforeRelease(page, out, PAIR_CELLS, inPort, 'leg 1');
-      const atRelease = (await drainRecord(page, '__drain1')).frames.at(-1)?.tick ?? -1;
-      await pollScene(page, (s) => s.tick > atRelease, {
-        message: 'leg 1: the tick still advances after the release (the pause drains)',
-        timeout: addWaitBudget(tickBudgetMs(DRAINED_PAST), 'leg 1: the drain advances after the release'),
-      }).toBe(true);
-      // The first frame after the release exists only once the page has drawn one, and on a slow
-      // page the model tick can move first: under the CPU quota the page draws about one frame
-      // every 286 ms, while the tick poll above reads every 100 ms. Reading `frames[upMark]`
-      // before that frame is drawn read `undefined` (todo
-      // `2026-10-24-belt-drawn-after-pause-reads-the-release-frame-before-it-is-drawn`). So wait
-      // until the record holds a frame after the release; the grade below is unchanged. A record
-      // with no release at all is left to the `upMark` check below, which names it. The log line
-      // says whether the old read would have found its frame (`drawn_at_first_read=false` is the
-      // race this wait absorbs).
-      const first = await drainRecord(page, '__drain1');
-      const drawnAtFirstRead = first.upMark >= 0 && first.frames.length > first.upMark;
-      await expect
-        .poll(
-          async () => {
-            const r = await drainRecord(page, '__drain1');
-            return r.upMark < 0 || r.frames.length > r.upMark;
-          },
-          {
-            message: 'leg 1: the page drew a frame after the release',
-            timeout: addWaitBudget(frameBudgetMs(FRAMES_AFTER_RELEASE), 'leg 1: one drawn frame after the release'),
-          },
-        )
-        .toBe(true);
-      const rel = await drainRecord(page, '__drain1');
-      console.log(`DRAIN leg 1: drawn_at_first_read=${drawnAtFirstRead}`);
-      expect(rel.upMark, 'leg 1: the sampler saw the release').toBeGreaterThanOrEqual(0);
-      const releaseTick = rel.frames[rel.upMark]?.tick ?? rel.frames.at(-1)!.tick;
-      const atPause = rel.frames.find((f) => f.paused)?.tick ?? -1;
-      // The draw helper waits for the toolbar to offer Play before the button comes up; the
-      // first frame sampled after the release must show it so. (The frame before the release
-      // cannot be asked: on a slow page no frame need fall between the toggle and the release.)
-      expect(rel.frames[rel.upMark]?.paused, 'leg 1: the board was paused at the release').toBe(true);
-      console.log(`DRAIN leg 1: atPause=${atPause} release=${releaseTick}`);
+        // THE DOCKED DRAW, Pause just before the release: the drain has just begun.
+        await startDrainSampler(page, '__drain1', 2);
+        await drawDockedPausingBeforeRelease(page, out, PAIR_CELLS, inPort, 'leg 1');
+        const atRelease = (await drainRecord(page, '__drain1')).frames.at(-1)?.tick ?? -1;
+        await pollScene(page, (s) => s.tick > atRelease, {
+          message: 'leg 1: the tick still advances after the release (the pause drains)',
+          timeout: addWaitBudget(tickBudgetMs(DRAINED_PAST), 'leg 1: the drain advances after the release'),
+        }).toBe(true);
+        // The first frame after the release exists only once the page has drawn one, and on a slow
+        // page the model tick can move first: under the CPU quota the page draws about one frame
+        // every 286 ms, while the tick poll above reads every 100 ms. Reading `frames[upMark]`
+        // before that frame is drawn read `undefined` (todo
+        // `2026-10-24-belt-drawn-after-pause-reads-the-release-frame-before-it-is-drawn`). So wait
+        // until the record holds a frame after the release; the grade below is unchanged. A record
+        // with no release at all is left to the `upMark` check below, which names it. The log line
+        // says whether the old read would have found its frame (`drawn_at_first_read=false` is the
+        // race this wait absorbs).
+        const first = await drainRecord(page, '__drain1');
+        const drawnAtFirstRead = first.upMark >= 0 && first.frames.length > first.upMark;
+        await expect
+          .poll(
+            async () => {
+              const r = await drainRecord(page, '__drain1');
+              return r.upMark < 0 || r.frames.length > r.upMark;
+            },
+            {
+              message: 'leg 1: the page drew a frame after the release',
+              timeout: addWaitBudget(frameBudgetMs(FRAMES_AFTER_RELEASE), 'leg 1: one drawn frame after the release'),
+            },
+          )
+          .toBe(true);
+        const rel = await drainRecord(page, '__drain1');
+        console.log(`DRAIN leg 1: drawn_at_first_read=${drawnAtFirstRead}`);
+        expect(rel.upMark, 'leg 1: the sampler saw the release').toBeGreaterThanOrEqual(0);
+        const releaseTick = rel.frames[rel.upMark]?.tick ?? rel.frames.at(-1)!.tick;
+        const atPause = rel.frames.find((f) => f.paused)?.tick ?? -1;
+        // The draw helper waits for the toolbar to offer Play before the button comes up; the
+        // first frame sampled after the release must show it so. (The frame before the release
+        // cannot be asked: on a slow page no frame need fall between the toggle and the release.)
+        expect(rel.frames[rel.upMark]?.paused, 'leg 1: the board was paused at the release').toBe(true);
+        console.log(`DRAIN leg 1: atPause=${atPause} release=${releaseTick}`);
 
-      // HELD PAST THE OLD EXPIRY: the drain runs at least 121 ticks past the release, paused.
-      await pollScene(page, (s) => s.tick >= releaseTick + DRAINED_PAST, {
-        message: `leg 1: the paused board drained at least ${DRAINED_PAST} ticks past the release`,
-        timeout: addWaitBudget(tickBudgetMs(DRAINED_PAST), `leg 1: ${DRAINED_PAST} drained ticks`),
-      }).toBe(true);
-      const beforePlay = await readScene(page);
-      expect(beltFrom(beforePlay, SEAM), 'leg 1: the belt is still held by the host before Play').toBeUndefined();
-      await expect(transport(page), 'leg 1: still paused before Play').toHaveAttribute('aria-label', 'Play');
-      console.log(`DRAIN leg 1: beforePlay=${beforePlay.tick} drained=${beforePlay.tick - releaseTick}`);
-      expect(beforePlay.tick - releaseTick, 'leg 1: EDGE: the drain ran past the old 120-tick expiry').toBeGreaterThanOrEqual(
-        DRAINED_PAST,
-      );
+        // HELD PAST THE OLD EXPIRY: the drain runs at least 121 ticks past the release, paused.
+        await pollScene(page, (s) => s.tick >= releaseTick + DRAINED_PAST, {
+          message: `leg 1: the paused board drained at least ${DRAINED_PAST} ticks past the release`,
+          timeout: addWaitBudget(tickBudgetMs(DRAINED_PAST), `leg 1: ${DRAINED_PAST} drained ticks`),
+        }).toBe(true);
+        const beforePlay = await readScene(page);
+        expect(beltFrom(beforePlay, SEAM), 'leg 1: the belt is still held by the host before Play').toBeUndefined();
+        await expect(transport(page), 'leg 1: still paused before Play').toHaveAttribute('aria-label', 'Play');
+        console.log(`DRAIN leg 1: beforePlay=${beforePlay.tick} drained=${beforePlay.tick - releaseTick}`);
+        expect(beforePlay.tick - releaseTick, 'leg 1: EDGE: the drain ran past the old 120-tick expiry').toBeGreaterThanOrEqual(
+          DRAINED_PAST,
+        );
 
-      await transport(page).click();
-      await expect(transport(page), 'leg 1: the sim runs again (the toggle offers Pause)').toHaveAttribute(
-        'aria-label',
-        'Pause',
-      );
-      const rec = await finishedRecord(page, '__drain1', 'leg 1');
-      expectCornerOnEveryFrame(rec, 'leg 1');
-      await expectLandedDocked(page, 'leg 1', out, inPort, oneDockEnds);
-      await expectRenderLoopAlive(page, 'leg 1 after Play');
-      errs.assertNone('leg 1');
-    } finally {
-      await page.mouse.up().catch(() => {});
-      await resumeIfPaused(page);
-    }
-  });
+        await transport(page).click();
+        await expect(transport(page), 'leg 1: the sim runs again (the toggle offers Pause)').toHaveAttribute(
+          'aria-label',
+          'Pause',
+        );
+        const rec = await finishedRecord(page, '__drain1', 'leg 1');
+        expectCornerOnEveryFrame(rec, 'leg 1');
+        await expectLandedDocked(page, 'leg 1', out, inPort, oneDockEnds);
+        await expectRenderLoopAlive(page, 'leg 1 after Play');
+        errs.assertNone('leg 1');
+      } finally {
+        await page.mouse.up().catch(() => {});
+        await resumeIfPaused(page);
+      }
+    });
 
-  test('leg 2: a docked belt drawn on a paused board just after Ctrl+Z still docks on Play, through the Undo\'s keyframe', async ({
-    page,
-  }) => {
-    test.setTimeout(240_000);
-    const errs = watchPageErrors(page);
-    try {
-      await emptyBoard(page);
-      await expectRenderLoopAlive(page, 'leg 2 start');
+    await test.step("leg 2: a docked belt drawn on a paused board just after Ctrl+Z still docks on Play, through the Undo's keyframe", async () => {
+      const errs = watchPageErrors(page);
+      try {
+        await emptyBoard(page);
+        await expectRenderLoopAlive(page, 'leg 2 start');
 
-      // X first, so its Undo puts it back ahead of everything placed after it.
-      await handPlaceAt(page, 'Source', ...X_AT);
-      await page.keyboard.press('Escape');
-      await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) !== undefined, {
-        message: 'leg 2: Source X landed',
-      }).toBe(true);
-      const { out, inPort } = await placePair(page, 'leg 2');
-      await handPlaceAt(page, 'Source', ...REF_SOURCE);
-      await page.keyboard.press('Escape');
-      await pollScene(page, (s) => machineAt(s, REF_SOURCE, SOURCE_KIND) !== undefined, {
-        message: 'leg 2: the reference Source landed',
-      }).toBe(true);
-      await drawOffloadBelt(page, portOf(machineAt(await readScene(page), REF_SOURCE, SOURCE_KIND)!, 1), REF_CELLS);
-      await pollScene(page, (s) => (beltFrom(s, REF_CELLS[0])?.docks ?? []).map((d) => d.end), {
-        message: 'leg 2: the reference belt landed docked at its Tail only',
-      }).toEqual(['Tail']);
-      const refId = beltFrom(await readScene(page), REF_CELLS[0])!.id;
-      await expect
-        .poll(() => beltEndInstructionsOn(page, refId), {
-          message: 'leg 2: the reference belt draws its one dock',
-          timeout: addWaitBudget(frameBudgetMs(8), 'leg 2: the reference end marks are drawn'),
-        })
-        .toBeGreaterThan(0);
-      const oneDockEnds = await beltEndInstructionsOn(page, refId);
+        // X first, so its Undo puts it back ahead of everything placed after it.
+        await handPlaceAt(page, 'Source', ...X_AT);
+        await page.keyboard.press('Escape');
+        await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) !== undefined, {
+          message: 'leg 2: Source X landed',
+        }).toBe(true);
+        const { out, inPort } = await placePair(page, 'leg 2');
+        await handPlaceAt(page, 'Source', ...REF_SOURCE);
+        await page.keyboard.press('Escape');
+        await pollScene(page, (s) => machineAt(s, REF_SOURCE, SOURCE_KIND) !== undefined, {
+          message: 'leg 2: the reference Source landed',
+        }).toBe(true);
+        await drawOffloadBelt(page, portOf(machineAt(await readScene(page), REF_SOURCE, SOURCE_KIND)!, 1), REF_CELLS);
+        await pollScene(page, (s) => (beltFrom(s, REF_CELLS[0])?.docks ?? []).map((d) => d.end), {
+          message: 'leg 2: the reference belt landed docked at its Tail only',
+        }).toEqual(['Tail']);
+        const refId = beltFrom(await readScene(page), REF_CELLS[0])!.id;
+        await expect
+          .poll(() => beltEndInstructionsOn(page, refId), {
+            message: 'leg 2: the reference belt draws its one dock',
+            timeout: addWaitBudget(frameBudgetMs(8), 'leg 2: the reference end marks are drawn'),
+          })
+          .toBeGreaterThan(0);
+        const oneDockEnds = await beltEndInstructionsOn(page, refId);
 
-      // Delete X, Ctrl+Z, Ctrl+Shift+Z, each folded on the playing board, as plan 88-04's leg 1
-      // does: the Redo's remint packs the handles with X gone, so the paused Undo below, which
-      // puts X back first in the host's order, moves the pair to new handles.
-      await selectMachineAt(page, ...X_AT);
-      await page.keyboard.press('Delete');
-      await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) === undefined, {
-        message: 'leg 2: the Delete removed X',
-      }).toBe(true);
-      await deselectViaEmptyCell(page, ...EMPTY_CELL);
-      await page.keyboard.press('Control+z');
-      await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) !== undefined, {
-        message: 'leg 2: Ctrl+Z put X back',
-      }).toBe(true);
-      await page.keyboard.press('Control+Shift+z');
-      await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) === undefined, {
-        message: 'leg 2: Ctrl+Shift+Z deleted X again',
-      }).toBe(true);
+        // Delete X, Ctrl+Z, Ctrl+Shift+Z, each folded on the playing board, as plan 88-04's leg 1
+        // does: the Redo's remint packs the handles with X gone, so the paused Undo below, which
+        // puts X back first in the host's order, moves the pair to new handles.
+        await selectMachineAt(page, ...X_AT);
+        await page.keyboard.press('Delete');
+        await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) === undefined, {
+          message: 'leg 2: the Delete removed X',
+        }).toBe(true);
+        await deselectViaEmptyCell(page, ...EMPTY_CELL);
+        await page.keyboard.press('Control+z');
+        await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) !== undefined, {
+          message: 'leg 2: Ctrl+Z put X back',
+        }).toBe(true);
+        await page.keyboard.press('Control+Shift+z');
+        await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) === undefined, {
+          message: 'leg 2: Ctrl+Shift+Z deleted X again',
+        }).toBe(true);
 
-      // PAUSE, Ctrl+Z (queued), then the docked draw on the paused board.
-      await pauseAndSettle(page, 'leg 2');
-      const g0 = await generationOf(page);
-      // Focus off the toolbar button the pause click left it on, as a hand clicks the board.
-      await deselectViaEmptyCell(page, ...EMPTY_CELL);
-      await page.keyboard.press('Control+z');
-      await expect
-        .poll(() => statusText(page), {
-          message: 'leg 2 PRECONDITION: the toolbar says the Undo is queued',
-          timeout: addWaitBudget(frameBudgetMs(8), 'leg 2: the queued status shows'),
-        })
-        .toBe(EDITS_QUEUED);
-      const paused = await readScene(page);
-      expect(machineAt(paused, X_AT, SOURCE_KIND), 'leg 2 PRECONDITION: the queued Undo has not folded').toBeUndefined();
-      const handlesBefore = {
-        source: machineAt(paused, PAIR_SOURCE, SOURCE_KIND)!.id,
-        sink: machineAt(paused, PAIR_SINK, SINK_KIND)!.id,
-      };
-      await startDrainSampler(page, '__undo2', 2);
-      await drawBeltThroughCells(page, out, PAIR_CELLS, inPort);
-      expect(await generationOf(page), 'leg 2 PRECONDITION: the draw was made on the pre-Undo board').toBe(g0);
+        // PAUSE, Ctrl+Z (queued), then the docked draw on the paused board.
+        await pauseAndSettle(page, 'leg 2');
+        const g0 = await generationOf(page);
+        // Focus off the toolbar button the pause click left it on, as a hand clicks the board.
+        await deselectViaEmptyCell(page, ...EMPTY_CELL);
+        await page.keyboard.press('Control+z');
+        await expect
+          .poll(() => statusText(page), {
+            message: 'leg 2 PRECONDITION: the toolbar says the Undo is queued',
+            timeout: addWaitBudget(frameBudgetMs(8), 'leg 2: the queued status shows'),
+          })
+          .toBe(EDITS_QUEUED);
+        const paused = await readScene(page);
+        expect(machineAt(paused, X_AT, SOURCE_KIND), 'leg 2 PRECONDITION: the queued Undo has not folded').toBeUndefined();
+        const handlesBefore = {
+          source: machineAt(paused, PAIR_SOURCE, SOURCE_KIND)!.id,
+          sink: machineAt(paused, PAIR_SINK, SINK_KIND)!.id,
+        };
+        await startDrainSampler(page, '__undo2', 2);
+        await drawBeltThroughCells(page, out, PAIR_CELLS, inPort);
+        expect(await generationOf(page), 'leg 2 PRECONDITION: the draw was made on the pre-Undo board').toBe(g0);
 
-      await transport(page).click();
-      await expect(transport(page), 'leg 2: the sim runs again (the toggle offers Pause)').toHaveAttribute(
-        'aria-label',
-        'Pause',
-      );
-      await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) !== undefined, {
-        message: 'leg 2: the queued Undo folded (X is back)',
-      }).toBe(true);
-      const rec = await finishedRecord(page, '__undo2', 'leg 2');
-      const after = await readScene(page);
-      const handlesAfter = {
-        source: machineAt(after, PAIR_SOURCE, SOURCE_KIND)!.id,
-        sink: machineAt(after, PAIR_SINK, SINK_KIND)!.id,
-      };
-      console.log(
-        `UNDO leg 2: generation ${g0} -> ${await generationOf(page)} before=${JSON.stringify(handlesBefore)} ` +
-          `after=${JSON.stringify(handlesAfter)}`,
-      );
-      expect(await generationOf(page), 'leg 2 PRECONDITION: the Undo reminted the handles').toBeGreaterThan(g0);
-      expect(
-        handlesAfter,
-        "leg 2 NON-VACUITY: the pair moved to new handles, so the drawn board's handles name other machines now",
-      ).not.toEqual(handlesBefore);
-      expectCornerOnEveryFrame(rec, 'leg 2');
-      await expectLandedDocked(page, 'leg 2', out, inPort, oneDockEnds);
-      await expectRenderLoopAlive(page, 'leg 2 after Play');
-      errs.assertNone('leg 2');
-    } finally {
-      await page.mouse.up().catch(() => {});
-      await resumeIfPaused(page);
-    }
+        await transport(page).click();
+        await expect(transport(page), 'leg 2: the sim runs again (the toggle offers Pause)').toHaveAttribute(
+          'aria-label',
+          'Pause',
+        );
+        await pollScene(page, (s) => machineAt(s, X_AT, SOURCE_KIND) !== undefined, {
+          message: 'leg 2: the queued Undo folded (X is back)',
+        }).toBe(true);
+        const rec = await finishedRecord(page, '__undo2', 'leg 2');
+        const after = await readScene(page);
+        const handlesAfter = {
+          source: machineAt(after, PAIR_SOURCE, SOURCE_KIND)!.id,
+          sink: machineAt(after, PAIR_SINK, SINK_KIND)!.id,
+        };
+        console.log(
+          `UNDO leg 2: generation ${g0} -> ${await generationOf(page)} before=${JSON.stringify(handlesBefore)} ` +
+            `after=${JSON.stringify(handlesAfter)}`,
+        );
+        expect(await generationOf(page), 'leg 2 PRECONDITION: the Undo reminted the handles').toBeGreaterThan(g0);
+        expect(
+          handlesAfter,
+          "leg 2 NON-VACUITY: the pair moved to new handles, so the drawn board's handles name other machines now",
+        ).not.toEqual(handlesBefore);
+        expectCornerOnEveryFrame(rec, 'leg 2');
+        await expectLandedDocked(page, 'leg 2', out, inPort, oneDockEnds);
+        await expectRenderLoopAlive(page, 'leg 2 after Play');
+        errs.assertNone('leg 2');
+      } finally {
+        await page.mouse.up().catch(() => {});
+        await resumeIfPaused(page);
+      }
+    });
   });
 });
