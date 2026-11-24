@@ -46,10 +46,10 @@ import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frame
 //      `document.activeElement` is neither an `input` nor a `textarea`, the `Place Source` row
 //      still reads `aria-pressed="true"`, and a hand click on another free cell (16,10) places
 //      a Source that the machine layer draws.
-//   2. THE CONTROL. The same empty board, playing. A Label dropped by hand on (10,12) with no
-//      tool change is selected, its panel heading reads `Label`, and its Text field
-//      (`#fab-label-text`) holds the keyboard. Without this leg, leg 1 could pass on a page
-//      where no label is ever selected or focused.
+//
+// The control, a label placed on a playing board with no tool change being selected with its
+// Text field focused, is graded by 86-delete-undo-config leg H. Without that check, leg 1 could
+// pass on a page where no label is ever selected or focused.
 //
 // Render health in every test: `watchPageErrors` before `goto`, `expectRenderLoopAlive` after
 // each gesture block on a ticking board and at the grading, and the watcher's `assertNone`. Never
@@ -244,38 +244,5 @@ test.describe('FAIL-08 live: a late label echo never takes the selection or the 
       await resumeIfPaused(page);
       await page.keyboard.press('Escape');
     }
-  });
-
-  test('leg 2: a label placed on a playing board with no tool change is selected and its Text field focused', async ({ page }) => {
-    const errs = watchPageErrors(page);
-    await emptyBoardAtScaleOne(page);
-    await expectRenderLoopAlive(page, 'leg 2: before the label is placed');
-
-    await handPlaceAt(page, 'Label', LABEL_AT[0], LABEL_AT[1]);
-    await pollScene(page, (s) => labelAt(s, LABEL_AT[0], LABEL_AT[1]) !== null, {
-      message: 'leg 2: the real host echoed the label',
-      timeout: addWaitBudget(tickBudgetMs(SLOW_BOARD * ECHO_TICKS), 'leg 2: the label echoes'),
-    }).toBe(true);
-    const label = labelAt(await readScene(page), LABEL_AT[0], LABEL_AT[1])!;
-    await expectRenderLoopAlive(page, 'leg 2: after the label echoed');
-
-    await expect
-      .poll(() => selectedNode(page), {
-        message: 'leg 2: the placed label is the selection',
-        timeout: addWaitBudget(frameBudgetMs(8), 'leg 2: the label is selected'),
-      })
-      .toBe(label.id);
-    const heading = page.locator('#fab-config-heading');
-    await expect(heading, 'leg 2: the label panel is open').toBeVisible();
-    await expect(heading, 'leg 2: the panel heading names a Label').toContainText('Label');
-    await expect
-      .poll(() => focusedElement(page), {
-        message: "leg 2: the label's Text field holds the keyboard",
-        timeout: addWaitBudget(frameBudgetMs(8), 'leg 2: the Text field takes focus'),
-      })
-      .toEqual({ tag: 'textarea', id: LABEL_TEXT_FIELD });
-    await expectRenderLoopAlive(page, 'leg 2: with the label selected and focused');
-    errs.assertNone('leg 2: a label placed with no tool change');
-    await page.keyboard.press('Escape');
   });
 });

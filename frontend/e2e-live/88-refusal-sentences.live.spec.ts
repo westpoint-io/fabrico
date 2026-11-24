@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CELL,
-  DRAWN_STATE_FRAMES,
   armAndPlaceAt,
   cameraOf,
   drawnNodesOf,
@@ -24,7 +23,7 @@ import {
   watchPageErrors,
   type SceneFacts,
 } from './support/oracle';
-import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frameSampler';
+import { addWaitBudget, tickBudgetMs } from '../e2e/support/frameSampler';
 
 // 88-refusal-sentences.live.spec.ts (plan 88-02, FAIL-09, WINDOWS 81, 83 and 84, phase 88
 // success criterion 5, D-11) - a refused edit tells the user its real cause. On the REAL host
@@ -46,22 +45,18 @@ import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frame
 // THE LEGS
 // ---------------------------------------------------------------------------
 //
-//   1. MACHINE TOO BIG. A Factory placed mid-grid, selected, and grown by `+ Add output` until
-//      the host refuses. The refused press is the one past the 64-cell size limit (the box is
-//      3 by 64 when it comes), every cell far from any grid edge. The band reads the
-//      MachineTooBig sentence and never "past the edge"; the Factory keeps its 64 outputs and
-//      the machine layer still draws it 3 by 64.
 //   2. ROTATE BLOCKED. A Router (2 by 3) with a Source on the cell its turned box (3 by 2)
 //      would cover. The Router selected, r pressed: the band reads the RotateBlocked sentence
 //      and never "elsewhere"; neither machine moves, both are drawn where they were.
-//   3. GROW BLOCKED. A Factory with a Source on the row its third `+ Add output` would grow the
-//      box into. The band reads the GrowBlocked sentence and never "elsewhere"; the
-//      Factory keeps its ports and its 3 by 3 box, drawn as before.
 //   4. UNDO DOES NOT FIT. `crates/fabrico-host/tests/fixtures/88-undo-does-not-fit.fab` (a
 //      Source, and a Sink deleted last with its docked belt, the Delete's captured belt
 //      stripped of its links by `forged_files.rs`) opened through the toolbar, Ctrl+Z: the
 //      band reads the UndoDoesNotFit sentence, the drawn board and the model are the same
 //      before and after, and Undo is still offered.
+//
+// Legs 2 and 4 stand for the other split sentences. MachineTooBig (a Factory grown past the
+// 64-cell limit mid-grid) and GrowBlocked (an output add blocked by another machine) read from
+// the same `REFUSAL_COPY` table; 74.1-belt-refusals-say-why leg 2 walks the growth refusal.
 //
 // RED BEFORE THE SPLIT (88-EVIDENCE.md `## Plan 88-02`, `sentences-red.*`): every leg read the
 // old sentence, on the host and frontend at the plan's start revision.
@@ -73,20 +68,14 @@ import { addWaitBudget, frameBudgetMs, tickBudgetMs } from '../e2e/support/frame
 
 /** Kind bytes (protocol `machine_kind`), transcribed: the live suite imports no product source. */
 const KIND_SOURCE = 0;
-const KIND_FACTORY = 2;
 const KIND_ROUTER = 5;
 const KIND_SINK = 7;
 
-/** `MAX_FOOTPRINT_DIM` (`crates/fabrico-core/src/state.rs`), transcribed. */
-const MAX_FOOTPRINT_DIM = 64;
-
 /** The sentences, transcribed from `REFUSAL_COPY` rather than imported. */
-const MACHINE_TOO_BIG = 'That machine would grow past the size limit.';
 const ROTATE_BLOCKED = 'No room to turn. Clear the space first.';
-const GROW_BLOCKED = 'No room to grow. Clear the space first.';
 const UNDO_DOES_NOT_FIT = 'That step no longer fits the board.';
 
-/** The screen point legs 1 to 3 build around: left of the right-docked panel, right of the
+/** The screen point leg 2 builds around: left of the right-docked panel, right of the
  *  palette, in the upper half of the 1280 by 800 viewport so a grown box has room below it. */
 const VIEW_AT = { x: 560, y: 260 } as const;
 
@@ -119,11 +108,6 @@ type NodeFacts = SceneFacts['nodes'][number];
 /** The band's text, trimmed. */
 async function bandText(page: Page): Promise<string> {
   return ((await page.locator('#fab-refusal').textContent()) ?? '').trim();
-}
-
-/** The number of Out ports (role 1) on a node. */
-function outCount(node: NodeFacts): number {
-  return node.ports.filter((p) => p.role === 1).length;
 }
 
 /** A node's box as [minX, minY, maxX, maxY]. */
@@ -216,81 +200,9 @@ async function placeAndSee(page: Page, name: string, kind: number, at: readonly 
   return placed!;
 }
 
-/**
- * Press `+ Add output` on the selected Factory until the host refuses one, and return the
- * sentence the band shows for it with the Out count the Factory held when it came. Each
- * press waits for its own answer: the Out count one higher (accepted) or a sentence in the
- * band (refused). The refusal is read the moment it shows, before its 4000 ms hold runs out.
- */
-async function addOutputsUntilRefused(page: Page, factory: number, limit: number): Promise<{ said: string; outs: number }> {
-  const addOutput = page.getByRole('region', { name: 'Ports' }).getByRole('button', { name: '+ Add output' });
-  for (let press = 1; press <= limit; press += 1) {
-    const before = outCount((await readScene(page)).nodes.find((n) => n.id === factory)!);
-    await expect(addOutput, `+ Add output is offered before press ${press}`).toBeEnabled({ timeout: answerWait('the Ports panel is ready for the next press') });
-    await addOutput.click();
-    let answer = '';
-    await expect
-      .poll(
-        async () => {
-          const said = await bandText(page);
-          if (said !== '') {
-            answer = `refused:${said}`;
-            return answer;
-          }
-          const node = (await readScene(page)).nodes.find((n) => n.id === factory);
-          answer = node !== undefined && outCount(node) === before + 1 ? 'accepted' : '';
-          return answer;
-        },
-        { timeout: answerWait('one press of + Add output'), intervals: [100, 250, 500], message: `press ${press} of + Add output was answered` },
-      )
-      .not.toBe('');
-    if (answer.startsWith('refused:')) {
-      return { said: answer.slice('refused:'.length), outs: before };
-    }
-  }
-  throw new Error(`no press of + Add output was refused in ${limit} presses`);
-}
-
 test.describe('FAIL-09 live: a refused edit says its real cause', () => {
   test.afterEach(async ({ page }, testInfo) => {
     await restoreHostAfterFailedTest(page, testInfo);
-  });
-
-  test('leg 1: a machine grown past the size limit in the middle of the grid is told so, not that it is past the edge', async ({
-    page,
-  }) => {
-    test.setTimeout(addWaitBudget(70 * ANSWER_MS, 'leg 1: 64 presses, each one host answer'));
-    const errs = await bootEmpty(page);
-    const FACTORY_AT = await cellInView(page);
-    const factory = await placeAndSee(page, 'Factory', KIND_FACTORY, FACTORY_AT);
-    expect(outCount(factory), 'a placed Factory starts with one output').toBe(1);
-    await selectMachineAt(page, FACTORY_AT[0], FACTORY_AT[1]);
-    await expectRenderLoopAlive(page, 'leg 1: the Factory placed and selected');
-
-    const { said, outs } = await addOutputsUntilRefused(page, factory.id, MAX_FOOTPRINT_DIM + 4);
-    const after = await readScene(page);
-    const grown = after.nodes.find((n) => n.id === factory.id)!;
-    const [x0, y0, x1, y1] = boxOf(grown);
-    console.log(`LEG1_REFUSED outs=${outs} box=${x1 - x0 + 1}x${y1 - y0 + 1} said=${JSON.stringify(said)}`);
-    // PRECONDITIONS: the refused press is the one past the size limit, and no edge is near.
-    expect(y1 - y0 + 1, 'PRECONDITION: the last accepted box is at the size limit, so the next add passes it').toBe(
-      MAX_FOOTPRINT_DIM,
-    );
-    expect(
-      [x0, y0, x1, y1].every((v) => v > -400 && v < 400),
-      'PRECONDITION: every cell of the box is far from every grid edge (-512 and 512)',
-    ).toBe(true);
-    expect(said, 'the band names the size limit').toBe(MACHINE_TOO_BIG);
-    expect(said.toLowerCase(), 'and never the grid edge').not.toContain('past the edge');
-    expect(outCount(grown), 'the refused press added no output').toBe(outs);
-    await expect
-      .poll(() => drawnBoard(page), {
-        timeout: addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), 'the machine layer draws the refused board'),
-        message: 'the machine layer still draws the Factory 3 by 64',
-      })
-      .toEqual({ machines: [factory.id], strays: 0, boxes: [`${factory.id}:3x${MAX_FOOTPRINT_DIM}`] });
-    await expectRenderLoopAlive(page, 'leg 1: after the refused press');
-    errs.assertNone('leg 1');
   });
 
   test('leg 2: a turn into another machine is told there is no room to turn, never to place elsewhere', async ({ page }) => {
@@ -340,48 +252,6 @@ test.describe('FAIL-09 live: a refused edit says its real cause', () => {
     expect(await drawnBoard(page), 'the machine layer draws both machines as they were').toEqual(drawnBefore);
     await expectRenderLoopAlive(page, 'leg 2: after the refused turn');
     errs.assertNone('leg 2');
-  });
-
-  test('leg 3: an output that would grow the box into another machine is told there is no room to grow', async ({ page }) => {
-    test.setTimeout(addWaitBudget(20 * ANSWER_MS, 'leg 3: six gestures, each one host answer'));
-    const errs = await bootEmpty(page);
-    const FACTORY_AT = await cellInView(page);
-    const factory = await placeAndSee(page, 'Factory', KIND_FACTORY, FACTORY_AT);
-    const [fx0, , fx1, fy1] = boxOf(factory);
-    expect([fx1 - fx0 + 1, fy1 - boxOf(factory)[1] + 1], 'MEASURED: a placed Factory is 3 by 3').toEqual([3, 3]);
-    // The first add that grows the box adds the row below it (the probe in
-    // `refusal_copy_truth.rs` measured the growth claiming the anchor column one row down).
-    const blockerAt: [number, number] = [fx0, fy1 + 1];
-    const source = await placeAndSee(page, 'Source', KIND_SOURCE, blockerAt);
-    await selectMachineAt(page, FACTORY_AT[0], FACTORY_AT[1]);
-    await expectRenderLoopAlive(page, 'leg 3: the board built and the Factory selected');
-
-    const { said, outs } = await addOutputsUntilRefused(page, factory.id, 6);
-    console.log(`LEG3_REFUSED outs=${outs} said=${JSON.stringify(said)}`);
-    const after = await readScene(page);
-    const held = after.nodes.find((n) => n.id === factory.id)!;
-    expect(said, 'the band says there is no room to grow').toBe(GROW_BLOCKED);
-    expect(said.toLowerCase(), 'and never offers elsewhere: an output add has no elsewhere').not.toContain('elsewhere');
-    expect(outCount(held), 'the Factory keeps the outputs it had').toBe(outs);
-    expect(boxOf(held), 'and its 3 by 3 box').toEqual(boxOf(factory));
-    expect(
-      after.nodes.find((n) => n.id === source.id)?.cells,
-      'the Source keeps its cell',
-    ).toEqual([blockerAt]);
-    await expect
-      .poll(() => drawnBoard(page), {
-        timeout: addWaitBudget(frameBudgetMs(DRAWN_STATE_FRAMES), 'the machine layer draws the refused board'),
-        message: 'the machine layer draws the Factory 3 by 3 and the Source',
-      })
-      .toEqual({
-        machines: [factory.id, source.id].sort((a, b) => a - b),
-        strays: 0,
-        boxes: [factory.id, source.id]
-          .sort((a, b) => a - b)
-          .map((id) => (id === factory.id ? `${id}:3x3` : `${id}:1x1`)),
-      });
-    await expectRenderLoopAlive(page, 'leg 3: after the refused press');
-    errs.assertNone('leg 3');
   });
 
   test('leg 4: Ctrl+Z on a board whose last step no longer fits it is told so, and the board does not change', async ({ page }) => {
